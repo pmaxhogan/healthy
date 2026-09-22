@@ -401,7 +401,7 @@ export function confirmedShapePayload(): Record<string, unknown> {
 /** An opaque per-organisation key, as `LoadPast` groups its rows by. Invented. */
 export const ORG_TOKEN = "org-token-aaa";
 /** A second one, so a test can prove both buckets are read. */
-export const ORG_TOKEN_2 = "org-token-bbb";
+const ORG_TOKEN_2 = "org-token-bbb";
 
 /**
  * A `LoadPast` body: the same rows, grouped one level deeper.

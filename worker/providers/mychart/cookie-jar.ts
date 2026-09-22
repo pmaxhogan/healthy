@@ -53,6 +53,21 @@ export interface StoredCookie {
 export interface CookieJarState {
   v: 1;
   cookies: StoredCookie[];
+  /**
+   * Non-cookie scraps a login flavour has to carry between invocations.
+   *
+   * The sign-in is spread across invocations by design: the password POST happens
+   * in one, and the emailed code is submitted in another with a brand-new client,
+   * so the sealed jar is the *only* thing the second one inherits. A flavour whose
+   * verify call needs more than a cookie -- the OpenID one needs the correlation
+   * id it generated and the user id the login answered with -- has nowhere else to
+   * put them.
+   *
+   * Never sent in a `Cookie` header, and treated as exactly as sensitive as a
+   * cookie value, because it is sealed in the same column. `v` stays 1: an older
+   * reader ignores an unknown field and a newer reader tolerates its absence.
+   */
+  extras?: Record<string, string>;
 }
 
 export interface CookieJarOptions {
@@ -152,7 +167,16 @@ export class CookieJar {
       return jar;
     }
     if (typeof parsed !== "object" || parsed === null) return jar;
-    const cookies = (parsed as Partial<CookieJarState>).cookies;
+    const state = parsed as Partial<CookieJarState>;
+    // Entries rather than indexing: this is untrusted JSON, so an inherited key
+    // must not be readable. Non-string values are dropped, not coerced.
+    // `typeof` rather than a truthiness test: the value came out of JSON.parse,
+    // so the declared type is a promise, not a fact -- it can be null or a number.
+    const extras = Object.entries(state.extras ?? {});
+    for (const [name, value] of extras) {
+      if (typeof value === "string") jar.extras.set(name, value);
+    }
+    const cookies = state.cookies;
     if (!Array.isArray(cookies)) return jar;
     for (const candidate of cookies) {
       if (isStoredCookie(candidate)) jar.put(candidate);
@@ -163,6 +187,8 @@ export class CookieJar {
 
   /** Keyed by `name\u0000domain\u0000path`, which is the uniqueness rule in §5.3. */
   private readonly cookies = new Map<string, StoredCookie>();
+  /** See `CookieJarState.extras`. Private so nothing can iterate it by accident. */
+  private readonly extras = new Map<string, string>();
   private readonly now: () => number;
 
   constructor(options: CookieJarOptions = {}) {
@@ -207,9 +233,24 @@ export class CookieJar {
   /** The jar as JSON, for sealing into D1. Expired cookies are dropped first. */
   serialise(): string {
     this.prune();
-    // eslint-disable-next-line unicorn/prefer-iterator-to-array -- Iterator#toArray is ES2025 and tsconfig.worker.json's lib is ES2022, so it does not type-check here.
-    const state: CookieJarState = { v: STATE_VERSION, cookies: [...this.cookies.values()] };
+    const state: CookieJarState = {
+      v: STATE_VERSION,
+      // eslint-disable-next-line unicorn/prefer-iterator-to-array -- Iterator#toArray is ES2025 and tsconfig.worker.json's lib is ES2022, so it does not type-check here.
+      cookies: [...this.cookies.values()],
+      ...(this.extras.size > 0 && { extras: Object.fromEntries(this.extras) }),
+    };
     return JSON.stringify(state);
+  }
+
+  /** One `extras` entry, or null. See `CookieJarState.extras` for what belongs there. */
+  getExtra(name: string): string | null {
+    return this.extras.get(name) ?? null;
+  }
+
+  /** Set (or, with an empty value, drop) one `extras` entry. */
+  setExtra(name: string, value: string): void {
+    if (value === "") this.extras.delete(name);
+    else this.extras.set(name, value);
   }
 
   /** How many live cookies the jar holds. For tests and for a status badge. */
@@ -225,6 +266,7 @@ export class CookieJar {
 
   clear(): void {
     this.cookies.clear();
+    this.extras.clear();
   }
 
   /**

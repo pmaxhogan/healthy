@@ -18,17 +18,20 @@
 import { AppError } from "../../lib/errors.ts";
 
 import { createMyChartClient } from "./client.ts";
+import { createCustomOidcClient } from "./custom-oidc/client.ts";
 import { discoverPortal } from "./discovery.ts";
 
 import type { PortalClient } from "./client.ts";
 import type { CookieJar } from "./cookie-jar.ts";
+import type { PortalCustomSettings } from "./custom-oidc/client.ts";
 import type { PortalEndpoint } from "./discovery.ts";
 import type { Logger } from "../../lib/log.ts";
 
 export type { PortalClient, PortalCredentials, SecondaryValidation } from "./client.ts";
+export type { PortalCustomSettings } from "./custom-oidc/client.ts";
 export type { PortalEndpoint } from "./discovery.ts";
 export type { PortalVisit } from "./visits.ts";
-export type { PortalVisitStatus, UsernameField } from "./wire.ts";
+export type { PortalFlavor, PortalVisitStatus, UsernameField } from "./wire.ts";
 export { CookieJar } from "./cookie-jar.ts";
 
 /** Which patient portal. One entry for now; the point is that there is a key. */
@@ -43,6 +46,16 @@ export interface PortalAdapterDeps {
   /** The cache-buster's randomness. Injected so a test can pin a URL. */
   random?: (() => number) | undefined;
   maxRedirects?: number | undefined;
+  /**
+   * The two values a `custom_oidc` deployment may need and discovery cannot
+   * always learn. Ignored entirely by the classic flavour.
+   *
+   * This is the escape hatch, not the intended path: the API base normally comes
+   * out of discovery and lands in the endpoint JSON, and the MFA contact normally
+   * comes out of the login response. Both are here because neither can have a
+   * default -- the real values name the organisation and the owner respectively.
+   */
+  custom?: PortalCustomSettings | undefined;
 }
 
 export interface PortalDiscoveryInput {
@@ -86,7 +99,7 @@ export function createMyChartAdapter(): PortalAdapter {
       });
     },
     client(endpoint, jar, deps) {
-      return createMyChartClient({
+      const common = {
         endpoint,
         jar,
         fetchImpl: deps.fetchImpl,
@@ -94,7 +107,13 @@ export function createMyChartAdapter(): PortalAdapter {
         now: deps.now,
         random: deps.random,
         maxRedirects: deps.maxRedirects,
-      });
+      };
+      // The one branch in this directory that picks a login strategy. Absent
+      // means `classic`, so an endpoint stored before the field existed behaves
+      // exactly as it always did.
+      return endpoint.flavor === "custom_oidc"
+        ? createCustomOidcClient({ ...common, custom: deps.custom })
+        : createMyChartClient(common);
     },
   };
 }

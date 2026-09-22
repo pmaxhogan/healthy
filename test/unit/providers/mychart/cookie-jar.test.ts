@@ -261,3 +261,65 @@ describe("CookieJar serialisation", () => {
     expect(cookies.size).toBe(0);
   });
 });
+
+describe("extras", () => {
+  // The sign-in spans Worker invocations: the emailed code is submitted by a new
+  // client built from the sealed jar, so anything the second half needs and a
+  // cookie cannot carry has to survive a serialise/deserialise round trip.
+  it("survives a round trip alongside the cookies", () => {
+    const store = jar();
+    store.setCookie(PAGE, "session=abc; Path=/");
+    store.setExtra("oidc.clientId", "1767225600000");
+
+    const restored = CookieJar.deserialise(store.serialise(), { now: () => T0 });
+
+    expect(restored.getExtra("oidc.clientId")).toBe("1767225600000");
+    expect(restored.has(PAGE, "session")).toBe(true);
+  });
+
+  it("is null for a name that was never set", () => {
+    expect(jar().getExtra("nothing")).toBeNull();
+  });
+
+  it("is never sent in a Cookie header", () => {
+    const store = jar();
+    store.setExtra("oidc.userId", "owner-login");
+
+    expect(store.getCookieHeader(PAGE)).toBeNull();
+    expect(store.size).toBe(0);
+  });
+
+  it("drops an entry set to the empty string", () => {
+    const store = jar();
+    store.setExtra("oidc.userId", "owner-login");
+    store.setExtra("oidc.userId", "");
+
+    expect(store.getExtra("oidc.userId")).toBeNull();
+    // And then it is not written at all, rather than written as an empty object.
+    expect(store.serialise()).not.toContain("extras");
+  });
+
+  it("omits the field entirely when there is nothing to carry", () => {
+    expect(jar().serialise()).toBe(JSON.stringify({ v: 1, cookies: [] }));
+  });
+
+  it("tolerates a stored shape that is not a string map", () => {
+    for (const bad of ['{"v":1,"cookies":[],"extras":null}', '{"v":1,"cookies":[],"extras":7}']) {
+      expect(CookieJar.deserialise(bad).getExtra("anything"), bad).toBeNull();
+    }
+    const mixed = CookieJar.deserialise('{"v":1,"cookies":[],"extras":{"a":1,"b":"two"}}');
+    expect(mixed.getExtra("a")).toBeNull();
+    expect(mixed.getExtra("b")).toBe("two");
+  });
+
+  it("is cleared with the cookies", () => {
+    const store = jar();
+    store.setCookie(PAGE, "session=abc");
+    store.setExtra("oidc.userId", "owner-login");
+
+    store.clear();
+
+    expect(store.getExtra("oidc.userId")).toBeNull();
+    expect(store.size).toBe(0);
+  });
+});

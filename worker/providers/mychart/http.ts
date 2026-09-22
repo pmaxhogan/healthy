@@ -67,6 +67,14 @@ export interface PortalRequest {
    * `Content-Type` header at all** -- see the module comment.
    */
   form?: Record<string, string> | undefined;
+  /**
+   * A body to send as JSON instead. Mutually exclusive with `form`.
+   *
+   * The classic pages take forms; the `custom_oidc` shell's API takes JSON for
+   * everything except its credential POST, which is form-urlencoded. Absent here
+   * means the same thing absent `form` means: no body, and no `Content-Type`.
+   */
+  jsonBody?: unknown;
   headers?: Record<string, string> | undefined;
   accept?: "html" | "json" | undefined;
   /** A stable label, e.g. "DoLogin". Goes in logs; never a URL. */
@@ -104,10 +112,34 @@ function encodeForm(form: Record<string, string>): string {
   return params.toString();
 }
 
+/**
+ * The first hop's body and its content type, or neither.
+ *
+ * `form` wins over `jsonBody` when a caller passes both, which nothing does; what
+ * matters is that with neither the result is two `undefined`s, because a request
+ * with no body must send no `Content-Type` at all.
+ */
+function firstBody(request: PortalRequest): {
+  body: string | undefined;
+  bodyContentType: string | undefined;
+} {
+  if (request.form !== undefined) {
+    return {
+      body: encodeForm(request.form),
+      bodyContentType: "application/x-www-form-urlencoded",
+    };
+  }
+  return request.jsonBody === undefined
+    ? { body: undefined, bodyContentType: undefined }
+    : { body: JSON.stringify(request.jsonBody), bodyContentType: "application/json" };
+}
+
 interface Hop {
   url: string;
   method: "GET" | "POST";
   body: string | undefined;
+  /** Only set when `body` is, and only then is a `Content-Type` header sent. */
+  bodyContentType: string | undefined;
 }
 
 function headersFor(request: PortalRequest, hop: Hop, jar: CookieJar | undefined): Headers {
@@ -116,7 +148,7 @@ function headersFor(request: PortalRequest, hop: Hop, jar: CookieJar | undefined
   const extra = Object.entries(request.headers ?? {});
   for (const [key, value] of extra) headers.set(key, value);
   // Only ever set for a request that actually has a body: see the module comment.
-  if (hop.body !== undefined) headers.set("content-type", "application/x-www-form-urlencoded");
+  if (hop.bodyContentType !== undefined) headers.set("content-type", hop.bodyContentType);
   const cookie = jar?.getCookieHeader(hop.url);
   if (cookie !== null && cookie !== undefined) headers.set("cookie", cookie);
   return headers;
@@ -134,13 +166,18 @@ function nextHop(response: Response, current: Hop): Hop | null {
     return null;
   }
   if (DOWNGRADE_TO_GET.has(response.status)) {
-    return { url: target.href, method: "GET", body: undefined };
+    return { url: target.href, method: "GET", body: undefined, bodyContentType: undefined };
   }
   // 307/308 keeps the method -- and the body, unless the chain left the origin.
   const sameOrigin = new URL(current.url).origin === target.origin;
   return sameOrigin
-    ? { url: target.href, method: current.method, body: current.body }
-    : { url: target.href, method: "GET", body: undefined };
+    ? {
+        url: target.href,
+        method: current.method,
+        body: current.body,
+        bodyContentType: current.bodyContentType,
+      }
+    : { url: target.href, method: "GET", body: undefined, bodyContentType: undefined };
 }
 
 /** A `<meta refresh>` / `window.location` redirect in a 200 body, resolved. */
@@ -148,7 +185,12 @@ function bodyHop(body: string, current: Hop): Hop | null {
   const target = bodyRedirectTarget(body);
   if (target === null) return null;
   try {
-    return { url: new URL(target, current.url).href, method: "GET", body: undefined };
+    return {
+      url: new URL(target, current.url).href,
+      method: "GET",
+      body: undefined,
+      bodyContentType: undefined,
+    };
   } catch {
     return null;
   }
@@ -197,12 +239,7 @@ export async function portalFetch(
   request: PortalRequest,
 ): Promise<PortalResponse> {
   const limit = deps.maxRedirects ?? MAX_REDIRECTS;
-  const form = request.form;
-  let hop: Hop = {
-    url: request.url,
-    method: request.method ?? "GET",
-    body: form === undefined ? undefined : encodeForm(form),
-  };
+  let hop: Hop = { url: request.url, method: request.method ?? "GET", ...firstBody(request) };
 
   for (let hops = 0; hops <= limit; hops++) {
     const init: RequestInit = {

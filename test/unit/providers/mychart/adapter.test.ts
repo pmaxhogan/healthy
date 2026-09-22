@@ -24,8 +24,10 @@ import type {
   PortalAdapterDeps,
   PortalClient,
   PortalCredentials,
+  PortalCustomSettings,
   PortalDiscoveryInput,
   PortalEndpoint,
+  PortalFlavor,
   PortalVisit,
   PortalVisitStatus,
   SecondaryValidation,
@@ -126,5 +128,88 @@ describe("the adapter's two jobs", () => {
     const status: PortalVisitStatus = visits[0]?.status ?? "scheduled";
     expect(status).toBe("confirmed");
     expect(visits[0]?.start).toBe("2026-09-21T14:13:20+00:00");
+  });
+});
+
+describe("the login flavour decides which client the adapter builds", () => {
+  it("drives the classic form when the endpoint says classic, or says nothing", async () => {
+    for (const flavor of [undefined, "classic" as PortalFlavor]) {
+      const stub = routed({
+        "GET /MyChart/Authentication/Login": () => html(loginPageNew()),
+        "POST /MyChart/Authentication/Login/DoLogin": () => redirect(`${HOST}/MyChart/Home`),
+        "GET /MyChart/Home": () => html(HOME_PAGE),
+      });
+      const endpoint: PortalEndpoint = {
+        baseUrl: HOST,
+        mountPath: MOUNT,
+        usernameField: "LoginIdentifier",
+        antiforgeryFieldName: "__RequestVerificationToken",
+        ...(flavor !== undefined && { flavor }),
+      };
+
+      const client = createMyChartAdapter().client(
+        endpoint,
+        new CookieJar({ now: () => T0 }),
+        deps(stub),
+      );
+      await expect(client.login(CREDENTIALS)).resolves.toBe("signed_in");
+      expect(stub.calls.some((call) => call.url.includes("/DoLogin"))).toBe(true);
+    }
+  });
+
+  it("drives the shell's JSON API when the endpoint says custom_oidc", async () => {
+    const stub = routed({
+      "POST /shellwebapi/login": () => Response.json({ mfaRequired: true, userId: "OWNER" }),
+    });
+    const endpoint: PortalEndpoint = {
+      baseUrl: HOST,
+      mountPath: MOUNT,
+      usernameField: "Username",
+      antiforgeryFieldName: "__RequestVerificationToken",
+      flavor: "custom_oidc",
+      authBaseUrl: HOST,
+      apiBasePath: "/shellwebapi",
+    };
+
+    const client = createMyChartAdapter().client(
+      endpoint,
+      new CookieJar({ now: () => T0 }),
+      deps(stub),
+    );
+
+    await expect(client.login(CREDENTIALS)).resolves.toBe("awaiting_code");
+    expect(stub.calls.map((call) => new URL(call.url).pathname)).toStrictEqual([
+      "/shellwebapi/login",
+    ]);
+  });
+
+  it("passes the caller's custom settings through to that client", async () => {
+    const stub = routed({
+      "POST /shellwebapi/login": () => Response.json({ mfaRequired: true, userId: "OWNER" }),
+      "POST /shellwebapi/verification/code/generate": () => Response.json({ success: true }),
+    });
+    const endpoint: PortalEndpoint = {
+      baseUrl: HOST,
+      mountPath: MOUNT,
+      usernameField: "Username",
+      antiforgeryFieldName: "__RequestVerificationToken",
+      flavor: "custom_oidc",
+      authBaseUrl: HOST,
+    };
+    // Neither value is discoverable, so this is the path the owner configures.
+    const custom: PortalCustomSettings = {
+      apiBasePath: "/shellwebapi",
+      mfaContact: "codes@example.test",
+    };
+
+    const client = createMyChartAdapter().client(endpoint, new CookieJar({ now: () => T0 }), {
+      ...deps(stub),
+      custom,
+    });
+    await client.login(CREDENTIALS);
+    await client.secondaryValidation.sendCode("email");
+
+    const generate = stub.calls.find((call) => call.url.includes("/code/generate"));
+    expect(JSON.parse(generate?.body ?? "{}")).toMatchObject({ email: custom.mfaContact });
   });
 });
