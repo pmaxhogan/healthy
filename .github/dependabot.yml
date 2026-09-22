@@ -9,6 +9,10 @@ version: 2
 updates:
   - package-ecosystem: "npm"
     directory: "/"
+    ignore:
+      # @cloudflare/vitest-pool-workers pins vitest ^4; re-enable when the pool supports 5.x.
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
     schedule:
       interval: "weekly"
       day: "monday"

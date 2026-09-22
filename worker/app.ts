@@ -11,7 +11,7 @@
 //   3. csrfGuard        -- /api/*, /auth/*, /authorize; mutating methods only.
 //   4. ownerGate        -- Access, then (login routes aside) the password session.
 //   5. /auth/login, /auth/logout
-//   6. /authorize       -- reserved for the MCP consent page (wave 2).
+//   6. /authorize       -- the MCP consent page.
 //   7. /api, /oauth     -- routers other changes fill in.
 //   8. SPA fallback     -- env.ASSETS, last, so no asset is ever served ungated.
 //
@@ -33,6 +33,7 @@ import {
 import { securityHeaders } from "./auth/security-headers.ts";
 import { clearSessionCookie, issueSession } from "./auth/session.ts";
 import { isAppError } from "./lib/errors.ts";
+import { consentDecision, consentPage } from "./mcp/consent-page.ts";
 import { oauthRouter } from "./oauth/index.ts";
 import { publicRouter } from "./public/pages.ts";
 
@@ -136,19 +137,24 @@ app.post("/auth/logout", () => {
   });
 });
 
-// --- 6. Reserved: the MCP consent page --------------------------------------
+// --- 6. The MCP consent page ------------------------------------------------
 
 /**
- * Registered now, ahead of its implementation, so the path cannot be claimed by
- * the SPA fallback and so its gating is settled and tested. Wave 2 replaces the
- * body with the consent page that calls `completeAuthorization`.
+ * Approving an MCP grant is the single most sensitive action in the app, and this
+ * screen is what stands between a registered client and the whole medical record.
+ * It is reached only after Cloudflare Access and the password session; its POST is
+ * additionally Origin-checked by the guard registered above. See
+ * `worker/mcp/consent-page.ts` for the rest of the reasoning.
  *
- * It must stay gated: approving an MCP grant is the single most sensitive action
- * in the app, and the consent screen is what stands between a registered client
- * and the whole medical record.
+ * `@cloudflare/workers-oauth-provider` does NOT serve `/authorize` itself -- it
+ * advertises the path in its metadata and forwards the request to this handler,
+ * which is why the consent page lives inside the gated app rather than beside the
+ * token endpoint.
  */
+app.get("/authorize", (c) => consentPage(c.req.raw, c.env, c.get("nonce")));
+app.post("/authorize", (c) => consentDecision(c.req.raw, c.env, c.get("nonce")));
 app.all("/authorize", (c) =>
-  c.json<ApiError>({ error: "not_implemented" }, 501, { "cache-control": "no-store" }),
+  c.json<ApiError>({ error: "method_not_allowed" }, 405, { "cache-control": "no-store" }),
 );
 
 // --- 7. The routers other changes fill in -----------------------------------

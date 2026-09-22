@@ -44,7 +44,7 @@ export interface TrelloAlertsConfig {
   now?: () => Date;
 }
 
-export interface TrelloCard {
+interface TrelloCard {
   id: string;
   name: string;
   closed: boolean;
@@ -52,13 +52,13 @@ export interface TrelloCard {
   desc: string;
 }
 
-export interface OpenReconnectCardInput {
+interface OpenReconnectCardInput {
   title: string;
   description: string;
   url: string;
 }
 
-export interface OpenReconnectCardResult {
+interface OpenReconnectCardResult {
   cardId: string;
   created: boolean;
 }

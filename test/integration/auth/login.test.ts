@@ -279,13 +279,16 @@ describe("a request carrying the session cookie", () => {
     expect(await response.json()).toStrictEqual({ error: "not_found" });
   });
 
-  it("gets 501 from the reserved /authorize route", async () => {
+  it("reaches the MCP consent page, which refuses a request with no OAuth parameters", async () => {
+    // The consent page itself is covered in test/integration/mcp/; what matters
+    // here is that a signed-in request gets past the gate to it at all.
     const cookie = cookieFrom(await formPost());
 
     const response = await call("/authorize", { headers: { cookie } });
+    const html = await response.text();
 
-    expect(response.status).toBe(501);
-    expect(await response.json()).toStrictEqual({ error: "not_implemented" });
+    expect(response.status).toBe(400);
+    expect(html).toContain("Cannot authorise");
   });
 
   it("reaches the SPA fallback, re-wrapped so the security headers stay writable", async () => {
@@ -303,10 +306,13 @@ describe("a request carrying the session cookie", () => {
     expect(response.headers.get("content-security-policy")).toContain("default-src 'self'");
   });
 
-  it("gets a JSON 404 from the /oauth placeholder router", async () => {
+  it("gets a JSON 404 from an unknown /oauth path", async () => {
+    // The real routes under /oauth answer with a 302 or an HTML page; an unknown
+    // path there is answered like any other unknown path. See
+    // test/integration/oauth/ for the routes themselves.
     const cookie = cookieFrom(await formPost());
 
-    const response = await call("/oauth/google/start", { headers: { cookie } });
+    const response = await call("/oauth/not-a-flow", { headers: { cookie } });
 
     expect(response.status).toBe(404);
     expect(await response.json()).toStrictEqual({ error: "not_found" });
@@ -441,8 +447,9 @@ describe("CSRF", () => {
   });
 
   it("guards POST /authorize, which matches neither /api/* nor /auth/*", async () => {
-    // Wave 2 turns this into the MCP consent approval. Guarding it now means the
-    // most sensitive POST in the app cannot ship unprotected by omission.
+    // POST /authorize is the MCP consent approval: the most sensitive POST in the
+    // app. An HTML form cannot send the CSRF header, so the same-origin proof is
+    // the whole defence and it has to hold.
     const cookie = cookieFrom(await formPost());
 
     const cross = await call("/authorize", {
@@ -452,11 +459,13 @@ describe("CSRF", () => {
     await drain(cross);
     expect(cross.status).toBe(403);
 
+    // Same-origin gets through the guard to the consent handler, which then
+    // refuses this particular body for having no authorisation request in it.
     const same = await call("/authorize", {
       method: "POST",
       headers: { origin: ORIGIN, cookie },
     });
-    expect(same.status).toBe(501);
+    expect(same.status).toBe(400);
     await drain(same);
   });
 

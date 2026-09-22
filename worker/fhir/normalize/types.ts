@@ -5,7 +5,6 @@
 // normalizers rather than set to `undefined`, so the wire format never carries
 // noise.
 import type { RefResolver } from "./refs.ts";
-import type * as fhir4 from "fhir/r4";
 
 /** Context every `normalizeX` function receives: which provider connection
  * the resource came from, and a synchronous resolver for its references. */
@@ -15,7 +14,7 @@ export interface NormalizeCtx {
 }
 
 /** Fields every normalized output object carries. */
-export interface NormalizedBase {
+interface NormalizedBase {
   resourceType: string;
   id: string;
   provider: string;
@@ -333,7 +332,3 @@ export type NormalizedResource =
   | NormalizedLocation
   | NormalizedOrganization
   | NormalizedGeneric;
-
-/** The discriminated union of every concrete FHIR R4 resource type, re-typed
- * here so `normalizeResource`'s switch can narrow on `resourceType`. */
-export type FhirResource = fhir4.FhirResource;

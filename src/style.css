@@ -99,7 +99,213 @@ select {
 }
 
 input:focus,
-select:focus {
+select:focus,
+textarea:focus,
+button:focus-visible,
+a:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
+}
+
+textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+/* ---------------------------------------------------------------------------
+   Shared layout vocabulary.
+
+   These live here rather than in each component's <style scoped> because the
+   admin UI is a dozen panels of the same three shapes, and duplicating the card
+   and table rules a dozen times is how they drift apart.
+
+   The gutter is 16px below 640px and 24px above, which is the whole of this
+   project's phone story: single column, nothing wider than the viewport.
+   --------------------------------------------------------------------------- */
+
+.page {
+  max-width: 940px;
+  margin: 0 auto;
+  padding: 20px 16px 56px;
+  display: grid;
+  gap: 16px;
+}
+
+@media (min-width: 640px) {
+  .page {
+    padding: 24px 24px 64px;
+  }
+}
+
+.card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.card > h2 {
+  font-size: 1.05rem;
+}
+
+.card > h3 {
+  font-size: 0.95rem;
+}
+
+.muted {
+  color: var(--text-dim);
+  font-size: 0.88rem;
+  margin: 0;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+  font-size: 0.88rem;
+  color: var(--text-dim);
+  min-width: 0;
+}
+
+.field > input,
+.field > select,
+.field > textarea {
+  color: var(--text);
+  font-size: 1rem;
+  min-width: 0;
+  width: 100%;
+}
+
+.fields {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 640px) {
+  .fields.two {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* A table may scroll sideways inside its own box; the page must never. */
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.88rem;
+}
+
+th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 10px 6px 0;
+  vertical-align: top;
+}
+
+tr:last-child > td {
+  border-bottom: none;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  padding-right: 14px;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.danger-text {
+  color: var(--danger);
+}
+
+button.danger {
+  color: var(--danger);
+}
+
+button.small {
+  padding: 4px 9px;
+  font-size: 0.85rem;
+}
+
+.spacer {
+  margin-left: auto;
+}
+
+/* An anchor that looks like a button. Used wherever the destination must be a
+   real page load -- the OAuth starts and the public pages are the Worker's, not
+   the router's, and a RouterLink to one would leave the SPA mounted. */
+.btn {
+  display: inline-block;
+  border-radius: 8px;
+  background: var(--bg-input);
+  color: var(--text);
+  text-decoration: none;
+  padding: 8px 12px;
+  font-size: 0.95rem;
+}
+
+.btn.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.btn.small {
+  padding: 4px 9px;
+  font-size: 0.85rem;
+}
+
+.chip {
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+code,
+pre {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+}
+
+pre {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  margin: 0;
+  overflow-x: auto;
 }

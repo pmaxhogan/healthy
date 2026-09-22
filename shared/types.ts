@@ -211,6 +211,16 @@ export interface SetProviderSecretRequest {
   clientSecret: string;
 }
 
+/**
+ * `GET /health`, the one route an unauthenticated stranger can read.
+ *
+ * Deliberately says nothing else: no version, no build, no connection count. Every
+ * extra field would be information disclosure on a public endpoint.
+ */
+export interface HealthResponse {
+  ok: true;
+}
+
 export interface ApiError {
   error: string;
   message?: string;
