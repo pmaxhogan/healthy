@@ -33,6 +33,7 @@
     "brands:update": "node scripts/slim-brands.mjs",
     "set-password": "tsx scripts/set-password.ts",
     "gen-data-key": "tsx scripts/gen-data-key.ts",
+    "set-provider-secret": "tsx scripts/set-provider-secret.ts",
     "record-fixtures": "tsx scripts/record-fixtures.ts",
     "prepare": "lefthook install && wrangler types"
   },

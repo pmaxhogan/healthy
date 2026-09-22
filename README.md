@@ -136,7 +136,13 @@ development (one `NAME=value` line each).
 
 Per-organisation Epic client secrets are **not** Worker secrets: they are
 entered in the admin UI and stored encrypted in D1, one per health system,
-rotated independently.
+rotated independently. When the admin UI is not an option (no live browser
+session against that environment), `npm run set-provider-secret -- --provider
+<id> --remote` sets the same column from the command line: it seals the value
+exactly as the Worker does and writes it with `wrangler d1 execute`. The
+secret is read from the `PROVIDER_CLIENT_SECRET` environment variable, or
+from stdin if that is unset, so it is never a command-line argument or in
+shell history, and the command never prints it back.
 
 ### 4. Run it
 
