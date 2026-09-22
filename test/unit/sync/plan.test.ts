@@ -28,6 +28,8 @@ function row(overrides: Partial<CalendarEventRow> = {}): CalendarEventRow {
     last_seen_at: 1_780_000_000,
     ghosted_at: null,
     updated_at: 1_780_000_000,
+    source: "fhir",
+    portal_csn: null,
     ...overrides,
   };
 }

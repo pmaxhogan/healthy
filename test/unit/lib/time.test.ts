@@ -12,6 +12,7 @@ import {
   nowSeconds,
   startOfDayInZone,
   toIso,
+  toIsoInZone,
 } from "../../../worker/lib/time.ts";
 
 // Fixtures are deliberately not the owner's zone: UTC plus one European zone,
@@ -124,5 +125,36 @@ describe("formatInZone", () => {
 
   it("rejects a zone Intl does not know", () => {
     expect(() => formatInZone("2026-01-02T03:04:00Z", "Nowhere/Nothing")).toThrow(AppError);
+  });
+});
+
+describe("toIsoInZone", () => {
+  it("keeps the local wall clock and states the offset", () => {
+    // 2026-07-01T10:00:00Z is noon in Paris, which is +02:00 in July.
+    expect(toIsoInZone(fromIso("2026-07-01T10:00:00Z"), PARIS)).toBe("2026-07-01T12:00:00+02:00");
+  });
+
+  it("uses the offset in force at that instant, not today's", () => {
+    // Either side of the European autumn transition on 2026-10-25.
+    expect(toIsoInZone(fromIso("2026-10-24T10:00:00Z"), PARIS)).toBe("2026-10-24T12:00:00+02:00");
+    expect(toIsoInZone(fromIso("2026-10-26T10:00:00Z"), PARIS)).toBe("2026-10-26T11:00:00+01:00");
+  });
+
+  it("writes a zero offset as +00:00 rather than Z", () => {
+    expect(toIsoInZone(fromIso("2026-01-02T03:04:05Z"), "UTC")).toBe("2026-01-02T03:04:05+00:00");
+  });
+
+  it("handles a zone west of UTC and one with a half-hour offset", () => {
+    expect(toIsoInZone(fromIso("2026-01-02T03:04:05Z"), "America/New_York")).toBe(
+      "2026-01-01T22:04:05-05:00",
+    );
+    expect(toIsoInZone(fromIso("2026-01-02T03:04:05Z"), "Asia/Kolkata")).toBe(
+      "2026-01-02T08:34:05+05:30",
+    );
+  });
+
+  it("rejects a zone Intl does not know, and a non-finite instant", () => {
+    expect(() => toIsoInZone(0, "Nowhere/Nothing")).toThrow(AppError);
+    expect(() => toIsoInZone(NaN, "UTC")).toThrow(AppError);
   });
 });

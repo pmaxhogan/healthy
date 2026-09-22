@@ -21,6 +21,14 @@ describe("AppError", () => {
       ["policy_denied", 403],
       ["crypto", 500],
       ["internal", 500],
+      ["portal_login_failed", 502],
+      ["portal_2fa_required", 409],
+      ["portal_2fa_rejected", 409],
+      ["portal_locked", 409],
+      ["portal_bot_blocked", 503],
+      ["portal_session_expired", 409],
+      ["portal_parse_failed", 502],
+      ["portal_unreachable", 503],
     ];
 
     for (const [code, status] of expected) {

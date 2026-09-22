@@ -277,6 +277,58 @@ export interface HealthResponse {
   ok: true;
 }
 
+/** Health of a provider's portal session. Mirrors `portal_accounts.session_state`. */
+export type PortalSessionState = "none" | "active" | "needs_reauth";
+
+/**
+ * How far a sign-in attempt got.
+ *
+ * Two values, because the portal's own flow has two outcomes: the password was
+ * enough, or it now wants a code that will arrive by email. The admin UI polls
+ * for this and shows "waiting for the emailed code" on the second one.
+ */
+export type PortalSignInStatus = "signed_in" | "awaiting_code";
+
+/**
+ * One provider's portal account.
+ *
+ * Write-only credentials: `hasCredentials` is the whole of what the UI learns
+ * about the username and password, and nothing here reflects the cookie jar's
+ * contents either -- a session cookie is as good as the password.
+ */
+export interface PortalAccountDto {
+  providerId: string;
+  /** Origin only, as discovery settled on it. Null until it has been probed. */
+  baseUrl: string | null;
+  /** The prefix the portal is mounted under, with both slashes. */
+  mountPath: string | null;
+  /** True when both a username and a password are stored. */
+  hasCredentials: boolean;
+  /** True when a cookie jar is stored, whether or not it still works. */
+  hasSession: boolean;
+  state: PortalSessionState;
+  lastLoginAt: string | null;
+  lastOkAt: string | null;
+  lastErrorCode: string | null;
+  needsReauthSince: string | null;
+  /** Sign-in attempts used today, against the daily cap. */
+  loginAttemptsToday: number;
+  updatedAt: string | null;
+}
+
+/**
+ * The payload of `POST /api/providers/:id/portal/credentials`.
+ *
+ * `baseUrl` and `mountPath` are optional: the owner can save credentials against
+ * an already-discovered endpoint, or supply the URL at the same time.
+ */
+export interface SetPortalCredentialsRequest {
+  username: string;
+  password: string;
+  baseUrl?: string | undefined;
+  mountPath?: string | undefined;
+}
+
 export interface ApiError {
   error: string;
   message?: string;

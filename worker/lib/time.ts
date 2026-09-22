@@ -140,6 +140,34 @@ export function dateInZone(iso: string, timeZone: string): string {
   return `${String(p.year).padStart(4, "0")}-${pad(p.month)}-${pad(p.day)}`;
 }
 
+/**
+ * An instant as an ISO-8601 string carrying `timeZone`'s own UTC offset, e.g.
+ * `2026-09-29T14:30:00-05:00`.
+ *
+ * `toIso` is the right answer almost everywhere in this project, and this is the
+ * exception: a patient portal reports a clinic-local wall-clock time plus the
+ * clinic's IANA zone, and a calendar event wants to keep that local reading
+ * rather than be rewritten into UTC. Offset rather than a bare local time
+ * because the string has to stay unambiguous on its own.
+ *
+ * The offset is read at the given instant, so a booking either side of a DST
+ * transition gets the offset actually in force then.
+ */
+export function toIsoInZone(unixSeconds: number, timeZone: string): string {
+  if (!Number.isFinite(unixSeconds)) {
+    throw new AppError("bad_request", "not a finite unix timestamp");
+  }
+  const ms = Math.floor(unixSeconds) * 1000;
+  const p = zonedParts(ms, timeZone);
+  const pad = (value: number): string => String(value).padStart(2, "0");
+  const offsetMinutes = Math.round(zoneOffsetMs(ms, timeZone) / 60_000);
+  const sign = offsetMinutes < 0 ? "-" : "+";
+  const absolute = Math.abs(offsetMinutes);
+  const date = `${String(p.year).padStart(4, "0")}-${pad(p.month)}-${pad(p.day)}`;
+  const time = `${pad(p.hour)}:${pad(p.minute)}:${pad(p.second)}`;
+  return `${date}T${time}${sign}${pad(Math.floor(absolute / 60))}:${pad(absolute % 60)}`;
+}
+
 const DEFAULT_FORMAT: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeStyle: "short" };
 
 /**

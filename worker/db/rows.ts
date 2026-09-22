@@ -1,5 +1,6 @@
 /**
- * One interface per table, matching `migrations/0001_init.sql` column for column.
+ * One interface per table, matching the migrations under `migrations/` column
+ * for column.
  *
  * These are the *raw* row shapes: snake_case, unix seconds as numbers, NULLable
  * columns as `| null`, and `_enc` columns still sealed. Repos are what turn them
@@ -8,6 +9,11 @@
  *
  * Kept free of Worker runtime types on purpose, so the unit tests can import it.
  */
+
+// The one type imported rather than restated: a portal session's state is the
+// same value in the column and in the DTO the admin UI reads, and two copies of
+// it could drift into disagreeing about what the CHECK constraint allows.
+import type { PortalSessionState } from "@shared/types.ts";
 
 /** 'connected' | 'needs_reauth' | 'error' | 'disconnected' (CHECK-constrained). */
 export type ConnectionStatus = "connected" | "needs_reauth" | "error" | "disconnected";
@@ -21,6 +27,15 @@ export type PolicyRuleType = "tool" | "resource" | "field" | "provider";
 export type ProviderEnvironment = "prod" | "sandbox";
 /** Which authorization flow an in-flight state belongs to. */
 export type OAuthStateKind = "epic" | "google";
+/**
+ * Where a calendar row came from.
+ *
+ * Not CHECK-constrained: SQLite cannot add one to an existing table, so the
+ * repos and the sync are what keep the domain honest. Not exported either --
+ * nothing outside this file names it yet, and the sync wave that does can export
+ * it then.
+ */
+type CalendarEventSource = "fhir" | "portal";
 
 export interface SettingRow {
   key: string;
@@ -124,6 +139,10 @@ export interface CalendarEventRow {
   last_seen_at: number;
   ghosted_at: number | null;
   updated_at: number;
+  /** Added by 0002_portal.sql; every pre-existing row reads 'fhir'. */
+  source: CalendarEventSource;
+  /** The portal's contact-serial number, set only when `source` is 'portal'. */
+  portal_csn: string | null;
 }
 
 export interface AlertRow {
@@ -170,4 +189,30 @@ export interface LoginAttemptRow {
   ip_hash: string;
   count: number;
   window_start: number;
+}
+
+/**
+ * One portal account per provider (0002_portal.sql).
+ *
+ * Three sealed columns, all bound to `portal_accounts.<column>.<providerId>`.
+ * `cookie_jar_enc` is a whole serialised cookie jar rather than one value: the
+ * trust-this-device cookie inside it is what lets a later run skip the emailed
+ * code, so it is exactly as sensitive as the password.
+ */
+export interface PortalAccountRow {
+  provider_id: string;
+  base_url: string | null;
+  mount_path: string | null;
+  username_enc: string | null;
+  password_enc: string | null;
+  cookie_jar_enc: string | null;
+  session_state: PortalSessionState;
+  last_login_at: number | null;
+  last_ok_at: number | null;
+  last_error_code: string | null;
+  login_attempts_today: number;
+  /** Whole UTC days since the epoch the counter above belongs to. */
+  login_attempts_day: number | null;
+  needs_reauth_since: number | null;
+  updated_at: number;
 }
