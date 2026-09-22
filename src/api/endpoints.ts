@@ -20,6 +20,8 @@ import type {
   CreatePolicyRuleRequest,
   CreateProviderRequest,
   GoogleAccountDto,
+  MailInboxEntryDto,
+  MailSettingsDto,
   McpAuditDto,
   McpGrantDto,
   McpToolInfoDto,
@@ -100,6 +102,14 @@ export const endpoints = {
 
   brands: (q: string, signal?: AbortSignal): Promise<BrandDto[]> =>
     api.get(`/api/brands?q=${encodeURIComponent(q)}`, signal),
+
+  mailInbox: (signal?: AbortSignal): Promise<MailInboxEntryDto[]> =>
+    api.get("/api/mail/inbox", signal),
+  mailSettings: (signal?: AbortSignal): Promise<MailSettingsDto> =>
+    api.get("/api/mail/settings", signal),
+  saveMailSettings: (allowlist: string[]): Promise<MailSettingsDto> =>
+    api.put("/api/mail/settings", { allowlist }),
+  sendMailTest: (): Promise<MailInboxEntryDto> => api.post("/api/mail/test"),
 };
 
 /**

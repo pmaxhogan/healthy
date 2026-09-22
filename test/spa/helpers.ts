@@ -13,6 +13,8 @@ import type {
   AlertDto,
   BrandDto,
   ConnectionDto,
+  MailInboxEntryDto,
+  MailSettingsDto,
   OverviewDto,
   ProviderDto,
   RunDto,
@@ -113,6 +115,7 @@ export async function testRouter(initial = "/"): Promise<Router> {
       { path: "/calendar", component: blank },
       { path: "/connectors", component: blank },
       { path: "/alerts", component: blank },
+      { path: "/mail", component: blank },
       { path: "/runs", component: blank },
       { path: "/settings", component: blank },
     ],
@@ -210,6 +213,29 @@ function alert(overrides: Partial<AlertDto> = {}): AlertDto {
     trelloCardId: "card-1",
     openedAt: "2026-09-21T09:00:00.000Z",
     resolvedAt: null,
+    ...overrides,
+  };
+}
+
+export function mailInboxEntry(overrides: Partial<MailInboxEntryDto> = {}): MailInboxEntryDto {
+  return {
+    id: "mail-1",
+    receivedAt: "2026-09-21T11:50:00.000Z",
+    fromDomain: "mychart.example.test",
+    subject: "Your MyChart login code",
+    kind: "otp",
+    consumedAt: null,
+    expiresAt: "2026-09-21T12:00:00.000Z",
+    rawSize: 1200,
+    pendingCode: null,
+    pendingUrl: null,
+    ...overrides,
+  };
+}
+
+export function mailSettings(overrides: Partial<MailSettingsDto> = {}): MailSettingsDto {
+  return {
+    allowlist: ["mychart.", "google.com"],
     ...overrides,
   };
 }

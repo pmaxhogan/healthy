@@ -16,6 +16,7 @@ export const NAV: { path: string; label: string }[] = [
   { path: "/calendar", label: "Calendar" },
   { path: "/connectors", label: "MCP" },
   { path: "/alerts", label: "Alerts" },
+  { path: "/mail", label: "Mail" },
   { path: "/runs", label: "Runs" },
   { path: "/settings", label: "Settings" },
 ];
@@ -31,6 +32,7 @@ const routes: RouteRecordRaw[] = [
   // reaching this component. The route name stays "mcp"; only the path moved.
   { path: "/connectors", name: "mcp", component: () => import("./views/McpView.vue") },
   { path: "/alerts", name: "alerts", component: () => import("./views/AlertsView.vue") },
+  { path: "/mail", name: "mail", component: () => import("./views/MailView.vue") },
   { path: "/runs", name: "runs", component: () => import("./views/RunsView.vue") },
   { path: "/settings", name: "settings", component: () => import("./views/SettingsView.vue") },
   // Anything else the SPA is handed is a stale bookmark; the overview is the
