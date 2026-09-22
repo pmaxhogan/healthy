@@ -36,3 +36,9 @@ export function providerSubject(providerId: string): string {
   if (providerId === "") throw new AppError("bad_request", "a provider id is required");
   return `provider:${providerId}`;
 }
+
+/** `alerts.subject` for a provider's portal session. Mirrors `db/repos/alerts.ts`. */
+export function portalSubject(providerId: string): string {
+  if (providerId === "") throw new AppError("bad_request", "a provider id is required");
+  return `portal:${providerId}`;
+}

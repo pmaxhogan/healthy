@@ -14,7 +14,7 @@ import { z } from "zod";
 
 import { isHttpsUrl } from "@shared/url.ts";
 
-import type { SetProviderSecretRequest } from "@shared/types.ts";
+import type { PutPortalAccountRequest, SetProviderSecretRequest } from "@shared/types.ts";
 
 // Re-exported so `test/unit/api/schemas.test.ts` -- and anything else that
 // already imports the predicate from here -- keeps working. The definition
@@ -126,6 +126,7 @@ export const settingsPatchSchema = z.strictObject({
   windowPastDays: z.number().int().min(0).max(3650).optional(),
   syncBackoffUntil: z.string().nullable().optional(),
   mcpEnabled: z.boolean().optional(),
+  portalLoginAttemptLimit: z.number().int().min(1).max(20).optional(),
 });
 
 /** `POST /api/mcp/policy`. */
@@ -143,6 +144,25 @@ export const syncRequestSchema = z.strictObject({
 /** `GET /api/brands?q=`. */
 export const brandQuerySchema = z.object({
   q: z.string().max(200).optional(),
+});
+
+/**
+ * `PUT /api/providers/:id/portal`.
+ *
+ * Annotated with the shared request DTO, like `providerSecretSchema`: that is what
+ * makes a change to `PutPortalAccountRequest` a compile error here rather than a
+ * body the SPA sends and the Worker silently rejects.
+ *
+ * `mountHint` is a hint, not a path: discovery probes it first and then the generic
+ * prefixes, and what gets stored is wherever a login page actually answered. It is
+ * bounded and otherwise unvalidated, because the shape of a vanity mount is the
+ * deployment's business.
+ */
+export const portalAccountSchema: z.ZodType<PutPortalAccountRequest> = z.strictObject({
+  username: z.string().min(1).max(200),
+  password: z.string().min(1).max(1000),
+  baseUrl: httpsUrl.optional(),
+  mountHint: z.string().min(1).max(200).optional(),
 });
 
 /** `PUT /api/mail/settings`. Replaces the whole allowlist -- there is only one field. */

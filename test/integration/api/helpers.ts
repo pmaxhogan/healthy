@@ -221,6 +221,7 @@ export function freshOwner(): () => Session {
 const TABLES = [
   "login_attempts",
   "mail_inbox",
+  "portal_accounts",
   "mcp_policy",
   "mcp_audit",
   "run_log",

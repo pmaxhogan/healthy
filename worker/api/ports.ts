@@ -26,17 +26,20 @@ import { AppError } from "../lib/errors.ts";
 import { listGrants, revokeGrant } from "../mcp/grants.ts";
 import {
   getGoogleCalendarFor,
+  portalSignInState,
   refreshConnectionToken,
   resolveReconnectAlert,
   runCalendarSync,
   startFullRefresh,
+  startPortalSignIn,
+  startPortalSync,
 } from "../sync/index.ts";
 
 import type { TrelloAlerts } from "../alerts/trello.ts";
 import type { Ctx } from "../db/client.ts";
 import type { Env } from "../env.ts";
 import type { CalendarClient } from "../google/calendar.ts";
-import type { McpGrantDto } from "@shared/types.ts";
+import type { McpGrantDto, PortalSignInState } from "@shared/types.ts";
 
 /** Which connection a reconnect alert is about. */
 type ReconnectSubject = "google" | { providerId: string };
@@ -80,6 +83,23 @@ interface SyncPort {
  */
 export type GrantLike = { id: string } & Partial<Omit<McpGrantDto, "id">>;
 
+/**
+ * The patient-portal runner, as the admin API uses it.
+ *
+ * All three methods reach the same per-provider Durable Object, and that is the
+ * reason this is a port rather than a direct call: a sign-in waits for a code the
+ * portal emails, so it cannot happen inside the request that asked for it, and a
+ * test has to be able to stand in for the whole alarm loop rather than for a
+ * transport. `started: false` from either starter means one was already in flight
+ * for that provider -- still a 202, because what the owner asked for is happening.
+ */
+interface PortalPort {
+  startSignIn(ctx: Ctx, options: { providerId: string }): Promise<{ started: boolean }>;
+  startSync(ctx: Ctx, options: { providerId: string }): Promise<{ started: boolean }>;
+  /** Progress for the card the admin UI polls. Never the emailed code. */
+  signInState(ctx: Ctx, options: { providerId: string }): Promise<PortalSignInState>;
+}
+
 interface GrantsPort {
   listGrants(env: Env): Promise<readonly GrantLike[]>;
   /** False when the grant was already gone. */
@@ -90,6 +110,7 @@ export interface Ports {
   /** Every outbound HTTP call the API and OAuth routes make goes through this. */
   fetch: typeof fetch;
   sync: SyncPort;
+  portal: PortalPort;
   grants: GrantsPort;
   /** Built per request so the injected fetch is the current one. */
   trello(env: Env, fetchImpl: typeof fetch): TrelloAlerts;
@@ -132,6 +153,11 @@ function defaults(): Ports {
       refreshConnectionToken,
       getGoogleCalendarFor,
       resolveReconnectAlert,
+    },
+    portal: {
+      startSignIn: startPortalSignIn,
+      startSync: startPortalSync,
+      signInState: portalSignInState,
     },
     grants: { listGrants, revokeGrant },
     trello: liveTrello,

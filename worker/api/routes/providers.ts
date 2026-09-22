@@ -30,7 +30,7 @@ import { brandById } from "../../brands.ts";
 import { AppError } from "../../lib/errors.ts";
 import { makeLogger } from "../../lib/log.ts";
 import { adapterFor } from "../../providers/registry.ts";
-import { closeAlert, providerSubject } from "../close-alert.ts";
+import { closeAlert, portalSubject, providerSubject } from "../close-alert.ts";
 import { fromProviderConfigDto, toConnectionDto, toProviderDto } from "../dto.ts";
 import { NO_STORE, afterResponse, apiContext, readJson, readOptionalJson } from "../http.ts";
 import {
@@ -185,6 +185,9 @@ providersRouter.delete("/:id", async (c) => {
   if (connection !== null) await api.repos.connections.disconnect(connection.id);
   await api.repos.fhirCache.clearProvider(row.id);
   await closeAlert(api, c.env, providerSubject(row.id));
+  // The portal session is a second subject with a second card (see
+  // `worker/sync/alerts.ts`), and a provider being removed moots both.
+  await closeAlert(api, c.env, portalSubject(row.id));
   await api.repos.providers.softDelete(row.id);
 
   return c.json({ ok: true }, 200, NO_STORE);

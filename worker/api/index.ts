@@ -26,6 +26,7 @@ import { googleRouter } from "./routes/google.ts";
 import { mailRouter } from "./routes/mail.ts";
 import { mcpRouter } from "./routes/mcp.ts";
 import { overviewRouter } from "./routes/overview.ts";
+import { portalRouter } from "./routes/portal.ts";
 import { providersRouter, syncRouter } from "./routes/providers.ts";
 import { runsRouter } from "./routes/runs.ts";
 import { settingsRouter } from "./routes/settings.ts";
@@ -48,6 +49,11 @@ apiRouter.onError(apiErrorHandler);
 apiRouter.get("/whoami", (c) => c.json({ ok: true }, 200, NO_STORE));
 
 apiRouter.route("/overview", overviewRouter);
+// Two routers under /providers. The portal routes are a separate file because they
+// are a separate subsystem -- a scrape with its own credentials, its own Durable
+// Object and its own failure vocabulary -- and `/:id` never matches `/:id/portal`,
+// so the two cannot shadow each other whichever order they are mounted in.
+apiRouter.route("/providers", portalRouter);
 apiRouter.route("/providers", providersRouter);
 apiRouter.route("/sync", syncRouter);
 apiRouter.route("/google", googleRouter);

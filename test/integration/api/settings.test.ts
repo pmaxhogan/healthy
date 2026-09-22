@@ -30,6 +30,7 @@ describe("GET /api/settings", () => {
       windowPastDays: 90,
       syncBackoffUntil: null,
       mcpEnabled: true,
+      portalLoginAttemptLimit: 3,
     });
   });
 
