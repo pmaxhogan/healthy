@@ -35,6 +35,14 @@
 
 export { runCalendarSync } from "./calendar-sync.ts";
 export { startFullRefresh } from "./runner.ts";
+/**
+ * The portal sign-in runner's three entry points.
+ *
+ * All three go through the Durable Object, which is the whole point: a sign-in
+ * waits for an emailed code, so it cannot happen inside the request that asked for
+ * it. `portalSignInState` is what the admin UI polls while it does.
+ */
+export { portalSignInState, startPortalSignIn, startPortalSync } from "./portal-runner.ts";
 export { refreshConnectionToken } from "./keepalive.ts";
 export { handleScheduled } from "./scheduled.ts";
 

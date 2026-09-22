@@ -96,6 +96,14 @@ export interface SettingsDto {
   windowPastDays: number;
   syncBackoffUntil: string | null;
   mcpEnabled: boolean;
+  /**
+   * Sign-in attempts one patient-portal account may make per UTC day.
+   *
+   * Editable so that live QA against a real portal can raise it for an afternoon;
+   * the default of three is chosen against the portal's own lockout, not against
+   * our convenience.
+   */
+  portalLoginAttemptLimit: number;
 }
 
 export type SettingsPatch = Partial<SettingsDto>;
@@ -118,6 +126,20 @@ export interface RunSummary {
   filteredView: boolean;
   backedOff: boolean;
   errors: { providerId: string; code: string }[];
+  /** Upcoming visits the patient-portal pass read, across every portal account. */
+  portalVisits: number;
+  /** Portal visits not calendared because a FHIR event already covers them. */
+  portalSkipped: number;
+  /**
+   * Stable codes from portal accounts that failed, and only codes.
+   *
+   * Deliberately *not* folded into `errors`: a portal session that needs the
+   * owner's attention is an expected state that can persist for days, and putting
+   * it in `errors` would mark every hourly run `ok = 0` and drown the failures
+   * that really are failures. The portal's own state machine
+   * (`portal_accounts.session_state`, plus the Trello card) is what escalates it.
+   */
+  portalErrors: string[];
 }
 
 /**
@@ -346,16 +368,80 @@ export interface PortalAccountDto {
 }
 
 /**
- * The payload of `POST /api/providers/:id/portal/credentials`.
+ * What the repo's `setCredentials` takes, and what the CLI script writes.
  *
  * `baseUrl` and `mountPath` are optional: the owner can save credentials against
- * an already-discovered endpoint, or supply the URL at the same time.
+ * an already-discovered endpoint, or supply the URL at the same time. The admin
+ * API's own body is `PutPortalAccountRequest` below, which carries a mount
+ * *hint* rather than a mount path -- the path is whatever discovery settles on.
  */
 export interface SetPortalCredentialsRequest {
   username: string;
   password: string;
   baseUrl?: string | undefined;
   mountPath?: string | undefined;
+}
+
+/**
+ * The body of `PUT /api/providers/:id/portal`.
+ *
+ * `baseUrl` is any URL on the portal's host; the handler keeps only its origin
+ * and runs discovery from there. `mountHint` is a prefix the owner already knows
+ * (`/MyChart/`), probed first. Both are optional once an endpoint is stored:
+ * saving a new password against a known portal is the common case.
+ */
+export interface PutPortalAccountRequest {
+  username: string;
+  password: string;
+  baseUrl?: string | undefined;
+  mountHint?: string | undefined;
+}
+
+/**
+ * How far the current (or last) sign-in attempt got.
+ *
+ * Reported by `GET /api/providers/:id/portal` for the admin UI to poll while a
+ * sign-in is in flight. It lives in the sign-in runner's own Durable Object
+ * storage, not in D1: it is progress, and the durable answer is
+ * `PortalAccountDto.state` plus `lastErrorCode`.
+ *
+ * The phases are the portal's own flow. `awaiting_code` is the one that lasts --
+ * the Worker has asked the portal to email a code and is waiting for it to
+ * arrive in the inbox, which takes seconds to a couple of minutes.
+ */
+export type PortalSignInPhase =
+  "idle" | "logging_in" | "awaiting_code" | "validating" | "signed_in" | "failed";
+
+export interface PortalSignInState {
+  phase: PortalSignInPhase;
+  /**
+   * The stable failure code when `phase` is "failed", e.g. `portal_login_failed`.
+   *
+   * **Never the emailed verification code.** A one-time code is read from the
+   * inbox, handed straight to the portal and never leaves the Worker -- it is not
+   * in any DTO, any log line or any error body.
+   */
+  code: string | null;
+  /** Unix seconds -- not an ISO instant, unlike the rest of this DTO. */
+  startedAt: number | null;
+  /** Unix seconds. Moves on every phase change, so a poller can show progress. */
+  updatedAt: number | null;
+}
+
+/**
+ * `GET /api/providers/:id/portal`: the stored account plus live sign-in progress.
+ *
+ * Always answered, even for a provider that has never had a portal account: the
+ * admin UI's portal card renders from this, so a missing row is a synthesized
+ * default (`state: "none"`, everything else null) rather than a 404.
+ */
+export interface PortalAccountStatusDto extends PortalAccountDto {
+  signIn: PortalSignInState;
+  /**
+   * Upcoming visits currently tracked from this portal, as of the last time it
+   * answered. Null when it never has.
+   */
+  lastVisitCount: number | null;
 }
 
 export interface ApiError {

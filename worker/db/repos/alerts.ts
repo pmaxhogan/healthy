@@ -22,6 +22,18 @@ export function providerSubject(providerId: string): string {
   return `provider:${providerId}`;
 }
 
+/**
+ * 'portal:<id>' for a health system's patient-portal session.
+ *
+ * A different subject from `providerSubject` for the same provider on purpose:
+ * the FHIR grant and the portal password break independently, so sharing a
+ * subject would let one alert's resolution close the other's card. See
+ * `worker/sync/alerts.ts`.
+ */
+export function portalSubject(providerId: string): string {
+  return `portal:${providerId}`;
+}
+
 /** The subject the Google calendar account's alerts use. */
 export const GOOGLE_SUBJECT = "google";
 

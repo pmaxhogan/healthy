@@ -26,13 +26,15 @@
  * the DTO is the whole of what the admin UI learns about it.
  */
 
-import { AppError } from "../../lib/errors.ts";
+import { AppError, isAppError } from "../../lib/errors.ts";
 import { DAY_SECONDS, toIso } from "../../lib/time.ts";
 import { all, one, run } from "../client.ts";
 import { aadFor, openOrNull, seal } from "../crypto.ts";
+import { parseJsonColumn, portalEndpointSchema } from "../schemas.ts";
 
 import type { Ctx } from "../client.ts";
 import type { PortalAccountRow } from "../rows.ts";
+import type { StoredPortalEndpoint } from "../schemas.ts";
 import type {
   PortalAccountDto,
   PortalSessionState,
@@ -51,6 +53,17 @@ export interface PortalEndpointPatch {
   /** Origin only. The repo does not validate it; discovery produces it. */
   baseUrl: string;
   mountPath: string;
+  /**
+   * The adapter's whole discovery result, stored verbatim as JSON.
+   *
+   * Opaque here on purpose: `worker/providers/mychart/**` owns the shape and it
+   * grows as deployments turn out to differ -- which login application to drive,
+   * for one -- so a column (or a strict schema) per field would mean a migration
+   * every time and a stored endpoint that quietly disagrees with the adapter that
+   * produced it. Omitted by a caller that only knows the two fields above, which
+   * is what `npm run set-portal-credentials` does.
+   */
+  endpoint?: Record<string, unknown>;
 }
 
 const SELECT = "SELECT * FROM portal_accounts";
@@ -164,7 +177,36 @@ export function makePortalAccountsRepo(ctx: Ctx) {
     /** Record where discovery found the portal. Required before `markActive`. */
     async setEndpoint(providerId: string, endpoint: PortalEndpointPatch): Promise<void> {
       await ensure(providerId);
-      await patch(providerId, { base_url: endpoint.baseUrl, mount_path: endpoint.mountPath });
+      await patch(providerId, {
+        base_url: endpoint.baseUrl,
+        mount_path: endpoint.mountPath,
+        // Null when the caller knew only the two columns: better an absent
+        // endpoint the sign-in rebuilds than a stored one missing the half that
+        // says how to sign in.
+        endpoint_json: endpoint.endpoint === undefined ? null : JSON.stringify(endpoint.endpoint),
+      });
+    },
+
+    /**
+     * The stored discovery result, or null when there is none to read.
+     *
+     * Tolerant by design, like the cookie jar: an unreadable endpoint costs a
+     * rebuild from `base_url` and `mount_path`, and turning it into a 500 would
+     * take the portal down over a column nothing but discovery ever writes.
+     */
+    async getEndpoint(providerId: string): Promise<StoredPortalEndpoint | null> {
+      const row = await byProvider(providerId);
+      const json = row?.endpoint_json ?? null;
+      if (json === null) return null;
+      try {
+        return parseJsonColumn(portalEndpointSchema, json, "portal_accounts.endpoint_json");
+      } catch (error) {
+        ctx.log.warn("portal_accounts.endpoint_unreadable", {
+          providerId,
+          code: isAppError(error) ? error.code : "internal",
+        });
+        return null;
+      }
     },
 
     /**
@@ -293,6 +335,43 @@ export function makePortalAccountsRepo(ctx: Ctx) {
       );
       const row = await require_(providerId);
       return row.login_attempts_today;
+    },
+
+    /**
+     * Forget the stored session, keeping the credentials and the endpoint.
+     *
+     * What the admin UI's "Forget session" button does, and the honest way to
+     * recover from a session the portal has decided it does not recognise: the
+     * next run signs in from scratch rather than replaying a jar that no longer
+     * works. The error and the reauth stamp go with it, because the state they
+     * described is no longer the state.
+     */
+    async forgetSession(providerId: string): Promise<void> {
+      await require_(providerId);
+      await patch(providerId, {
+        cookie_jar_enc: null,
+        session_state: "none" satisfies PortalSessionState,
+        last_error_code: null,
+        needs_reauth_since: null,
+      });
+      ctx.log.info("portal_accounts.session_forgotten", { providerId });
+    },
+
+    /**
+     * Forget the portal account entirely: credentials, jar, endpoint, counters.
+     *
+     * The row is deleted rather than blanked. A blanked row would keep
+     * `login_attempts_today` -- so removing an account and adding it back would
+     * inherit a spent budget -- and would leave `listActive` and the admin UI
+     * reasoning about a row that describes nothing. The endpoint goes too: the
+     * owner may be re-adding the account precisely because that was wrong.
+     */
+    async clear(providerId: string): Promise<boolean> {
+      const { changes } = await run(
+        ctx.db.prepare("DELETE FROM portal_accounts WHERE provider_id = ?").bind(providerId),
+      );
+      if (changes > 0) ctx.log.info("portal_accounts.cleared", { providerId });
+      return changes > 0;
     },
 
     /** The row as the admin UI sees it. Never a sealed column. */

@@ -33,11 +33,9 @@ export type MailKind = "otp" | "forward_verify" | "other";
  * Where a calendar row came from.
  *
  * Not CHECK-constrained: SQLite cannot add one to an existing table, so the
- * repos and the sync are what keep the domain honest. Not exported either --
- * nothing outside this file names it yet, and the sync wave that does can export
- * it then.
+ * repos and the sync are what keep the domain honest.
  */
-type CalendarEventSource = "fhir" | "portal";
+export type CalendarEventSource = "fhir" | "portal";
 
 export interface SettingRow {
   key: string;
@@ -217,6 +215,17 @@ export interface PortalAccountRow {
   provider_id: string;
   base_url: string | null;
   mount_path: string | null;
+  /**
+   * The whole discovery result, as the portal adapter's own JSON (0003).
+   *
+   * Opaque outside `worker/providers/mychart/**`: it carries `baseUrl` and
+   * `mountPath`, which the db layer validates, plus whatever else the adapter
+   * needs to drive that deployment's login -- which varies, and is why this is
+   * one JSON column rather than a column per field. NULL on a row written before
+   * 0003 or by the CLI script; the sign-in then falls back to the two columns
+   * above.
+   */
+  endpoint_json: string | null;
   username_enc: string | null;
   password_enc: string | null;
   cookie_jar_enc: string | null;

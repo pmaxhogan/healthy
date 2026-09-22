@@ -68,6 +68,14 @@ export const settingSchemas = {
   mcp_enabled: z.boolean(),
   /** Comma-separated sender domains the inbound email handler accepts mail from. */
   mail_sender_allowlist: z.string().min(1),
+  /**
+   * Sign-in attempts one patient-portal account may make per UTC day.
+   *
+   * A setting rather than a constant because it is a safety limit against the
+   * portal's own lockout, and the one time it has to move is live QA against a
+   * real portal, where three attempts is a short afternoon. The default is three.
+   */
+  portal_login_attempt_limit: z.number().int().min(1).max(20),
 } as const;
 
 export type SettingKey = keyof typeof settingSchemas;
@@ -90,6 +98,7 @@ export const SETTING_DEFAULTS: Settings = {
   sync_backoff_until: null,
   mcp_enabled: true,
   mail_sender_allowlist: DEFAULT_MAIL_SENDER_ALLOWLIST_CSV,
+  portal_login_attempt_limit: 3,
 };
 
 export const SETTING_KEYS = Object.keys(settingSchemas) as SettingKey[];
@@ -191,6 +200,12 @@ export const runSummarySchema = z.object({
   filteredView: z.boolean().default(false),
   /** The run stopped early, or never started, because of a rate-limit backoff. */
   backedOff: z.boolean().default(false),
+  /** Upcoming visits the patient-portal pass read. Zero on a row written before it existed. */
+  portalVisits: count,
+  /** Portal visits skipped because a FHIR-sourced event already covered them. */
+  portalSkipped: count,
+  /** Stable codes from portal accounts that failed. Codes only; see `RunSummary`. */
+  portalErrors: z.array(z.string()).default([]),
 });
 
 export type RunSummary = z.infer<typeof runSummarySchema>;
@@ -199,6 +214,27 @@ export type RunSummaryInput = z.input<typeof runSummarySchema>;
 // ---------------------------------------------------------------------------
 // fhir_sync_state.warnings_json and mcp_audit.providers_json
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// portal_accounts.endpoint_json
+// ---------------------------------------------------------------------------
+
+/**
+ * The stored discovery result.
+ *
+ * Deliberately loose: `worker/providers/mychart/**` owns this shape and adds to
+ * it as deployments turn out to differ (which login application to drive, for
+ * one). Validating the two fields the db layer and the sign-in actually read, and
+ * passing everything else through untouched, is what lets the adapter evolve
+ * without a migration or a schema change here. A strict object would silently
+ * strip the field that decides how to sign in.
+ */
+export const portalEndpointSchema = z.looseObject({
+  baseUrl: z.string().min(1),
+  mountPath: z.string().min(1),
+});
+
+export type StoredPortalEndpoint = z.infer<typeof portalEndpointSchema>;
 
 export const syncWarningsSchema = z.array(
   z.object({ code: z.string(), count: z.number().int().nonnegative() }),

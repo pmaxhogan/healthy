@@ -15,15 +15,15 @@
  * when the row was newly created. If Trello is unconfigured the row still lands
  * and the admin UI still shows the alert.
  *
- * Log lines carry subjects (`provider:<id>`, `google`) and error codes. Never a
- * provider display name -- that names a real health system -- and never a card
- * body, which contains one.
+ * Log lines carry subjects (`provider:<id>`, `portal:<id>`, `google`) and error
+ * codes. Never a provider display name -- that names a real health system -- and
+ * never a card body, which contains one.
  */
 
 import { buildReconnectCard } from "../alerts/reconnect.ts";
 import { createTrelloAlerts } from "../alerts/trello.ts";
 import { makeRepos } from "../db/index.ts";
-import { GOOGLE_SUBJECT, providerSubject } from "../db/repos/alerts.ts";
+import { GOOGLE_SUBJECT, portalSubject, providerSubject } from "../db/repos/alerts.ts";
 import { errorFields } from "../lib/log.ts";
 
 import { DEFAULT_PUBLIC_ORIGIN, resolveDeps } from "./deps.ts";
@@ -32,15 +32,27 @@ import type { SyncDeps } from "./deps.ts";
 import type { TrelloAlerts } from "../alerts/trello.ts";
 import type { Ctx } from "../db/client.ts";
 
-/** Who an alert is about: the Google account, or one health system. */
-export type AlertSubject = "google" | { providerId: string };
+/**
+ * Who an alert is about: the Google account, one health system's FHIR connection,
+ * or one health system's patient-portal session.
+ *
+ * The portal is a separate subject from the FHIR connection for the same provider,
+ * and that is load-bearing. They break independently and are fixed differently --
+ * one is an OAuth reconnect, the other is a password and an emailed code -- so one
+ * subject for both would mean a dead portal session silently closing the card
+ * about a dead FHIR grant, or the reverse.
+ */
+export type AlertSubject = "google" | { providerId: string; portal?: true };
 
 /** The label Trello cards use for the calendar account. Not a health system. */
 const GOOGLE_PROVIDER_NAME = "Google";
 
 /** `alerts.subject` for a subject. */
 function subjectKey(subject: AlertSubject): string {
-  return subject === "google" ? GOOGLE_SUBJECT : providerSubject(subject.providerId);
+  if (subject === "google") return GOOGLE_SUBJECT;
+  return subject.portal === true
+    ? portalSubject(subject.providerId)
+    : providerSubject(subject.providerId);
 }
 
 /**
@@ -76,14 +88,26 @@ function trelloFor(ctx: Ctx, trelloFetch: typeof fetch): TrelloAlerts | null {
  *
  * Epic reconnects are per-connection, so the path carries the connection id.
  * Google has exactly one account, so it goes straight to the start of the
- * consent flow. The origin is this app's own public domain, which is not personal
- * data; `deps.origin` overrides it for a local run or a test.
+ * consent flow. A portal reconnect is neither, and goes to the Providers page.
+ * The origin is this app's own public domain, which is not personal data;
+ * `deps.origin` overrides it for a local run or a test.
  */
 function reconnectUrl(origin: string, subject: AlertSubject, connectionId: string | null): string {
   if (subject === "google") return `${origin}/oauth/google/start`;
+  // A portal session is not an OAuth grant: there is no consent screen to send the
+  // owner to, only the Providers page, where they re-enter the password and press
+  // "Sign in now". The path carries no provider id, because a URL that names one is
+  // one lookup away from naming a health system and this one ends up in Trello.
+  if (subject.portal === true) return `${origin}/providers`;
   return connectionId === null
     ? `${origin}/oauth/epic/start?provider=${encodeURIComponent(subject.providerId)}`
     : `${origin}/oauth/reconnect/${connectionId}`;
+}
+
+/** Which flavour of card a subject wants. */
+function kindOf(subject: AlertSubject): "google" | "epic" | "portal" {
+  if (subject === "google") return "google";
+  return subject.portal === true ? "portal" : "epic";
 }
 
 /**
@@ -123,7 +147,7 @@ export async function openReconnectAlert(
     );
 
     const card = buildReconnectCard({
-      kind: subject === "google" ? "google" : "epic",
+      kind: kindOf(subject),
       providerName,
       reconnectUrl: url,
       reason,

@@ -45,6 +45,7 @@ import type { Env } from "./env.ts";
 // configured `main` module, not from wherever the class happens to live.
 export { HealthyMcp } from "./mcp/server.ts";
 export { FullRefreshRunner } from "./sync/runner.ts";
+export { PortalSignInRunner } from "./sync/portal-runner.ts";
 
 /**
  * The library requires a non-optional `fetch` on the handlers it is given, while

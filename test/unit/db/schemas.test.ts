@@ -48,6 +48,9 @@ describe("the settings catalogue", () => {
       sync_backoff_until: null,
       mcp_enabled: true,
       mail_sender_allowlist: "mychart.,google.com",
+      // Three, chosen against the portal's own lockout rather than against our
+      // convenience. A setting so live QA can raise it for an afternoon.
+      portal_login_attempt_limit: 3,
     });
   });
 
@@ -181,6 +184,9 @@ describe("runSummarySchema", () => {
       warningCount: 0,
       filteredView: false,
       backedOff: false,
+      portalVisits: 0,
+      portalSkipped: 0,
+      portalErrors: [],
     });
   });
 

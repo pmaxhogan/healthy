@@ -29,7 +29,12 @@ export type ErrorCode =
   | "portal_bot_blocked" // 403/429 or a challenge page: a WAF, not a credential problem
   | "portal_session_expired" // an authenticated call bounced to the login page
   | "portal_parse_failed" // the response was not the shape this client can read
-  | "portal_unreachable"; // network failure, timeout, or 5xx after retries
+  | "portal_unreachable" // network failure, timeout, or 5xx after retries
+  // The two the admin API raises about a portal account rather than about the
+  // portal itself, so unlike the codes above they really are 4xx: the owner gave
+  // a URL that hosts no login page, or asked for one sign-in too many today.
+  | "portal_discovery_failed"
+  | "portal_attempts_exhausted";
 
 const STATUS: Record<ErrorCode, number> = {
   bad_request: 400,
@@ -58,6 +63,10 @@ const STATUS: Record<ErrorCode, number> = {
   portal_session_expired: 409,
   portal_parse_failed: 502,
   portal_unreachable: 503,
+  // These two are the caller's: a URL that hosts no portal is a bad request, and
+  // the daily sign-in budget is this app's own rate limit.
+  portal_discovery_failed: 400,
+  portal_attempts_exhausted: 429,
 };
 
 export interface AppErrorBody {

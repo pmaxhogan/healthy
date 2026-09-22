@@ -14,10 +14,22 @@
  */
 
 import type { RetryOpts } from "../lib/retry.ts";
+import type { PortalAdapter } from "../providers/mychart/index.ts";
 
 export interface SyncDeps {
   /** Upstream FHIR and Google Calendar transport. Defaults to global fetch. */
   fetchImpl?: typeof fetch;
+  /**
+   * The patient portal, as an adapter.
+   *
+   * A whole adapter rather than a third `fetch`, because the portal pass is the
+   * one part of the sync whose upstream is a scrape: stubbing it at the transport
+   * would mean a test maintaining synthetic HTML for every page of a sign-in just
+   * to assert something about ghosting. The live default is the MyChart adapter,
+   * built where it is used -- see `portal-signin.ts`. Deliberately absent from
+   * `ResolvedDeps`: nothing outside the portal pass has any use for it.
+   */
+  portalAdapter?: PortalAdapter;
   /** Trello transport, kept apart from `fetchImpl`. Defaults to global fetch. */
   trelloFetch?: typeof fetch;
   /** Forwarded to `retriedFetch`; a test injects a no-op sleep and 2 attempts. */

@@ -40,6 +40,7 @@
     "bindings": [
       { "name": "HEALTHY_MCP", "class_name": "HealthyMcp" },
       { "name": "FULL_REFRESH", "class_name": "FullRefreshRunner" },
+      { "name": "PORTAL_SIGNIN", "class_name": "PortalSignInRunner" },
     ],
   },
   "migrations": [
@@ -53,6 +54,13 @@
       // Drives a manual full refresh from an alarm, one chunk per invocation,
       // because work in a request's waitUntil is cancelled after ~30 seconds.
       "new_sqlite_classes": ["FullRefreshRunner"],
+    },
+    {
+      "tag": "v3",
+      // Drives a patient-portal sign-in from an alarm, one step per invocation:
+      // the portal emails a verification code and a request cannot wait minutes
+      // for it to arrive.
+      "new_sqlite_classes": ["PortalSignInRunner"],
     },
   ],
   "triggers": {

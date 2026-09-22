@@ -8,6 +8,7 @@
 
 // Type-only, so this stays a declaration file in effect: the class is needed to
 // type the Durable Object stub's RPC methods, not at runtime.
+import type { PortalSignInRunner } from "./sync/portal-runner.ts";
 import type { FullRefreshRunner } from "./sync/runner.ts";
 
 export interface Env {
@@ -29,6 +30,13 @@ export interface Env {
    * `waitUntil` cannot do this job.
    */
   FULL_REFRESH: DurableObjectNamespace<FullRefreshRunner>;
+  /**
+   * One object per provider, driving a patient-portal sign-in across as many
+   * ten-second alarm invocations as the emailed code takes to arrive, and the
+   * portal sync that follows one. See `worker/sync/portal-runner.ts` for why a
+   * request's `waitUntil` cannot wait for an email.
+   */
+  PORTAL_SIGNIN: DurableObjectNamespace<PortalSignInRunner>;
 
   // --- Var (wrangler.jsonc) ------------------------------------------------
   /**
