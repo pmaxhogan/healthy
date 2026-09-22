@@ -19,7 +19,7 @@ src/                    The Vue 3 admin SPA, built by Vite into dist/ and served
 shared/                 Types both sides import — the only bridge between worker/ and src/
 migrations/             D1 schema, applied in order by wrangler d1 migrations
 data/epic-brands.json   A slimmed, committed, public index of Epic FHIR endpoints
-scripts/                Setup and maintenance CLIs (set-password, gen-data-key, slim-brands)
+scripts/                Setup and maintenance CLIs (set-password, gen-data-key, set-provider-secret, slim-brands)
 test/unit/**            vitest, plain Node — pure logic, no Worker runtime
 test/integration/**     vitest, real workerd + D1 + Durable Objects
 test/spa/**             vitest, happy-dom — Vue component and helper tests

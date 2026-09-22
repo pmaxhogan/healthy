@@ -19,7 +19,7 @@ The server registers (in `worker/mcp/tools/index.ts`): `get_health_summary`,
 `get_coverage`, `get_service_requests`. Most accept an optional
 `providers[]` filter and an optional `raw` flag that additionally returns
 the underlying FHIR resource (filtered by the same policy as the normalised
-one). The admin UI's MCP page lists the live catalogue.
+one). The admin UI's MCP page (`/connectors`) lists the live catalogue.
 
 A single settings toggle, **MCP enabled**, is a kill switch: when it is off,
 every tool call answers `mcp_disabled` immediately, without reading
@@ -28,29 +28,41 @@ where it left off.
 
 ## Connecting a client (claude.ai)
 
-1. In claude.ai, add a **custom connector** — **(verify the exact menu path
-   in the current claude.ai UI; this has moved before)** — and give it your
-   server URL: `https://<your-host>/mcp`.
-2. claude.ai registers itself as an OAuth client via Dynamic Client
+1. In claude.ai: **Settings → Connectors → Add custom connector**. Give it a
+   name and the server URL, `https://<your-host>/mcp` (no trailing slash).
+   Click **Continue**.
+2. The **Authentication** screen that follows auto-detects "Register
+   automatically (DCR)" — leave the Advanced settings empty. Click **Add**,
+   then **Connect**.
+3. claude.ai registers itself as an OAuth client via Dynamic Client
    Registration (`POST /oauth/register`, which bypasses Access, like the
    rest of the MCP-facing surface) and then redirects your browser to the
    consent page at `/authorize`.
-3. **The consent page requires both gates**, exactly like the rest of the
+4. **The consent page requires both gates**, exactly like the rest of the
    admin surface: Cloudflare Access, then the password session. If you have
    not already signed into the admin UI in that browser, `/authorize`
    answers with the login form instead of the consent screen; sign in and
    it resumes automatically.
-4. The consent screen shows the client's name, id, redirect URI and
+5. The consent screen shows the client's name, id, redirect URI and
    requested scope, and warns plainly that approving grants read access to
    appointments, conditions, medications, results and documents from every
-   connected health system, subject to your exposure policy. Approve it.
-5. claude.ai is redirected back with an authorization code, exchanges it at
+   connected health system, subject to your exposure policy. **Approve**.
+6. claude.ai is redirected back with an authorization code, exchanges it at
    `/oauth/token`, and can now call tools at `/mcp` with a bearer token —
    this is the same flow Claude Code or any other MCP client speaking
    OAuth 2.1 (PKCE required, no implicit flow) would use.
 
 The one scope this server ever issues is `health:read`; a client asking for
 anything else still only receives that one.
+
+### From Claude Code
+
+```sh
+claude mcp add --transport http -s user healthy https://<your-host>/mcp
+```
+
+Then, inside a session, run `/mcp` and complete the same consent flow in the
+browser tab it opens.
 
 ## Managing what is exposed: the policy deny-list
 
@@ -59,8 +71,10 @@ tool answers with everything it can reach. Rules only ever remove; nothing
 in this system can be used to grant _more_ than a tool would otherwise
 return, except the one `allow:` exception below.
 
-Manage rules from the admin UI's **MCP → Exposure policy** section, or via
-`POST/DELETE /api/mcp/policy`. Each rule has a `ruleType` and a `target`:
+Manage rules from the admin UI's **MCP → Exposure policy** section
+(`/connectors` — it moved off `/mcp` because `/mcp` is the transport, not a
+page), or via `POST /api/mcp/policy` and `DELETE /api/mcp/policy/:id`. Each
+rule has a `ruleType` and a `target`:
 
 | `ruleType` | `target`                                 | Effect                                                                                                  |
 | ---------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------- |
@@ -99,16 +113,16 @@ see), `policy_field_removed:<target>`, `sensitive_withheld:<Type.field>`.
 Every tool call writes exactly one row to `mcp_audit`: the tool, the
 calling client and grant id, which provider ids it touched, how many items
 came back, whether it succeeded, and how long it took — never the content
-of the answer. View it in the admin UI's MCP page, or `GET
+of the answer. View it in the admin UI's MCP page (`/connectors`), or `GET
 /api/mcp/audit?limit=`. Rows older than 365 days are pruned automatically
 (by the daily cron, and probabilistically on a small fraction of tool
 calls, so an idle deployment does not accumulate them indefinitely either).
 
 ## Revoking a client
 
-The admin UI's MCP page lists every linked client (name, scope, when it was
-linked, last used) with a **Revoke** button, which deletes its grant from
-the OAuth provider's store (Workers KV, not D1) via `DELETE
+The admin UI's MCP page (`/connectors`) lists every linked client (name,
+scope, when it was linked, last used) with a **Revoke** button, which deletes
+its grant from the OAuth provider's store (Workers KV, not D1) via `DELETE
 /api/mcp/grants/:id`. A revoked client's existing access token stops
 working immediately; it has to complete the whole consent flow again,
 including the two-factor consent page, to get another one.

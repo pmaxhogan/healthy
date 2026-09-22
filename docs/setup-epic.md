@@ -112,7 +112,10 @@ Once the app is registered (sandbox is enough to start):
    organisation.
 4. Save, then open the provider and set its **client secret** — the one
    provisioned for your app at that organisation in the previous section.
-   This is write-only: once saved, the admin UI never displays it again.
+   This is write-only: once saved, the admin UI never displays it again. With
+   no live browser session against that environment, `npm run
+set-provider-secret -- --provider <id> --remote` sets the same value from
+   the command line instead — see the README's secrets section.
 5. Click **Connect**. You are redirected through `/oauth/epic/start`, land
    on that organisation's own sign-in and consent screen, and are returned
    to `/oauth/callback`. Approve every data category the consent screen

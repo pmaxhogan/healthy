@@ -44,7 +44,9 @@ a header asked for just burns the next quota window too.
 
 Every sync (scheduled or manual) writes one row to `run_log`: its kind
 (`calendar`, `full`, `refresh`, or `manual`), when it started and finished,
-whether it succeeded, and a `summary_json` of counts — never any clinical
+whether it succeeded, and a `summary_json` of counts, plus the distinct
+warning and error codes seen (`warningCodes`, `errors`) — bare, stable codes
+such as an Epic OperationOutcome code, never a provider id or any clinical
 content. View recent runs in the admin UI's **Runs** page, or `GET
 /api/runs`.
 
@@ -121,8 +123,10 @@ put SESSION_SECRET`. This invalidates every existing session cookie; you
   re-authorising every Epic and Google connection from scratch and letting
   the FHIR cache repopulate — there is no in-place re-encryption path.
 - **A per-organisation Epic client secret** — set or rotate it from the
-  provider's page in the admin UI (`POST /api/providers/:id/secret`).
-  Write-only: once saved, it is never read back or displayed again.
+  provider's page in the admin UI (`POST /api/providers/:id/secret`), or, with
+  no live browser session against that environment, `npm run
+set-provider-secret -- --provider <id> --remote`. Write-only: once saved,
+  it is never read back or displayed again.
 - **`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `EPIC_CLIENT_ID_PROD`/
   `EPIC_CLIENT_ID_NONPROD`, `TRELLO_KEY`/`TRELLO_TOKEN`/list ids** —
   `wrangler secret put <NAME>` as usual.
