@@ -13,3 +13,6 @@ data/
 
 # npm owns the formatting of its own lockfile
 package-lock.json
+
+# Gitignored scratch space (see CLAUDE.md) -- never shipped, never reviewed
+.local/
