@@ -18,12 +18,31 @@
  * If the candidate key lists ever stop matching -- a release renames things --
  * the honest answer is `portal_parse_failed`, not "you have no appointments",
  * because the second one silently ghosts every event on the owner's calendar.
+ *
+ * **Place is nested, and video is not a boolean.** A live capture corrected both
+ * guesses: the department name, its address and its phone number are fields of a
+ * `PrimaryDepartment` object rather than flat keys, the address inside it is
+ * itself structured, and no `IsVideoVisit`-shaped flag exists at all -- a video
+ * visit is one whose `Telemedicine` object is present or whose `TelehealthMode`
+ * is above zero. The flat readers are kept as fallbacks for a deployment that
+ * still answers the old way.
  */
 
 import { AppError } from "../../lib/errors.ts";
 import { toIsoInZone } from "../../lib/time.ts";
 
-import { STATUS_PRIORITY, VIDEO_KEYS, VISIT_BUCKETS, VISIT_KEYS } from "./wire.ts";
+import {
+  ADDRESS_KEYS,
+  DEPARTMENT_KEYS,
+  DEPARTMENT_OBJECT_KEYS,
+  PAST_BUCKET,
+  STATUS_PRIORITY,
+  TELEHEALTH_MODE_KEYS,
+  TELEMEDICINE_OBJECT_KEYS,
+  VIDEO_KEYS,
+  VISIT_BUCKETS,
+  VISIT_KEYS,
+} from "./wire.ts";
 
 import type { PortalVisitStatus } from "./wire.ts";
 
@@ -125,6 +144,98 @@ export function statusOf(fields: ReadonlyMap<string, unknown>): PortalVisitStatu
   return "scheduled";
 }
 
+/** The first candidate key whose value is a plain object. */
+function nested(
+  fields: ReadonlyMap<string, unknown>,
+  keys: readonly string[],
+): Map<string, unknown> | null {
+  for (const key of keys) {
+    const value = fields.get(key);
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      return fieldsOf(value);
+    }
+  }
+  return null;
+}
+
+/** Non-empty trimmed strings out of a value that may be one, or a list of them. */
+function lines(value: unknown): string[] {
+  if (typeof value === "string") return value.trim() === "" ? [] : [value.trim()];
+  return Array.isArray(value)
+    ? value.flatMap((entry) => (typeof entry === "string" ? lines(entry) : []))
+    : [];
+}
+
+/**
+ * A structured address as one line, tolerantly.
+ *
+ * Accepts the three shapes the payload has been seen to use -- a plain string, an
+ * array of lines, or an object of parts -- and assembles whichever parts are
+ * present. Nothing is required: an object with only a city yields the city, and
+ * an object with none of the candidate keys yields nothing rather than throwing.
+ * The result is only ever written to a calendar event's location.
+ */
+export function formatAddress(value: unknown): string | undefined {
+  const direct = lines(value);
+  if (direct.length > 0) return direct.join(", ");
+  if (typeof value !== "object" || value === null) return undefined;
+  const fields = fieldsOf(value);
+  // A nested `DiscreteAddress` wins over the flat parts beside it: it is the
+  // structured copy, and the flat one next to it is the display copy.
+  const discrete = nested(fields, ADDRESS_KEYS.discrete);
+  const parts = discrete ?? fields;
+  const street = ADDRESS_KEYS.lines.flatMap((key) => lines(parts.get(key)));
+  const city = text(parts, ADDRESS_KEYS.city);
+  const state = text(parts, ADDRESS_KEYS.state);
+  const postalCode = text(parts, ADDRESS_KEYS.postalCode);
+  const locality = [city, [state, postalCode].filter(Boolean).join(" ")].filter(
+    (part) => part !== undefined && part !== "",
+  );
+  const all = [...street, ...locality];
+  return all.length === 0 ? undefined : all.join(", ");
+}
+
+/** The department object's name, address and phone, when the payload nests them. */
+function departmentOf(fields: ReadonlyMap<string, unknown>): {
+  department?: string;
+  address?: string;
+  phone?: string;
+} {
+  const department = nested(fields, DEPARTMENT_OBJECT_KEYS);
+  if (department === null) return {};
+  return {
+    ...pick("department", text(department, DEPARTMENT_KEYS.name)),
+    ...pick("address", formatAddress(firstPresent(department, DEPARTMENT_KEYS.address))),
+    ...pick("phone", text(department, DEPARTMENT_KEYS.phone)),
+  };
+}
+
+/** The first candidate key that is set at all, whatever its type. */
+function firstPresent(fields: ReadonlyMap<string, unknown>, keys: readonly string[]): unknown {
+  for (const key of keys) {
+    const value = fields.get(key);
+    if (value !== undefined && value !== null) return value;
+  }
+  return undefined;
+}
+
+/**
+ * True when this visit is a video visit.
+ *
+ * Three signals, any of which is enough: a legacy boolean flag, a present (not
+ * null) telemedicine object, or a non-zero telehealth mode. The second and third
+ * are what a real payload carries; the first is the earlier guess, kept for a
+ * deployment that renders it.
+ */
+export function isVideoVisit(fields: ReadonlyMap<string, unknown>): boolean {
+  if (flag(fields, VIDEO_KEYS) || nested(fields, TELEMEDICINE_OBJECT_KEYS) !== null) return true;
+  return TELEHEALTH_MODE_KEYS.some((key) => {
+    const value = fields.get(key);
+    const mode = typeof value === "string" ? Number(value) : value;
+    return typeof mode === "number" && Number.isFinite(mode) && mode > 0;
+  });
+}
+
 /** The practitioner, whether the payload names one or lists several. */
 function practitionerOf(fields: ReadonlyMap<string, unknown>): string | undefined {
   const single = text(fields, VISIT_KEYS.practitioner);
@@ -155,15 +266,22 @@ function toVisit(record: object, fallbackTimeZone: string): PortalVisit | null {
   const visitType = text(fields, VISIT_KEYS.visitType);
   const timeZone = text(fields, VISIT_KEYS.timeZone) ?? fallbackTimeZone;
   const minutes = count(fields, VISIT_KEYS.durationMinutes);
+  const place = departmentOf(fields);
   const optional = {
     ...(minutes !== undefined && {
       end: isoIn(startSeconds + Math.round(minutes * 60), timeZone, fallbackTimeZone),
     }),
     ...pick("practitioner", practitionerOf(fields)),
+    // The flat readers first, then the nested object on top: the nested copy is
+    // the one a live payload actually carries, so where both exist it wins.
     ...pick("department", text(fields, VISIT_KEYS.department)),
     ...pick("locationName", text(fields, VISIT_KEYS.locationName)),
     ...pick("address", text(fields, VISIT_KEYS.address)),
     ...pick("phone", text(fields, VISIT_KEYS.phone)),
+    ...place,
+    // A nested department is also the best name for the location when the payload
+    // has no flat one, which is the common case.
+    ...pick("locationName", text(fields, VISIT_KEYS.locationName) ?? place.department),
   };
 
   return {
@@ -171,7 +289,7 @@ function toVisit(record: object, fallbackTimeZone: string): PortalVisit | null {
     start: isoIn(startSeconds, timeZone, fallbackTimeZone),
     timeZone,
     visitType: visitType ?? "Appointment",
-    isVideo: flag(fields, VIDEO_KEYS),
+    isVideo: isVideoVisit(fields),
     status: statusOf(fields),
     ...optional,
   };
@@ -221,30 +339,74 @@ function isoIn(seconds: number, timeZone: string, fallbackTimeZone: string): str
  * them parsed -- see the module comment for why that is not an empty result.
  */
 export function parseUpcoming(payload: unknown, fallbackTimeZone: string): ParsedUpcoming {
-  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
-    throw new AppError("portal_parse_failed", "the upcoming-visits body was not an object");
-  }
-  const buckets = fieldsOf(payload);
+  const buckets = objectBody(payload, "upcoming-visits");
   const present = VISIT_BUCKETS.filter((name) => Array.isArray(buckets.get(name)));
   if (present.length === 0) {
     throw new AppError("portal_parse_failed", "the upcoming-visits body had none of the buckets");
   }
+  const rows = present.flatMap((name) => buckets.get(name) as unknown[]);
+  return collect(rows, fallbackTimeZone, "upcoming-visits");
+}
 
-  const visits: PortalVisit[] = [];
-  let rows = 0;
-  for (const name of present) {
-    for (const record of buckets.get(name) as unknown[]) {
-      if (typeof record !== "object" || record === null) continue;
-      rows++;
-      const visit = toVisit(record, fallbackTimeZone);
-      if (visit !== null) visits.push(visit);
-    }
+/**
+ * Parse a `LoadPast` body.
+ *
+ * Same rows, one level deeper: `LoadPast` groups by an opaque organisation token
+ * because a chart account can be linked to several organisations, so the arrays
+ * live at `List.<token>.List`. The tokens themselves are never named here -- they
+ * identify organisations -- and are simply whatever own keys the object has.
+ *
+ * Throws `portal_parse_failed` on the same two conditions `parseUpcoming` does:
+ * a body that is not the documented shape, and a body with rows where none of
+ * them parsed.
+ */
+export function parsePast(payload: unknown, fallbackTimeZone: string): ParsedUpcoming {
+  const body = objectBody(payload, "past-visits");
+  const outer = body.get(PAST_BUCKET.outer);
+  if (typeof outer !== "object" || outer === null || Array.isArray(outer)) {
+    throw new AppError("portal_parse_failed", "the past-visits body had no organisation buckets");
   }
+  const rows: unknown[] = [];
+  let buckets = 0;
+  for (const [, bucket] of fieldsOf(outer)) {
+    if (typeof bucket !== "object" || bucket === null) continue;
+    const inner: unknown = fieldsOf(bucket).get(PAST_BUCKET.inner);
+    if (!Array.isArray(inner)) continue;
+    buckets++;
+    rows.push(...(inner as unknown[]));
+  }
+  if (buckets === 0) {
+    throw new AppError("portal_parse_failed", "no organisation bucket carried a visit list");
+  }
+  return collect(rows, fallbackTimeZone, "past-visits");
+}
 
-  if (rows > 0 && visits.length === 0) {
-    throw new AppError("portal_parse_failed", "no row in the upcoming-visits body could be read", {
-      rows,
+/** The body as a field map, or `portal_parse_failed`. */
+function objectBody(payload: unknown, label: string): Map<string, unknown> {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    throw new AppError("portal_parse_failed", `the ${label} body was not an object`);
+  }
+  return fieldsOf(payload);
+}
+
+/** Rows to visits, with the "rows but nothing parsed" rule from the module comment. */
+function collect(
+  rows: readonly unknown[],
+  fallbackTimeZone: string,
+  label: string,
+): ParsedUpcoming {
+  const visits: PortalVisit[] = [];
+  let seen = 0;
+  for (const record of rows) {
+    if (typeof record !== "object" || record === null) continue;
+    seen++;
+    const visit = toVisit(record, fallbackTimeZone);
+    if (visit !== null) visits.push(visit);
+  }
+  if (seen > 0 && visits.length === 0) {
+    throw new AppError("portal_parse_failed", `no row in the ${label} body could be read`, {
+      rows: seen,
     });
   }
-  return { visits, unparsed: rows - visits.length };
+  return { visits, unparsed: seen - visits.length };
 }

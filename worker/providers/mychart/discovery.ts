@@ -24,12 +24,12 @@
 
 import { AppError } from "../../lib/errors.ts";
 
-import { findAntiforgeryField, inputFields } from "./html.ts";
-import { mountedUrl, normaliseMount, originOf, portalFetch } from "./http.ts";
+import { apiBasePathHint, findAntiforgeryField, inputFields } from "./html.ts";
+import { isOpenIdHandoff, mountedUrl, normaliseMount, originOf, portalFetch } from "./http.ts";
 import { ANTIFORGERY_FIELD_NAMES, CANDIDATE_MOUNTS, FIELDS, PATHS } from "./wire.ts";
 
 import type { PortalHttpDeps } from "./http.ts";
-import type { UsernameField } from "./wire.ts";
+import type { PortalFlavor, UsernameField } from "./wire.ts";
 import type { Logger } from "../../lib/log.ts";
 
 /** Everything the authenticated client needs in order to be pointed at an instance. */
@@ -41,6 +41,32 @@ export interface PortalEndpoint {
   usernameField: UsernameField;
   /** The hidden field the login POST has to echo back. */
   antiforgeryFieldName: string;
+  /**
+   * Which login application drives this deployment. **Absent means `classic`.**
+   *
+   * Optional rather than required so that a caller which stored only the origin
+   * and the mount -- everything written before this field existed -- still
+   * type-checks and still signs in the way it always did. Discovery always sets
+   * it, so an account rediscovered after this landed carries the real answer.
+   */
+  flavor?: PortalFlavor | undefined;
+  /**
+   * `custom_oidc` only: the origin serving the login shell and its JSON API.
+   *
+   * Discovered, as the origin the login probe's redirect chain landed on. Usually
+   * the same origin as `baseUrl`; a deployment that federates across hosts is why
+   * it is recorded separately.
+   */
+  authBaseUrl?: string | undefined;
+  /**
+   * `custom_oidc` only: the path prefix the login shell's JSON API is mounted at.
+   *
+   * **Not reliably discoverable, and never defaulted.** The real value names the
+   * organisation, so it can have no fallback in source: discovery makes one
+   * bounded attempt to read it off the handoff stub, and where that finds nothing
+   * the caller supplies it (`PortalAdapterDeps.custom.apiBasePath`).
+   */
+  apiBasePath?: string | undefined;
 }
 
 export interface DiscoveryDeps {
@@ -78,14 +104,31 @@ export function candidateMounts(mountHint?: string): string[] {
  * was tried, because there is nothing better to infer from.
  */
 export function mountFromLandedUrl(landedUrl: string, fallback: string): string {
+  return mountBefore(landedUrl, [PATHS.login, PATHS.openId], fallback);
+}
+
+/**
+ * The mount implied by a landing URL, given the mount-relative paths it could be.
+ *
+ * `markers` is tried in order and the first one found in the path wins, so
+ * `.../x/Authentication/Login` and `.../x/OpenId?op=...` both yield `/x/`. The
+ * second case is the whole reason this is a list: a `custom_oidc` deployment
+ * redirects the login page to the handoff stub, and the mount then has to be read
+ * out of *that* URL because the login path is no longer in it.
+ */
+function mountBefore(landedUrl: string, markers: readonly string[], fallback: string): string {
   let path: string;
   try {
     path = new URL(landedUrl).pathname;
   } catch {
     return normaliseMount(fallback);
   }
-  const marker = path.toLowerCase().indexOf(PATHS.login.toLowerCase());
-  return normaliseMount(marker === -1 ? fallback : path.slice(0, marker));
+  const lower = path.toLowerCase();
+  for (const marker of markers) {
+    const at = lower.indexOf(marker.toLowerCase());
+    if (at !== -1) return normaliseMount(path.slice(0, at));
+  }
+  return normaliseMount(fallback);
 }
 
 /** The username field this page uses, or null when it is not a login form. */
@@ -116,6 +159,30 @@ async function probe(mount: string, baseUrl: string, deps: DiscoveryDeps): Promi
   });
   if (response.status !== 200) return { endpoint: null, reason: "http_error" };
 
+  // Before the form checks, because a `custom_oidc` deployment fails all of them:
+  // its login page renders no form at all, so without this it would be reported as
+  // "no login page under any known mount" -- a dead end for something that is
+  // simply a different, and supported, way of signing in.
+  if (isOpenIdHandoff(response)) {
+    const origin = originOf(response.url);
+    const hint = apiBasePathHint(response.body);
+    return {
+      endpoint: {
+        baseUrl: origin,
+        mountPath: mountBefore(response.url, [PATHS.openId, PATHS.login], mount),
+        // Seeds only, and unused by this flavour: the shell posts lower-case
+        // `username`/`password` as JSON-app form fields and carries no
+        // antiforgery token. Kept so the shape is one type, not two.
+        usernameField: "Username",
+        antiforgeryFieldName: ANTIFORGERY_FIELD_NAMES[0] ?? "__RequestVerificationToken",
+        flavor: "custom_oidc",
+        authBaseUrl: origin,
+        ...(hint !== null && { apiBasePath: hint }),
+      },
+      reason: "http_error",
+    };
+  }
+
   const fields = inputFields(response.body);
   const usernameField = usernameFieldOf(fields);
   // A password field but no known username field is a login page this client
@@ -132,6 +199,7 @@ async function probe(mount: string, baseUrl: string, deps: DiscoveryDeps): Promi
       mountPath: mountFromLandedUrl(response.url, mount),
       usernameField,
       antiforgeryFieldName: antiforgery.name,
+      flavor: "classic",
     },
     reason: "http_error",
   };
@@ -169,6 +237,10 @@ export async function discoverPortal(
       deps.logger.info("portal.discovered", {
         candidates: mounts.length,
         usernameField: result.endpoint.usernameField,
+        flavor: result.endpoint.flavor,
+        // Whether the hint found anything, never what it found: the value names
+        // the organisation.
+        apiBaseKnown: result.endpoint.apiBasePath !== undefined,
       });
       return result.endpoint;
     }

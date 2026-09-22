@@ -34,7 +34,14 @@
 import { AppError } from "../../lib/errors.ts";
 
 import { bodyMentions, bodyRedirectTarget } from "./html.ts";
-import { ACCEPT_HTML, ACCEPT_JSON, BROWSER_HEADERS, MARKERS, MAX_REDIRECTS } from "./wire.ts";
+import {
+  ACCEPT_HTML,
+  ACCEPT_JSON,
+  BROWSER_HEADERS,
+  MARKERS,
+  MAX_REDIRECTS,
+  PATHS,
+} from "./wire.ts";
 
 import type { CookieJar } from "./cookie-jar.ts";
 import type { Logger } from "../../lib/log.ts";
@@ -73,6 +80,16 @@ export interface PortalResponse {
   /** The URL of the hop that actually answered. */
   url: string;
   body: string;
+  /**
+   * The answering hop's `Content-Type`, lower-cased, or null when it sent none.
+   *
+   * Load-bearing rather than informational: the JSON endpoints answer a stale
+   * antiforgery token with an HTTP **200 carrying an HTML page**, so "was this
+   * JSON" cannot be decided from the status code and has to be decided from here
+   * (plus a body sniff) instead. Without it a silent auth failure reads as a day
+   * with no appointments on it.
+   */
+  contentType: string | null;
   /** Redirects followed to get here, header and body alike. */
   hops: number;
 }
@@ -228,7 +245,13 @@ export async function portalFetch(
       status: response.status,
       hops,
     });
-    return { status: response.status, url: hop.url, body, hops };
+    return {
+      status: response.status,
+      url: hop.url,
+      body,
+      contentType: response.headers.get("content-type")?.toLowerCase() ?? null,
+      hops,
+    };
   }
 
   deps.logger.warn("portal.redirect_loop", { endpoint: request.endpoint, hops: limit });
@@ -236,6 +259,36 @@ export async function portalFetch(
     endpoint: request.endpoint,
     hops: limit,
   });
+}
+
+/** The lower-cased path of a URL, or "" when it is not one. Never logged. */
+export function pathOf(url: string): string {
+  try {
+    return new URL(url).pathname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * True when a response is an OpenID Connect handoff rather than a page.
+ *
+ * Either signal is enough. The URL is the strong one: on a `custom_oidc`
+ * deployment the login path 302s to the handoff stub, so a chain that started at
+ * a login page ends on a path containing it. The body marker covers the
+ * deployment that serves the stub *at* the login path, where there is no redirect
+ * to read -- the page is then one script tag and one hidden antiforgery input,
+ * which every other check in this directory reads as "not a login form".
+ *
+ * Used in two places for two different conclusions: discovery reads it as "this
+ * is the custom flavour", and the authenticated client reads it as "the session
+ * is gone". It is the same observation either way.
+ */
+export function isOpenIdHandoff(response: PortalResponse): boolean {
+  return (
+    pathOf(response.url).includes(`/${PATHS.openId.toLowerCase()}`) ||
+    bodyMentions(response.body, MARKERS.openIdHandoff)
+  );
 }
 
 /** Join a mount-relative path onto an origin and mount, e.g. `Home` -> `/x/Home`. */

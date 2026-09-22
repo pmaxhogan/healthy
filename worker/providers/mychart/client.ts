@@ -32,15 +32,18 @@
 import { AppError } from "../../lib/errors.ts";
 
 import { bodyMentions, findAntiforgeryField, inputFields } from "./html.ts";
-import { mountedUrl, portalFetch } from "./http.ts";
-import { parseUpcoming } from "./visits.ts";
+import { isOpenIdHandoff, mountedUrl, pathOf, portalFetch } from "./http.ts";
+import { parsePast, parseUpcoming } from "./visits.ts";
 import {
   ANTIFORGERY_FIELD_NAMES,
   ANTIFORGERY_HEADER,
   FIELDS,
+  KEEP_ALIVE_COUNT_PARAM,
+  LOAD_PAST_QUERY,
   LOAD_UPCOMING_QUERY,
   MARKERS,
   NO_CACHE_PARAM,
+  OLDEST_RENDERED_DATE_PARAM,
   PATHS,
   REMEMBER_ME_VALUE,
   SEND_CODE_VARIANTS,
@@ -103,6 +106,15 @@ export interface PortalClient {
    * pass.
    */
   loadUpcoming(timeZone: string): Promise<PortalVisit[]>;
+  /**
+   * Past visits, most recent first, in the clinic's own zone.
+   *
+   * `oldestRenderedDate` is the paging boundary: the portal answers with the page
+   * of visits older than it, and omitting it asks for the first page. The reply
+   * groups its rows by organisation because a chart account can be linked to
+   * several; this flattens them, because the calendar does not care.
+   */
+  loadPast(timeZone: string, oldestRenderedDate?: string): Promise<PortalVisit[]>;
   /** A cheap authenticated GET. False means the session is gone, not that it failed. */
   isSessionAlive(): Promise<boolean>;
   /** The live jar, for the caller to seal after any call. */
@@ -112,14 +124,13 @@ export interface PortalClient {
 /** Where a redirect chain stopped, which is the only reliable sign-in signal. */
 type Landing = "signed_in" | "awaiting_code" | "login";
 
-/** The lower-cased path of a URL, or "" when it is not one. */
-function pathOf(url: string): string {
-  try {
-    return new URL(url).pathname.toLowerCase();
-  } catch {
-    return "";
-  }
-}
+/**
+ * Longest body `Home/KeepAlive` may answer with and still count as alive.
+ *
+ * The capture measured one byte -- a single JSON scalar. A handful of characters
+ * of slack covers `true` and a quoted digit; anything beyond that is a page.
+ */
+const SCALAR_BODY_LIMIT = 8;
 
 function landingOf(response: PortalResponse): Landing {
   const path = pathOf(response.url);
@@ -131,7 +142,12 @@ function landingOf(response: PortalResponse): Landing {
   // POST's own URL has to be excluded or every DoLogin would read as a bounce.
   const onLoginPage =
     path.includes(PATHS.login.toLowerCase()) && !path.includes(PATHS.doLogin.toLowerCase());
-  return onLoginPage || bodyMentions(response.body, MARKERS.loginForm) ? "login" : "signed_in";
+  // A `custom_oidc` deployment bounces to a login page that renders no form, so
+  // none of `MARKERS.loginForm` fires and the bounce would otherwise read as
+  // "signed in" -- which is the failure mode that reports an empty day.
+  const bounced =
+    onLoginPage || isOpenIdHandoff(response) || bodyMentions(response.body, MARKERS.loginForm);
+  return bounced ? "login" : "signed_in";
 }
 
 /** A login page reached from an authenticated call means the session died. */
@@ -191,6 +207,21 @@ function usernameFieldOn(html: string, fallback: UsernameField): UsernameField {
  * HTML, and might be an empty 200. Anything that is not an explicit refusal
  * counts, and the caller only moves on to the next variant when it is.
  */
+/**
+ * True when a body could plausibly be the JSON that was asked for.
+ *
+ * Content type first, because these endpoints label their answers, and a leading
+ * `{` or `[` second, because a deployment behind a proxy that rewrites the header
+ * would otherwise be unreadable. Deliberately *not* "did JSON.parse succeed":
+ * the distinction being drawn is between "JSON arrived" and "an HTML page
+ * arrived with a 200 on it", and the second one has to fail loudly.
+ */
+function looksLikeJson(response: PortalResponse): boolean {
+  if (response.contentType?.includes("json") === true) return true;
+  const trimmed = response.body.trimStart();
+  return trimmed.startsWith("{") || trimmed.startsWith("[");
+}
+
 function sendCodeAccepted(response: PortalResponse): boolean {
   if (response.status >= 400 || bodyMentions(response.body, MARKERS.badCredentials)) return false;
   const trimmed = response.body.trim();
@@ -253,6 +284,18 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
 
   const login = async (credentials: PortalCredentials): Promise<PortalSignInStatus> => {
     const page = await tokenPage(PATHS.login, "Login");
+    // The classic cycle cannot drive a `custom_oidc` deployment at all: there is
+    // no form, so `DoLogin` does not exist and posting to it would send the
+    // password at a 404. Failing here, with a reason, is what tells live QA that
+    // the stored endpoint lost its `flavor` on the way to this client rather than
+    // that the portal changed.
+    if (isOpenIdHandoff(page.response)) {
+      throw new AppError("portal_parse_failed", "this deployment signs in through OpenID Connect", {
+        endpoint: "Login",
+        status: page.response.status,
+        reason: "custom_oidc_detected",
+      });
+    }
     // Trust the page over the stored discovery result: a release can rename the
     // field between the probe and the first sign-in.
     const usernameField = usernameFieldOn(page.response.body, endpoint.usernameField);
@@ -336,50 +379,114 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
     });
   };
 
-  const loadUpcoming = async (timeZone: string): Promise<PortalVisit[]> => {
+  /**
+   * One of the two visit endpoints, as parsed JSON.
+   *
+   * The order of the three checks is the whole point. `assertSession` first,
+   * because a stale session is the likeliest reason a JSON endpoint answered with
+   * a page and it deserves its own code. Then the "is this JSON at all" guard,
+   * because a **200 carrying HTML** is exactly what a missing or misnamed
+   * antiforgery header gets from these endpoints -- silently, with no 4xx
+   * anywhere -- and reading that as zero visits would ghost the owner's calendar.
+   * Only then `JSON.parse`.
+   */
+  const visitJson = async (
+    path: string,
+    label: string,
+    query: Record<string, string>,
+  ): Promise<unknown> => {
     const page = await tokenPage(PATHS.visitsList, "VisitsList", { [NO_CACHE_PARAM]: noCache() });
     assertSession(page.response, "VisitsList");
 
     const response = await portalFetch(http, {
-      url: url(PATHS.loadUpcoming, {
-        timeZone,
-        ...LOAD_UPCOMING_QUERY,
-        [NO_CACHE_PARAM]: noCache(),
-      }),
+      url: url(path, { ...query, [NO_CACHE_PARAM]: noCache() }),
       method: "POST",
-      endpoint: "LoadUpcoming",
+      endpoint: label,
       accept: "json",
       headers: { ...XHR_HEADER, [ANTIFORGERY_HEADER]: page.value },
       // No `form`, so no body and no Content-Type. See the module comment.
     });
-    assertSession(response, "LoadUpcoming");
+    assertSession(response, label);
     if (response.status !== 200) {
-      throw new AppError("portal_parse_failed", "the upcoming-visits call failed", {
-        endpoint: "LoadUpcoming",
+      throw new AppError("portal_parse_failed", "the visits call failed", {
+        endpoint: label,
         status: response.status,
       });
     }
-
-    let payload: unknown;
+    if (!looksLikeJson(response)) {
+      // Not an empty day: see the doc comment above.
+      throw new AppError("portal_parse_failed", "the visits endpoint answered with a page", {
+        endpoint: label,
+        status: response.status,
+      });
+    }
     try {
-      payload = JSON.parse(response.body);
+      return JSON.parse(response.body);
     } catch (error) {
       throw new AppError(
         "portal_parse_failed",
-        "the upcoming-visits body was not JSON",
-        { endpoint: "LoadUpcoming", status: response.status },
+        "the visits body was not JSON",
+        { endpoint: label, status: response.status },
         { cause: error },
       );
     }
+  };
+
+  const loadUpcoming = async (timeZone: string): Promise<PortalVisit[]> => {
+    const payload = await visitJson(PATHS.loadUpcoming, "LoadUpcoming", {
+      timeZone,
+      ...LOAD_UPCOMING_QUERY,
+    });
     const parsed = parseUpcoming(payload, timeZone);
     logger.info("portal.upcoming", { visits: parsed.visits.length, unparsed: parsed.unparsed });
     return parsed.visits;
+  };
+
+  const loadPast = async (timeZone: string, oldestRenderedDate = ""): Promise<PortalVisit[]> => {
+    const payload = await visitJson(PATHS.loadPast, "LoadPast", {
+      ...LOAD_PAST_QUERY,
+      [OLDEST_RENDERED_DATE_PARAM]: oldestRenderedDate,
+    });
+    const parsed = parsePast(payload, timeZone);
+    logger.info("portal.past", { visits: parsed.visits.length, unparsed: parsed.unparsed });
+    return parsed.visits;
+  };
+
+  /**
+   * The portal's own liveness endpoint: one byte of JSON behind the login wall.
+   *
+   * Returns null for "this deployment did not answer it", which is not the same
+   * as a dead session -- a deployment old enough not to serve `KeepAlive` 404s
+   * here, and the `Home` fallback is what decides. A 200 that is a login page is
+   * a real answer, though, and short-circuits.
+   */
+  const keepAlive = async (): Promise<boolean | null> => {
+    const response = await portalFetch(http, {
+      url: url(PATHS.keepAlive, {
+        [KEEP_ALIVE_COUNT_PARAM]: "1",
+        [NO_CACHE_PARAM]: noCache(),
+      }),
+      endpoint: "KeepAlive",
+      accept: "json",
+    });
+    if (response.status !== 200) return null;
+    if (landingOf(response) !== "signed_in") return false;
+    // A scalar, per the capture. Anything longer is a page, and a page here means
+    // this deployment answers the path with something else entirely -- which is
+    // "do not know", not "dead", so the `Home` fallback gets to decide.
+    const isScalar = response.body.trim().length <= SCALAR_BODY_LIMIT;
+    return isScalar || null;
   };
 
   const isSessionAlive = async (): Promise<boolean> => {
     // Deliberately not `assertSession`: the answer to this question is a
     // boolean, and a transport failure or a bot block is a different thing again
     // and is allowed to propagate.
+    const probed = await keepAlive();
+    if (probed !== null) {
+      logger.debug("portal.session_check", { alive: probed, probe: "keepalive" });
+      return probed;
+    }
     const response = await portalFetch(http, {
       url: url(PATHS.home, { [NO_CACHE_PARAM]: noCache() }),
       endpoint: "Home",
@@ -387,7 +494,7 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
       followBodyRedirects: true,
     });
     const alive = response.status === 200 && landingOf(response) === "signed_in";
-    logger.debug("portal.session_check", { alive, status: response.status });
+    logger.debug("portal.session_check", { alive, status: response.status, probe: "home" });
     return alive;
   };
 
@@ -395,6 +502,7 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
     login,
     secondaryValidation: { sendCode, validate },
     loadUpcoming,
+    loadPast,
     isSessionAlive,
     jar,
   };

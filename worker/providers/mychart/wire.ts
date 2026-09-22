@@ -16,6 +16,7 @@
  *  - where a name varies per deployment, list the variants in the order to try.
  *
  * CONFIDENCE KEY
+ *   [confirmed]  a live capture of a real deployment carried this exact string
  *   [documented] the research describes this exact string
  *   [convention] not in the research; it is the framework's own convention and
  *                the request almost certainly needs it
@@ -25,10 +26,33 @@
 /** Which name the login form gives the username field. Varies by release. */
 export type UsernameField = "LoginIdentifier" | "Username";
 
+/**
+ * Which login application a deployment puts in front of the classic pages.
+ *
+ * `classic` is the server-rendered form this file's `PATHS.doLogin` cycle drives.
+ * `custom_oidc` is a deployment whose `Authentication/Login` is a redirect stub
+ * into an OpenID Connect handoff: the credentials go to a separate single-page
+ * shell's JSON API and the classic session arrives by way of the OIDC bridge.
+ * `worker/providers/mychart/custom-oidc/**` is that second strategy; everything
+ * past sign-in (the visits endpoints) is identical, which is the whole reason the
+ * flavour is a field rather than a second adapter.
+ */
+export type PortalFlavor = "classic" | "custom_oidc";
+
 /** Paths, relative to the instance's mount (no leading slash). */
 export const PATHS = {
-  /** [documented] The login form, and the page an expired session bounces to. */
+  /**
+   * [confirmed] The login form, and the page an expired session bounces to.
+   *
+   * On a `custom_oidc` deployment this path exists but renders no form: it 302s
+   * to `openId` below, which is exactly how the flavour is detected.
+   */
   login: "Authentication/Login",
+  /**
+   * [confirmed] The OpenID Connect handoff stub a `custom_oidc` deployment's
+   * `login` redirects to. Its query carries an opaque per-attempt operation id.
+   */
+  openId: "OpenId",
   /** [documented] The credential POST. */
   doLogin: "Authentication/Login/DoLogin",
   /** [documented] The challenge page; also where a fresh Validate token comes from. */
@@ -37,14 +61,24 @@ export const PATHS = {
   sendCode: "Authentication/SecondaryValidation/SendCode",
   /** [documented] Submits the code. */
   validate: "Authentication/SecondaryValidation/Validate",
-  /** [documented] The upcoming-visits page, whose HTML carries the token. */
+  /** [confirmed] The upcoming-visits page, whose HTML carries the token. */
   visitsList: "Visits/VisitsList",
-  /** [documented] The JSON endpoint. Takes NO body. */
+  /** [confirmed] The JSON endpoint. Takes NO body. */
   loadUpcoming: "Visits/VisitsList/LoadUpcoming",
   /**
-   * [guess] The cheapest authenticated page, used only to ask "is the session
-   * still alive". Anything behind the login wall would do; this is the landing
-   * page every deployment in the research has.
+   * [confirmed] Past visits, same auth mechanism and same "no body" rule as
+   * `loadUpcoming`. Its JSON groups the rows by an opaque organisation token
+   * because the account can be linked to several; see `parsePast`.
+   */
+  loadPast: "Visits/VisitsList/LoadPast",
+  /**
+   * [confirmed] The liveness probe the portal's own scripts use. One byte of
+   * JSON, so it is the cheapest possible "is the session still alive".
+   */
+  keepAlive: "Home/KeepAlive",
+  /**
+   * [confirmed] The landing page, and the fallback liveness check for a
+   * deployment that does not serve `keepAlive`.
    */
   home: "Home",
 } as const;
@@ -84,14 +118,32 @@ export const ANTIFORGERY_FIELD_NAMES: readonly string[] = [
 export const ANTIFORGERY_HEADER = "__RequestVerificationToken";
 
 /**
- * [documented] Query parameters `LoadUpcoming` is called with.
+ * [confirmed] Query parameters `LoadUpcoming` is called with.
  *
  * `ComponentNumber=5` is opaque and is sent exactly as observed. `timeZone` and
  * `noCache` are filled in per call.
  */
 export const LOAD_UPCOMING_QUERY = { ComponentNumber: "5" } as const;
 
-/** [documented] The cache-buster every one of these endpoints carries. */
+/**
+ * [confirmed] Query parameters `LoadPast` is called with.
+ *
+ * Query-string only, no body, exactly like `LoadUpcoming`. `oldestRenderedDate`
+ * is filled in per call and is the paging boundary the page's own script sends.
+ */
+export const LOAD_PAST_QUERY = {
+  loadpast: "1",
+  searchString: "",
+  ComponentNumber: "7",
+} as const;
+
+/** [confirmed] `LoadPast`'s paging boundary: an ISO date-time string. */
+export const OLDEST_RENDERED_DATE_PARAM = "oldestRenderedDate";
+
+/** [confirmed] `Home/KeepAlive`'s only parameter: an incrementing counter. */
+export const KEEP_ALIVE_COUNT_PARAM = "cnt";
+
+/** [confirmed] The cache-buster every one of these endpoints carries. */
 export const NO_CACHE_PARAM = "noCache";
 
 /**
@@ -112,34 +164,103 @@ export const SEND_CODE_VARIANTS: readonly Record<string, string>[] = [
 ];
 
 /**
- * [guess] Keys carrying the visit's fields in the `LoadUpcoming` JSON.
+ * Keys carrying the visit's fields in the `LoadUpcoming` JSON.
  *
- * The research names the *contents* (CSN, a `/Date(ms)/` instant, `PrimaryDate`
- * plus `TimeZone`, visit type, provider, department) but not the keys, except
- * `IsPastVisit`. Every list below is tried in order and the first present,
- * non-empty value wins, so an unexpected name degrades to a missing optional
- * field rather than a parse failure.
+ * Every list is tried in order and the first present, non-empty value wins, so
+ * an unexpected name degrades to a missing optional field rather than a parse
+ * failure. The first entry of each list is the name a live capture confirmed;
+ * the rest are the earlier [guess] candidates, kept as fallbacks because the
+ * same vendor's deployments differ and a second organisation may still use one.
+ *
+ * `department` / `locationName` / `address` / `phone` are the exception and are
+ * the correction the capture forced: on a real payload none of them is a flat
+ * key at all. They live nested under `PrimaryDepartment`, so the flat lists
+ * below are now only the fallback and `DEPARTMENT_OBJECT_KEYS` is the real path.
  */
 export const VISIT_KEYS = {
-  csn: ["CSN", "Csn", "ContactSerialNumber", "EncounterCsn", "VisitCsn"],
-  /** The `/Date(ms)/` instant. */
+  /** [confirmed] `Csn`. */
+  csn: ["Csn", "CSN", "ContactSerialNumber", "EncounterCsn", "VisitCsn"],
+  /** [confirmed] The `/Date(ms)/` instant. */
   instant: ["Instant", "DateTimeInstant", "AppointmentInstant", "StartInstant"],
-  /** Clinic-local wall clock, used only when there is no instant. */
+  /** [confirmed] Clinic-local wall clock, used only when there is no instant. */
   primaryDate: ["PrimaryDate", "DisplayDate", "Date"],
+  /** [confirmed] Top-level, and the visit's own zone rather than the owner's. */
   timeZone: ["TimeZone", "TimeZoneId", "DepartmentTimeZone"],
-  /** Minutes, when the payload says how long the visit is. */
+  /** [confirmed] Minutes, when the payload says how long the visit is. */
   durationMinutes: ["DurationInMinutes", "Duration", "LengthInMinutes", "AppointmentDuration"],
-  visitType: ["VisitType", "AppointmentType", "VisitTypeName", "Type", "Title"],
-  practitioner: ["ProviderName", "Provider", "PrimaryProviderName", "ProviderDisplayName"],
-  /** A list of providers, when the payload has several. */
+  /** [confirmed] `VisitTypeName`. */
+  visitType: ["VisitTypeName", "VisitType", "AppointmentType", "Type", "Title"],
+  /** [confirmed] `PrimaryProviderName`, nullable. */
+  practitioner: ["PrimaryProviderName", "ProviderName", "Provider", "ProviderDisplayName"],
+  /** [confirmed] A list of providers, when the payload has several. */
   practitioners: ["Providers", "ProviderList"],
+  /** [guess] Flat fallback only -- see `DEPARTMENT_OBJECT_KEYS`. */
   department: ["DepartmentName", "Department", "ClinicName"],
+  /** [guess] Flat fallback only. */
   locationName: ["LocationName", "Location", "FacilityName", "SiteName"],
+  /** [guess] Flat fallback only. */
   address: ["Address", "DepartmentAddress", "LocationAddress", "FullAddress"],
+  /** [guess] Flat fallback only. */
   phone: ["Phone", "PhoneNumber", "DepartmentPhone", "LocationPhone"],
 } as const;
 
-/** [guess] Keys whose truthiness means "this is a video visit". */
+/**
+ * [confirmed] Keys whose value is the visit's department as a nested object.
+ *
+ * `PrimaryDepartment` is where the department name, the address and the phone
+ * number really live. `Department` appears in both this list and
+ * `VISIT_KEYS.department`: a string value is read by the flat reader and an
+ * object value by the nested one, so listing it twice is safe and costs nothing.
+ */
+export const DEPARTMENT_OBJECT_KEYS: readonly string[] = [
+  "PrimaryDepartment",
+  "Department",
+  "DepartmentInfo",
+];
+
+/** Keys inside a department object. First entry of each list [confirmed]. */
+export const DEPARTMENT_KEYS = {
+  name: ["Name", "DepartmentName", "DisplayName"],
+  /** Itself an object (or an array of lines) -- never a string. See `ADDRESS_KEYS`. */
+  address: ["Address", "DiscreteAddress", "DepartmentAddress"],
+  phone: ["PhoneNumber", "Phone", "DepartmentPhone"],
+} as const;
+
+/**
+ * [guess] Keys inside a structured address.
+ *
+ * The capture proves the address is an object but not which of these it uses, so
+ * this is deliberately tolerant: any subset may be present, an absent part is
+ * simply left out of the joined line, and a plain string or an array of lines is
+ * accepted as-is. The one nearby shape that *was* captured (an organisation's
+ * `DiscreteAddress`) had `StreetAddress` / `City` / `State` / `StateName` / `Zip`,
+ * which is why those lead.
+ */
+export const ADDRESS_KEYS = {
+  /** A nested object holding the parts, preferred over the flat parts beside it. */
+  discrete: ["DiscreteAddress", "StructuredAddress"],
+  lines: [
+    "StreetAddress",
+    "Street",
+    "Line1",
+    "AddressLine",
+    "Address",
+    "Lines",
+    "StreetAddressLines",
+  ],
+  city: ["City", "CityName"],
+  state: ["State", "StateName", "StateAbbreviation"],
+  postalCode: ["Zip", "ZipCode", "PostalCode"],
+} as const;
+
+/**
+ * [guess] Keys whose truthiness means "this is a video visit".
+ *
+ * None of these was present on the captured payload, so on their own they are no
+ * longer enough -- see `TELEMEDICINE_OBJECT_KEYS` and `TELEHEALTH_MODE_KEYS` for
+ * what a real payload actually carries. Kept because a deployment that renders
+ * one of them is cheap to keep supporting.
+ */
 export const VIDEO_KEYS: readonly string[] = [
   "IsVideoVisit",
   "IsTelemedicine",
@@ -147,12 +268,37 @@ export const VIDEO_KEYS: readonly string[] = [
   "HasVideoVisit",
 ];
 
-/** [documented] The three buckets `LoadUpcoming` answers with. */
+/**
+ * [confirmed] Keys whose value is a telemedicine *object* when the visit is
+ * video, and `null` when it is not. Presence, not truthiness, is the signal.
+ */
+export const TELEMEDICINE_OBJECT_KEYS: readonly string[] = ["Telemedicine"];
+
+/**
+ * [confirmed] Keys holding an enum-like number; anything above zero is video.
+ *
+ * `CanShowTelemedicine` sits next to these in the payload and is deliberately
+ * *not* listed anywhere: it says the page may render a telemedicine section, not
+ * that this visit is one, and reading it would mark every visit as a video call.
+ */
+export const TELEHEALTH_MODE_KEYS: readonly string[] = ["TelehealthMode"];
+
+/** [confirmed] The three buckets `LoadUpcoming` answers with. */
 export const VISIT_BUCKETS: readonly string[] = [
   "InProgressVisits",
   "NextNDaysVisits",
   "LaterVisitsList",
 ];
+
+/**
+ * [confirmed] `LoadPast` groups its rows one level deeper than `LoadUpcoming`.
+ *
+ * The outer key holds an object keyed by an opaque per-organisation token, and
+ * each of those has its own array under the inner key. The tokens are not
+ * written down anywhere: they are read from whatever the response happens to
+ * carry, because they identify the organisations the account is linked to.
+ */
+export const PAST_BUCKET = { outer: "List", inner: "List" } as const;
 
 /** A visit's derived status. `scheduled` is the floor: something is always true. */
 export type PortalVisitStatus =
@@ -167,29 +313,51 @@ export type PortalVisitStatus =
   | "scheduled";
 
 /**
- * [documented order, guessed names] Status, highest priority first.
+ * [documented order, names confirmed where marked] Status, highest priority first.
  *
  * The *order* is documented and load-bearing: the research says the booleans
  * are set in combinations that contradict each other (and that `IsPastVisit` is
  * simply always wrong), so a visit is whatever its highest-priority true flag
- * says and nothing else. The *names* are guesses -- both British and American
- * spellings of "cancelled" are listed because the payload could use either, and
- * a name that is absent is read as false rather than as a parse failure.
+ * says and nothing else. A name that is absent is read as false rather than as a
+ * parse failure, which is why every list keeps its earlier guesses -- both
+ * British and American spellings of "cancelled" among them.
+ *
+ * Two of the guessed names were simply wrong and the capture supplied the real
+ * ones: `LeftWithoutSeen` (not `IsLeftWithoutBeingSeen`) and `IsCancelRequestSent`
+ * (not `IsCancelRequested`). Both now lead their list.
+ *
+ * `completed` has no confirmed name: the captured payload had no top-level
+ * completion flag at all. The nested `ECheckIn.IsComplete` is a different concept
+ * -- whether the check-in questionnaire was finished -- and is deliberately not
+ * matched, which is why only top-level keys are read.
  */
 export const STATUS_PRIORITY: readonly { status: PortalVisitStatus; keys: readonly string[] }[] = [
+  /** [confirmed] `IsCanceled`. */
   { status: "canceled", keys: ["IsCanceled", "IsCancelled", "Canceled", "Cancelled"] },
+  /** [confirmed] `IsNoShow`. */
   { status: "no_show", keys: ["IsNoShow", "NoShow"] },
+  /** [confirmed] `LeftWithoutSeen`. */
   {
     status: "left_without_being_seen",
-    keys: ["IsLeftWithoutBeingSeen", "LeftWithoutBeingSeen", "IsLwbs"],
+    keys: ["LeftWithoutSeen", "IsLeftWithoutBeingSeen", "LeftWithoutBeingSeen", "IsLwbs"],
   },
-  { status: "in_progress", keys: ["IsInProgress", "InProgress"] },
+  /** [confirmed] `InProgress`. */
+  { status: "in_progress", keys: ["InProgress", "IsInProgress"] },
+  /** [confirmed] `IsArrived`. */
   { status: "arrived", keys: ["IsArrived", "Arrived", "HasArrived"] },
-  { status: "completed", keys: ["IsCompleted", "Completed", "IsComplete"] },
+  /** [guess] No confirmed name; see the note above. */
+  { status: "completed", keys: ["IsCompleted", "Completed"] },
+  /** [confirmed] `IsCancelRequestSent`. */
   {
     status: "cancel_requested",
-    keys: ["IsCancelRequested", "CancelRequested", "IsCancellationRequested"],
+    keys: [
+      "IsCancelRequestSent",
+      "IsCancelRequested",
+      "CancelRequested",
+      "IsCancellationRequested",
+    ],
   },
+  /** [confirmed] `IsConfirmed`. */
   { status: "confirmed", keys: ["IsConfirmed", "Confirmed"] },
 ];
 
@@ -224,6 +392,22 @@ export const MARKERS = {
    * authenticated call look like a pending code.
    */
   secondaryValidation: ["secondaryvalidation/validate", "twofactorcode"],
+  /**
+   * [confirmed] The page is the OpenID Connect handoff stub, not a login form.
+   *
+   * A `custom_oidc` deployment's `Authentication/Login` renders no form and none
+   * of `loginForm`'s markers, so without this a bounced authenticated call would
+   * read as *signed in* and the run would report an empty day. The strings are
+   * the stub's own controller script and the two `sessionStorage` keys it writes;
+   * `oidcform` is the form the same script auto-submits.
+   */
+  openIdHandoff: [
+    "openidrequestcontroller",
+    "oidccodeverifier",
+    "oidcnonce",
+    'id="oidcform"',
+    "id='oidcform'",
+  ],
   /**
    * The request was refused, used only to decide whether a `SendCode` variant
    * was accepted. `"try again"` is deliberately absent: a *successful* response

@@ -22,6 +22,7 @@ import {
   loginPageOld,
   META_REDIRECT_PAGE,
   NOT_A_LOGIN_PAGE,
+  OPENID_STUB_PAGE,
   redirect,
   routed,
   SCRIPT_REDIRECT_PAGE,
@@ -93,6 +94,7 @@ describe("discoverPortal", () => {
       mountPath: "/MyChart/",
       usernameField: "Username",
       antiforgeryFieldName: "__RequestVerificationToken",
+      flavor: "classic",
     });
   });
 
@@ -132,6 +134,7 @@ describe("discoverPortal", () => {
       mountPath: "/prd/",
       usernameField: "LoginIdentifier",
       antiforgeryFieldName: "__RequestVerificationToken",
+      flavor: "classic",
     });
   });
 
@@ -268,5 +271,69 @@ describe("discoverPortal", () => {
     expect(call?.headers.accept).toContain("text/html");
     // No body means no Content-Type: a GET must not look like a form post.
     expect(call?.headers["content-type"]).toBeUndefined();
+  });
+});
+
+describe("discoverPortal: the custom OpenID flavour", () => {
+  it("reports custom_oidc when the login page 302s to the OpenID stub", async () => {
+    const stub = routed({
+      "GET /prd/Authentication/Login": () =>
+        redirect(`${HOST}/prd/OpenId?op=synthetic-op&forceAuthn=False`),
+      "GET /prd/OpenId": () => html(OPENID_STUB_PAGE),
+    });
+
+    await expect(discoverPortal(HOST, deps(stub, "prd"))).resolves.toStrictEqual({
+      baseUrl: HOST,
+      mountPath: "/prd/",
+      usernameField: "Username",
+      antiforgeryFieldName: "__RequestVerificationToken",
+      flavor: "custom_oidc",
+      authBaseUrl: HOST,
+    });
+  });
+
+  it("takes the mount from the OpenID URL, where the login path no longer is", async () => {
+    const stub = routed({
+      "GET /Authentication/Login": () => redirect(`${HOST}/prd/OpenId?op=synthetic-op`),
+      "GET /prd/OpenId": () => html(OPENID_STUB_PAGE),
+    });
+
+    await expect(discoverPortal(HOST, deps(stub, "/"))).resolves.toMatchObject({
+      mountPath: "/prd/",
+      flavor: "custom_oidc",
+    });
+  });
+
+  it("reports custom_oidc from the body marker when the stub is served in place", async () => {
+    // No redirect to read: the stub *is* the login page. Only the controller
+    // script tells it apart from a page that is simply not a login form.
+    const stub = routed({ "GET /MyChart/Authentication/Login": () => html(OPENID_STUB_PAGE) });
+
+    await expect(discoverPortal(HOST, deps(stub))).resolves.toMatchObject({
+      mountPath: "/MyChart/",
+      flavor: "custom_oidc",
+    });
+  });
+
+  it("records the shell API base when the stub happens to name one, and omits it otherwise", async () => {
+    const withHint = OPENID_STUB_PAGE.replace(
+      "<body>",
+      `<body><script>var apiBase = "/shellwebapi/";</script>`,
+    );
+    const hinted = routed({ "GET /MyChart/Authentication/Login": () => html(withHint) });
+    const bare = routed({ "GET /MyChart/Authentication/Login": () => html(OPENID_STUB_PAGE) });
+
+    await expect(discoverPortal(HOST, deps(hinted))).resolves.toMatchObject({
+      apiBasePath: "/shellwebapi",
+    });
+    // Not guessed, and never defaulted: the real value names the organisation.
+    const withoutHint = await discoverPortal(HOST, deps(bare));
+    expect(Object.hasOwn(withoutHint, "apiBasePath")).toBe(false);
+  });
+
+  it("marks a classic login form as the classic flavour", async () => {
+    const stub = routed({ "GET /MyChart/Authentication/Login": () => html(loginPageNew()) });
+
+    await expect(discoverPortal(HOST, deps(stub))).resolves.toMatchObject({ flavor: "classic" });
   });
 });

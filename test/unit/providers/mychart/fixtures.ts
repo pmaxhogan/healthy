@@ -309,3 +309,170 @@ export function upcomingPayload(): Record<string, unknown> {
     ],
   };
 }
+
+/**
+ * A `LoadUpcoming` body in the shape a live capture found, rather than the shape
+ * the key guesses assumed.
+ *
+ * Every difference from `upcomingPayload()` is a correction the capture forced:
+ * `Csn` not `CSN`, `VisitTypeName` not `VisitType`, `PrimaryProviderName` not
+ * `ProviderName`, the whole of the place nested under `PrimaryDepartment` with a
+ * structured `Address` object, no `IsVideoVisit`-shaped flag anywhere, and the
+ * two status keys whose guessed names were simply wrong.
+ *
+ * Invented values throughout. No part of this came from a real payload.
+ */
+export function confirmedShapePayload(): Record<string, unknown> {
+  return {
+    HasPVG: false,
+    HighlightDays: [],
+    InProgressVisits: [],
+    NextNDaysVisits: [
+      {
+        Csn: "csn-nested",
+        Instant: `/Date(${String(VISIT_INSTANT_MS)})/`,
+        PrimaryDate: "Sep 21, 2026",
+        TimeZone: CLINIC_ZONE,
+        DurationInMinutes: 20,
+        VisitTypeName: "Office Visit",
+        PrimaryProviderName: "C. Example, NP",
+        Providers: [{ PrimaryProviderName: "C. Example, NP" }],
+        PrimaryDepartment: {
+          Name: "Example Family Medicine",
+          PhoneNumber: "555-0142",
+          Address: {
+            StreetAddress: "42 Invented Road",
+            City: "Exampleville",
+            State: "ZZ",
+            StateName: "Exampleshire",
+            Zip: "00000",
+          },
+        },
+        // The real video signals: an object where a boolean was guessed.
+        Telemedicine: { JoinBy: "app" },
+        TelehealthMode: 0,
+        CanShowTelemedicine: true,
+        IsConfirmed: true,
+        IsPastVisit: false,
+      },
+      {
+        Csn: "csn-telehealth-mode",
+        Instant: `/Date(${String(VISIT_INSTANT_MS + 3_600_000)})/`,
+        VisitTypeName: "Video Follow-up",
+        TimeZone: CLINIC_ZONE,
+        // The other real video signal, on its own: a non-zero enum-like number.
+        Telemedicine: null,
+        TelehealthMode: 2,
+        CanShowTelemedicine: true,
+      },
+      {
+        Csn: "csn-in-person",
+        Instant: `/Date(${String(VISIT_INSTANT_MS + 7_200_000)})/`,
+        VisitTypeName: "Lab",
+        TimeZone: CLINIC_ZONE,
+        // `CanShowTelemedicine` alone must NOT make this a video visit: it says
+        // the page may render the section, not that this appointment is one.
+        Telemedicine: null,
+        TelehealthMode: 0,
+        CanShowTelemedicine: true,
+      },
+      {
+        Csn: "csn-lwbs",
+        Instant: `/Date(${String(VISIT_INSTANT_MS + 10_800_000)})/`,
+        VisitTypeName: "Urgent Care",
+        TimeZone: CLINIC_ZONE,
+        // The corrected key names, each with the guessed name absent.
+        LeftWithoutSeen: true,
+        InProgress: true,
+      },
+      {
+        Csn: "csn-cancel-sent",
+        Instant: `/Date(${String(VISIT_INSTANT_MS + 14_400_000)})/`,
+        VisitTypeName: "Imaging",
+        TimeZone: CLINIC_ZONE,
+        IsCancelRequestSent: true,
+        IsConfirmed: true,
+      },
+    ],
+    LaterVisitsList: [],
+  };
+}
+
+/** An opaque per-organisation key, as `LoadPast` groups its rows by. Invented. */
+export const ORG_TOKEN = "org-token-aaa";
+/** A second one, so a test can prove both buckets are read. */
+export const ORG_TOKEN_2 = "org-token-bbb";
+
+/**
+ * A `LoadPast` body: the same rows, grouped one level deeper.
+ *
+ * `LoadPast` buckets by an opaque organisation token because a chart account can
+ * be linked to several organisations, which is the one structural difference from
+ * `LoadUpcoming`.
+ */
+export function pastPayload(): Record<string, unknown> {
+  return {
+    CanSearch: true,
+    List: {
+      [ORG_TOKEN]: {
+        HasMoreData: true,
+        ListSize: 1,
+        SerializedIndex: "cursor-one",
+        List: [
+          {
+            Csn: "csn-past-one",
+            Instant: `/Date(${String(VISIT_INSTANT_MS - 86_400_000)})/`,
+            TimeZone: CLINIC_ZONE,
+            VisitTypeName: "Follow-up",
+            PrimaryDepartment: { Name: "Example Family Medicine" },
+            IsPastVisit: true,
+          },
+        ],
+      },
+      [ORG_TOKEN_2]: {
+        HasMoreData: false,
+        ListSize: 1,
+        List: [
+          {
+            Csn: "csn-past-two",
+            Instant: `/Date(${String(VISIT_INSTANT_MS - 172_800_000)})/`,
+            TimeZone: CLINIC_ZONE,
+            VisitTypeName: "Lab",
+          },
+        ],
+      },
+    },
+    SerializedIndex: "cursor-top",
+  };
+}
+
+/**
+ * The OpenID handoff stub a `custom_oidc` deployment serves at the login path.
+ *
+ * No form the classic client could drive, no username field, no password field:
+ * one hidden antiforgery input and the controller script that hands off to the
+ * OpenID flow. Written by hand; the marker strings are the only part that has to
+ * match a real deployment.
+ */
+export const OPENID_STUB_PAGE = `<!doctype html><html><head>
+  <script src="/areas/authentication/scripts/controllers/openidrequestcontroller.min.js"></script>
+</head><body>
+  <input type="hidden" name="__RequestVerificationToken" value="${TOKEN}" />
+</body></html>`;
+
+/**
+ * The same stub, with the hidden form the controller script auto-submits.
+ *
+ * This is the shape the bridge has to drive: a form the browser posts for you,
+ * carrying the authorization request the server already minted (nonce, state and
+ * the PKCE challenge among it).
+ */
+export const OPENID_FORM_PAGE = `<!doctype html><html><body>
+  <form id="OIDCForm" method="post" action="/shell/api/oauth2/authorize">
+    <input type="hidden" name="client_id" value="synthetic-client" />
+    <input type="hidden" name="state" value="synthetic-state" />
+    <input type="hidden" name="code_challenge" value="synthetic-challenge" />
+    <input type="hidden" name="code_challenge_method" value="S256" />
+  </form>
+  <script>document.getElementById("OIDCForm").submit();</script>
+</body></html>`;

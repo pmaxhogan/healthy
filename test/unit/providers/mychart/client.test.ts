@@ -30,6 +30,8 @@ import {
   loginPageNew,
   loginPageOld,
   MOUNT,
+  OPENID_STUB_PAGE,
+  pastPayload,
   redirect,
   routed,
   stubPortal,
@@ -587,5 +589,158 @@ describe("request shape", () => {
 
     await expect(codeOf(client(stub).isSessionAlive())).resolves.toBe("portal_parse_failed");
     expect(stub.calls.length).toBeLessThanOrEqual(12);
+  });
+});
+
+/** A portal whose visits page serves the token and whose LoadPast answers JSON. */
+function pastPortal(payload: unknown = pastPayload()): PortalFetchStub {
+  return routed({
+    "GET /MyChart/Visits/VisitsList": () => html(visitsListPage()),
+    "POST /MyChart/Visits/VisitsList/LoadPast": () => json(payload),
+  });
+}
+
+describe("loadPast", () => {
+  it("sends the documented query, no body and the token in a header", async () => {
+    const stub = pastPortal();
+
+    await client(stub).loadPast(OWNER_ZONE, "2026-01-01T00:00:00Z");
+
+    const post = find(stub, "POST", "/LoadPast");
+    const query = new URL(post?.url ?? "").searchParams;
+    expect(query.get("loadpast")).toBe("1");
+    expect(query.get("searchString")).toBe("");
+    expect(query.get("ComponentNumber")).toBe("7");
+    expect(query.get("oldestRenderedDate")).toBe("2026-01-01T00:00:00Z");
+    expect(post?.body).toBeUndefined();
+    expect(post?.headers["content-type"]).toBeUndefined();
+    expect(post?.headers.__requestverificationtoken).toBe(TOKEN_2);
+  });
+
+  it("flattens the per-organisation buckets into one list", async () => {
+    const stub = pastPortal();
+
+    const visits = await client(stub).loadPast(OWNER_ZONE);
+
+    expect(visits.map((visit) => visit.csn)).toStrictEqual(["csn-past-one", "csn-past-two"]);
+  });
+
+  it("asks for the first page when no boundary is given", async () => {
+    const stub = pastPortal();
+
+    await client(stub).loadPast(OWNER_ZONE);
+
+    expect(
+      new URL(find(stub, "POST", "/LoadPast")?.url ?? "").searchParams.get("oldestRenderedDate"),
+    ).toBe("");
+  });
+
+  it("reports portal_session_expired when the call bounces to login", async () => {
+    const stub = routed({
+      "GET /MyChart/Visits/VisitsList": () => html(visitsListPage()),
+      "POST /MyChart/Visits/VisitsList/LoadPast": () =>
+        redirect(`${HOST}/MyChart/Authentication/Login`),
+      "GET /MyChart/Authentication/Login": () => html(loginPageNew()),
+    });
+
+    await expect(codeOf(client(stub).loadPast(OWNER_ZONE))).resolves.toBe("portal_session_expired");
+  });
+});
+
+describe("a 200 that is a page where JSON was expected", () => {
+  // The silent-failure mode a live capture found: with a missing or misnamed
+  // antiforgery header these endpoints answer 200 with an HTML page rather than a
+  // 4xx. Reading that as "no appointments" would ghost the owner's calendar.
+  const CHART_PAGE = "<!doctype html><html><body><h1>Your chart</h1></body></html>";
+
+  it("is portal_parse_failed on LoadUpcoming, never an empty day", async () => {
+    const stub = routed({
+      "GET /MyChart/Visits/VisitsList": () => html(visitsListPage()),
+      "POST /MyChart/Visits/VisitsList/LoadUpcoming": () => html(CHART_PAGE),
+    });
+
+    await expect(codeOf(client(stub).loadUpcoming(OWNER_ZONE))).resolves.toBe(
+      "portal_parse_failed",
+    );
+  });
+
+  it("is portal_parse_failed on LoadPast, never an empty history", async () => {
+    const stub = routed({
+      "GET /MyChart/Visits/VisitsList": () => html(visitsListPage()),
+      "POST /MyChart/Visits/VisitsList/LoadPast": () => html(CHART_PAGE),
+    });
+
+    await expect(codeOf(client(stub).loadPast(OWNER_ZONE))).resolves.toBe("portal_parse_failed");
+  });
+
+  it("is portal_session_expired when that page is the OpenID handoff stub", async () => {
+    // A `custom_oidc` deployment's bounce: a 200 whose body has no login form at
+    // all, so only the handoff marker tells it apart from a signed-in page.
+    const stub = routed({
+      "GET /MyChart/Visits/VisitsList": () => html(visitsListPage()),
+      "POST /MyChart/Visits/VisitsList/LoadUpcoming": () => html(OPENID_STUB_PAGE),
+    });
+
+    await expect(codeOf(client(stub).loadUpcoming(OWNER_ZONE))).resolves.toBe(
+      "portal_session_expired",
+    );
+  });
+
+  it("still reads JSON a deployment mislabels as text/html", async () => {
+    const stub = routed({
+      "GET /MyChart/Visits/VisitsList": () => html(visitsListPage()),
+      "POST /MyChart/Visits/VisitsList/LoadUpcoming": () => html(JSON.stringify(upcomingPayload())),
+    });
+
+    await expect(client(stub).loadUpcoming(OWNER_ZONE)).resolves.toHaveLength(4);
+  });
+});
+
+describe("isSessionAlive via Home/KeepAlive", () => {
+  it("prefers KeepAlive and never falls back when it answers a scalar", async () => {
+    const stub = routed({ "GET /MyChart/Home/KeepAlive": () => json(1) });
+
+    await expect(client(stub).isSessionAlive()).resolves.toBe(true);
+    expect(stub.calls).toHaveLength(1);
+    expect(new URL(stub.calls[0]?.url ?? "").searchParams.get("cnt")).toBe("1");
+  });
+
+  it("is false without a fallback when KeepAlive itself bounces to login", async () => {
+    const stub = routed({
+      "GET /MyChart/Home/KeepAlive": () => redirect(`${HOST}/MyChart/Authentication/Login`),
+      "GET /MyChart/Authentication/Login": () => html(loginPageNew()),
+      "GET /MyChart/Home": () => html(HOME_PAGE),
+    });
+
+    await expect(client(stub).isSessionAlive()).resolves.toBe(false);
+    expect(find(stub, "GET", "/MyChart/Home")).toBeUndefined();
+  });
+
+  it("falls back to Home when the deployment does not serve KeepAlive", async () => {
+    const stub = routed({ "GET /MyChart/Home": () => html(HOME_PAGE) });
+
+    await expect(client(stub).isSessionAlive()).resolves.toBe(true);
+    expect(find(stub, "GET", "/MyChart/Home")).toBeDefined();
+  });
+
+  it("falls back to Home when KeepAlive answers a whole page", async () => {
+    const stub = routed({
+      "GET /MyChart/Home/KeepAlive": () => html(HOME_PAGE),
+      "GET /MyChart/Home": () => html(HOME_PAGE),
+    });
+
+    await expect(client(stub).isSessionAlive()).resolves.toBe(true);
+    expect(stub.calls).toHaveLength(2);
+  });
+});
+
+describe("a deployment that signs in through OpenID Connect", () => {
+  it("refuses to post a password at a login page that is a redirect stub", async () => {
+    const stub = routed({ "GET /MyChart/Authentication/Login": () => html(OPENID_STUB_PAGE) });
+
+    await expect(codeOf(client(stub).login(CREDENTIALS))).resolves.toBe("portal_parse_failed");
+    // The credentials never went anywhere: the only call was the page fetch.
+    expect(stub.calls).toHaveLength(1);
+    expect(stub.calls[0]?.method).toBe("GET");
   });
 });

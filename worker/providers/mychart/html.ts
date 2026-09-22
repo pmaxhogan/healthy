@@ -18,6 +18,10 @@ const INPUT_TAG = /<input\b[^>]*>/giu;
 /** One attribute's value, double-quoted, single-quoted, or bare. */
 const NAME_ATTRIBUTE = /\bname\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/iu;
 const VALUE_ATTRIBUTE = /\bvalue\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/iu;
+/** Every `<form>` opening tag. Bounded for the same reason `INPUT_TAG` is. */
+const FORM_TAG = /<form\b[^>]*>/giu;
+const ID_ATTRIBUTE = /\bid\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/iu;
+const ACTION_ATTRIBUTE = /\baction\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/iu;
 /** `<meta http-equiv="refresh" content="0;url=...">`, in either attribute order. */
 const META_REFRESH = /<meta\b[^>]*http-equiv\s*=\s*["']?refresh["']?[^>]*>/iu;
 const CONTENT_ATTRIBUTE = /\bcontent\s*=\s*(?:"([^"]*)"|'([^']*)')/iu;
@@ -33,6 +37,17 @@ const REFRESH_URL = /url\s*=\s*['"]?([^'";\s]+)/iu;
 const SCRIPT_ASSIGN = /\blocation(?:\.href)?\s*=\s*["']([^"']+)["']/iu;
 const SCRIPT_REPLACE = /\blocation\.replace\s*\(\s*["']([^"']+)["']/iu;
 const NAMED_ENTITY = /&(amp|lt|gt|quot|apos|#\d{1,7}|#x[0-9a-f]{1,6});/giu;
+/**
+ * [guess] A quoted absolute path whose first segment ends in `webapi`.
+ *
+ * The one shape of API base a login shell has been seen to mount its JSON
+ * endpoints under. Bounded: a single segment of at most 32 characters, anchored
+ * on the quote or paren that opens the string literal it sits in, so it cannot
+ * backtrack across a bundle. Deliberately a *hint* -- the real value names the
+ * organisation and can have no default, so a miss is normal and the caller
+ * supplies the value instead.
+ */
+const API_BASE_HINT = /["'(](\/[a-z][\w-]{0,31}webapi)(?=[/"'?)])/iu;
 
 const NAMED: Readonly<Record<string, string>> = {
   amp: "&",
@@ -118,6 +133,38 @@ export function findAntiforgeryField(
 }
 
 /**
+ * A form this page expects a script to submit for it, by the form's `id`.
+ *
+ * The OpenID handoff stub is a page with no visible content: a hidden form whose
+ * fields are the authorization request, and a script whose only job is to submit
+ * it. A client that follows redirects but not that submit stops one hop short of
+ * the sign-in, so the bridge has to do the submit itself.
+ *
+ * The fields are every named `<input>` on the page rather than only the ones
+ * inside this form: the stub carries nothing else, `inputFields` is already the
+ * bounded scanner this module is built on, and pairing tags with their closing
+ * `</form>` would mean actually parsing. If a future stub grows a second form
+ * this will send too much, which the authorization endpoint ignores.
+ *
+ * `ids` is matched case-insensitively and in order, and the action is returned
+ * exactly as written -- relative, which the caller resolves against the page.
+ */
+export function autoSubmitForm(
+  html: string,
+  ids: readonly string[],
+): { action: string; fields: Map<string, string> } | null {
+  const wanted = new Set(ids.map((id) => id.toLowerCase()));
+  for (const [tag] of html.matchAll(FORM_TAG)) {
+    const id = attribute(tag, ID_ATTRIBUTE);
+    if (id === null || !wanted.has(id.toLowerCase())) continue;
+    const action = attribute(tag, ACTION_ATTRIBUTE);
+    if (action === null || action === "") continue;
+    return { action, fields: inputFields(html) };
+  }
+  return null;
+}
+
+/**
  * Where this page redirects to without an HTTP redirect, if anywhere.
  *
  * Vanity hostnames in the wild answer a login request with a 200 whose body is
@@ -139,6 +186,18 @@ export function bodyRedirectTarget(html: string): string | null {
   return target === undefined || target === "" || target.startsWith("#")
     ? null
     : decodeEntities(target);
+}
+
+/**
+ * A best-effort guess at the path a login shell mounts its JSON API under.
+ *
+ * Returns null far more often than not, and that is the expected outcome: the
+ * value names an organisation, so there is nothing to fall back to and the owner
+ * supplies it. Never logged, and only ever returned to discovery, which stores it
+ * in the same sealed-adjacent endpoint JSON the mount path lives in.
+ */
+export function apiBasePathHint(html: string): string | null {
+  return API_BASE_HINT.exec(html)?.[1] ?? null;
 }
 
 /** True if any of `markers` (already lower-case) appears in the body. */
