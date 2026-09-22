@@ -254,9 +254,21 @@ epicRouter.get("/callback", async (c) => {
   } catch {
     log.warn("oauth.epic.alert_not_resolved", { providerId: provider.id });
   }
-  afterResponse(c, "oauth.epic.sync", () =>
-    ports.sync.runCalendarSync(repos.ctx, { providerIds: [provider.id], trigger: "manual" }),
-  );
+
+  // A calendar sync with nowhere to write is not a failed sync -- it is not a sync
+  // at all. Without this, connecting a provider before Google (the normal order on
+  // first setup) kicked off a run that could only ever fail with
+  // `sync.google_unavailable`, so the first thing the owner saw after a successful
+  // connect was a red run. Mirrors the backoff skip in calendar-sync.ts: no run
+  // row for work that could not start, just a note that it was skipped.
+  const google = await repos.google.get();
+  if (google.status === "disconnected") {
+    log.info("oauth.epic.sync_skipped_google_disconnected", { providerId: provider.id });
+  } else {
+    afterResponse(c, "oauth.epic.sync", () =>
+      ports.sync.runCalendarSync(repos.ctx, { providerIds: [provider.id], trigger: "manual" }),
+    );
+  }
 
   return c.redirect(`/?connected=${encodeURIComponent(provider.id)}`, 302);
 });

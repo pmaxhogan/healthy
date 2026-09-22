@@ -9,7 +9,7 @@
 // its discovery parsing, its HTTP Basic client authentication, and its `TokenSet`
 // construction are all exercised against the committed fixtures.
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { clearDiscoveryCache } from "../../../worker/oauth/discovery.ts";
 import smartConfiguration from "../../fixtures/epic/smart-configuration.json";
@@ -21,9 +21,11 @@ import {
   resetPorts,
   seedProvider,
   stubFetch,
+  testCtx,
   testRepos,
   usePorts,
 } from "../api/helpers.ts";
+import { seedGoogle } from "../sync/helpers.ts";
 
 import type { FetchStub } from "../api/helpers.ts";
 
@@ -198,6 +200,10 @@ async function startFlow(providerId: string): Promise<string> {
   return new URL(response.headers.get("location") ?? "").searchParams.get("state") ?? "";
 }
 
+function swallow(): void {
+  // The spy must not print; its calls are asserted on instead.
+}
+
 describe("GET /oauth/callback", () => {
   it("exchanges the code, connects, and redirects to the dashboard", async () => {
     const id = await seedProvider({ clientSecret: SECRET });
@@ -205,6 +211,9 @@ describe("GET /oauth/callback", () => {
     usePorts({ fetch: stub.fetchImpl });
     // `setPorts` merges, so the sync override below keeps the stubbed fetch.
     const recorded = recordingSync();
+    // Google connected: this test is about the exchange, not the post-connect
+    // sync skip below, which has its own tests.
+    await seedGoogle(testCtx());
     const state = await startFlow(id);
 
     const response = await call(`/oauth/callback?code=auth-code&state=${state}`, {
@@ -237,6 +246,53 @@ describe("GET /oauth/callback", () => {
     );
 
     expect(recorded.resolved).toStrictEqual([{ providerId: id }]);
+    expect(recorded.synced).toStrictEqual([{ providerIds: [id], trigger: "manual" }]);
+  });
+
+  it("skips the post-connect sync when Google is not connected yet", async () => {
+    // The normal order on first setup: a provider is connected before Google is.
+    // `seedProvider`/`testRepos` never touch `google_account`, so it is left at
+    // its migrated `disconnected` default -- no `seedGoogle` call here.
+    const id = await seedProvider({ clientSecret: SECRET });
+    usePorts({ fetch: stubEpic().fetchImpl });
+    const recorded = recordingSync();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(swallow);
+    const state = await startFlow(id);
+
+    const response = await call(`/oauth/callback?code=auth-code&state=${state}`, {
+      headers: { cookie: owner().cookie },
+    });
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(`/?connected=${id}`);
+    // The connection itself still succeeded; only the sync it would have kicked
+    // off is skipped.
+    const connection = await testRepos().connections.getForProvider(id);
+    expect(connection?.status).toBe("connected");
+    expect(recorded.synced).toStrictEqual([]);
+    expect(
+      logSpy.mock.calls.some(([line]) => {
+        if (typeof line !== "string") return false;
+        const parsed = JSON.parse(line) as { event?: string; providerId?: string };
+        return (
+          parsed.event === "oauth.epic.sync_skipped_google_disconnected" && parsed.providerId === id
+        );
+      }),
+    ).toBe(true);
+    logSpy.mockRestore();
+  });
+
+  it("still fires the post-connect sync once Google is connected", async () => {
+    const id = await seedProvider({ clientSecret: SECRET });
+    usePorts({ fetch: stubEpic().fetchImpl });
+    const recorded = recordingSync();
+    await seedGoogle(testCtx());
+    const state = await startFlow(id);
+
+    await call(`/oauth/callback?code=auth-code&state=${state}`, {
+      headers: { cookie: owner().cookie },
+    });
+
     expect(recorded.synced).toStrictEqual([{ providerIds: [id], trigger: "manual" }]);
   });
 
