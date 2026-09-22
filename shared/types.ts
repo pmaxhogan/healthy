@@ -99,6 +99,12 @@ export interface SettingsDto {
 
 export type SettingsPatch = Partial<SettingsDto>;
 
+/**
+ * The sync engine's own working shape for a run in progress -- see
+ * `worker/sync/run.ts` for why `errors` still names a provider here. None of that
+ * survives being written to `run_log`, so it is `RunSummaryDto`, not this, that
+ * `RunDto` actually carries.
+ */
 export interface RunSummary {
   providers: number;
   encountersSeen: number;
@@ -113,13 +119,25 @@ export interface RunSummary {
   errors: { providerId: string; code: string }[];
 }
 
+/**
+ * What `RunDto.summary` actually contains: the same counts as `RunSummary`, but
+ * `errors` and `warningCodes` are the bare, stable codes `run_log.summary_json`
+ * stores -- never a provider id, which is one join away from naming a health
+ * system. `warnings` stays a count; `warningCodes` is the distinct codes behind
+ * it, e.g. an Epic OperationOutcome code -- which, not how many.
+ */
+export interface RunSummaryDto extends Omit<RunSummary, "errors"> {
+  errors: string[];
+  warningCodes: string[];
+}
+
 export interface RunDto {
   id: string;
   kind: RunKind;
   startedAt: string;
   finishedAt: string | null;
   ok: boolean | null;
-  summary: RunSummary | null;
+  summary: RunSummaryDto | null;
 }
 
 export interface AlertDto {

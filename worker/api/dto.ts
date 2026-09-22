@@ -40,7 +40,7 @@ import type {
   ProviderDto,
   RunDto,
   RunKind,
-  RunSummary,
+  RunSummaryDto,
   SettingsDto,
   SettingsPatch,
   Vendor,
@@ -288,17 +288,6 @@ export function fromSettingsPatch(patch: Loose<SettingsPatch>): Partial<Settings
 // ---------------------------------------------------------------------------
 
 /**
- * One entry of `run_log.summary_json.errors`, which is a flat list of stable
- * codes, optionally prefixed with the provider the code came from.
- */
-function toRunError(entry: string): { providerId: string; code: string } {
-  const separator = entry.indexOf(":");
-  return separator === -1
-    ? { providerId: "", code: entry }
-    : { providerId: entry.slice(0, separator), code: entry.slice(separator + 1) };
-}
-
-/**
  * The stored summary -> the DTO the overview renders.
  *
  * The two vocabularies do not line up exactly, and the difference is worth
@@ -309,16 +298,20 @@ function toRunError(entry: string): { providerId: string; code: string } {
  *    upstream, which is everything it inserted, patched, restored or left
  *    unchanged. Ghosts are excluded on purpose: a ghost is an appointment that
  *    was *not* there.
- *  - `warnings` is how many warnings there were, not how many distinct codes. The
- *    stored row has both; the codes themselves are not in the DTO. A row written
- *    before `warningCount` existed has it at zero, so the number of distinct codes
- *    is the floor -- which is why this is a `max` and not a read.
+ *  - `warnings` is how many warnings there were, not how many distinct codes.
+ *    `warningCodes` is those distinct codes -- e.g. an Epic OperationOutcome code,
+ *    which, not how many. A row written before `warningCount` existed has it at
+ *    zero, so the number of distinct codes is the floor for `warnings` -- which is
+ *    why that is a `max` and not a read.
+ *  - `errors` is passed straight through: `run_log.summary_json.errors` is
+ *    already bare, stable codes with no provider prefix, by design (see
+ *    `worker/sync/run.ts`), so there is nothing here to parse.
  *  - `filteredView` and `backedOff` come straight off the stored summary. A run
  *    that saw a filtered schedule is the run that refused to ghost anything, and a
  *    backed-off one did almost nothing at all: both are the first thing to look at
  *    when a run reports no changes.
  */
-export function toRunSummaryDto(summary: DbRunSummary): RunSummary {
+export function toRunSummaryDto(summary: DbRunSummary): RunSummaryDto {
   return {
     providers: summary.providers,
     encountersSeen: summary.inserted + summary.patched + summary.restored + summary.unchanged,
@@ -328,9 +321,10 @@ export function toRunSummaryDto(summary: DbRunSummary): RunSummary {
     eventsRestored: summary.restored,
     resourcesCached: summary.resources,
     warnings: Math.max(summary.warningCount, summary.warnings.length),
+    warningCodes: [...summary.warnings],
     filteredView: summary.filteredView,
     backedOff: summary.backedOff,
-    errors: summary.errors.map((entry) => toRunError(entry)),
+    errors: [...summary.errors],
   };
 }
 

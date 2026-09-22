@@ -1,17 +1,24 @@
 /**
  * `run_log` bookkeeping, and the two summary shapes that have to be kept apart.
  *
- * There are genuinely two. `RunSummary` in `shared/types.ts` is the DTO the admin
- * UI renders: camelCase, with `filteredView` and `backedOff` flags and errors as
- * `{providerId, code}` pairs. `runSummarySchema` in `worker/db/schemas.ts` is what
- * `run_log.summary_json` stores: shorter names, warnings as both a count and the
- * distinct codes, errors as plain strings, and a `unchanged` count the DTO has no
- * field for. `toStoredSummary` is the one place that translates, and every field
- * the DTO has now survives the round trip -- a run that reports no changes is
+ * There are genuinely two here. `RunSummary` in `shared/types.ts` is the sync
+ * engine's own working shape, built up while a run is in flight: camelCase, with
+ * `filteredView` and `backedOff` flags and errors as `{providerId, code}` pairs --
+ * the provider id is what lets a caller (and a test) say *which* connection
+ * failed. `runSummarySchema` in `worker/db/schemas.ts` is what `run_log.summary_json`
+ * stores: shorter names, warnings as both a count and the distinct codes, errors
+ * as plain strings, and an `unchanged` count the working shape has no field for.
+ * `toStoredSummary` is the one place that translates, and every field the working
+ * shape has now survives the round trip -- a run that reports no changes is
  * explained by `filteredView` or `backedOff` or by nothing, and reading the row
  * back has to be able to say which. `providerId` is dropped on the way in --
  * the run log is the table an operator reads casually, and a provider id there is
  * one join away from naming a health system.
+ *
+ * A third shape, `RunSummaryDto` (also `shared/types.ts`), is what actually
+ * reaches the admin UI: built by `worker/api/dto.ts` from the *stored* row, so its
+ * `errors` and `warningCodes` are the bare codes above, never a provider id --
+ * there was never one to reconstruct.
  *
  * A run row is opened before any work and closed after it, so a run cut off
  * mid-flight (CPU limit, a deploy) leaves `finished_at IS NULL`. That is the only

@@ -285,7 +285,10 @@ describe("toRunSummaryDto", () => {
     restored: 2,
     unchanged: 10,
     resources: 120,
-    errors: ["PROV1:upstream_unavailable", "needs_reauth"],
+    // Bare codes, no provider prefix -- `toStoredSummary` writes them this way
+    // by design, so this fixture does too rather than exercising a shape that
+    // never actually reaches this function.
+    errors: ["upstream_unavailable", "needs_reauth"],
     warnings: ["4119", "4101"],
     warningCount: 9,
     filteredView: true,
@@ -322,11 +325,12 @@ describe("toRunSummaryDto", () => {
     expect(toRunSummaryDto({ ...stored, backedOff: true }).backedOff).toBe(true);
   });
 
-  it("splits an error into its provider and its code, tolerating a bare code", () => {
-    expect(toRunSummaryDto(stored).errors).toStrictEqual([
-      { providerId: "PROV1", code: "upstream_unavailable" },
-      { providerId: "", code: "needs_reauth" },
-    ]);
+  it("passes the stored error codes straight through, with no provider to reconstruct", () => {
+    expect(toRunSummaryDto(stored).errors).toStrictEqual(["upstream_unavailable", "needs_reauth"]);
+  });
+
+  it("exposes the distinct warning codes, not just the count", () => {
+    expect(toRunSummaryDto(stored).warningCodes).toStrictEqual(["4119", "4101"]);
   });
 });
 

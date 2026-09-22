@@ -192,6 +192,7 @@ function run(overrides: Partial<RunDto> = {}): RunDto {
       eventsRestored: 0,
       resourcesCached: 9,
       warnings: 0,
+      warningCodes: [],
       filteredView: false,
       backedOff: false,
       errors: [],

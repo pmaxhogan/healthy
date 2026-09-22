@@ -8,7 +8,7 @@ import { ref } from "vue";
 
 import { formatDateTime, formatDuration, relativeTime } from "../lib/format.ts";
 
-import type { RunDto } from "@shared/types.ts";
+import type { RunDto, RunSummaryDto } from "@shared/types.ts";
 
 const props = withDefaults(
   defineProps<{
@@ -50,6 +50,21 @@ function counts(run: RunDto): string {
   ].filter(Boolean);
   return parts.length > 0 ? parts.join(" ") : "no changes";
 }
+
+/**
+ * A one-line index into the JSON below: "Warnings: 4119, 4101 · Errors: needs_reauth".
+ *
+ * The codes are stable identifiers, not content -- an Epic OperationOutcome code,
+ * an `AppError` code -- so showing them here is privacy-safe, and it is the only
+ * way to see which codes came back without reading the raw dump line by line.
+ */
+function codesLine(summary: RunSummaryDto): string | null {
+  const parts = [
+    summary.warningCodes.length > 0 ? `Warnings: ${summary.warningCodes.join(", ")}` : "",
+    summary.errors.length > 0 ? `Errors: ${summary.errors.join(", ")}` : "",
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
 </script>
 
 <template>
@@ -88,6 +103,7 @@ function counts(run: RunDto): string {
           </tr>
           <tr v-if="props.expandable && open === run.id && run.summary">
             <td colspan="6">
+              <p v-if="codesLine(run.summary)" class="muted codes">{{ codesLine(run.summary) }}</p>
               <pre>{{ JSON.stringify(run.summary, null, 2) }}</pre>
             </td>
           </tr>
