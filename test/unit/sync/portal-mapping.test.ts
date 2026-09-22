@@ -58,8 +58,17 @@ function input(
   };
 }
 
-function visit(overrides: Partial<PortalVisit> = {}): PortalVisit {
-  return {
+/**
+ * A visit override may be an explicit `undefined`, which means "drop this field".
+ *
+ * `Partial<PortalVisit>` will not do: under `exactOptionalPropertyTypes` an
+ * optional property does not accept `undefined`, and several tests here are about
+ * what the mapping does when the payload carried no practitioner or no location.
+ */
+type VisitOverrides = { [K in keyof PortalVisit]?: PortalVisit[K] | undefined };
+
+function visit(overrides: VisitOverrides = {}): PortalVisit {
+  const base = {
     csn: "csn-1",
     start: "2026-10-01T15:30:00+00:00",
     timeZone: "UTC",
@@ -70,11 +79,15 @@ function visit(overrides: Partial<PortalVisit> = {}): PortalVisit {
     status: "scheduled",
     ...overrides,
   };
+  // An explicit `undefined` override becomes an absent key, which is what the
+  // parser in `visits.ts` would actually have produced for a missing field.
+  const present = Object.entries(base).filter(([, value]) => value !== undefined);
+  return Object.fromEntries(present) as unknown as PortalVisit;
 }
 
 /** The mapping for one visit, which is the conversion plus the shared mapper. */
 async function map(
-  overrides: Partial<PortalVisit> = {},
+  overrides: VisitOverrides = {},
   mappingInput: MappingInput = input(),
 ): Promise<CalendarMapping> {
   return buildCalendarModel(portalVisitView(PROVIDER_ID, visit(overrides)), mappingInput);
