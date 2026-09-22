@@ -212,6 +212,20 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
       return changes > 0;
     },
 
+    /**
+     * The owner changed the sync target and the row's event has followed it
+     * there. Only the tracked calendar moves -- the fingerprint, state and
+     * timestamps describe the appointment, not where it lives, and the caller
+     * has already made the Google-side move before calling this.
+     */
+    async moveCalendar(eventKey: string, calendarId: string): Promise<void> {
+      await run(
+        ctx.db
+          .prepare(`UPDATE calendar_events SET calendar_id = ?, updated_at = ? WHERE event_key = ?`)
+          .bind(calendarId, ctx.now(), eventKey),
+      );
+    },
+
     /** Stamp `last_seen_at` for every key the current sync saw. */
     async touch(eventKeys: readonly string[]): Promise<number> {
       if (eventKeys.length === 0) return 0;

@@ -37,6 +37,12 @@
  * hammering a second organisation while the first is throttling us is how an app
  * gets its access reviewed.
  *
+ * **A row follows its event when the target calendar changes.** An event id is
+ * only valid on the calendar it was created on, and the Google listing above is
+ * always against the *current* target -- so a row still pointing at the old one
+ * is invisible to this run until `followCalendarMoves` moves it, before the diff
+ * ever sees it.
+ *
  * Nothing here logs a title, a name, an address, a URL or a resource body. Ids of
  * our own rows, counts, resource type names, HTTP statuses and Epic codes only.
  */
@@ -289,9 +295,11 @@ async function syncProvider(run: RunContext, target: SyncTarget): Promise<void> 
   await cacheEncounters(run, providerId, encounters);
 
   const rows = await windowRows(run, providerId);
-  const providerEvents = run.googleEvents.filter((event) =>
-    (eventKeyOf(event) ?? "").startsWith(`${providerId}:`),
-  );
+  const followedEvents = await followCalendarMoves(run, providerId, rows);
+  const providerEvents = [
+    ...run.googleEvents.filter((event) => (eventKeyOf(event) ?? "").startsWith(`${providerId}:`)),
+    ...followedEvents,
+  ];
 
   const { candidates, models, ghosts } = await buildCandidates(run, target, mappings, rows);
   const plan = planChanges(rows, providerEvents, candidates, { suppressGhosting: filtered });
@@ -415,6 +423,55 @@ async function cacheEncounters(
 async function windowRows(run: RunContext, providerId: string): Promise<CalendarEventRow[]> {
   const rows = await run.repos.calendarEvents.list({ providerId, limit: MAX_ROWS });
   return rows.filter((row) => row.start_at === null || row.start_at >= run.windowStartSeconds);
+}
+
+/**
+ * Follow a row's event onto the current target calendar when the owner has
+ * moved the target since the row was written.
+ *
+ * `run.googleEvents` is listed once per run, from `run.calendarId`, before any
+ * provider is touched -- so a row whose `calendar_id` is stale is invisible to
+ * `eventByKey` no matter what the plan does with it: its event id was never
+ * valid anywhere but the calendar it was created on. Left alone, the plan sees
+ * "no matching event" and does the same thing it does for one the owner deleted
+ * by hand -- re-insert an upcoming appointment, or quietly ghost a past one with
+ * no Google write -- which duplicates every tracked appointment onto the new
+ * calendar and strands the original, still looking live, on the old one.
+ *
+ * Calling Google's `events.move` here, before the diff runs, turns a stale row
+ * back into an ordinary one: the moved event (same id, same
+ * `extendedProperties`, now on `run.calendarId`) is folded into this
+ * provider's event set below, so the rest of this run treats it exactly as if
+ * it had always lived there. A row whose event has *also* vanished from the old
+ * calendar (`moveEvent` -> `null`) is left untouched -- that is genuinely the
+ * owner deleting it, and the plan's existing handling for a missing event is
+ * the right answer.
+ */
+async function followCalendarMoves(
+  run: RunContext,
+  providerId: string,
+  rows: readonly CalendarEventRow[],
+): Promise<EventRecord[]> {
+  const stale = rows.filter((row) => row.calendar_id !== run.calendarId);
+  if (stale.length === 0) return [];
+
+  const moved: EventRecord[] = [];
+  let gone = 0;
+  for (const row of stale) {
+    const event = await run.calendar.moveEvent(
+      row.calendar_id,
+      row.google_event_id,
+      run.calendarId,
+    );
+    if (event === null) {
+      gone += 1;
+      continue;
+    }
+    await run.repos.calendarEvents.moveCalendar(row.event_key, run.calendarId);
+    moved.push(event);
+  }
+  run.ctx.log.info("sync.calendar_move", { providerId, moved: moved.length, gone });
+  return moved;
 }
 
 /** The active and ghost models for every key the plan will consider. */

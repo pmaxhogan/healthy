@@ -370,6 +370,48 @@ describe("single event operations", () => {
     expect(patched?.colorId).toBe("8");
   });
 
+  it("moves an event to another calendar, as a bodyless POST to the destination query param", async () => {
+    const destination = "other@group.calendar.google.com";
+    const { fetchImpl, calls } = recordingFetch(() =>
+      jsonResponse(200, {
+        id: "ev-1",
+        status: "confirmed",
+        extendedProperties: { private: { healthy: "1", key: "prov-1:enc-1" } },
+      }),
+    );
+
+    const moved = await client(fetchImpl).moveEvent(CALENDAR_ID, "ev-1", destination);
+
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.url.pathname).toBe(
+      `/calendar/v3/calendars/${encodeURIComponent(CALENDAR_ID)}/events/ev-1/move`,
+    );
+    expect(calls[0]?.url.searchParams.get("destination")).toBe(destination);
+    // No body: `events.move` takes the destination as a query param only.
+    expect(calls[0]?.body).toBeNull();
+    expect(moved?.id).toBe("ev-1");
+    expect(moved?.extendedProperties?.private.key).toBe("prov-1:enc-1");
+  });
+
+  it("returns null from move on 404, like a patch on a deleted event", async () => {
+    const { fetchImpl, calls } = recordingFetch(() =>
+      jsonResponse(404, { error: { code: 404, message: "Not Found" } }),
+    );
+
+    await expect(
+      client(fetchImpl).moveEvent(CALENDAR_ID, "ev-gone", "other-cal"),
+    ).resolves.toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+
+  it("returns null from move on 410 gone", async () => {
+    const { fetchImpl } = recordingFetch(() => jsonResponse(410, { error: { code: 410 } }));
+
+    await expect(
+      client(fetchImpl).moveEvent(CALENDAR_ID, "ev-gone", "other-cal"),
+    ).resolves.toBeNull();
+  });
+
   it("returns null from getEvent when the event is gone", async () => {
     const { fetchImpl } = recordingFetch(() => jsonResponse(404, { error: { code: 404 } }));
 

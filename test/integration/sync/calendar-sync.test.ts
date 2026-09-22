@@ -7,7 +7,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { getSetting } from "../../../worker/db/settings.ts";
+import { getSetting, setSetting } from "../../../worker/db/settings.ts";
 import { runCalendarSync } from "../../../worker/sync/calendar-sync.ts";
 
 import {
@@ -844,5 +844,74 @@ describe("nothing to do", () => {
     expect(summary.providers).toBe(0);
     expect(summary.errors).toStrictEqual([]);
     await expect(syncRepos(ctx).runLog.listRecent()).resolves.toMatchObject([{ ok: true }]);
+  });
+});
+
+describe("changing the target calendar", () => {
+  it("moves a tracked event instead of duplicating it", async () => {
+    const h = await setup({ encounters: [{ id: "enc-1", start: UPCOMING }] });
+    await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
+    const original = h.upstreams.calendar.byKeyOn("primary").get(`${h.providerId}:enc-1`);
+    expect(original).toBeDefined();
+
+    await setSetting(h.ctx, "calendar_id", "vacation");
+    h.time.advance(3600);
+    const summary = await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
+
+    expect(summary.errors).toStrictEqual([]);
+    expect(summary.eventsInserted).toBe(0);
+    // Exactly one event, anywhere: the same Google event id as before, now on
+    // the new calendar -- not a second, duplicate insert.
+    expect(h.upstreams.calendar.events()).toHaveLength(1);
+    expect(h.upstreams.calendar.byKeyOn("primary").size).toBe(0);
+    const moved = h.upstreams.calendar.byKeyOn("vacation").get(`${h.providerId}:enc-1`);
+    expect(moved?.id).toBe(original?.id);
+    expect(h.upstreams.calendar.moves).toBe(1);
+
+    const row = await syncRepos(h.ctx).calendarEvents.getByKey(`${h.providerId}:enc-1`);
+    expect(row?.calendar_id).toBe("vacation");
+    expect(row?.google_event_id).toBe(original?.id);
+  });
+
+  it("ghosts a cancellation on the new calendar rather than stranding a live-looking copy on the old one", async () => {
+    const h = await setup({ encounters: [{ id: "enc-1", start: UPCOMING }] });
+    await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
+
+    await setSetting(h.ctx, "calendar_id", "vacation");
+    h.time.advance(3600);
+    // The appointment is gone from the schedule -- cancelled, in this app's terms.
+    h.server.encounters = searchBundle([]);
+    const summary = await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
+
+    expect(summary.eventsGhosted).toBe(1);
+    expect(summary.eventsInserted).toBe(0);
+    expect(h.upstreams.calendar.byKeyOn("primary").size).toBe(0);
+    const ghost = h.upstreams.calendar.byKeyOn("vacation").get(`${h.providerId}:enc-1`);
+    expect(ghost).toBeDefined();
+    expect(String(ghost?.summary).startsWith("Cancelled: ")).toBe(true);
+
+    const row = await syncRepos(h.ctx).calendarEvents.getByKey(`${h.providerId}:enc-1`);
+    expect(row?.calendar_id).toBe("vacation");
+    expect(row?.state).toBe("ghost");
+  });
+
+  it("re-creates on the new calendar when the event is also gone from the old one", async () => {
+    const h = await setup({ encounters: [{ id: "enc-1", start: UPCOMING }] });
+    await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
+    const [original] = h.upstreams.calendar.events();
+    // The owner deleted the event by hand before ever switching calendars.
+    h.upstreams.calendar.remove(String(original?.id));
+
+    await setSetting(h.ctx, "calendar_id", "vacation");
+    h.time.advance(3600);
+    const summary = await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
+
+    expect(summary.errors).toStrictEqual([]);
+    // The plan's ordinary "owner deleted it" handling: an upcoming appointment
+    // is re-created, on the calendar this run actually targets.
+    expect(summary.eventsInserted).toBe(1);
+    expect(h.upstreams.calendar.byKeyOn("vacation").size).toBe(1);
+    expect(h.upstreams.calendar.byKeyOn("primary").size).toBe(0);
+    expect(h.upstreams.calendar.moves).toBe(0);
   });
 });

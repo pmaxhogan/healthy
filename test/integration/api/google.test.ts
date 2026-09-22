@@ -68,6 +68,7 @@ function stubCalendar(): CalendarClient {
     getEvent: () => Promise.resolve(null),
     insertEvent: () => Promise.reject(new Error("not used")),
     patchEvent: () => Promise.resolve(null),
+    moveEvent: () => Promise.reject(new Error("not used")),
     deleteEvent: () => Promise.resolve(true),
   };
 }

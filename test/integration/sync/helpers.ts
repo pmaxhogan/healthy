@@ -243,46 +243,81 @@ export async function seedSettings(
 /** One stored event, as Google would hold it. */
 type StoredEvent = Record<string, unknown> & { id: string };
 
+/** Every test that does not care about calendar moves uses this one. */
+const DEFAULT_CALENDAR = "primary";
+
 interface FakeCalendar {
-  /** Every event currently on the calendar, insertion order. */
+  /** Every event on every calendar this stub is holding, insertion order. */
   events: () => StoredEvent[];
-  /** The events this app owns, by their `extendedProperties.private.key`. */
+  /** This app's events across every calendar, by `extendedProperties.private.key`. */
   byKey: () => Map<string, StoredEvent>;
-  /** Drop an event as though the owner deleted it by hand. */
+  /** This app's events on one calendar only -- for asserting *where* an event
+   * ended up after a target change, not just that it exists somewhere. */
+  byKeyOn: (calendarId: string) => Map<string, StoredEvent>;
+  /** Drop an event as though the owner deleted it by hand, on whichever calendar it is on. */
   remove: (eventId: string) => void;
-  /** Put an event on the calendar that this app does not own. */
-  plant: (event: Record<string, unknown>) => void;
+  /** Put an event, that this app does not own, on a calendar (default the one every other test uses). */
+  plant: (event: Record<string, unknown>, calendarId?: string) => void;
   inserts: number;
   patches: number;
+  /** `events.move` calls that actually relocated an event. */
+  moves: number;
 }
 
 function makeFakeCalendar(): {
   calendar: FakeCalendar;
   handle: (url: URL, init: RequestInit | undefined) => Response;
 } {
-  // A plain array rather than a Map: the store is never more than a handful of
-  // events, insertion order is what the assertions read, and it keeps the
-  // accessors free of iterator gymnastics.
-  const store: StoredEvent[] = [];
-  const counters = { inserts: 0, patches: 0, nextId: 1 };
-  const indexOf = (eventId: string): number => store.findIndex((event) => event.id === eventId);
+  // Partitioned by calendar id, because that is the whole point of this stub:
+  // a real Google event id is only ever valid on the calendar it was created
+  // on, and a test that switches the target has to be able to prove that.
+  const stores = new Map<string, StoredEvent[]>();
+  const counters = { inserts: 0, patches: 0, moves: 0, nextId: 1 };
+
+  const storeFor = (calendarId: string): StoredEvent[] => {
+    let list = stores.get(calendarId);
+    if (list === undefined) {
+      list = [];
+      stores.set(calendarId, list);
+    }
+    return list;
+  };
+
+  // Iterator#toArray would need the esnext.iterator lib, and this project's test
+  // tsconfig is ES2022 only (the same tradeoff as Array#toSorted elsewhere).
+  // eslint-disable-next-line unicorn/prefer-iterator-to-array
+  const allEvents = (): StoredEvent[] => [...stores.values()].flat();
+
+  /** Which calendar (if any) currently holds this event id. */
+  const findCalendarOf = (eventId: string): string | null => {
+    for (const [calendarId, list] of stores) {
+      if (list.some((event) => event.id === eventId)) return calendarId;
+    }
+    return null;
+  };
+
+  const byKeyIn = (events: readonly StoredEvent[]): Map<string, StoredEvent> => {
+    const out = new Map<string, StoredEvent>();
+    for (const event of events) {
+      const key = keyOf(event);
+      if (key !== null) out.set(key, event);
+    }
+    return out;
+  };
 
   const calendar: FakeCalendar = {
-    events: () => [...store],
-    byKey: () => {
-      const out = new Map<string, StoredEvent>();
-      for (const event of store) {
-        const key = keyOf(event);
-        if (key !== null) out.set(key, event);
-      }
-      return out;
-    },
+    events: allEvents,
+    byKey: () => byKeyIn(allEvents()),
+    byKeyOn: (calendarId) => byKeyIn(storeFor(calendarId)),
     remove: (eventId) => {
-      const at = indexOf(eventId);
-      if (at >= 0) store.splice(at, 1);
+      const calendarId = findCalendarOf(eventId);
+      if (calendarId === null) return;
+      const list = storeFor(calendarId);
+      const at = list.findIndex((event) => event.id === eventId);
+      if (at !== -1) list.splice(at, 1);
     },
-    plant: (event) => {
-      store.push({ ...event, id: `planted-${String(counters.nextId++)}` });
+    plant: (event, calendarId = DEFAULT_CALENDAR) => {
+      storeFor(calendarId).push({ ...event, id: `planted-${String(counters.nextId++)}` });
     },
     get inserts() {
       return counters.inserts;
@@ -290,35 +325,61 @@ function makeFakeCalendar(): {
     get patches() {
       return counters.patches;
     },
+    get moves() {
+      return counters.moves;
+    },
   };
 
-  const handle = (url: URL, init: RequestInit | undefined): Response => {
-    const method = init?.method ?? "GET";
-    const body =
-      typeof init?.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : {};
-    const eventId = eventIdFrom(url);
+  /** No event id in the URL: `events.list` or `events.insert`. */
+  const handleCollection = (
+    method: string,
+    url: URL,
+    calendarId: string,
+    body: Record<string, unknown>,
+  ): Response => {
+    if (method === "GET") return listEvents(url, storeFor(calendarId));
+    if (method !== "POST") return new Response(null, { status: 405 });
+    counters.inserts += 1;
+    const created: StoredEvent = {
+      ...body,
+      id: `google-${String(counters.nextId++)}`,
+      status: "confirmed",
+    };
+    storeFor(calendarId).push(created);
+    return Response.json(created);
+  };
 
-    if (eventId === null) {
-      if (method === "GET") return listEvents(url, store);
-      if (method !== "POST") return new Response(null, { status: 405 });
-      counters.inserts += 1;
-      const created: StoredEvent = {
-        ...body,
-        id: `google-${String(counters.nextId++)}`,
-        status: "confirmed",
-      };
-      store.push(created);
-      return Response.json(created);
-    }
+  /** `events.move`: relocate one event, keeping its id, into another calendar's list. */
+  const handleMove = (url: URL, calendarId: string, eventId: string): Response => {
+    const destination = url.searchParams.get("destination");
+    const list = storeFor(calendarId);
+    const at = list.findIndex((event) => event.id === eventId);
+    // Gone from the source calendar: already moved, or genuinely deleted --
+    // either way, the caller treats a null move like a null patch.
+    if (at === -1 || destination === null) return notFound();
+    const [moved] = list.splice(at, 1) as [StoredEvent];
+    storeFor(destination).push(moved);
+    counters.moves += 1;
+    return Response.json(moved);
+  };
 
-    const at = indexOf(eventId);
+  /** An id naming one event on one calendar: `events.get`/`patch`/`delete`. */
+  const handleSingleEvent = (
+    method: string,
+    calendarId: string,
+    eventId: string,
+    body: Record<string, unknown>,
+  ): Response => {
+    const list = storeFor(calendarId);
+    const at = list.findIndex((event) => event.id === eventId);
     if (method === "DELETE") {
-      if (at >= 0) store.splice(at, 1);
+      if (at !== -1) list.splice(at, 1);
       return new Response(null, { status: 204 });
     }
     // A missing event answers 404, exactly as Google does once the owner has
-    // deleted it -- which is the branch the sync has to survive.
-    const existing = store.find((event) => event.id === eventId);
+    // deleted it, or once an event id from a different calendar is used here --
+    // which is the branch the sync has to survive either way.
+    const existing = at === -1 ? undefined : list[at];
     if (existing === undefined) return notFound();
     if (method === "GET") return Response.json(existing);
     if (method !== "PATCH") return new Response(null, { status: 405 });
@@ -329,6 +390,19 @@ function makeFakeCalendar(): {
     return Response.json(existing);
   };
 
+  const handle = (url: URL, init: RequestInit | undefined): Response => {
+    const method = init?.method ?? "GET";
+    const body =
+      typeof init?.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : {};
+    const calendarId = calendarIdFrom(url);
+    const eventId = eventIdFrom(url);
+
+    if (eventId === null) return handleCollection(method, url, calendarId, body);
+    return isMove(url)
+      ? handleMove(url, calendarId, eventId)
+      : handleSingleEvent(method, calendarId, eventId, body);
+  };
+
   return { calendar, handle };
 }
 
@@ -336,9 +410,20 @@ function notFound(): Response {
   return Response.json({ error: { code: 404, message: "Not Found" } }, { status: 404 });
 }
 
-/** `.../events/<id>` -> the id; `.../events` -> null. */
+/** `.../events/<id>/move` -> true. Anything else, including a plain `.../events/<id>` -> false. */
+function isMove(url: URL): boolean {
+  return url.pathname.endsWith("/move");
+}
+
+/** `.../calendars/<id>/events...` -> the id, decoded. Defaults if the shape is unexpected. */
+function calendarIdFrom(url: URL): string {
+  const match = /\/calendars\/([^/]+)\/events/u.exec(url.pathname);
+  return match?.[1] === undefined ? DEFAULT_CALENDAR : decodeURIComponent(match[1]);
+}
+
+/** `.../events/<id>` or `.../events/<id>/move` -> the id; `.../events` -> null. */
 function eventIdFrom(url: URL): string | null {
-  const match = /\/events\/([^/]+)$/u.exec(url.pathname);
+  const match = /\/events\/([^/]+?)(?:\/move)?$/u.exec(url.pathname);
   return match?.[1] === undefined ? null : decodeURIComponent(match[1]);
 }
 

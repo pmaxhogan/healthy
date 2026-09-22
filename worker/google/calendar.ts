@@ -98,6 +98,20 @@ export interface CalendarClient {
     body: Partial<CalendarEventBody>,
   ): Promise<EventRecord | null>;
   /**
+   * Move a tracked event to a different calendar, keeping its event id and
+   * everything else about it -- including `extendedProperties`, so the moved
+   * event is still ours by the `healthy=1` invariant on the calendar it lands
+   * on. An event id is only ever valid on the calendar it was created on, so
+   * this is what a sync target change has to do instead of a plain patch, which
+   * would 404 against the new calendar. `null` when the event is gone from the
+   * source calendar too -- genuinely deleted, not merely relocated.
+   */
+  moveEvent(
+    sourceCalendarId: string,
+    eventId: string,
+    destinationCalendarId: string,
+  ): Promise<EventRecord | null>;
+  /**
    * ADMIN CLEANUP ONLY. The sync engine must never call this: vanished
    * appointments are ghosted (title prefix + transparent + grey), never
    * deleted, so that a cancelled visit stays visible in the owner's history.
@@ -508,6 +522,18 @@ export function createCalendarClient(options: CalendarClientOptions): CalendarCl
       // 404/410: the owner deleted it by hand, or it was already purged. The
       // caller re-inserts instead of treating the run as failed.
       return patched === null ? null : toEventRecord(patched);
+    },
+
+    async moveEvent(sourceCalendarId, eventId, destinationCalendarId) {
+      const params = new URLSearchParams({ destination: destinationCalendarId });
+      const moved = await request(
+        "POST",
+        `${BASE}/calendars/${encodeURIComponent(sourceCalendarId)}/events/${encodeURIComponent(eventId)}/move?${params.toString()}`,
+        { gone: true },
+      );
+      // 404/410: gone from the source calendar too, not merely moved already --
+      // the caller treats this exactly like a patch on a deleted event.
+      return moved === null ? null : toEventRecord(moved);
     },
 
     async deleteEvent(calendarId, eventId) {
