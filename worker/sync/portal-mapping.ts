@@ -62,6 +62,18 @@ export function portalEncounterId(csn: string): string {
   return `${CSN_PREFIX}${csn}`;
 }
 
+/**
+ * What every one of a provider's portal event keys starts with.
+ *
+ * The one place the marker is spelled out for a *caller*: both passes of the sync
+ * filter on it -- the portal pass to take its own rows and events, the FHIR pass to
+ * leave them alone -- and a second copy of the string in either file is a way for
+ * the two filters to stop being exact complements of each other.
+ */
+export function portalKeyPrefix(providerId: string): string {
+  return `${providerId}:${CSN_PREFIX}`;
+}
+
 /** The CSN a portal event key carries, or null when the key is not a portal one. */
 export function csnOfEncounterId(encounterId: string): string | null {
   return encounterId.startsWith(CSN_PREFIX) ? encounterId.slice(CSN_PREFIX.length) : null;

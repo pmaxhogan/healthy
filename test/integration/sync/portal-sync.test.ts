@@ -246,6 +246,30 @@ describe("portal visits that FHIR also knows about", () => {
     expect(stray).toBeNull();
   });
 
+  it("leaves a portal row alone when the FHIR pass runs and has no Encounter for it", async () => {
+    // The premise of the whole feature: the portal knows about a visit the FHIR
+    // view does not return yet. The FHIR pass sees a row with no Encounter, and
+    // must not read that as "vanished upstream" -- doing so ghosts the row, the
+    // portal pass restores it, and the owner's event is patched twice an hour for
+    // ever.
+    const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1", start: SOON })] } });
+    await portalRun(fix);
+    const patchesBefore = fix.upstreams.calendar.patches;
+    withEncounters(fix, []);
+
+    const first = await portalRun(fix, false);
+    const second = await portalRun(fix, false);
+
+    for (const summary of [first, second]) {
+      expect(summary.eventsGhosted).toBe(0);
+      expect(summary.eventsRestored).toBe(0);
+      expect(summary.eventsPatched).toBe(0);
+    }
+    expect(fix.upstreams.calendar.patches).toBe(patchesBefore);
+    const row = await syncRepos(fix.ctx).calendarEvents.getByKey(portalKey(fix.provider, "csn-1"));
+    expect(row?.state).toBe("active");
+  });
+
   it("hands the portal's row and event to the Encounter that turns up later", async () => {
     const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1", start: SOON })] } });
     await portalRun(fix);

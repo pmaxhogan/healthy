@@ -77,6 +77,7 @@ import { getGoogleCalendarFor } from "./google-tokens.ts";
 import { sha256Hex } from "./hash.ts";
 import { buildCalendarModel, ghostModel } from "./mapping.ts";
 import { eventKeyOf, planChanges } from "./plan.ts";
+import { portalKeyPrefix } from "./portal-mapping.ts";
 import { adoptPortalRows, runPortalPass } from "./portal-sync.ts";
 import { collectEncounterReferences, resolveReferences } from "./references.ts";
 import { emptySummary, record } from "./run.ts";
@@ -386,8 +387,18 @@ async function syncProvider(run: RunContext, target: SyncTarget): Promise<void> 
     rows: windowed,
     events: listed,
   });
-  const rows = adopted.rows;
-  const providerEvents = adopted.events;
+  // Portal-sourced rows and events are the portal pass's to diff, and this pass
+  // must not: it has no Encounter for one (that is the premise of the feature, not
+  // a visit that vanished), so it would read every one of them as absent, ghost the
+  // row with no Google write, and watch the portal pass restore it an instant
+  // later -- a patch per portal visit per hour, for ever. Anything the adoption
+  // just renamed carries a FHIR key and so survives both filters, which is the
+  // point of doing this after it rather than before.
+  const rows = adopted.rows.filter((row) => row.source !== "portal");
+  const portalPrefix = portalKeyPrefix(providerId);
+  const providerEvents = adopted.events.filter(
+    (event) => !(eventKeyOf(event) ?? "").startsWith(portalPrefix),
+  );
 
   const { candidates, models, ghosts } = await buildCandidates(run, target, mappings, rows);
   const plan = planChanges(rows, providerEvents, candidates, { suppressGhosting: filtered });

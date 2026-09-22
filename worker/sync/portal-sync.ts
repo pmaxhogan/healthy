@@ -61,6 +61,7 @@ import {
   DEDUPE_WINDOW_SECONDS,
   csnOfEncounterId,
   isOffSchedule,
+  portalKeyPrefix,
   portalVisitView,
 } from "./portal-mapping.ts";
 import {
@@ -86,9 +87,6 @@ import type { PortalVisit } from "../providers/mychart/index.ts";
 
 /** Portal rows per provider the diff will consider. Far above any real schedule. */
 const MAX_PORTAL_ROWS = 500;
-
-/** What the second half of a portal event key starts with. See `portal-mapping.ts`. */
-const PORTAL_KEY_INFIX = "csn:";
 
 /**
  * What the FHIR pass saw for one provider, as the dedupe needs it.
@@ -205,7 +203,7 @@ async function syncPortalProvider(input: PortalPassInput, providerId: string): P
   // Portal keys only, not every key this provider owns: the FHIR pass's events
   // have no candidate here, and handing them to the diff would report each one as
   // an orphan. `:csn:` is what makes the two halves distinguishable by key alone.
-  const portalPrefix = `${providerId}:${PORTAL_KEY_INFIX}`;
+  const portalPrefix = portalKeyPrefix(providerId);
   const events = input.googleEvents.filter((event) =>
     (keyOf(event) ?? "").startsWith(portalPrefix),
   );
