@@ -51,6 +51,7 @@ describe("the settings catalogue", () => {
   });
 
   it("accepts its own defaults through its own schemas", () => {
+    // `SETTING_DEFAULTS[key]`: `SETTING_KEYS` is the key list of that same const.
     for (const key of SETTING_KEYS) {
       const encoded = encodeSetting(key, SETTING_DEFAULTS[key]);
 
@@ -176,6 +177,9 @@ describe("runSummarySchema", () => {
       resources: 0,
       errors: [],
       warnings: [],
+      warningCount: 0,
+      filteredView: false,
+      backedOff: false,
     });
   });
 
@@ -191,6 +195,21 @@ describe("runSummarySchema", () => {
     expect(parsed.inserted).toBe(3);
     expect(parsed.errors).toStrictEqual(["needs_reauth"]);
     expect(parsed.warnings).toStrictEqual(["4119"]);
+  });
+
+  it("keeps the flags a run needs to explain itself", () => {
+    const parsed = runSummarySchema.parse({
+      warnings: ["4119"],
+      warningCount: 12,
+      filteredView: true,
+      backedOff: true,
+    });
+
+    // Twelve warnings carrying one code: the count and the codes say different
+    // things, and the run log needs both.
+    expect(parsed.warningCount).toBe(12);
+    expect(parsed.filteredView).toBe(true);
+    expect(parsed.backedOff).toBe(true);
   });
 
   it("rejects a negative or fractional count", () => {

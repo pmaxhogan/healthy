@@ -10,6 +10,12 @@
   // behind Cloudflare Access. A workers.dev hostname would be a second,
   // un-gated front door, so it stays off.
   "workers_dev": false,
+  // Same reasoning for per-version preview URLs: each one is a workers.dev
+  // hostname with no Access in front of it. In-worker JWT verification is
+  // fail-closed, so nothing is *reachable* there, but a second front door is
+  // reconnaissance surface and a future route that trusts "Access is in front"
+  // would be wrong on it.
+  "preview_urls": false,
   "routes": [{ "pattern": "healthy.maxhogan.dev", "custom_domain": true }],
   "assets": {
     "directory": "./dist",

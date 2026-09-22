@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import { PASSWORD_HASH_PATTERN } from "@shared/password.ts";
 
 import {
+  MAX_PBKDF2_ITERATIONS,
   MIN_PBKDF2_ITERATIONS,
   hashPassword,
+  isCostUnsupported,
   verifyPassword,
 } from "../../../worker/auth/password.ts";
 
@@ -97,5 +99,28 @@ describe("verifyPassword", () => {
     parts[4] = (digest.startsWith("A") ? "B" : "A") + digest.slice(1);
 
     await expect(verifyPassword(PASSWORD, parts.join("$"))).resolves.toBe(false);
+  });
+});
+
+describe("isCostUnsupported", () => {
+  it("flags a well-formed envelope whose cost the runtime would refuse", async () => {
+    // The 2026-09-22 shape: a genuine hash, minted above the deployed PBKDF2 cap.
+    // Nothing else can detect it -- local workerd derives at 600,000 quite happily.
+    const atTheFloor = await hashPassword(PASSWORD, COST);
+    const overCap = atTheFloor.replace(`$${String(COST)}$`, "$600000$");
+
+    expect(isCostUnsupported(overCap)).toBe(true);
+  });
+
+  it("says nothing about a hash at the supported cost", async () => {
+    expect(isCostUnsupported(await hashPassword(PASSWORD, MAX_PBKDF2_ITERATIONS))).toBe(false);
+  });
+
+  it("stays out of the way of every other kind of bad secret", () => {
+    // A missing, malformed or too-cheap secret is a failed login and nothing more:
+    // reporting a misconfiguration for those would tell an attacker which one it is.
+    for (const stored of ["", "not-a-hash", "pbkdf2$sha256$1$c2FsdA$aGFzaA", "pbkdf2$sha256$$$"]) {
+      expect(isCostUnsupported(stored), stored).toBe(false);
+    }
   });
 });

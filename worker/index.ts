@@ -1,50 +1,94 @@
-// Worker entry point.
-//
-// TODO(wave2): the default export becomes
-//   new OAuthProvider({
-//     apiRoute: "/mcp",
-//     apiHandler: HealthyMcp.serve("/mcp"),
-//     defaultHandler: app,
-//     authorizeEndpoint: "/authorize",
-//     tokenEndpoint: "/oauth/token",
-//     clientRegistrationEndpoint: "/oauth/register",
-//     scopesSupported: ["health:read"],
-//     allowImplicitFlow: false,
-//     allowPlainPKCE: false,
-//     accessTokenTTL: 3600,
-//   })
-// with `scheduled` kept alongside it. Until the MCP server and the consent page
-// exist, wrapping everything in the OAuth provider would expose token and
-// registration endpoints that lead nowhere, so the Hono app is the whole
-// handler for now.
+/**
+ * The Worker's entry point: the OAuth provider wrapping everything else.
+ *
+ * Request topology, top to bottom. `OAuthProvider` looks at the path and the
+ * ordering here is the whole of how the two worlds stay separate:
+ *
+ *   /.well-known/oauth-authorization-server   the provider, itself
+ *   /.well-known/oauth-protected-resource*    the provider, itself
+ *   POST /oauth/token                         the provider, itself (exact path)
+ *   POST /oauth/register                      the provider, itself (exact path)
+ *   /mcp*                                     bearer-validated, then HealthyMcp
+ *   everything else                           the Hono app
+ *
+ * The route overlap is deliberate and it is exact, not prefixed: the provider
+ * matches its token and registration endpoints with `===` on the pathname, so
+ * `/oauth/callback`, `/oauth/google/*` and `/oauth/epic/*` -- every browser
+ * redirect back from Epic or Google -- fall through to Hono untouched. Only
+ * `/mcp` is matched as a prefix. There is an integration test asserting that
+ * `/oauth/callback` reaches Hono, because getting this wrong would break
+ * reconnection in a way nothing else would notice.
+ *
+ * Why the export is a hand-written object rather than the provider instance:
+ * `OAuthProvider` exposes `fetch` and `purgeExpiredData`, and nothing else. It is
+ * not an `ExportedHandler`, so a `scheduled` handler cannot be hung off it -- the
+ * object below is the smallest wrapper that gives the Worker both.
+ *
+ * Cloudflare Access sits in front of all of this and is configured to let only
+ * `/mcp*`, the two provider endpoints, `/.well-known/*` and the public pages past
+ * it. Everything the Hono app gates -- the consent page included -- is behind
+ * Access as well. That is configuration, not code, and it is described in the
+ * README's setup table.
+ */
+
+import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 
 import { app } from "./app.ts";
-import { makeLogger } from "./lib/log.ts";
+import { MCP_API_ROUTE, OAUTH_CORE } from "./mcp/oauth-config.ts";
+import { HealthyMcp } from "./mcp/server.ts";
+import { handleScheduled } from "./sync/index.ts";
 
 import type { Env } from "./env.ts";
-
-const cronLogger = makeLogger({ src: "cron" });
 
 // Re-exported because wrangler resolves Durable Object classes from the
 // configured `main` module, not from wherever the class happens to live.
 export { HealthyMcp } from "./mcp/server.ts";
 
+/**
+ * The library requires a non-optional `fetch` on the handlers it is given, while
+ * `McpAgent.serve()` and a Hono app both type theirs differently. Wrapping both in
+ * this shape is the same workaround the reference implementations use.
+ */
+interface HandlerWithFetch {
+  fetch: (request: Request, env: Env, ctx: ExecutionContext) => Response | Promise<Response>;
+}
+
+/**
+ * The Durable Object binding name is `HEALTHY_MCP` in wrangler.jsonc, which is not
+ * the default `MCP_OBJECT` that `McpAgent.serve` assumes -- hence the explicit
+ * `binding`. The class name and the binding name are both fixed by migration tag
+ * v1 and must not be changed.
+ */
+const mcpHandler = HealthyMcp.serve(MCP_API_ROUTE, { binding: "HEALTHY_MCP" });
+
+const mcpApiHandler: HandlerWithFetch = {
+  fetch: (request, env, ctx) => mcpHandler.fetch(request, env, ctx),
+};
+
+const honoHandler: HandlerWithFetch = {
+  fetch: (request, env, ctx) => app.fetch(request, env, ctx),
+};
+
+const provider = new OAuthProvider<Env>({
+  ...OAUTH_CORE,
+  apiRoute: MCP_API_ROUTE,
+  apiHandler: mcpApiHandler,
+  defaultHandler: honoHandler,
+});
+
 export default {
-  fetch(request: Request, env: Env, ctx: ExecutionContext): Response | Promise<Response> {
-    return app.fetch(request, env, ctx);
+  fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    return provider.fetch(request, env, ctx);
   },
 
-  scheduled(controller: ScheduledController, _env: Env, _ctx: ExecutionContext): void {
-    // Logged, then returns. Wave 2 dispatches on the exact cron string, which is
-    // why the string is the only thing recorded here: the two expressions in
-    // wrangler.jsonc are the dispatch keys, so seeing which one fired is what
-    // makes a missing branch a visible no-op rather than a silent one.
-    //
-    // TODO(wave2): "7 * * * *"  -> hourly Encounter-only calendar sync + token
-    //              keepalive; "23 6 * * *" -> daily full-scope refresh of the MCP
-    //              read cache plus retention pruning (mcp_audit > 365d, expired
-    //              oauth_states). UTC, both of them -- never translated to local
-    //              time in a comment, because that would leak the timezone.
-    cronLogger.info("cron.received", { cron: controller.cron });
+  /**
+   * Both cron expressions land here and the sync engine dispatches on the string:
+   * `7 * * * *` is the hourly appointment sync plus the token keepalive, and
+   * `23 6 * * *` is the daily full-scope refresh of the MCP read cache. UTC, both
+   * of them -- never translated to local time in a comment, because that would
+   * leak the timezone.
+   */
+  scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    return handleScheduled(env, controller.cron, ctx);
   },
 } satisfies ExportedHandler<Env>;
