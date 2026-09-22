@@ -255,6 +255,7 @@ export function toSettingsDto(settings: Settings): SettingsDto {
     windowPastDays: settings.window_past_days,
     syncBackoffUntil: isoOrNull(settings.sync_backoff_until),
     mcpEnabled: settings.mcp_enabled,
+    portalLoginAttemptLimit: settings.portal_login_attempt_limit,
   };
 }
 
@@ -283,6 +284,9 @@ export function fromSettingsPatch(patch: Loose<SettingsPatch>): Partial<Settings
   }
   if (patch.windowPastDays !== undefined) values.window_past_days = patch.windowPastDays;
   if (patch.mcpEnabled !== undefined) values.mcp_enabled = patch.mcpEnabled;
+  if (patch.portalLoginAttemptLimit !== undefined) {
+    values.portal_login_attempt_limit = patch.portalLoginAttemptLimit;
+  }
   return values;
 }
 
@@ -328,6 +332,9 @@ export function toRunSummaryDto(summary: DbRunSummary): RunSummaryDto {
     filteredView: summary.filteredView,
     backedOff: summary.backedOff,
     errors: [...summary.errors],
+    portalVisits: summary.portalVisits,
+    portalSkipped: summary.portalSkipped,
+    portalErrors: [...summary.portalErrors],
   };
 }
 
@@ -346,17 +353,30 @@ export function toRunDto(entry: RunEntryLike): RunDto {
 // alerts, policy, audit
 // ---------------------------------------------------------------------------
 
-/** `alerts.subject` is `provider:<id>` or the literal `google`. */
-const PROVIDER_SUBJECT_PREFIX = "provider:";
+/**
+ * `alerts.subject` is `provider:<id>`, `portal:<id>` or the literal `google`.
+ *
+ * Both prefixes yield the same `providerId`, because the UI groups alerts by the
+ * health system they concern -- a dead FHIR grant and a dead portal session are
+ * two alerts about one provider, and the subject string is still there for
+ * anything that needs to tell them apart.
+ */
+const SUBJECT_PREFIXES = ["provider:", "portal:"] as const;
+
+/** The provider id a subject names, or null when it names none. */
+function providerIdOfSubject(subject: string): string | null {
+  for (const prefix of SUBJECT_PREFIXES) {
+    if (subject.startsWith(prefix)) return subject.slice(prefix.length);
+  }
+  return null;
+}
 
 export function toAlertDto(row: AlertRow): AlertDto {
   return {
     id: row.id,
     kind: row.kind,
     subject: row.subject,
-    providerId: row.subject.startsWith(PROVIDER_SUBJECT_PREFIX)
-      ? row.subject.slice(PROVIDER_SUBJECT_PREFIX.length)
-      : null,
+    providerId: providerIdOfSubject(row.subject),
     trelloCardId: row.trello_card_id,
     openedAt: toIso(row.opened_at),
     resolvedAt: isoOrNull(row.resolved_at),

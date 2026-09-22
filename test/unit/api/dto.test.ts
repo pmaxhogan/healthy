@@ -272,6 +272,7 @@ describe("the settings mapping", () => {
         defaultArrivalOffsetMin: 0,
         windowPastDays: 90,
         mcpEnabled: true,
+        portalLoginAttemptLimit: 3,
       }),
     );
     const expected = Object.keys(SETTING_DEFAULTS).filter(
@@ -299,6 +300,9 @@ describe("toRunSummaryDto", () => {
     warningCount: 9,
     filteredView: true,
     backedOff: false,
+    portalVisits: 5,
+    portalSkipped: 2,
+    portalErrors: ["portal_session_expired"],
   };
 
   it("counts an appointment as seen when it was inserted, patched, restored or unchanged", () => {
@@ -338,6 +342,17 @@ describe("toRunSummaryDto", () => {
   it("exposes the distinct warning codes, not just the count", () => {
     expect(toRunSummaryDto(stored).warningCodes).toStrictEqual(["4119", "4101"]);
   });
+
+  it("carries the portal pass's own counts and codes", () => {
+    const dto = toRunSummaryDto(stored);
+
+    expect(dto.portalVisits).toBe(5);
+    expect(dto.portalSkipped).toBe(2);
+    // Deliberately apart from `errors`: a portal session that needs the owner is an
+    // expected state that would otherwise mark every hourly run failed.
+    expect(dto.portalErrors).toStrictEqual(["portal_session_expired"]);
+    expect(dto.errors).not.toContain("portal_session_expired");
+  });
 });
 
 describe("toRunDto", () => {
@@ -361,6 +376,9 @@ describe("toRunDto", () => {
         warningCount: 0,
         filteredView: false,
         backedOff: false,
+        portalVisits: 0,
+        portalSkipped: 0,
+        portalErrors: [],
       },
     });
 

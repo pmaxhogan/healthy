@@ -83,6 +83,9 @@ export function emptySummary(): RunSummary {
     filteredView: false,
     backedOff: false,
     errors: [],
+    portalVisits: 0,
+    portalSkipped: 0,
+    portalErrors: [],
   };
 }
 
@@ -131,7 +134,11 @@ export interface RunStateSnapshot {
 
 function snapshotRunState(state: RunState): RunStateSnapshot {
   return {
-    summary: { ...state.summary, errors: [...state.summary.errors] },
+    summary: {
+      ...state.summary,
+      errors: [...state.summary.errors],
+      portalErrors: [...state.summary.portalErrors],
+    },
     unchanged: state.unchanged,
     warningCodes: [...state.warningCodes],
   };
@@ -140,7 +147,11 @@ function snapshotRunState(state: RunState): RunStateSnapshot {
 function restoreRunState(snapshot: RunStateSnapshot | null | undefined): RunState {
   if (snapshot === null || snapshot === undefined) return newRunState();
   return {
-    summary: { ...snapshot.summary, errors: [...snapshot.summary.errors] },
+    summary: {
+      ...snapshot.summary,
+      errors: [...snapshot.summary.errors],
+      portalErrors: [...snapshot.summary.portalErrors],
+    },
     unchanged: snapshot.unchanged,
     warningCodes: new Set(snapshot.warningCodes),
     unfinished: false,
@@ -166,6 +177,10 @@ function toStoredSummary(state: RunState): RunSummaryInput {
     warningCount: summary.warnings,
     filteredView: summary.filteredView,
     backedOff: summary.backedOff,
+    portalVisits: summary.portalVisits,
+    portalSkipped: summary.portalSkipped,
+    // Already bare codes: the portal pass never puts a provider id in here.
+    portalErrors: [...summary.portalErrors],
   };
 }
 

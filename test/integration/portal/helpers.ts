@@ -1,0 +1,201 @@
+// Scaffolding for the patient-portal integration tests: a fake `PortalAdapter`,
+// and the seeding a portal account needs.
+//
+// ### Why a fake adapter rather than stubbed HTTP
+//
+// The portal is a scrape, and `test/unit/providers/mychart/**` already drives the
+// real client against synthetic HTML -- that is where "does the login POST echo the
+// antiforgery token" belongs. What these suites are about is everything *around*
+// it: the session state machine, the attempt budget, the emailed-code handoff
+// through `mail_inbox`, and the calendar diff. Stubbing at the adapter boundary is
+// what keeps those tests about those things instead of about markup.
+//
+// Nothing here names a real host, organisation, person or timezone. Hosts are
+// `*.example.test` (reserved by RFC 6761), names are invented, and the visits are
+// numbers around invented places.
+
+import { makeRepos } from "../../../worker/db/index.ts";
+import { AppError } from "../../../worker/lib/errors.ts";
+
+import type { Ctx } from "../../../worker/db/client.ts";
+import type {
+  PortalAdapter,
+  PortalClient,
+  PortalVisit,
+  PortalVisitStatus,
+} from "../../../worker/providers/mychart/index.ts";
+
+/** An invented portal host. Never a real one. */
+export const PORTAL_ORIGIN = "https://portal.example.test";
+export const PORTAL_MOUNT = "/MyChart/";
+export const PORTAL_USERNAME = "portal-user";
+export const PORTAL_PASSWORD = "portal-password";
+
+/** What the fake portal will do, and what it recorded. All of it mutable. */
+export interface FakePortal {
+  adapter: PortalAdapter;
+  /** Visits `loadUpcoming` answers with. Assign to change what the portal reports. */
+  visits: PortalVisit[];
+  /** What `isSessionAlive` answers. A sign-in sets it true. */
+  alive: boolean;
+  /** What `login` resolves with, when it does not throw. */
+  loginStatus: "signed_in" | "awaiting_code";
+  /** Thrown by `login` instead of resolving. */
+  loginError: AppError | null;
+  /** Thrown by `loadUpcoming` instead of resolving. */
+  loadError: AppError | null;
+  calls: {
+    logins: number;
+    sendCodes: number;
+    validates: number;
+    loadUpcoming: number;
+    sessionChecks: number;
+  };
+  /** Codes handed to `validate`, so a test can prove which one was submitted. */
+  submitted: string[];
+}
+
+/**
+ * A `PortalAdapter` whose client answers from a mutable script.
+ *
+ * `discover` throws: discovery is exercised against the real adapter and synthetic
+ * HTML in `test/integration/api/portal.test.ts`, and a fake that silently answered
+ * it would make a broken discovery path look tested.
+ */
+export function fakePortal(overrides: Partial<FakePortal> = {}): FakePortal {
+  const state: FakePortal = {
+    adapter: {
+      portal: "mychart",
+      discover: () => {
+        throw new AppError("portal_parse_failed", "the fake adapter does not discover");
+      },
+      client: (_endpoint, jar) => client(jar),
+    },
+    visits: [],
+    alive: true,
+    loginStatus: "awaiting_code",
+    loginError: null,
+    loadError: null,
+    calls: { logins: 0, sendCodes: 0, validates: 0, loadUpcoming: 0, sessionChecks: 0 },
+    submitted: [],
+    ...overrides,
+  };
+
+  function client(jar: PortalClient["jar"]): PortalClient {
+    return {
+      jar,
+      login: () => {
+        state.calls.logins += 1;
+        if (state.loginError !== null) throw state.loginError;
+        // A password that is enough is a live session; a code still to come is not.
+        if (state.loginStatus === "signed_in") state.alive = true;
+        return Promise.resolve(state.loginStatus);
+      },
+      secondaryValidation: {
+        sendCode: () => {
+          state.calls.sendCodes += 1;
+          return Promise.resolve();
+        },
+        validate: (code: string) => {
+          state.calls.validates += 1;
+          state.submitted.push(code);
+          state.alive = true;
+          return Promise.resolve();
+        },
+      },
+      loadUpcoming: () => {
+        state.calls.loadUpcoming += 1;
+        if (state.loadError !== null) throw state.loadError;
+        return Promise.resolve([...state.visits]);
+      },
+      // Not what the calendar sync reads -- the portal is the source for upcoming
+      // visits only, and FHIR is the source for history -- so the fake answers with
+      // nothing rather than pretending to page through a past it has no fixture for.
+      loadPast: () => Promise.resolve([]),
+      isSessionAlive: () => {
+        state.calls.sessionChecks += 1;
+        return Promise.resolve(state.alive);
+      },
+    };
+  }
+
+  return state;
+}
+
+/** One upcoming visit. Everything optional has an invented default. */
+export function portalVisit(overrides: Partial<PortalVisit> & { csn: string }): PortalVisit {
+  return {
+    start: "2026-06-20T14:30:00+00:00",
+    timeZone: "UTC",
+    visitType: "Follow-up",
+    practitioner: "A. Example, MD",
+    department: "Example Clinic",
+    isVideo: false,
+    status: "scheduled" satisfies PortalVisitStatus,
+    ...overrides,
+  };
+}
+
+/**
+ * A portal account in state `active`, with a stored endpoint, credentials and an
+ * (empty but present) cookie jar.
+ *
+ * The jar matters: `hasSession` and the sign-in path both key off it, and an
+ * account with credentials but no jar is a different state.
+ */
+export async function seedPortalAccount(
+  ctx: Ctx,
+  providerId: string,
+  options: { active?: boolean } = {},
+): Promise<void> {
+  const repos = makeRepos(ctx);
+  await repos.portalAccounts.setEndpoint(providerId, {
+    baseUrl: PORTAL_ORIGIN,
+    mountPath: PORTAL_MOUNT,
+    endpoint: {
+      baseUrl: PORTAL_ORIGIN,
+      mountPath: PORTAL_MOUNT,
+      usernameField: "LoginIdentifier",
+      antiforgeryFieldName: "__RequestVerificationToken",
+    },
+  });
+  await repos.portalAccounts.setCredentials(providerId, {
+    username: PORTAL_USERNAME,
+    password: PORTAL_PASSWORD,
+  });
+  await repos.portalAccounts.saveCookieJar(providerId, JSON.stringify({ v: 1, cookies: [] }));
+  if (options.active !== false) await repos.portalAccounts.markActive(providerId);
+}
+
+/**
+ * An unconsumed verification code in the inbox.
+ *
+ * `receivedAt` defaults to one second ahead of the clock, because `takeFreshOtp`
+ * only claims a code that arrived strictly after the `SendCode` call -- a code from
+ * before it belongs to an earlier attempt, and submitting it would fail and burn
+ * this one too.
+ */
+export async function seedOtp(
+  ctx: Ctx,
+  code: string,
+  options: { receivedAt?: number; expiresAt?: number } = {},
+): Promise<void> {
+  await makeRepos(ctx).mailInbox.insert({
+    fromAddr: "no-reply@mail.example.test",
+    subject: "Your verification code",
+    kind: "otp",
+    code,
+    url: null,
+    receivedAt: options.receivedAt ?? ctx.now() + 1,
+    expiresAt: options.expiresAt ?? ctx.now() + 600,
+    rawSize: 512,
+  });
+}
+
+/** Spend `count` sign-in attempts, so the budget check has something to refuse. */
+export async function spendAttempts(ctx: Ctx, providerId: string, count: number): Promise<void> {
+  const repos = makeRepos(ctx);
+  for (let attempt = 0; attempt < count; attempt += 1) {
+    await repos.portalAccounts.recordLoginAttempt(providerId);
+  }
+}

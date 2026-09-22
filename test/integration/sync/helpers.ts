@@ -76,6 +76,7 @@ export function syncEnv(options: TestEnvOptions = {}): Env {
     ASSETS: bindings.ASSETS,
     HEALTHY_MCP: bindings.HEALTHY_MCP,
     FULL_REFRESH: bindings.FULL_REFRESH,
+    PORTAL_SIGNIN: bindings.PORTAL_SIGNIN,
     DEV_MODE: "true",
     DATA_KEY,
     EPIC_CLIENT_ID_PROD: EPIC_CLIENT_ID,
@@ -780,6 +781,8 @@ function capabilityStatement(
 /** Every table, child before parent so the deletes never trip a foreign key. */
 const TABLES = [
   "login_attempts",
+  "mail_inbox",
+  "portal_accounts",
   "mcp_policy",
   "mcp_audit",
   "run_log",

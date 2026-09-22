@@ -10,12 +10,19 @@
  * A ghost is never deleted, so an appointment that vanished upstream stays
  * visible in the owner's history, and `restore` can bring it back if the org
  * un-cancels it.
+ *
+ * `source` and `portal_csn` (0002_portal.sql) exist because the same visit can be
+ * seen twice: the patient portal knows about it as soon as it is booked, and the
+ * FHIR Encounter for it may not appear until afterwards. `rekey` is what happens
+ * when the second sighting arrives -- the portal row becomes the FHIR row, in
+ * place, keeping the Google event it already created rather than ghosting one
+ * appointment and inserting another.
  */
 
 import { all, one, run, sha256Hex } from "../client.ts";
 
 import type { Ctx } from "../client.ts";
-import type { CalendarEventRow, CalendarEventState } from "../rows.ts";
+import type { CalendarEventRow, CalendarEventSource, CalendarEventState } from "../rows.ts";
 
 /** Hex characters of `eventKey`'s digest kept in a log line. Short on purpose:
  * long enough to correlate two lines about the same row, short enough that it
@@ -51,6 +58,10 @@ interface UpsertEvent {
   fingerprint: string;
   /** Unix second the appointment starts, for window queries. */
   startAt?: number | null;
+  /** Which pass wrote this row. Defaults to 'fhir', which is what every row was. */
+  source?: CalendarEventSource;
+  /** The portal's contact-serial number. Only ever set on a 'portal' row. */
+  portalCsn?: string | null;
   /**
    * True when this write is a ghost coming back to life.
    *
@@ -88,8 +99,9 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
           .prepare(
             `INSERT INTO calendar_events
                (event_key, provider_id, encounter_id, calendar_id, google_event_id, fingerprint,
-                state, start_at, first_seen_at, last_seen_at, ghosted_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, NULL, ?)
+                state, start_at, first_seen_at, last_seen_at, ghosted_at, updated_at,
+                source, portal_csn)
+             VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, NULL, ?, ?, ?)
              ON CONFLICT (event_key) DO UPDATE SET
                calendar_id = excluded.calendar_id,
                google_event_id = excluded.google_event_id,
@@ -98,7 +110,12 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
                start_at = excluded.start_at,
                last_seen_at = excluded.last_seen_at,
                ghosted_at = CASE WHEN ? THEN NULL ELSE calendar_events.ghosted_at END,
-               updated_at = excluded.updated_at`,
+               updated_at = excluded.updated_at,
+               -- Provenance moves with the write: a row the adoption in
+               -- portal-sync.ts handed to the FHIR pass is written again as
+               -- 'fhir' and must not still read 'portal' afterwards.
+               source = excluded.source,
+               portal_csn = excluded.portal_csn`,
           )
           .bind(
             input.eventKey,
@@ -111,6 +128,8 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
             at,
             at,
             at,
+            input.source ?? "fhir",
+            input.portalCsn ?? null,
             restoring,
             restoring,
           ),
@@ -126,6 +145,7 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
       options: {
         providerId?: string;
         state?: CalendarEventState;
+        source?: CalendarEventSource;
         startsAfter?: number;
         limit?: number;
       } = {},
@@ -135,6 +155,10 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
       if (options.providerId !== undefined) {
         clauses.push("provider_id = ?");
         values.push(options.providerId);
+      }
+      if (options.source !== undefined) {
+        clauses.push("source = ?");
+        values.push(options.source);
       }
       if (options.state !== undefined) {
         clauses.push("state = ?");
@@ -210,6 +234,61 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
       );
       if (changes > 0) ctx.log.info("calendar_events.restored", await logSafeKey(eventKey));
       return changes > 0;
+    },
+
+    /**
+     * Hand one row to a different event key, keeping its Google event.
+     *
+     * The one caller is the FHIR pass meeting an appointment the portal has
+     * already calendared: one visit under two ids (`<providerId>:csn:<csn>` and
+     * `<providerId>:<encounterId>`). Ghosting the portal row and inserting a FHIR
+     * one would leave the owner looking at a grey "Cancelled:" event beside a live
+     * duplicate of the same appointment, so the row is renamed in place and the
+     * patch that follows rewrites the event's own key marker.
+     *
+     * The fingerprint is cleared on purpose: what is on the calendar was rendered
+     * from the portal's fields, so the FHIR fingerprint cannot describe it and the
+     * diff has to see a change.
+     *
+     * False when the target key already exists -- both sightings have been written
+     * already and there is nothing to move.
+     */
+    async rekey(
+      fromKey: string,
+      toKey: string,
+      input: { encounterId: string; source: CalendarEventSource },
+    ): Promise<boolean> {
+      const existing = await byKey(toKey);
+      if (existing !== null) return false;
+      const { changes } = await run(
+        ctx.db
+          .prepare(
+            `UPDATE calendar_events
+                SET event_key = ?, encounter_id = ?, source = ?, portal_csn = NULL,
+                    fingerprint = '', last_seen_at = ?, updated_at = ?
+              WHERE event_key = ?`,
+          )
+          .bind(toKey, input.encounterId, input.source, ctx.now(), ctx.now(), fromKey),
+      );
+      if (changes > 0) ctx.log.info("calendar_events.rekeyed", await logSafeKey(toKey));
+      return changes > 0;
+    },
+
+    /** How many of one provider's rows came from one pass and are in one state. */
+    async countBySource(
+      providerId: string,
+      source: CalendarEventSource,
+      state: CalendarEventState,
+    ): Promise<number> {
+      const row = await one<{ n: number }>(
+        ctx.db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM calendar_events
+              WHERE provider_id = ? AND source = ? AND state = ?`,
+          )
+          .bind(providerId, source, state),
+      );
+      return row?.n ?? 0;
     },
 
     /**

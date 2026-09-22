@@ -130,6 +130,15 @@ export interface CalendarMapping {
   reportedStart: string;
   /** Minutes the event start was moved earlier. 0 when no offset applies. */
   arrivalOffsetMin: number;
+  /**
+   * The visit's contact-serial number, when the source published one.
+   *
+   * Epic puts the same number on the Encounter that the patient portal reports,
+   * which makes it the one exact way to recognise that a portal visit and a FHIR
+   * Encounter are the same appointment. `worker/sync/portal-sync.ts` is the only
+   * reader; everything else about the mapping is indifferent to it.
+   */
+  csn?: string;
 }
 
 export interface GhostOptions {
@@ -397,6 +406,7 @@ export async function buildCalendarModel(
     offSchedule: OFF_SCHEDULE_STATUSES.has(view.status),
     reportedStart,
     arrivalOffsetMin: offsetMin,
+    ...(view.csn !== undefined && { csn: view.csn }),
   };
 }
 

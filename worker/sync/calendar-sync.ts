@@ -37,6 +37,16 @@
  * hammering a second organisation while the first is throttling us is how an app
  * gets its access reviewed.
  *
+ * **The patient-portal pass runs last, and is a separate module.** The portal
+ * knows about an upcoming visit before Epic's patient-facing FHIR view admits it
+ * exists, so `portal-sync.ts` calendars those and this pass stays the source for
+ * everything else. Two seams connect them, both of which exist to stop one
+ * appointment becoming two events: this pass hands `runPortalPass` the CSNs and
+ * start times it mapped, so the portal can skip what is already calendared; and it
+ * calls `adoptPortalRows` before its own diff, so an Encounter arriving for a visit
+ * the portal calendared weeks ago takes over that row and its calendar entry rather
+ * than inserting a duplicate beside it.
+ *
  * **A row follows its event when the target calendar changes.** An event id is
  * only valid on the calendar it was created on, and the Google listing above is
  * always against the *current* target -- so a row still pointing at the old one
@@ -67,6 +77,7 @@ import { getGoogleCalendarFor } from "./google-tokens.ts";
 import { sha256Hex } from "./hash.ts";
 import { buildCalendarModel, ghostModel } from "./mapping.ts";
 import { eventKeyOf, planChanges } from "./plan.ts";
+import { adoptPortalRows, runPortalPass } from "./portal-sync.ts";
 import { collectEncounterReferences, resolveReferences } from "./references.ts";
 import { emptySummary, record } from "./run.ts";
 import { syncTargets } from "./targets.ts";
@@ -75,6 +86,7 @@ import { getFhirClientFor } from "./tokens.ts";
 import type { SyncDeps } from "./deps.ts";
 import type { CalendarMapping, MappingSettings } from "./mapping.ts";
 import type { PlanCandidate, PlanEntry } from "./plan.ts";
+import type { FhirSighting, PortalPassInput } from "./portal-sync.ts";
 import type { RunState } from "./run.ts";
 import type { SyncTarget } from "./targets.ts";
 import type { Ctx } from "../db/client.ts";
@@ -111,6 +123,26 @@ export interface CalendarSyncOptions {
   trigger?: RunKind;
   /** Ignore (and clear) an active backoff. Only ever set by a human action. */
   force?: boolean;
+  /**
+   * Run only the patient-portal pass, skipping every FHIR search.
+   *
+   * What `POST /api/providers/:id/portal/sync` asks for, through the Durable
+   * Object in `portal-runner.ts`. It is the same run row, the same Google listing
+   * and the same writer -- only the upstream that is not consulted differs -- so
+   * the Runs page reports it exactly like any other manual run.
+   */
+  portalOnly?: boolean;
+  /**
+   * How long the portal pass may wait for an emailed verification code.
+   *
+   * Left alone under cron, which has the wall clock for the full wait and wants
+   * the visits in this run. The Durable Object passes 0: it has already
+   * established the session in its own alarm loop, one ten-second step per
+   * invocation, precisely so that no invocation sleeps for minutes -- and a 0 here
+   * guarantees that a session that died between its check and this pass cannot
+   * start the whole wait over inside one alarm.
+   */
+  signInWaitSeconds?: number;
   /** Test seams; production omits it. See `deps.ts`. */
   deps?: SyncDeps;
 }
@@ -165,6 +197,16 @@ interface RunContext {
   settings: MappingSettings;
   state: RunState;
   deps: SyncDeps;
+  /**
+   * What the FHIR pass mapped, per provider, for the portal pass to dedupe
+   * against.
+   *
+   * Filled in as each provider is synced and read once at the end. It carries the
+   * Encounters' CSNs, which `calendar_events` does not store and which are the one
+   * exact way to tell that a portal visit and an Encounter are the same
+   * appointment.
+   */
+  fhirSeen: Map<string, FhirSighting>;
 }
 
 async function syncAllProviders(
@@ -231,9 +273,13 @@ async function syncAllProviders(
     },
     state,
     deps,
+    fhirSeen: new Map(),
   };
 
-  for (const target of targets) {
+  // Empty for a portal-only run: the Google listing and the run row above are
+  // shared, and only the FHIR searches are skipped.
+  const fhirTargets = options.portalOnly === true ? [] : targets;
+  for (const target of fhirTargets) {
     try {
       await syncProvider(run, target);
       await repos.connections.recordSync(target.connection.id, "calendar");
@@ -255,6 +301,32 @@ async function syncAllProviders(
       return;
     }
   }
+
+  // Last, and after every provider: the portal pass needs to know what the FHIR
+  // pass mapped before it decides which of its visits are already calendared.
+  await runPortalPass(portalInput(run, options));
+}
+
+/** The portal pass's input, from the run context that already holds all of it. */
+function portalInput(run: RunContext, options: CalendarSyncOptions): PortalPassInput {
+  return {
+    ctx: run.ctx,
+    repos: run.repos,
+    calendar: run.calendar,
+    calendarId: run.calendarId,
+    timezone: run.timezone,
+    nowIso: run.nowIso,
+    windowStartSeconds: run.windowStartSeconds,
+    googleEvents: run.googleEvents,
+    settings: run.settings,
+    state: run.state,
+    deps: run.deps,
+    fhirSeen: run.fhirSeen,
+    ...(options.providerIds !== undefined && { providerIds: options.providerIds }),
+    ...(options.signInWaitSeconds !== undefined && {
+      signInWaitSeconds: options.signInWaitSeconds,
+    }),
+  };
 }
 
 /** One provider, from search to calendar writes. */
@@ -293,14 +365,29 @@ async function syncProvider(run: RunContext, target: SyncTarget): Promise<void> 
   run.state.summary.resourcesCached += resolved.resources.length;
 
   const mappings = await mapAppointments(run, target, encounters, resolved.resources);
+  recordSightings(run, providerId, mappings);
   await cacheEncounters(run, providerId, encounters);
 
-  const rows = await windowRows(run, providerId);
-  const followedEvents = await followCalendarMoves(run, providerId, rows);
-  const providerEvents = [
+  const windowed = await windowRows(run, providerId);
+  const followedEvents = await followCalendarMoves(run, providerId, windowed);
+  const listed = [
     ...run.googleEvents.filter((event) => (eventKeyOf(event) ?? "").startsWith(`${providerId}:`)),
     ...followedEvents,
   ];
+
+  // Before the diff, deliberately: a portal row for an appointment this run has an
+  // Encounter for is renamed to the Encounter's key, so what follows patches the
+  // event the portal already created instead of inserting a second one.
+  const adopted = await adoptPortalRows({
+    ctx,
+    repos,
+    providerId,
+    mappings,
+    rows: windowed,
+    events: listed,
+  });
+  const rows = adopted.rows;
+  const providerEvents = adopted.events;
 
   const { candidates, models, ghosts } = await buildCandidates(run, target, mappings, rows);
   const plan = planChanges(rows, providerEvents, candidates, { suppressGhosting: filtered });
@@ -332,6 +419,28 @@ async function syncProvider(run: RunContext, target: SyncTarget): Promise<void> 
   // hour, so the next run succeeds *without* refreshing and would otherwise leave
   // the card open. One SELECT when nothing is open.
   await resolveReconnectAlert(ctx, { providerId }, run.deps);
+}
+
+/**
+ * Remember what this provider's appointments look like, for the portal pass.
+ *
+ * The shifted start rather than the reported one, because that is what
+ * `calendar_events.start_at` holds and what the portal's own mapping produces: the
+ * two sides are then comparable without either having to undo an arrive-early
+ * offset it cannot see.
+ */
+function recordSightings(
+  run: RunContext,
+  providerId: string,
+  mappings: ReadonlyMap<string, CalendarMapping>,
+): void {
+  const csns = new Set<string>();
+  const starts: number[] = [];
+  for (const mapping of mappings.values()) {
+    if (mapping.csn !== undefined) csns.add(mapping.csn);
+    starts.push(fromIso(mapping.model.start));
+  }
+  run.fhirSeen.set(providerId, { csns, starts });
 }
 
 /** Tally warnings on the run and report whether the view was filtered. */
