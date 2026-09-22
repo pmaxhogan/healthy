@@ -22,6 +22,7 @@ import { makeLoginAttemptsRepo } from "./repos/login-attempts.ts";
 import { makeMcpAuditRepo } from "./repos/mcp-audit.ts";
 import { makeMcpPolicyRepo } from "./repos/mcp-policy.ts";
 import { makeOAuthStatesRepo } from "./repos/oauth-states.ts";
+import { makePortalAccountsRepo } from "./repos/portal-accounts.ts";
 import { makeProvidersRepo } from "./repos/providers.ts";
 import { makeRunLogRepo } from "./repos/run-log.ts";
 
@@ -43,6 +44,7 @@ export function makeRepos(ctx: Ctx) {
     mcpPolicy: makeMcpPolicyRepo(ctx),
     runLog: makeRunLogRepo(ctx),
     loginAttempts: makeLoginAttemptsRepo(ctx),
+    portalAccounts: makePortalAccountsRepo(ctx),
   };
 }
 
