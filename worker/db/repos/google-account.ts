@@ -8,8 +8,15 @@
  * The lease mirrors the one on `connections`: Google's refresh tokens survive
  * re-use, but two concurrent refreshes still race to write `access_token_enc`, and
  * the loser can persist a token that has already been superseded.
+ *
+ * And as on `connections`, holding the lease when the refresh began is not enough:
+ * `upsertTokensLeased` puts `lease_owner = ? AND lease_expires_at > now` in the
+ * write's own predicate, so a refresher whose lease expired mid-flight cannot land
+ * a stale access token on top of the winner's. `upsertTokens` -- the consent
+ * callback, which holds no lease -- writes only while no live lease exists.
  */
 
+import { AppError } from "../../lib/errors.ts";
 import { one, run, ttlSeconds } from "../client.ts";
 import { aadFor, openOrNull, seal } from "../crypto.ts";
 
@@ -47,42 +54,76 @@ export function makeGoogleAccountRepo(ctx: Ctx) {
     return row;
   };
 
+  /** One token write, guarded by whatever predicate the caller's lease demands. */
+  const writeTokens = async (
+    patch: GooglePatch,
+    guard: { clause: string; values: unknown[] },
+  ): Promise<GoogleAccountRow | null> => {
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    const put = (column: string, value: unknown): void => {
+      sets.push(`${column} = ?`);
+      values.push(value);
+    };
+
+    if (patch.email !== undefined) {
+      put("email_enc", await seal(ctx.env, patch.email, aad("email_enc")));
+    }
+    if (patch.accessToken !== undefined) {
+      put("access_token_enc", await seal(ctx.env, patch.accessToken, aad("access_token_enc")));
+    }
+    if (patch.refreshToken !== undefined) {
+      put("refresh_token_enc", await seal(ctx.env, patch.refreshToken, aad("refresh_token_enc")));
+    }
+    if (patch.accessExpiresAt !== undefined) put("access_expires_at", patch.accessExpiresAt);
+    if (patch.scope !== undefined) put("scope", patch.scope);
+    if (patch.status !== undefined) put("status", patch.status);
+    put("last_refresh_at", ctx.now());
+    put("updated_at", ctx.now());
+
+    const { changes } = await run(
+      ctx.db
+        .prepare(`UPDATE google_account SET ${sets.join(", ")} WHERE id = ? ${guard.clause}`)
+        .bind(...values, ROW_ID, ...guard.values),
+    );
+    return changes === 0 ? null : read();
+  };
+
   return {
     get: read,
 
     /**
-     * Store whichever fields the caller has, sealed. The status only moves if the
-     * caller passes one; `markConnected()` is the separate step that does that.
+     * Store whichever fields the caller has, sealed, while no refresh is in flight.
+     *
+     * The status only moves if the caller passes one; `markConnected()` is the
+     * separate step that does that. Throws `conflict` when a live lease says a
+     * refresh is mid-flight -- see the module comment.
      */
     async upsertTokens(patch: GooglePatch): Promise<GoogleAccountRow> {
-      const sets: string[] = [];
-      const values: unknown[] = [];
-      const put = (column: string, value: unknown): void => {
-        sets.push(`${column} = ?`);
-        values.push(value);
-      };
+      const row = await writeTokens(patch, {
+        clause: "AND (lease_expires_at IS NULL OR lease_expires_at <= ?)",
+        values: [ctx.now()],
+      });
+      if (row === null) {
+        ctx.log.warn("google.token_write_blocked");
+        throw new AppError("conflict", "a token refresh holds the Google account lease");
+      }
+      return row;
+    },
 
-      if (patch.email !== undefined) {
-        put("email_enc", await seal(ctx.env, patch.email, aad("email_enc")));
-      }
-      if (patch.accessToken !== undefined) {
-        put("access_token_enc", await seal(ctx.env, patch.accessToken, aad("access_token_enc")));
-      }
-      if (patch.refreshToken !== undefined) {
-        put("refresh_token_enc", await seal(ctx.env, patch.refreshToken, aad("refresh_token_enc")));
-      }
-      if (patch.accessExpiresAt !== undefined) put("access_expires_at", patch.accessExpiresAt);
-      if (patch.scope !== undefined) put("scope", patch.scope);
-      if (patch.status !== undefined) put("status", patch.status);
-      put("last_refresh_at", ctx.now());
-      put("updated_at", ctx.now());
-
-      await run(
-        ctx.db
-          .prepare(`UPDATE google_account SET ${sets.join(", ")} WHERE id = ?`)
-          .bind(...values, ROW_ID),
-      );
-      return read();
+    /**
+     * Store tokens under the lease this caller holds.
+     *
+     * `null` means the lease expired or somebody else took it, so the token this
+     * caller obtained must be discarded rather than written over the winner's.
+     */
+    async upsertTokensLeased(owner: string, patch: GooglePatch): Promise<GoogleAccountRow | null> {
+      const row = await writeTokens(patch, {
+        clause: "AND lease_owner = ? AND lease_expires_at > ?",
+        values: [owner, ctx.now()],
+      });
+      if (row === null) ctx.log.warn("google.lease_lost");
+      return row;
     },
 
     async getSecrets(): Promise<GoogleSecrets> {

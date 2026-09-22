@@ -1,8 +1,9 @@
 // CSRF defence for state-changing requests under /api and /auth.
 //
 // Three independent layers, so no single browser quirk is load-bearing:
-//   1. The session cookie is `SameSite=Strict` (session.ts), so a cross-site
-//      request does not carry credentials at all in a current browser.
+//   1. The session cookie is `SameSite=Lax` (session.ts), so a cross-site POST
+//      or subresource request does not carry credentials in a current browser;
+//      only a top-level GET navigation does, and GETs never mutate here.
 //   2. A same-origin proof: `Origin` equal to this origin, or `Sec-Fetch-Site:
 //      same-origin`. Browsers send `Origin` on every POST and refuse to let
 //      script set either header, so a forged cross-site request cannot fake it.

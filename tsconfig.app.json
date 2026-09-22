@@ -1,10 +1,17 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    // ES2023 for the non-mutating array methods (toSorted, findLast): eslint's
+    // unicorn/no-array-sort requires them over the in-place originals, and every
+    // browser that can run this admin UI has had them for years.
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["vite/client"],
     "jsx": "preserve",
     "baseUrl": "."
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "shared/**/*.ts"]
+  // test/spa/** belongs to this project rather than the Node one: those tests
+  // import .vue single-file components, which only vue-tsc can read, and they
+  // need the DOM lib above. Keeping them here is also what gives
+  // typescript-eslint's project service a project for them.
+  "include": ["src/**/*.ts", "src/**/*.vue", "shared/**/*.ts", "test/spa/**/*.ts"]
 }

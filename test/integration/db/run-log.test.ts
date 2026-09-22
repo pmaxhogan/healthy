@@ -27,6 +27,9 @@ describe("run_log.start and finish", () => {
         resources: 0,
         errors: [],
         warnings: [],
+        warningCount: 0,
+        filteredView: false,
+        backedOff: false,
       },
     });
 

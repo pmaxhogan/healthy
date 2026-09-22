@@ -168,14 +168,18 @@ describe("the connection status machine", () => {
     expect(await repos.connections.disconnect(connection.id)).toBe(true);
 
     expect(await repos.connections.getSecrets(connection.id)).toStrictEqual({
-      // The patient id survives: it is not a credential, and re-authorising the
-      // same person should not have to rediscover it.
-      patientFhirId: "p",
+      // The patient id goes with the tokens. It is the one column here that names
+      // a person, and the privacy page says disconnecting revokes what is stored;
+      // rediscovering it on re-authorisation costs one request.
+      patientFhirId: null,
       accessToken: null,
       refreshToken: null,
     });
     await expect(repos.connections.get(connection.id)).resolves.toMatchObject({
       status: "disconnected",
+      scope: null,
+      lease_owner: null,
+      lease_expires_at: null,
     });
   });
 
@@ -288,5 +292,73 @@ describe("the connection lease", () => {
     const repos = testRepos();
 
     expect(await repos.connections.acquireLease("NOPE", "worker-a", 30_000)).toBe(false);
+  });
+});
+
+describe("a token write under the lease", () => {
+  it("refuses the loser whose lease expired while its refresh was in flight", async () => {
+    const time = clock();
+    const repos = testRepos({ now: time.now });
+    const providerId = await seedProvider(repos);
+    const connection = await repos.connections.upsertTokens(providerId, {
+      accessToken: "access-0",
+      refreshToken: "refresh-0",
+    });
+
+    // A takes the lease and posts to a token endpoint that then hangs.
+    expect(await repos.connections.acquireLease(connection.id, "worker-a", 30_000)).toBe(true);
+    // The hang outlasts the TTL, so B takes the lease, refreshes, and stores the
+    // rotated refresh token. Epic's are single-use: refresh-0 is now dead.
+    time.advance(31);
+    expect(await repos.connections.acquireLease(connection.id, "worker-b", 30_000)).toBe(true);
+    expect(
+      await repos.connections.upsertTokensLeased(providerId, "worker-b", {
+        accessToken: "access-b",
+        refreshToken: "refresh-b",
+      }),
+    ).not.toBeNull();
+    const afterWinner = await repos.connections.get(connection.id);
+
+    // A wakes up last. Its write must not land: refresh-b is the only token the
+    // organisation will accept, and overwriting it costs the owner a re-auth.
+    expect(
+      await repos.connections.upsertTokensLeased(providerId, "worker-a", {
+        accessToken: "access-a",
+        refreshToken: "refresh-a",
+      }),
+    ).toBeNull();
+
+    await expect(repos.connections.getSecrets(connection.id)).resolves.toMatchObject({
+      accessToken: "access-b",
+      refreshToken: "refresh-b",
+    });
+    // Nothing at all moved, so the keepalive still sees B's refresh as the last one.
+    await expect(repos.connections.get(connection.id)).resolves.toMatchObject({
+      last_refresh_at: afterWinner?.last_refresh_at,
+      updated_at: afterWinner?.updated_at,
+    });
+  });
+
+  it("refuses an unleased write while a refresh holds the lease, and allows it after", async () => {
+    const time = clock();
+    const repos = testRepos({ now: time.now });
+    const providerId = await seedProvider(repos);
+    const connection = await repos.connections.upsertTokens(providerId, { refreshToken: "r0" });
+    await repos.connections.acquireLease(connection.id, "worker-a", 30_000);
+
+    // The authorization callback holds no lease, so all it can do is refuse.
+    await expect(
+      repos.connections.upsertTokens(providerId, { refreshToken: "from-callback" }),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    // An expired lease blocks nothing: a Worker that died holding one leaves
+    // `lease_owner` set, and reconnecting must not be hostage to it.
+    time.advance(31);
+    await expect(
+      repos.connections.upsertTokens(providerId, { refreshToken: "from-callback" }),
+    ).resolves.toMatchObject({ id: connection.id });
+    await expect(repos.connections.getSecrets(connection.id)).resolves.toMatchObject({
+      refreshToken: "from-callback",
+    });
   });
 });

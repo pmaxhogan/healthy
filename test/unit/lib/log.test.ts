@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AppError } from "../../../worker/lib/errors.ts";
 import {
   errorFields,
+  logLine,
   makeLogger,
   noopLogger,
   redactFields,
@@ -51,8 +52,59 @@ describe("redactString", () => {
     expect(redactString("01JRQ8ZVME000000000000000Z")).toBe("01JRQ8ZVME000000000000000Z");
   });
 
+  it("collapses a JWT, whose dots used to make it invisible to the shape rule", () => {
+    // Epic's access and id tokens are JWTs: three base64url segments, dotted.
+    const jwt = [
+      "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9",
+      "eyJzdWIiOiJlM0x2UUZqeEtnOEFCQ0RFRkdIIn0",
+      "c2lnbmF0dXJlLXRoYXQtaXMtbG9uZy1lbm91Z2gtdG8tbG9va19yZWFs",
+    ].join(".");
+
+    expect(redactString(jwt)).toBe(`[opaque:${String(jwt.length)}]`);
+    // ...and embedded in a sentence, which is how it reaches `errorMessage`.
+    expect(redactString(`token endpoint rejected ${jwt} twice`)).toBe(
+      `token endpoint rejected [opaque:${String(jwt.length)}] twice`,
+    );
+  });
+
+  it("collapses a ya29-style Google token, whose first segment is short", () => {
+    const token = `ya29.${"a0AfH6SMBx".repeat(6)}`;
+
+    expect(redactString(token)).toBe(`[opaque:${String(token.length)}]`);
+    expect(redactString(`stored ${token}`)).toBe(`stored [opaque:${String(token.length)}]`);
+  });
+
+  it("redacts the value of a credential-bearing query parameter", () => {
+    expect(
+      redactString("GET https://healthy.example.test/oauth/callback?code=4/0AbCD_efGH&state=zz11"),
+    ).toBe("GET https://healthy.example.test/oauth/callback?code=[redacted]&state=[redacted]");
+    expect(redactString("redirected to https://example.test/cb#access_token=ya29.short")).toBe(
+      "redirected to https://example.test/cb#access_token=[redacted]",
+    );
+    expect(redactString("refresh failed: token=abc123def")).toBe(
+      "refresh failed: token=[redacted]",
+    );
+  });
+
+  it("collapses a long token embedded in a longer string", () => {
+    expect(redactString(`upstream said ${"Zm9vYmFy_x".repeat(4)} at once`)).toBe(
+      "upstream said [opaque:40] at once",
+    );
+  });
+
   it("leaves ordinary text alone", () => {
     expect(redactString("sync finished, 3 inserted")).toBe("sync finished, 3 inserted");
+  });
+
+  it("leaves a URL's host and a request path readable", () => {
+    // `/` and `:` terminate a run, so the parts of a path stay short enough to
+    // survive -- a redactor that ate the path would make a 500 undebuggable.
+    expect(redactString("/api/providers/01JRQ8ZVME000000000000000Z/refresh-token")).toBe(
+      "/api/providers/01JRQ8ZVME000000000000000Z/refresh-token",
+    );
+    expect(redactString("GET https://fhir.example.test/api/FHIR/R4/Encounter failed")).toBe(
+      "GET https://fhir.example.test/api/FHIR/R4/Encounter failed",
+    );
   });
 });
 
@@ -81,6 +133,21 @@ describe("redactValue", () => {
     expect(redactValue("error_code", "invalid_grant")).toBe("invalid_grant");
     expect(redactValue("statusCode", 503)).toBe(503);
     expect(redactValue("eventState", "ghost")).toBe("ghost");
+  });
+
+  it("redacts a patient or FHIR identifier by key, whatever its shape", () => {
+    // A 24-character Epic id is far below the opaque threshold, so only the key
+    // rule catches it. `providerId` is one of ours and stays readable.
+    // Invented, not read from any record; it is base64url-shaped enough that the
+    // secret scanner takes it for a key, hence the allow.
+    const epicShapedId = "eXY3NzY0NTIzNDU2Nzg5MD"; // gitleaks:allow -- synthetic fixture, not a credential
+    for (const key of ["patientId", "patient_fhir_id", "fhirPatientId", "fhirResourceId"]) {
+      expect(redactValue(key, epicShapedId), key).toBe("[redacted]");
+    }
+    expect(redactValue("providerId", "01JRQ8ZVME000000000000000Z")).toBe(
+      "01JRQ8ZVME000000000000000Z",
+    );
+    expect(redactValue("email", "owner")).toBe("[redacted]");
   });
 
   it("recurses into nested objects and arrays", () => {
@@ -226,6 +293,28 @@ describe("makeLogger", () => {
 function swallow(): void {
   // The spy must not print; anything it captured is asserted on instead.
 }
+
+describe("logLine", () => {
+  it("writes one redacted JSON object, for the handlers with no logger", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(swallow);
+
+    logLine("error", "unhandled", {
+      errorMessage: "Invalid time zone specified: owner@example.test",
+      path: "/api/runs",
+    });
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    const line = JSON.parse(String(spy.mock.calls[0]?.[0])) as Record<string, unknown>;
+    expect(line).toMatchObject({
+      level: "error",
+      event: "unhandled",
+      errorMessage: "Invalid time zone specified: [email]",
+      path: "/api/runs",
+    });
+    expect(line.t).toBeTypeOf("string");
+    spy.mockRestore();
+  });
+});
 
 describe("noopLogger", () => {
   it("writes nothing to the console", () => {

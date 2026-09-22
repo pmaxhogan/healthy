@@ -101,6 +101,10 @@ export function isSettingKey(key: string): key is SettingKey {
  * generic key gives TypeScript a union of parsers, and it cannot see that the
  * parser for key K produces Settings[K]. The mapped type above is what ties the
  * two together, and the runtime check is the schema itself.
+ *
+ * `security/detect-object-injection` warns on both lookups below. Both index a
+ * const map by `K extends SettingKey`, a closed union of literals, so the key can
+ * only be one this module declared.
  */
 export function parseSetting<K extends SettingKey>(key: K, valueJson: string): Settings[K] {
   const schema = settingSchemas[key] as unknown as z.ZodType<Settings[K]>;
@@ -165,8 +169,24 @@ export const runSummarySchema = z.object({
   resources: count,
   /** Stable error codes, one per provider that failed. */
   errors: z.array(z.string()).default([]),
-  /** OperationOutcome codes an org returned, e.g. "4119". */
+  /** OperationOutcome codes an org returned, e.g. "4119" -- which, not how many. */
   warnings: z.array(z.string()).default([]),
+  /**
+   * How many warnings there were, as opposed to how many distinct codes.
+   * One org repeating 4119 for every Encounter is a different situation from one
+   * that said it once, and `warnings` alone cannot tell them apart.
+   */
+  warningCount: count,
+  /**
+   * An organisation served a patient-facing, filtered view of the schedule.
+   *
+   * On the summary rather than derived, because it is the reason a run may have
+   * seen fewer appointments than exist -- and therefore the reason it refused to
+   * ghost anything.
+   */
+  filteredView: z.boolean().default(false),
+  /** The run stopped early, or never started, because of a rate-limit backoff. */
+  backedOff: z.boolean().default(false),
 });
 
 export type RunSummary = z.infer<typeof runSummarySchema>;

@@ -11,17 +11,18 @@
  * login attempt, which is rate-limited, so an attacker pays the cost far more
  * often than the owner does.
  *
- * WebCrypto in workerd caps PBKDF2 iterations, and the cap has moved between
- * runtime releases. A hash minted above the cap cannot be verified, which locks
- * the owner out of the admin UI -- so this value is asserted in
- * test/integration/worker.test.ts. That test runs against the *local* workerd
- * that the test pool bundles, which is strong evidence but not proof about
- * deployed Workers: confirm a login works on the first real deploy before
- * relying on it. If production rejects this cost, `hashPassword(pw, 100_000)`
- * re-mints at the older known-safe count. Do not raise it without the test
- * going green.
+ * WebCrypto in deployed workerd caps PBKDF2 at 100,000 iterations: a hash minted
+ * above that fails with "iteration counts above 100000 are not supported" and
+ * locks the owner out of the admin UI. The local workerd bundled with the test
+ * pool accepts more, which is exactly how a 600,000-iteration hash once passed
+ * every test and then broke the first production login (2026-09-22). So the
+ * cost is pinned to the production cap; do not raise it without proving a real
+ * deploy still accepts it. `verifyPassword` refuses anything below
+ * MIN_PBKDF2_ITERATIONS, which is this same number, and
+ * `MAX_PBKDF2_ITERATIONS` there is the ceiling the login handler checks before it
+ * calls WebCrypto, so an over-cap secret reports itself instead of throwing.
  */
-export const PBKDF2_ITERATIONS = 600_000;
+export const PBKDF2_ITERATIONS = 100_000;
 
 /** Derived key length, in bytes. */
 export const PBKDF2_KEY_BYTES = 32;

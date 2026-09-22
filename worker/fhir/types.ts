@@ -87,9 +87,16 @@ export interface CapabilityIndex {
 /**
  * A non-fatal problem a search reported, flattened for storage and logging.
  *
- * Carries codes and severities only -- `diagnostics` is kept because Epic puts
- * useful operator detail there, but callers must not log it: at some
- * organisations it names the department that filtered a result.
+ * Carries codes and severities only, with one exception.
+ *
+ * @remarks
+ * `diagnostics` is free text from the organisation and is **internal to this
+ * module's callers inside the FHIR layer**: it must never be logged, persisted or
+ * put in an API body. Epic quotes the request URL in it -- which contains the
+ * patient id -- and at some organisations it names the department that filtered a
+ * result. `fhir_sync_state.warnings_json` stores codes and counts, and the run
+ * summary stores codes and a count; neither has a field for this, which is the
+ * property to preserve.
  */
 export interface SearchWarning {
   resourceType: string;
