@@ -39,7 +39,7 @@ Cloudflare Access JWT — verified in the Worker against the team's signing keys
 checking issuer, `aud`, expiry and the email claim, rather than trusting a
 request header — _and_ a password-derived session. Access alone is not treated as
 sufficient, so an Access misconfiguration is not by itself a breach. Sessions are
-HMAC-signed cookies, `SameSite=Strict`, `Secure`, `HttpOnly`. State-changing
+HMAC-signed cookies, `SameSite=Lax`, `Secure`, `HttpOnly`. State-changing
 `/api` calls additionally require a custom header and a same-origin `Origin`
 check. Login attempts are rate-limited per client, keyed by a hash of the IP
 rather than the address itself.

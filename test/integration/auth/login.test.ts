@@ -132,8 +132,8 @@ describe("the gate, with no session", () => {
   });
 
   it("keeps the query string in ?next, because an OAuth callback is nothing without it", async () => {
-    // SameSite=Strict drops the cookie on the cross-site redirect back from a
-    // provider, so the callback itself lands here and must be resumable whole.
+    // If the session expired mid-flow the callback itself lands here and must be
+    // resumable whole.
     const response = await call("/oauth/google/callback?code=abc&state=xyz");
     const html = await response.text();
 
@@ -178,7 +178,7 @@ describe("POST /auth/login", () => {
     expect(cookieHeader).toContain("healthy_session=");
     expect(cookieHeader).toContain("HttpOnly");
     expect(cookieHeader).toContain("Secure");
-    expect(cookieHeader).toContain("SameSite=Strict");
+    expect(cookieHeader).toContain("SameSite=Lax");
     expect(cookieHeader).toContain("Path=/");
   });
 
@@ -348,7 +348,7 @@ describe("POST /auth/logout", () => {
     const cookieHeader = response.headers.get("set-cookie") ?? "";
     expect(cookieHeader).toContain("healthy_session=;");
     expect(cookieHeader).toContain("Max-Age=0");
-    expect(cookieHeader).toContain("SameSite=Strict");
+    expect(cookieHeader).toContain("SameSite=Lax");
   });
 
   it("works from a session that is already gone, so a distrusted cookie can be dropped", async () => {

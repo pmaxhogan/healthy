@@ -7,8 +7,9 @@
  *  1. Cloudflare Access. The requesting client never reaches this page; the owner's
  *    browser does, and Access has already established that it is the owner.
  *  2. The password session, from `ownerGate` in `worker/app.ts`. The GET is a
- *    cross-site navigation, so `SameSite=Strict` withholds the cookie and the gate
- *    answers with the login form carrying `?next=` -- signing in resumes the flow.
+ *    top-level navigation, which the `SameSite=Lax` cookie rides; if the session
+ *    has lapsed the gate answers with the login form carrying `?next=` and
+ *    signing in resumes the flow.
  *  3. Origin check on the POST (`csrfGuard`). An HTML form cannot send a custom
  *    header, so the same-origin proof is the CSRF defence here; see
  *    `worker/auth/csrf.ts`, which lists `/authorize` as header-exempt on purpose.

@@ -15,12 +15,13 @@
 // Access identity and no password session.
 //
 // Every route that DOES live here is gated, and is reached by a top-level browser
-// navigation redirected from a third party. That crosses sites, so the
-// `SameSite=Strict` session cookie is not sent: the gate will answer the callback
-// with the login page, carrying `?next=` set to the full callback URL including
-// its query. Signing in resumes the flow. Do not relax the cookie to `Lax` to
-// avoid that -- the redirect-back is exactly the request `Strict` is there to
-// protect.
+// navigation redirected from a third party. The session cookie is `SameSite=Lax`
+// precisely so that navigation carries it (owner decision, 2026-09-22; `Strict`
+// bounced every callback through the password page). If the session has lapsed
+// the gate answers with the login page carrying `?next=` set to the full callback
+// URL including its query, and signing in resumes the flow. The callback is a
+// GET that mutates nothing until the single-use `state` row is consumed, which
+// is what protects it.
 //
 // Responses are HTML or a 302, never JSON, because every one of them is rendered
 // in the address bar. The exception is the catch-all below: an unknown /oauth path

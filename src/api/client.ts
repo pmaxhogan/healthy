@@ -112,7 +112,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     method,
     headers,
     // Explicit rather than relying on the default: the session cookie is
-    // SameSite=Strict and the whole API depends on it being sent.
+    // SameSite=Lax and the whole API depends on it being sent.
     credentials: "same-origin",
     cache: "no-store",
     ...(options.body !== undefined && { body: JSON.stringify(options.body) }),

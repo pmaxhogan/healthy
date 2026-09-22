@@ -32,9 +32,9 @@ describe("issueSession", () => {
     expect(header).toContain(`Max-Age=${String(SESSION_TTL_SECONDS)}`);
     expect(header).toContain("HttpOnly");
     expect(header).toContain("Secure");
-    // Strict, not Lax: this is half of the CSRF defence, so a downgrade here is a
-    // security change and must fail the suite.
-    expect(header).toContain("SameSite=Strict");
+    // Lax, not None: the cookie must never ride a cross-site POST or subresource
+    // request. A downgrade to None is a security change and must fail the suite.
+    expect(header).toContain("SameSite=Lax");
     expect(header).toContain("Path=/");
   });
 
@@ -152,7 +152,7 @@ describe("clearSessionCookie", () => {
     // so a mismatch here would leave the old cookie in place.
     expect(header).toContain("HttpOnly");
     expect(header).toContain("Secure");
-    expect(header).toContain("SameSite=Strict");
+    expect(header).toContain("SameSite=Lax");
     expect(header).toContain("Path=/");
   });
 });
