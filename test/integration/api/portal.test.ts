@@ -406,6 +406,19 @@ describe("POST /api/providers/:id/portal/sync", () => {
     expect(await json(response)).toStrictEqual({ accepted: true, started: true });
     expect(runner.syncs).toBe(1);
   });
+
+  it("refuses to queue a sync with no credentials to sign in with", async () => {
+    const providerId = await seedProvider();
+    const runner = fakeRunner(fakePortal());
+    usePorts(runner.ports);
+
+    const response = await owner().send("POST", `/api/providers/${providerId}/portal/sync`);
+
+    // Refused here, not inside the alarm: a job that fails there marks the account
+    // `needs_reauth` over a button press that should not have been possible.
+    expect(response.status).toBe(409);
+    expect(runner.syncs).toBe(0);
+  });
 });
 
 describe("DELETE /api/providers/:id/portal", () => {
@@ -431,6 +444,18 @@ describe("DELETE /api/providers/:id/portal", () => {
     const providerId = await seedProvider();
     const response = await owner().send("DELETE", `/api/providers/${providerId}/portal/session`);
     expect(response.status).toBe(404);
+  });
+
+  it("goes with the provider, so a soft delete does not outlive its credentials", async () => {
+    usePorts(idlePorts());
+    const providerId = await seedProvider();
+    await seedPortalAccount(testCtx(), providerId);
+
+    await owner().send("DELETE", `/api/providers/${providerId}`);
+
+    // `providers` is soft-deleted, so the row's ON DELETE CASCADE never fires: the
+    // sealed password and cookie jar have to be cleared by hand or they stay.
+    expect(await testRepos().portalAccounts.get(providerId)).toBeNull();
   });
 
   it("removes the account entirely, and leaves the calendar alone", async () => {

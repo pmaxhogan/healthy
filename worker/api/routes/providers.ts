@@ -14,7 +14,9 @@
  * written are left exactly as they are -- they are the owner's appointment history,
  * and a provider being removed from the admin UI is not a reason to rewrite a
  * year of their calendar. `providers.deleted_at` hides the row; the tokens are
- * destroyed by `connections.disconnect`.
+ * destroyed by `connections.disconnect`, and the portal account with them -- a soft
+ * delete never fires its `ON DELETE CASCADE`, so the credentials have to be cleared
+ * by hand or they outlive the provider.
  *
  * **The long-running actions answer 202, by two different mechanisms.** A calendar
  * sync runs in `waitUntil` after the response. A full refresh cannot: `waitUntil` is
@@ -184,6 +186,11 @@ providersRouter.delete("/:id", async (c) => {
   const connection = await api.repos.connections.getForProvider(row.id);
   if (connection !== null) await api.repos.connections.disconnect(connection.id);
   await api.repos.fhirCache.clearProvider(row.id);
+  // For the same reason the cache is cleared rather than left: a portal login is a
+  // password to a whole medical record, and the row's ON DELETE CASCADE never fires
+  // because a provider is soft-deleted. Leaving the sealed credentials and cookie
+  // jar behind would keep a live key to a system nothing will ever read again.
+  await api.repos.portalAccounts.clear(row.id);
   await closeAlert(api, c.env, providerSubject(row.id));
   // The portal session is a second subject with a second card (see
   // `worker/sync/alerts.ts`), and a provider being removed moots both.

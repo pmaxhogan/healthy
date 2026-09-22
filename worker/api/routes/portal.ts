@@ -109,6 +109,14 @@ async function portalStatus(api: ApiContext, providerId: string): Promise<Portal
   return { ...dto, signIn, lastVisitCount };
 }
 
+/** A 409 when there is no stored login for a job to use. */
+async function requireCredentials(api: ApiContext, providerId: string): Promise<void> {
+  const account = await api.repos.portalAccounts.get(providerId);
+  if ((account?.username_enc ?? null) === null || (account?.password_enc ?? null) === null) {
+    throw new AppError("conflict", "no portal credentials are stored for this provider");
+  }
+}
+
 /** The origin of a URL, or a 400 naming the field rather than the host. */
 function originOf(url: string): string {
   try {
@@ -211,10 +219,7 @@ portalRouter.put("/:id/portal", async (c) => {
 portalRouter.post("/:id/portal/sign-in", async (c) => {
   const api = apiContext(c);
   const row = await requireProvider(api, c.req.param("id"));
-  const account = await api.repos.portalAccounts.get(row.id);
-  if ((account?.username_enc ?? null) === null || (account?.password_enc ?? null) === null) {
-    throw new AppError("conflict", "no portal credentials are stored for this provider");
-  }
+  await requireCredentials(api, row.id);
 
   const limit = await getSetting(api.ctx, "portal_login_attempt_limit");
   const used = await api.repos.portalAccounts.countLoginAttemptsToday(row.id);
@@ -233,6 +238,10 @@ portalRouter.post("/:id/portal/sign-in", async (c) => {
 portalRouter.post("/:id/portal/sync", async (c) => {
   const api = apiContext(c);
   const row = await requireProvider(api, c.req.param("id"));
+  // Refused here rather than in the job: a queued sync with nothing to sign in with
+  // fails inside the alarm, which would mark the account `needs_reauth` over a
+  // button press that should simply not have been possible.
+  await requireCredentials(api, row.id);
   const { started } = await api.ports.portal.startSync(api.ctx, { providerId: row.id });
   return c.json({ accepted: true, started }, 202, NO_STORE);
 });
