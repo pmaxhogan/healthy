@@ -16,6 +16,7 @@ import {
   encounter,
   fhirServer,
   loggedEvent,
+  loggedFields,
   recordingLog,
   referencePool,
   resetSyncDb,
@@ -397,6 +398,21 @@ describe("an event the owner deleted by hand", () => {
       syncRepos(h.ctx).calendarEvents.getByKey(`${h.providerId}:enc-1`),
     ).resolves.toMatchObject({ state: "ghost" });
     expect(loggedEvent(h.lines, "sync.ghost.row_only")).toBe(true);
+
+    // Regression: neither the sync's own ghost log nor the repo's must carry the
+    // upstream encounter id, joined or bare. `providerId` (our row id) and a short
+    // digest are the only identifiers allowed through -- see
+    // `worker/db/repos/calendar-events.ts`'s `logSafeKey` and SECURITY.md, "No PHI
+    // in logs".
+    for (const event of ["sync.ghost.row_only", "calendar_events.ghosted"]) {
+      const fields = loggedFields(h.lines, event);
+      expect(fields.length).toBeGreaterThan(0);
+      for (const line of fields) {
+        const serialized = JSON.stringify(line);
+        expect(serialized).not.toContain(`${h.providerId}:`);
+        expect(serialized).not.toContain("enc-1");
+      }
+    }
   });
 });
 

@@ -12,10 +12,33 @@
  * un-cancels it.
  */
 
-import { all, one, run } from "../client.ts";
+import { all, one, run, sha256Hex } from "../client.ts";
 
 import type { Ctx } from "../client.ts";
 import type { CalendarEventRow, CalendarEventState } from "../rows.ts";
+
+/** Hex characters of `eventKey`'s digest kept in a log line. Short on purpose:
+ * long enough to correlate two lines about the same row, short enough that it
+ * never brushes the redactor's 32-character opaque-string threshold. */
+const LOG_HASH_CHARS = 12;
+
+/**
+ * `providerId` plus a short digest of the full key, for the two log lines below.
+ *
+ * `eventKey` is `<providerId>:<encounterId>` -- the encounter half is Epic's own
+ * resource id. `worker/lib/log.ts`'s redactor cannot catch it there: the `:`
+ * ends an opaque run, so neither half reaches the 32-character threshold, and
+ * the key name matches neither `SENSITIVE_KEY` nor `IDENTIFIER_KEY`. Logging
+ * `providerId` (our own row id) plus a digest of the whole key keeps these
+ * lines correlatable without ever putting the upstream id in Workers Logs. See
+ * SECURITY.md, "No PHI in logs".
+ */
+async function logSafeKey(eventKey: string): Promise<{ providerId: string; eventKeyHash: string }> {
+  const separator = eventKey.indexOf(":");
+  const providerId = separator > 0 ? eventKey.slice(0, separator) : eventKey;
+  const digest = await sha256Hex(eventKey);
+  return { providerId, eventKeyHash: digest.slice(0, LOG_HASH_CHARS) };
+}
 
 interface UpsertEvent {
   /** '<providerId>:<encounterId>', mirrored into extendedProperties.private.key. */
@@ -167,7 +190,7 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
           )
           .bind(options.ghostedAt ?? at, fingerprint, at, at, eventKey, fingerprint),
       );
-      if (changes > 0) ctx.log.info("calendar_events.ghosted", { eventKey });
+      if (changes > 0) ctx.log.info("calendar_events.ghosted", await logSafeKey(eventKey));
       return changes > 0;
     },
 
@@ -185,7 +208,7 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
           )
           .bind(fingerprint ?? null, at, at, eventKey),
       );
-      if (changes > 0) ctx.log.info("calendar_events.restored", { eventKey });
+      if (changes > 0) ctx.log.info("calendar_events.restored", await logSafeKey(eventKey));
       return changes > 0;
     },
 

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { T0, clock, column, resetDb, seedProvider, testRepos } from "./helpers.ts";
+import { T0, clock, column, recordingLog, resetDb, seedProvider, testRepos } from "./helpers.ts";
 
 import type { Repos } from "../../../worker/db/index.ts";
 
@@ -210,6 +210,36 @@ describe("ghosting and restoring", () => {
 
     expect(await repos.calendarEvents.markGhost("nope:nope")).toBe(false);
     expect(await repos.calendarEvents.getByKey("nope:nope")).toBeNull();
+  });
+
+  it("logs the provider id and a digest, never the encounter id, when ghosting or restoring", async () => {
+    // Regression: `eventKey` is `<providerId>:<encounterId>` -- the encounter half
+    // is Epic's own resource id, and the `:` defeats the log redactor's 32-char
+    // opaque-string rule (see worker/lib/log.ts's header and SECURITY.md, "No PHI
+    // in logs"). `calendar_events.ghosted` and `calendar_events.restored` must
+    // carry `providerId` (our own row id) and a short digest instead.
+    const { log, lines } = recordingLog();
+    const repos = testRepos({ log });
+    const providerId = await seedProvider(repos);
+    const row = await seedEvent(repos, providerId, { encounterId: "enc-secret" });
+
+    await repos.calendarEvents.markGhost(row.event_key);
+    await repos.calendarEvents.restore(row.event_key);
+
+    const parsed = lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+    const ghosted = parsed.filter((line) => line.event === "calendar_events.ghosted");
+    const restored = parsed.filter((line) => line.event === "calendar_events.restored");
+    expect(ghosted).toHaveLength(1);
+    expect(restored).toHaveLength(1);
+
+    for (const line of [...ghosted, ...restored]) {
+      expect(line.providerId).toBe(providerId);
+      expect(typeof line.eventKeyHash).toBe("string");
+      expect(line.eventKey).toBeUndefined();
+      const serialized = JSON.stringify(line);
+      expect(serialized).not.toContain("enc-secret");
+      expect(serialized).not.toContain(`${providerId}:`);
+    }
   });
 });
 

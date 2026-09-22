@@ -147,6 +147,13 @@ export function loggedEvent(lines: readonly string[], event: string): boolean {
   return lines.some((line) => (JSON.parse(line) as { event?: string }).event === event);
 }
 
+/** The fields of every recorded line carrying this event name, in order. */
+export function loggedFields(lines: readonly string[], event: string): Record<string, unknown>[] {
+  return lines
+    .map((line) => JSON.parse(line) as { event?: string } & Record<string, unknown>)
+    .filter((parsed) => parsed.event === event);
+}
+
 // ---------------------------------------------------------------------------
 // Seeding
 // ---------------------------------------------------------------------------

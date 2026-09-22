@@ -58,6 +58,7 @@ import { resolveReconnectAlert } from "./alerts.ts";
 import { backoffUntilSeconds, rateLimitOf } from "./backoff.ts";
 import { getCapabilityIndex } from "./discovery.ts";
 import { getGoogleCalendarFor } from "./google-tokens.ts";
+import { sha256Hex } from "./hash.ts";
 import { buildCalendarModel, ghostModel } from "./mapping.ts";
 import { eventKeyOf, planChanges } from "./plan.ts";
 import { collectEncounterReferences, resolveReferences } from "./references.ts";
@@ -570,7 +571,7 @@ async function applyEntry(
       return;
     }
     case "ghost-row-only": {
-      await writeGhostRow(run, entry, rows);
+      await writeGhostRow(run, providerId, entry, rows);
       return;
     }
     default: {
@@ -647,10 +648,20 @@ async function writeGhostPatch(
 
 async function writeGhostRow(
   run: RunContext,
+  providerId: string,
   entry: PlanEntry,
   rows: readonly CalendarEventRow[],
 ): Promise<void> {
-  run.ctx.log.info("sync.ghost.row_only", { eventKey: entry.key, reasonCode: entry.reason });
+  // `entry.key` is `<providerId>:<encounterId>` -- the encounter half is Epic's
+  // own resource id and must not reach Workers Logs (see `calendar-events.ts`'s
+  // `logSafeKey`, which this mirrors; SECURITY.md, "No PHI in logs"). `providerId`
+  // is already in scope here, so only the digest needs computing.
+  const keyDigest = await sha256Hex(entry.key);
+  run.ctx.log.info("sync.ghost.row_only", {
+    providerId,
+    eventKeyHash: keyDigest.slice(0, 12),
+    reasonCode: entry.reason,
+  });
   await run.repos.calendarEvents.markGhost(entry.key, {
     // No Google write happened, so the stored fingerprint must keep describing
     // whatever is actually on the calendar.
