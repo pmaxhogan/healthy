@@ -197,6 +197,41 @@ describe("everything else still reaches Hono", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toStrictEqual({ ok: true });
   });
+
+  it("GET /connectors -- the admin UI's MCP page -- reaches Hono's SPA fallback, not the provider", async () => {
+    // This is the collision the /mcp block above exists to prevent: the admin
+    // page used to sit at /mcp too, and the provider's apiRoute always won,
+    // so a direct load or reload 401'd with an empty body instead of ever
+    // reaching Hono. src/router.ts moved the page to /connectors so the two
+    // can no longer collide.
+    //
+    // Not asserting on what ./dist holds, same as
+    // test/integration/auth/login.test.ts's "reaches the SPA fallback" test:
+    // it is empty on a clean checkout, because `npm run check` runs the tests
+    // before the build. What is under test is that the request got past the
+    // gate to Hono's fallback at all -- the CSP and cache-control it stamps,
+    // and the absence of the provider's bare 401.
+    const cookie = await sessionCookie();
+
+    const response = await gated("/connectors", { headers: { cookie } });
+    await response.text();
+
+    expect(response.status).not.toBe(401);
+    expect(response.headers.get("x-healthy-auth")).toBeNull();
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("content-security-policy")).toContain("default-src 'self'");
+  });
+
+  it("GET /connectors with no session reaches the gate, not the provider's bare 401", async () => {
+    const response = await SELF.fetch(`${ORIGIN}/connectors`);
+
+    // Same discriminator as /mcp above: the provider stamps no CSP at all. Here
+    // Hono answers instead -- 403, because this test env configures no working
+    // Access -- proving /connectors was never claimed by the provider the way
+    // /mcp is.
+    expect(response.headers.get("content-security-policy")).toContain("default-src 'self'");
+    expect(response.status).toBe(403);
+  });
 });
 
 describe("/authorize", () => {

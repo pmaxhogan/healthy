@@ -14,7 +14,7 @@ export const NAV: { path: string; label: string }[] = [
   { path: "/", label: "Overview" },
   { path: "/providers", label: "Providers" },
   { path: "/calendar", label: "Calendar" },
-  { path: "/mcp", label: "MCP" },
+  { path: "/connectors", label: "MCP" },
   { path: "/alerts", label: "Alerts" },
   { path: "/runs", label: "Runs" },
   { path: "/settings", label: "Settings" },
@@ -24,7 +24,12 @@ const routes: RouteRecordRaw[] = [
   { path: "/", name: "overview", component: () => import("./views/OverviewView.vue") },
   { path: "/providers", name: "providers", component: () => import("./views/ProvidersView.vue") },
   { path: "/calendar", name: "calendar", component: () => import("./views/CalendarView.vue") },
-  { path: "/mcp", name: "mcp", component: () => import("./views/McpView.vue") },
+  // Not /mcp: worker/mcp/oauth-config.ts's MCP_API_ROUTE claims that exact path
+  // for the MCP transport itself, ahead of this Hono/SPA app (see
+  // worker/index.ts). An admin page at the same path always lost to it, so a
+  // direct load or reload of /mcp 401'd with an empty body instead of ever
+  // reaching this component. The route name stays "mcp"; only the path moved.
+  { path: "/connectors", name: "mcp", component: () => import("./views/McpView.vue") },
   { path: "/alerts", name: "alerts", component: () => import("./views/AlertsView.vue") },
   { path: "/runs", name: "runs", component: () => import("./views/RunsView.vue") },
   { path: "/settings", name: "settings", component: () => import("./views/SettingsView.vue") },

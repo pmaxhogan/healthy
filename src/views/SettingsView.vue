@@ -71,7 +71,7 @@ async function onToggleMcp(next: boolean): Promise<void> {
           </div>
           <p class="muted">
             Clients, policy rules and the audit log live on the
-            <RouterLink to="/mcp">MCP</RouterLink> page.
+            <RouterLink to="/connectors">MCP</RouterLink> page.
           </p>
         </section>
 

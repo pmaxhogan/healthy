@@ -183,7 +183,7 @@ async function runSyncNow(): Promise<void> {
           <div class="row">
             <h2>MCP</h2>
             <span class="chip">{{ overview.data.value.mcp.enabled ? "enabled" : "disabled" }}</span>
-            <RouterLink class="btn small spacer" to="/mcp">Manage</RouterLink>
+            <RouterLink class="btn small spacer" to="/connectors">Manage</RouterLink>
           </div>
           <dl class="facts">
             <div>
