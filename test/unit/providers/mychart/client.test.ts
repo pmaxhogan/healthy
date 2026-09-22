@@ -21,9 +21,12 @@ import {
   HOST,
   html,
   json,
+  HOME_PAGE_WITH_INNOCENT_MARKERS,
   LOGIN_LOCKED_PAGE,
   LOGIN_PAGE_ENCODED_TOKEN,
+  LOGIN_PAGE_WITH_INNOCENT_MARKERS,
   LOGIN_REJECTED_PAGE,
+  LOGIN_REJECTED_WITH_INNOCENT_MARKERS,
   loginPageNew,
   loginPageOld,
   MOUNT,
@@ -167,6 +170,19 @@ describe("login", () => {
     });
 
     await expect(codeOf(client(stub).login(CREDENTIALS))).resolves.toBe("portal_locked");
+  });
+
+  it("calls a wrong password a wrong password, even on a form full of innocent markers", async () => {
+    // `disabled` on the submit button and a reCAPTCHA tag in the head are both
+    // ordinary. Reading either as "locked" would stop the retry loop for the day
+    // over a typo.
+    const stub = routed({
+      "GET /MyChart/Authentication/Login": () => html(LOGIN_PAGE_WITH_INNOCENT_MARKERS),
+      "POST /MyChart/Authentication/Login/DoLogin": () =>
+        html(LOGIN_REJECTED_WITH_INNOCENT_MARKERS),
+    });
+
+    await expect(codeOf(client(stub).login(CREDENTIALS))).resolves.toBe("portal_login_failed");
   });
 
   it("reports portal_bot_blocked for a 429, carrying its Retry-After", async () => {
@@ -499,6 +515,15 @@ describe("loadUpcoming", () => {
 describe("isSessionAlive", () => {
   it("is true when an authenticated page answers", async () => {
     const stub = signedInPortal();
+
+    await expect(client(stub).isSessionAlive()).resolves.toBe(true);
+  });
+
+  it("is true on a signed-in page that links to two-step settings and can change a password", async () => {
+    // A `SecondaryValidation` link and a password input are both things a real
+    // chart page carries. Either one read as a marker would make every
+    // authenticated call report a pending code or a dead session.
+    const stub = routed({ "GET /MyChart/Home": () => html(HOME_PAGE_WITH_INNOCENT_MARKERS) });
 
     await expect(client(stub).isSessionAlive()).resolves.toBe(true);
   });

@@ -135,6 +135,44 @@ export const LOGIN_PAGE_ENCODED_TOKEN = `<!doctype html><html><body>
   </form>
 </body></html>`;
 
+/**
+ * A login page that carries the two things that most look like trouble and are
+ * not: a reCAPTCHA script tag (present on plenty of login pages that never show
+ * a challenge) and a `disabled` attribute (present on nearly every form). A
+ * marker list that matched either as a substring would abandon discovery, or
+ * report a locked account, on a page that is simply a login form.
+ */
+export const LOGIN_PAGE_WITH_INNOCENT_MARKERS = `<!doctype html><html><head>
+  <script src="https://www.example-captcha.test/recaptcha/api.js"></script>
+</head><body>
+  <form action="/MyChart/Authentication/Login/DoLogin" method="post">
+    <input type="hidden" name="__RequestVerificationToken" value="${TOKEN}" />
+    <input type="text" name="LoginIdentifier" value="" />
+    <input type="password" name="Password" value="" />
+    <div class="g-recaptcha" data-sitekey="synthetic"></div>
+    <button type="submit" disabled>Sign in</button>
+  </form>
+</body></html>`;
+
+/** The same page re-rendered after a wrong password. Still not a locked account. */
+export const LOGIN_REJECTED_WITH_INNOCENT_MARKERS = LOGIN_PAGE_WITH_INNOCENT_MARKERS.replace(
+  "<body>",
+  `<body><p class="error">The information you entered is incorrect. Please try again.</p>`,
+);
+
+/**
+ * A signed-in page that mentions the two-step settings and carries a
+ * change-password form -- neither of which means the session is gone.
+ */
+export const HOME_PAGE_WITH_INNOCENT_MARKERS = `<!doctype html><html><body>
+  <h1>Your chart</h1>
+  <nav><a href="/MyChart/Profile/SecondaryValidation">Two-step verification</a></nav>
+  <form action="/MyChart/Profile/ChangePassword" method="post">
+    <input type="password" name="Password" value="" />
+    <button type="submit" disabled>Change</button>
+  </form>
+</body></html>`;
+
 /** A vanity host that redirects with a script rather than a header. */
 export const SCRIPT_REDIRECT_PAGE = `<!doctype html><html><head><script>
   window.location.href = "${HOST}/prd/Authentication/Login";

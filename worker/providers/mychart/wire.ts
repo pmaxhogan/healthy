@@ -201,31 +201,62 @@ export const STATUS_PRIORITY: readonly { status: PortalVisitStatus; keys: readon
  * they were matched against is dropped immediately.
  */
 export const MARKERS = {
-  /** The page is the login form (so an authenticated call was bounced). */
-  loginForm: ["authentication/login/dologin", 'name="password"', "name='password'"],
-  /** The page is the two-step challenge: signed in as far as the password goes. */
-  secondaryValidation: ["secondaryvalidation", "twofactorcode"],
-  /** The credentials were wrong. */
-  badCredentials: [
-    "incorrect",
-    "not recognized",
-    "not recognised",
-    "invalid username",
-    "try again",
+  /**
+   * The page is the login form, so an authenticated call was bounced to it.
+   *
+   * The form's own action and its two possible username fields -- not a bare
+   * password input. A signed-in chart page can carry a change-password form, and
+   * matching `name="password"` would make every authenticated call read as an
+   * expired session.
+   */
+  loginForm: [
+    "authentication/login/dologin",
+    'name="loginidentifier"',
+    "name='loginidentifier'",
+    'name="username"',
+    "name='username'",
   ],
-  /** The account is locked or deactivated: stop trying. */
-  locked: ["locked", "deactivated", "disabled", "too many"],
+  /**
+   * The page is the two-step challenge: signed in as far as the password goes.
+   *
+   * The challenge form's action rather than the bare word, because a signed-in
+   * page with a link to the two-step *settings* would otherwise make every
+   * authenticated call look like a pending code.
+   */
+  secondaryValidation: ["secondaryvalidation/validate", "twofactorcode"],
+  /**
+   * The request was refused, used only to decide whether a `SendCode` variant
+   * was accepted. `"try again"` is deliberately absent: a *successful* response
+   * that says "didn't get it? try again in 60 seconds" would otherwise be read
+   * as a refusal and send the owner five emails.
+   */
+  badCredentials: ["incorrect", "not recognized", "not recognised", "invalid username"],
+  /**
+   * The account is locked or deactivated: stop trying.
+   *
+   * Phrases, never bare words. `"locked"` is inside `"unlocked"`, and
+   * `"disabled"` is an HTML attribute on nearly every re-rendered form -- either
+   * one as a substring would turn an ordinary wrong password into
+   * `portal_locked`, which by design stops the retry loop for the day.
+   */
+  locked: [
+    "account has been locked",
+    "account is locked",
+    "temporarily locked",
+    "has been disabled",
+    "has been deactivated",
+    "too many",
+  ],
   /** The emailed code was wrong or stale. */
   badCode: ["code you entered", "invalid code", "incorrect code", "expired"],
-  /** A WAF or bot wall answered instead of the application. */
-  challenge: [
-    "captcha",
-    "are you a human",
-    "unusual traffic",
-    "request blocked",
-    "access denied",
-    "cf-browser-verification",
-  ],
+  /**
+   * A WAF or bot wall answered instead of the application.
+   *
+   * Distinctive phrases only. `"captcha"` is absent on purpose: a login page can
+   * carry a reCAPTCHA script tag while showing no challenge at all, and matching
+   * it would abandon discovery before a single mount had been tried.
+   */
+  challenge: ["are you a human", "unusual traffic", "request blocked", "cf-browser-verification"],
 } as const;
 
 /**

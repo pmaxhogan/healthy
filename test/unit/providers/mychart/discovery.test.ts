@@ -16,6 +16,7 @@ import {
 import {
   ALIAS,
   CHALLENGE_PAGE,
+  LOGIN_PAGE_WITH_INNOCENT_MARKERS,
   HOST,
   loginPageNew,
   loginPageOld,
@@ -161,6 +162,20 @@ describe("discoverPortal", () => {
     });
 
     await expect(discoverPortal(HOST, deps(stub))).resolves.toMatchObject({ mountPath: "/prd/" });
+  });
+
+  it("is not fooled by a login page that merely carries a reCAPTCHA tag", async () => {
+    // The commonest false positive there is: plenty of login pages load the
+    // script and never show a challenge. Reading that as a bot block would
+    // abandon discovery before a single mount had been tried.
+    const stub = routed({
+      "GET /MyChart/Authentication/Login": () => html(LOGIN_PAGE_WITH_INNOCENT_MARKERS),
+    });
+
+    await expect(discoverPortal(HOST, deps(stub))).resolves.toMatchObject({
+      mountPath: "/MyChart/",
+      usernameField: "LoginIdentifier",
+    });
   });
 
   it("reports portal_bot_blocked for a 403 and stops probing", async () => {
