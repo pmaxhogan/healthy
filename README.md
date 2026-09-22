@@ -151,6 +151,28 @@ secret is read from the `PROVIDER_CLIENT_SECRET` environment variable, or
 from stdin if that is unset, so it is never a command-line argument or in
 shell history, and the command never prints it back.
 
+A patient-portal login, where one is configured, is stored the same way and for
+the same reasons: sealed in D1 per organisation, never a Worker secret, and
+never readable back out of the admin UI. The portal is a scrape rather than an
+API, so the row also holds the mount the login page was discovered at and a
+sealed cookie jar — which carries the "trust this device" cookie, and is
+therefore treated as being exactly as sensitive as the password. `npm run
+set-portal-credentials -- --provider <id> --remote` is the no-browser
+equivalent of the admin UI's portal card. The username comes from
+`PORTAL_USERNAME` or the first line of stdin and the password from
+`PORTAL_PASSWORD` or the rest of it, so neither is ever a command-line argument
+or in shell history:
+
+```sh
+{ echo "$portal_user"; echo "$portal_pass"; } |
+  npm run set-portal-credentials -- --provider <id> --remote
+```
+
+Storing credentials this way resets the session state and drops any stored
+cookie jar, because a changed password invalidates whatever the old session
+was. With `--local`, run `npm run migrate:local` first or the table will not
+exist yet.
+
 ### 4. Run it
 
 ```sh
