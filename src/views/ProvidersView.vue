@@ -41,7 +41,7 @@ async function reloadProviders(): Promise<void> {
       :loading="providers.loading.value || settings.loading.value"
       :error="providers.error.value ?? settings.error.value"
       :empty="list.length === 0"
-      empty-text="No providers yet. Search for a health system above to add the first one."
+      empty-text="No providers yet. Search for a health system above, or enter a FHIR base URL manually, to add the first one."
       loading-text="Loading providers…"
       @retry="reloadProviders"
     >

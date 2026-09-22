@@ -12,7 +12,14 @@
 
 import { z } from "zod";
 
+import { isHttpsUrl } from "@shared/url.ts";
+
 import type { SetProviderSecretRequest } from "@shared/types.ts";
+
+// Re-exported so `test/unit/api/schemas.test.ts` -- and anything else that
+// already imports the predicate from here -- keeps working. The definition
+// itself lives in shared/url.ts because the SPA needs the exact same rule.
+export { isHttpsUrl } from "@shared/url.ts";
 
 /** Matches an offset like `+05:00`, which Intl accepts but which is not a zone. */
 const OFFSET_ZONE = /^[+-]/;
@@ -41,17 +48,6 @@ export function isValidTimezone(zone: string): boolean {
   } catch {
     return false;
   }
-}
-
-/** An absolute https URL. Everything this app talks to is https, without exception. */
-export function isHttpsUrl(value: string): boolean {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return false;
-  }
-  return url.protocol === "https:";
 }
 
 const httpsUrl = z.string().min(1).max(2048).refine(isHttpsUrl, { error: "must be an https URL" });

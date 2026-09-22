@@ -7,6 +7,7 @@ import { SEARCH_DEBOUNCE_MS } from "../../src/lib/debounce.ts";
 import { brand, fakeResponse, installFakeApi, provider } from "./helpers.ts";
 
 import type { FakeFetch } from "./helpers.ts";
+import type { DOMWrapper } from "@vue/test-utils";
 
 function searchCalls(api: FakeFetch): string[] {
   return api.calls.filter((call) => call.url.startsWith("/api/brands")).map((call) => call.url);
@@ -180,5 +181,130 @@ describe("AddProviderForm", () => {
     await flushPromises();
     expect(wrapper.text()).toContain("brands unavailable");
     expect(wrapper.find('input[type="search"]').exists()).toBe(true);
+  });
+
+  describe("manual FHIR base URL entry", () => {
+    type Wrapper = ReturnType<typeof mount>;
+
+    // Fixed field order inside the manual block: display name, FHIR base URL,
+    // client secret, patient portal URL. Nothing else in that template renders
+    // a bare <input>.
+    function manualInputs(wrapper: Wrapper): {
+      displayName: DOMWrapper<Element>;
+      fhirBaseUrl: DOMWrapper<Element>;
+      clientSecret: DOMWrapper<Element>;
+      portalUrl: DOMWrapper<Element>;
+    } {
+      const [displayName, fhirBaseUrl, clientSecret, portalUrl] = wrapper.findAll("input");
+      if (!displayName || !fhirBaseUrl || !clientSecret || !portalUrl) {
+        throw new Error("manual entry did not render its four fields");
+      }
+      return { displayName, fhirBaseUrl, clientSecret, portalUrl };
+    }
+
+    async function toManualMode(wrapper: Wrapper): Promise<void> {
+      await wrapper
+        .findAll("button")
+        .find((b) => b.text() === "Enter a FHIR base URL manually")
+        ?.trigger("click");
+    }
+
+    /** Fills the two required fields with a valid, synthetic endpoint. */
+    async function fillRequired(wrapper: Wrapper): Promise<void> {
+      const { displayName, fhirBaseUrl } = manualInputs(wrapper);
+      await displayName.setValue("Example Health");
+      await fhirBaseUrl.setValue("https://fhir.example.test/api/FHIR/R4");
+    }
+
+    it("swaps the brands search for the manual fields, and back, without searching", async () => {
+      const wrapper = mountForm();
+      await toManualMode(wrapper);
+      expect(wrapper.find('input[type="search"]').exists()).toBe(false);
+      expect(wrapper.text()).toContain("FHIR base URL");
+
+      await wrapper
+        .findAll("button")
+        .find((b) => b.text() === "Search health systems instead")
+        ?.trigger("click");
+      expect(wrapper.find('input[type="search"]').exists()).toBe(true);
+      expect(searchCalls(api)).toHaveLength(0);
+    });
+
+    it("hints at an https URL and keeps the submit button disabled until the URL is one", async () => {
+      const wrapper = mountForm();
+      await toManualMode(wrapper);
+      const { displayName, fhirBaseUrl } = manualInputs(wrapper);
+      await displayName.setValue("Example Health");
+      // eslint-disable-next-line unicorn/prefer-https -- the assertion IS that http is refused.
+      await fhirBaseUrl.setValue("http://fhir.example.test/api/FHIR/R4");
+      await fhirBaseUrl.trigger("blur");
+
+      expect(wrapper.text()).toContain("Must be an https URL");
+      expect(wrapper.find("button.primary").attributes("disabled")).toBeDefined();
+      expect(api.calls.some((call) => call.method === "POST")).toBe(false);
+    });
+
+    it("posts the manual FHIR base URL with no brandId", async () => {
+      const wrapper = mountForm();
+      await toManualMode(wrapper);
+      await fillRequired(wrapper);
+      await wrapper.find("button.primary").trigger("click");
+      await flushPromises();
+
+      const created = api.calls.find((call) => call.method === "POST");
+      expect(created?.url).toBe("/api/providers");
+      expect(JSON.parse(created?.body ?? "null")).toEqual({
+        displayName: "Example Health",
+        fhirBaseUrl: "https://fhir.example.test/api/FHIR/R4",
+        environment: "prod",
+      });
+    });
+
+    it("carries the optional secret, portal and a non-default environment when they are filled in", async () => {
+      const wrapper = mountForm();
+      await toManualMode(wrapper);
+      await fillRequired(wrapper);
+      const { clientSecret, portalUrl } = manualInputs(wrapper);
+      await clientSecret.setValue("a-secret");
+      await portalUrl.setValue("https://portal.example.test");
+      await wrapper.find("select").setValue("sandbox");
+      await wrapper.find("button.primary").trigger("click");
+      await flushPromises();
+
+      const created = api.calls.find((call) => call.method === "POST");
+      expect(JSON.parse(created?.body ?? "null")).toEqual({
+        displayName: "Example Health",
+        fhirBaseUrl: "https://fhir.example.test/api/FHIR/R4",
+        environment: "sandbox",
+        clientSecret: "a-secret",
+        portalUrl: "https://portal.example.test",
+      });
+    });
+
+    it("carries the CSRF header on a manual create", async () => {
+      const wrapper = mountForm();
+      await toManualMode(wrapper);
+      await fillRequired(wrapper);
+      await wrapper.find("button.primary").trigger("click");
+      await flushPromises();
+
+      const created = api.calls.find((call) => call.method === "POST");
+      expect(created?.headers.get("x-healthy-csrf")).toBe("1");
+    });
+
+    it("emits the created provider and resets the manual fields", async () => {
+      const wrapper = mountForm();
+      await toManualMode(wrapper);
+      await fillRequired(wrapper);
+      await wrapper.find("button.primary").trigger("click");
+      await flushPromises();
+
+      expect(wrapper.emitted("created")).toEqual([
+        [{ id: "prov-1", displayName: "Example Health" }],
+      ]);
+      const { displayName, fhirBaseUrl } = manualInputs(wrapper);
+      expect((displayName.element as HTMLInputElement).value).toBe("");
+      expect((fhirBaseUrl.element as HTMLInputElement).value).toBe("");
+    });
   });
 });

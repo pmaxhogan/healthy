@@ -39,6 +39,27 @@ describe("ProviderEditor", () => {
     api = installFakeApi({ "/api/providers*": () => fakeResponse({ body: provider() }) });
   });
 
+  // A regression guard for a bug this exact shape would produce: if Connect or
+  // Reconnect were ever written as a <RouterLink> instead of a plain <a>, the
+  // stubbed RouterLink here would render as <router-link-stub>, not <a>, and
+  // these lookups would fail -- so a router-intercepted OAuth start link is
+  // caught here rather than only by a live click going nowhere.
+  it("renders Reconnect as a real anchor at the connection's reconnect path", () => {
+    const wrapper = mountEditor();
+    const link = wrapper.find('a[href^="/reconnect"]');
+    expect(link.exists()).toBe(true);
+    expect(link.attributes("href")).toBe("/reconnect/conn-1");
+    expect(link.text()).toBe("Reconnect");
+  });
+
+  it("renders Connect as a real anchor at the epic start route when there is no connection yet", () => {
+    const wrapper = mountEditor(provider({ connection: null }));
+    const link = wrapper.find('a[href^="/oauth/epic/start"]');
+    expect(link.exists()).toBe(true);
+    expect(link.attributes("href")).toBe("/oauth/epic/start?provider=prov-1");
+    expect(link.text()).toBe("Connect");
+  });
+
   it("saves with PATCH, not PUT", async () => {
     await save(mountEditor());
     expect(lastMutation(api)?.method).toBe("PATCH");
