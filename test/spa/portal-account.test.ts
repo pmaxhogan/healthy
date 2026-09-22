@@ -208,6 +208,38 @@ describe("PortalAccountCard: credentials", () => {
       "username",
     ]);
   });
+
+  it("includes mfaContact in the payload when filled, and omits it when blank", async () => {
+    const { wrapper, api } = await mountLoaded({ get: () => portalAccount({ baseUrl: null }) });
+
+    await wrapper.find("input[autocomplete='username']").setValue("alice");
+    await wrapper.find('input[type="password"]').setValue("hunter2");
+    await wrapper.find('input[type="email"]').setValue("owner@example.test");
+    const saveButton = wrapper.findAll("button").find((b) => b.text() === "Save");
+    await saveButton?.trigger("click");
+    await flushPromises();
+
+    const put = api.calls.find((call) => call.url === PORTAL_PATH && call.method === "PUT");
+    expect(JSON.parse(put?.body ?? "null")).toEqual({
+      username: "alice",
+      password: "hunter2",
+      mfaContact: "owner@example.test",
+    });
+  });
+
+  it("omits mfaContact from the payload when it is left blank", async () => {
+    const { wrapper, api } = await mountLoaded({ get: () => portalAccount({ baseUrl: null }) });
+
+    await wrapper.find("input[autocomplete='username']").setValue("alice");
+    await wrapper.find('input[type="password"]').setValue("hunter2");
+    const saveButton = wrapper.findAll("button").find((b) => b.text() === "Save");
+    await saveButton?.trigger("click");
+    await flushPromises();
+
+    const put = api.calls.find((call) => call.url === PORTAL_PATH && call.method === "PUT");
+    const payload = JSON.parse(put?.body ?? "null") as Record<string, unknown>;
+    expect(payload.mfaContact).toBeUndefined();
+  });
 });
 
 describe("PortalAccountCard: sign-in polling", () => {

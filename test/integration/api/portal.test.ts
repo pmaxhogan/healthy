@@ -151,6 +151,7 @@ describe("GET /api/providers/:id/portal", () => {
       mountPath: null,
       hasCredentials: false,
       hasSession: false,
+      hasMfaContact: false,
       state: "none",
       lastLoginAt: null,
       lastOkAt: null,
@@ -223,6 +224,66 @@ describe("PUT /api/providers/:id/portal", () => {
     const secrets = await testRepos().portalAccounts.getSecrets(providerId);
     expect(secrets?.username).toBe(PORTAL_USERNAME);
     expect(secrets?.password).toBe(PORTAL_PASSWORD);
+  });
+
+  it("stores the MFA contact when supplied, sealed and never echoed", async () => {
+    usePorts({ ...idlePorts(), fetch: htmlStub(LOGIN_PAGE).fetchImpl });
+    const providerId = await seedProvider();
+    const mfaContact = "owner@example.test";
+
+    const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
+      baseUrl: PORTAL_ORIGIN,
+      mountHint: PORTAL_MOUNT,
+      username: PORTAL_USERNAME,
+      password: PORTAL_PASSWORD,
+      mfaContact,
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(body).not.toContain(mfaContact);
+    const dto = JSON.parse(body) as PortalAccountStatusDto;
+    expect(dto.hasMfaContact).toBe(true);
+
+    const secrets = await testRepos().portalAccounts.getSecrets(providerId);
+    expect(secrets?.mfaContact).toBe(mfaContact);
+  });
+
+  it("leaves a stored MFA contact alone when the PUT omits it", async () => {
+    usePorts({ ...idlePorts(), fetch: htmlStub(LOGIN_PAGE).fetchImpl });
+    const providerId = await seedProvider();
+    const mfaContact = "owner@example.test";
+    await owner().send("PUT", `/api/providers/${providerId}/portal`, {
+      baseUrl: PORTAL_ORIGIN,
+      mountHint: PORTAL_MOUNT,
+      username: PORTAL_USERNAME,
+      password: PORTAL_PASSWORD,
+      mfaContact,
+    });
+
+    await owner().send("PUT", `/api/providers/${providerId}/portal`, {
+      baseUrl: PORTAL_ORIGIN,
+      username: PORTAL_USERNAME,
+      password: "a-new-password",
+    });
+
+    const secrets = await testRepos().portalAccounts.getSecrets(providerId);
+    expect(secrets?.mfaContact).toBe(mfaContact);
+  });
+
+  it("rejects a malformed MFA contact", async () => {
+    usePorts({ ...idlePorts(), fetch: htmlStub(LOGIN_PAGE).fetchImpl });
+    const providerId = await seedProvider();
+
+    const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
+      baseUrl: PORTAL_ORIGIN,
+      mountHint: PORTAL_MOUNT,
+      username: PORTAL_USERNAME,
+      password: PORTAL_PASSWORD,
+      mfaContact: "not-an-email",
+    });
+
+    expect(response.status).toBe(400);
   });
 
   it("stores the whole discovery result, not just the two columns", async () => {

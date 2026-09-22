@@ -5,6 +5,11 @@
 //   PORTAL_USERNAME=<user> npm run set-portal-credentials -- --provider <id> --remote
 //   npm run set-portal-credentials -- --provider <id> --local     # both from stdin
 //
+// `--mfa-contact` additionally sets the address (from PORTAL_MFA_CONTACT) the
+// portal should email a verification code to, for the rare deployment whose
+// login response does not say. Optional, and left alone unless the flag is
+// given -- most accounts never need it.
+//
 // Why this exists: the admin UI's portal card is how this is normally set, but
 // that path needs a browser session, and a portal password -- which is a login
 // to a whole medical record, not an API credential -- should not be typed into
@@ -50,6 +55,8 @@ type Target = "--remote" | "--local";
 interface CliArgs {
   providerId: string;
   target: Target;
+  /** Also write `mfa_contact_enc` from `PORTAL_MFA_CONTACT`. */
+  mfaContact: boolean;
 }
 
 function printUsage(): void {
@@ -63,10 +70,14 @@ function printUsage(): void {
       "  --local           Write to the local D1 database used by `wrangler dev`.",
       "                    Run `npm run migrate:local` first, or the table will",
       "                    not exist. Exactly one of --remote / --local is required.",
+      "  --mfa-contact     Also set the address (from PORTAL_MFA_CONTACT) the portal",
+      "                    should email a verification code to. Optional; omit to",
+      "                    leave whatever is already stored unchanged.",
       "",
       "The username is read from PORTAL_USERNAME, or the first line of stdin.",
       "The password is read from PORTAL_PASSWORD, or the remaining lines of stdin.",
-      "Neither is ever a command-line argument.",
+      "Neither is ever a command-line argument. Same for --mfa-contact's address,",
+      "which comes only from PORTAL_MFA_CONTACT.",
     ].join("\n"),
   );
 }
@@ -89,6 +100,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   let providerId: string | null = null;
   let remote = false;
   let local = false;
+  let mfaContact = false;
 
   const remaining = [...argv];
   for (let flag = remaining.shift(); flag !== undefined; flag = remaining.shift()) {
@@ -105,6 +117,10 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         local = true;
         continue;
       }
+      case "--mfa-contact": {
+        mfaContact = true;
+        continue;
+      }
       default: {
         throw new Error(`unrecognized argument: ${flag}`);
       }
@@ -119,7 +135,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     // this always writes to a real database, so the target is never inferred.
     throw new Error("exactly one of --remote or --local is required");
   }
-  return { providerId, target: remote ? "--remote" : "--local" };
+  return { providerId, target: remote ? "--remote" : "--local", mfaContact };
 }
 
 /** Drains stdin to EOF and returns it as text, with no encoding surprises. */
@@ -243,7 +259,7 @@ function providerExists(id: string, target: Target): boolean {
 }
 
 /**
- * The AADs the two columns are sealed under.
+ * The AADs the three columns are sealed under.
  *
  * These must equal `aad(...)` in `worker/db/repos/portal-accounts.ts` byte for
  * byte, or a value this script writes is illegible to the Worker. See
@@ -256,6 +272,10 @@ export function portalUsernameAad(providerId: string): string {
 
 export function portalPasswordAad(providerId: string): string {
   return aadFor("portal_accounts", "password_enc", providerId);
+}
+
+export function portalMfaContactAad(providerId: string): string {
+  return aadFor("portal_accounts", "mfa_contact_enc", providerId);
 }
 
 function checkEnvelope(sealed: string): string {
@@ -294,13 +314,22 @@ export async function sealPortalCredentials(
  * Success is confirmed with a SELECT rather than by trusting `meta.changes`: a
  * local D1 only ever reports `meta.duration` for a write, so checking that field
  * would make this refuse every local write it just made.
+ *
+ * `mfaContactEnc` is omitted from the statement entirely when null -- not set to
+ * SQL `NULL` -- so a run without `--mfa-contact` leaves an already-stored value
+ * alone instead of wiping it on every credential rotation.
  */
 function writeCredentials(
   id: string,
   sealed: { username: string; password: string },
+  mfaContactEnc: string | null,
   updatedAt: number,
   target: Target,
 ): void {
+  const mfaColumn = mfaContactEnc === null ? "" : ", mfa_contact_enc";
+  const mfaValue = mfaContactEnc === null ? "" : `, '${mfaContactEnc}'`;
+  const mfaSet = mfaContactEnc === null ? "" : ", mfa_contact_enc = excluded.mfa_contact_enc";
+
   runWrangler([
     "d1",
     "execute",
@@ -309,8 +338,8 @@ function writeCredentials(
     "--json",
     "--command",
     `INSERT INTO portal_accounts
-       (provider_id, username_enc, password_enc, session_state, updated_at)
-     VALUES ('${id}', '${sealed.username}', '${sealed.password}', 'none', ${String(updatedAt)})
+       (provider_id, username_enc, password_enc, session_state, updated_at${mfaColumn})
+     VALUES ('${id}', '${sealed.username}', '${sealed.password}', 'none', ${String(updatedAt)}${mfaValue})
      ON CONFLICT (provider_id) DO UPDATE SET
        username_enc = excluded.username_enc,
        password_enc = excluded.password_enc,
@@ -318,7 +347,7 @@ function writeCredentials(
        session_state = 'none',
        last_error_code = NULL,
        needs_reauth_since = NULL,
-       updated_at = excluded.updated_at`,
+       updated_at = excluded.updated_at${mfaSet}`,
   ]);
 
   const stdout = runWrangler([
@@ -328,14 +357,15 @@ function writeCredentials(
     target,
     "--json",
     "--command",
-    `SELECT username_enc, password_enc, updated_at FROM portal_accounts WHERE provider_id = '${id}'`,
+    `SELECT username_enc, password_enc, mfa_contact_enc, updated_at FROM portal_accounts WHERE provider_id = '${id}'`,
   ]);
   const row = rowsFromD1Json(stdout)[0];
   const wroteExpectedValue =
     isRecord(row) &&
     row.username_enc === sealed.username &&
     row.password_enc === sealed.password &&
-    row.updated_at === updatedAt;
+    row.updated_at === updatedAt &&
+    (mfaContactEnc === null || row.mfa_contact_enc === mfaContactEnc);
   if (!wroteExpectedValue) {
     throw new Error("write did not take effect: the row does not read back what was written");
   }
@@ -355,12 +385,21 @@ async function main(): Promise<void> {
   const dataKey = resolveDataKey();
   const sealed = await sealPortalCredentials(dataKey, args.providerId, credentials);
 
+  let sealedMfaContact: string | null = null;
+  if (args.mfaContact) {
+    const contact = process.env.PORTAL_MFA_CONTACT ?? "";
+    if (contact === "") throw new Error("--mfa-contact requires PORTAL_MFA_CONTACT to be set");
+    sealedMfaContact = checkEnvelope(
+      await seal(dataKey, contact, portalMfaContactAad(args.providerId)),
+    );
+  }
+
   const targetLabel = args.target === "--remote" ? "remote" : "local";
   if (!providerExists(args.providerId, args.target)) {
     throw new Error(`no provider with id ${args.providerId} in the ${targetLabel} database`);
   }
 
-  writeCredentials(args.providerId, sealed, nowSeconds(), args.target);
+  writeCredentials(args.providerId, sealed, sealedMfaContact, nowSeconds(), args.target);
 
   console.log(`${args.providerId} updated`);
 }

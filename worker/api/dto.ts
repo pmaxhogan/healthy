@@ -256,6 +256,7 @@ export function toSettingsDto(settings: Settings): SettingsDto {
     syncBackoffUntil: isoOrNull(settings.sync_backoff_until),
     mcpEnabled: settings.mcp_enabled,
     portalLoginAttemptLimit: settings.portal_login_attempt_limit,
+    portalApiBasePath: settings.portal_api_base_path,
   };
 }
 

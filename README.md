@@ -154,14 +154,17 @@ shell history, and the command never prints it back.
 A patient-portal login, where one is configured, is stored the same way and for
 the same reasons: sealed in D1 per organisation, never a Worker secret, and
 never readable back out of the admin UI. The portal is a scrape rather than an
-API, so the row also holds the mount the login page was discovered at and a
+API, so the row also holds the mount the login page was discovered at, a
 sealed cookie jar — which carries the "trust this device" cookie, and is
-therefore treated as being exactly as sensitive as the password. `npm run
+therefore treated as being exactly as sensitive as the password — and,
+optionally, an address to email a verification code to, for the rare
+deployment whose own login flow will not say. `npm run
 set-portal-credentials -- --provider <id> --remote` is the no-browser
 equivalent of the admin UI's portal card. The username comes from
 `PORTAL_USERNAME` or the first line of stdin and the password from
 `PORTAL_PASSWORD` or the rest of it, so neither is ever a command-line argument
-or in shell history:
+or in shell history; add `--mfa-contact` (with `PORTAL_MFA_CONTACT` set) to
+also set that email address:
 
 ```sh
 { echo "$portal_user"; echo "$portal_pass"; } |
@@ -200,9 +203,11 @@ Then, in the admin UI: add your health systems and connect each one
 
 For a health system that also has a patient portal, the **Providers** page
 shows a **MyChart portal** card under that provider: a portal login URL
-(prefilled when one is already known), a username and a password. Save it,
-then **Sign in now** — the card polls while the sign-in is in progress and
-shows what it is waiting on.
+(prefilled when one is already known), a username, a password and,
+optionally, an email address to send verification codes to when it differs
+from the login — most deployments never need that last field. Save it, then
+**Sign in now** — the card polls while the sign-in is in progress and shows
+what it is waiting on.
 
 If the portal asks for an emailed verification code, that code has to reach
 this Worker, not just your inbox: set up the one-time Gmail forwarding filter

@@ -177,6 +177,7 @@ export function settings(overrides: Partial<SettingsDto> = {}): SettingsDto {
     syncBackoffUntil: null,
     mcpEnabled: true,
     portalLoginAttemptLimit: 3,
+    portalApiBasePath: null,
     ...overrides,
   };
 }
@@ -254,6 +255,7 @@ export function portalAccount(
     mountPath: "/MyChart",
     hasCredentials: true,
     hasSession: true,
+    hasMfaContact: false,
     state: "active",
     lastLoginAt: "2026-09-21T06:00:00.000Z",
     lastOkAt: "2026-09-21T11:07:00.000Z",

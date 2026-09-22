@@ -163,6 +163,7 @@ export const portalAccountSchema: z.ZodType<PutPortalAccountRequest> = z.strictO
   password: z.string().min(1).max(1000),
   baseUrl: httpsUrl.optional(),
   mountHint: z.string().min(1).max(200).optional(),
+  mfaContact: z.email().max(320).optional(),
 });
 
 /** `PUT /api/mail/settings`. Replaces the whole allowlist -- there is only one field. */

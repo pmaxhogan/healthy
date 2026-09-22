@@ -59,7 +59,11 @@ import { openReconnectAlert } from "./alerts.ts";
 
 import type { SyncDeps } from "./deps.ts";
 import type { Ctx } from "../db/client.ts";
-import type { PortalClient, PortalEndpoint } from "../providers/mychart/index.ts";
+import type {
+  PortalClient,
+  PortalCustomSettings,
+  PortalEndpoint,
+} from "../providers/mychart/index.ts";
 import type { PortalSignInPhase } from "@shared/types.ts";
 
 /** How long to wait for the emailed code before giving up. */
@@ -164,10 +168,22 @@ export async function openPortalSession(
     stored === null
       ? fallbackEndpoint(row.base_url, row.mount_path)
       : (stored as unknown as PortalEndpoint);
+  // The two values a `custom_oidc` deployment may need and the endpoint alone
+  // cannot always supply -- see `PortalAdapterDeps.custom`'s own comment in
+  // `worker/providers/mychart/index.ts`. Built here, not in the adapter, because
+  // both live outside `worker/providers/mychart/**`: one is a stored setting, the
+  // other a sealed column. Harmless to build unconditionally -- the classic
+  // client ignores it entirely.
+  const shellApiBasePath = await getSetting(ctx, "portal_api_base_path");
+  const custom: PortalCustomSettings = {
+    apiBasePath: endpoint.apiBasePath ?? shellApiBasePath ?? undefined,
+    mfaContact: secrets?.mfaContact ?? undefined,
+  };
   const client = adapter.client(endpoint, jar, {
     fetchImpl: deps.fetchImpl,
     logger: ctx.log,
     now: ctx.now,
+    custom,
   });
 
   return {

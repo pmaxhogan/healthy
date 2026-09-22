@@ -24,7 +24,8 @@ import type { AppError } from "../../../worker/lib/errors.ts";
 
 const CREDENTIALS = { username: "portal-login", password: "portal-password" };
 const ENDPOINT = { baseUrl: "https://portal.example.test", mountPath: "/MyChart/" };
-const SEALED_COLUMNS = ["username_enc", "password_enc", "cookie_jar_enc"];
+const MFA_CONTACT = "owner@example.test";
+const SEALED_COLUMNS = ["username_enc", "password_enc", "cookie_jar_enc", "mfa_contact_enc"];
 
 beforeEach(resetDb);
 
@@ -50,6 +51,7 @@ describe("portalAccounts.setCredentials", () => {
       username: CREDENTIALS.username,
       password: CREDENTIALS.password,
       cookieJar: null,
+      mfaContact: null,
     });
 
     for (const column of ["username_enc", "password_enc"]) {
@@ -102,6 +104,39 @@ describe("portalAccounts.setCredentials", () => {
       username: "b",
     });
   });
+
+  it("seals the MFA contact when supplied, and leaves it alone when omitted", async () => {
+    const repos = testRepos();
+    const providerId = await seedProvider(repos);
+
+    await repos.portalAccounts.setCredentials(providerId, {
+      ...CREDENTIALS,
+      mfaContact: MFA_CONTACT,
+    });
+
+    await expect(repos.portalAccounts.getSecrets(providerId)).resolves.toMatchObject({
+      mfaContact: MFA_CONTACT,
+    });
+    await expect(repos.portalAccounts.dto(providerId)).resolves.toMatchObject({
+      hasMfaContact: true,
+    });
+    const raw = await rawColumn(
+      "portal_accounts",
+      "mfa_contact_enc",
+      "provider_id = ?",
+      providerId,
+    );
+    expect(raw?.startsWith("v1:")).toBe(true);
+    expect(raw).not.toContain("owner");
+
+    // A later credential change with no `mfaContact` leaves the stored value be --
+    // a password rotation is not a reason to forget where the codes go.
+    await repos.portalAccounts.setCredentials(providerId, { username: "b", password: "c" });
+
+    await expect(repos.portalAccounts.getSecrets(providerId)).resolves.toMatchObject({
+      mfaContact: MFA_CONTACT,
+    });
+  });
 });
 
 describe("portalAccounts sealing", () => {
@@ -121,7 +156,10 @@ describe("portalAccounts sealing", () => {
     const dataKey = OTHER_DATA_KEY;
     const repos = testRepos({ dataKey });
     const providerId = await seedProvider(repos);
-    await repos.portalAccounts.setCredentials(providerId, CREDENTIALS);
+    await repos.portalAccounts.setCredentials(providerId, {
+      ...CREDENTIALS,
+      mfaContact: MFA_CONTACT,
+    });
     await repos.portalAccounts.saveCookieJar(providerId, '{"v":1,"cookies":[]}');
 
     for (const column of SEALED_COLUMNS) {
@@ -315,7 +353,11 @@ describe("portalAccounts.dto", () => {
   it("says whether there are credentials and a session without revealing either", async () => {
     const repos = testRepos();
     const providerId = await seedProvider(repos);
-    await repos.portalAccounts.setCredentials(providerId, { ...CREDENTIALS, ...ENDPOINT });
+    await repos.portalAccounts.setCredentials(providerId, {
+      ...CREDENTIALS,
+      ...ENDPOINT,
+      mfaContact: MFA_CONTACT,
+    });
     await repos.portalAccounts.saveCookieJar(providerId, '{"v":1,"cookies":[]}');
     await repos.portalAccounts.markActive(providerId);
     await repos.portalAccounts.recordLoginAttempt(providerId);
@@ -328,6 +370,7 @@ describe("portalAccounts.dto", () => {
       mountPath: ENDPOINT.mountPath,
       hasCredentials: true,
       hasSession: true,
+      hasMfaContact: true,
       state: "active",
       lastLoginAt: "2026-01-01T00:00:00.000Z",
       lastOkAt: "2026-01-01T00:00:00.000Z",
@@ -337,6 +380,7 @@ describe("portalAccounts.dto", () => {
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
     expect(JSON.stringify(dto)).not.toContain("portal-password");
+    expect(JSON.stringify(dto)).not.toContain(MFA_CONTACT);
   });
 
   it("reports yesterday's attempt count as zero", async () => {

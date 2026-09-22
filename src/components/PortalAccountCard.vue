@@ -36,9 +36,10 @@ interface Draft {
   baseUrl: string;
   username: string;
   password: string;
+  mfaContact: string;
 }
 
-const draft = reactive<Draft>({ baseUrl: "", username: "", password: "" });
+const draft = reactive<Draft>({ baseUrl: "", username: "", password: "", mfaContact: "" });
 const seeded = ref(false);
 
 // Seeds the base URL once the account has loaded, from whatever it already has
@@ -67,6 +68,7 @@ const confirmingRemove = ref(false);
 
 const hasCredentials = computed(() => portal.account.data.value?.hasCredentials ?? false);
 const hasSession = computed(() => portal.account.data.value?.hasSession ?? false);
+const hasMfaContact = computed(() => portal.account.data.value?.hasMfaContact ?? false);
 const state = computed(() => portal.account.data.value?.state ?? "none");
 // `data.value` can be null (nothing has loaded yet); once it is not, `signIn`
 // is always present -- `GET .../portal` synthesizes a default rather than
@@ -109,11 +111,13 @@ async function onSave(): Promise<void> {
   const baseUrl = draft.baseUrl.trim();
   const username = draft.username;
   const password = draft.password;
+  const mfaContact = draft.mfaContact.trim();
   const ok = await save.run(async () => {
     const saved = await endpoints.savePortalAccount(props.providerId, {
       username,
       password,
       ...(baseUrl !== "" && { baseUrl }),
+      ...(mfaContact !== "" && { mfaContact }),
     });
     portal.account.set(saved);
     toastSuccess("Portal login saved.");
@@ -127,6 +131,7 @@ async function onSave(): Promise<void> {
 
   draft.username = "";
   draft.password = "";
+  draft.mfaContact = "";
 }
 
 async function onSignIn(): Promise<void> {
@@ -196,6 +201,16 @@ async function onRemove(): Promise<void> {
             type="password"
             autocomplete="new-password"
             placeholder="new password"
+          />
+        </label>
+        <label class="field">
+          Email for verification codes (if different from your username)
+          <span class="muted">{{ hasMfaContact ? "stored" : "not set" }}</span>
+          <input
+            v-model="draft.mfaContact"
+            type="email"
+            autocomplete="off"
+            placeholder="optional"
           />
         </label>
       </div>

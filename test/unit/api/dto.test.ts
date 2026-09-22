@@ -262,6 +262,9 @@ describe("the settings mapping", () => {
     // does not cover. `mail_sender_allowlist` is edited through
     // `PUT /api/mail/settings` instead, the same way `SettingsPatch` itself
     // never grew a field for anything the /mcp or /providers routes own.
+    // `portal_api_base_path` has no route at all -- it names no organisation
+    // that a default could disclose, is needed by almost no deployment, and is
+    // set directly in D1 (see `worker/db/schemas.ts`'s comment on it).
     const writable = Object.keys(
       fromSettingsPatch({
         timezone: "UTC",
@@ -276,7 +279,10 @@ describe("the settings mapping", () => {
       }),
     );
     const expected = Object.keys(SETTING_DEFAULTS).filter(
-      (key) => key !== "sync_backoff_until" && key !== "mail_sender_allowlist",
+      (key) =>
+        key !== "sync_backoff_until" &&
+        key !== "mail_sender_allowlist" &&
+        key !== "portal_api_base_path",
     );
 
     expect(writable.toSorted(alphabetical)).toStrictEqual(expected.toSorted(alphabetical));

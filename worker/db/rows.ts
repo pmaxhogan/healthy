@@ -206,7 +206,7 @@ export interface MailInboxRow {
 /**
  * One portal account per provider (0002_portal.sql).
  *
- * Three sealed columns, all bound to `portal_accounts.<column>.<providerId>`.
+ * Four sealed columns, all bound to `portal_accounts.<column>.<providerId>`.
  * `cookie_jar_enc` is a whole serialised cookie jar rather than one value: the
  * trust-this-device cookie inside it is what lets a later run skip the emailed
  * code, so it is exactly as sensitive as the password.
@@ -228,6 +228,11 @@ export interface PortalAccountRow {
   endpoint_json: string | null;
   username_enc: string | null;
   password_enc: string | null;
+  /**
+   * Where the portal should email a verification code, when its own login
+   * response does not say (0004). NULL for every account that never needed it.
+   */
+  mfa_contact_enc: string | null;
   cookie_jar_enc: string | null;
   session_state: PortalSessionState;
   last_login_at: number | null;

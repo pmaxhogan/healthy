@@ -31,6 +31,7 @@ describe("GET /api/settings", () => {
       syncBackoffUntil: null,
       mcpEnabled: true,
       portalLoginAttemptLimit: 3,
+      portalApiBasePath: null,
     });
   });
 

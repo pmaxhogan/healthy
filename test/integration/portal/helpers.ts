@@ -20,6 +20,7 @@ import { AppError } from "../../../worker/lib/errors.ts";
 import type { Ctx } from "../../../worker/db/client.ts";
 import type {
   PortalAdapter,
+  PortalAdapterDeps,
   PortalClient,
   PortalVisit,
   PortalVisitStatus,
@@ -53,6 +54,14 @@ export interface FakePortal {
   };
   /** Codes handed to `validate`, so a test can prove which one was submitted. */
   submitted: string[];
+  /**
+   * The deps every `adapter.client(...)` call received, oldest first.
+   *
+   * What proves `openPortalSession` builds and passes `custom` -- the sign-in
+   * path opens a fresh client on more than one occasion in a single run, so this
+   * is a log, not a single slot.
+   */
+  clientDeps: PortalAdapterDeps[];
 }
 
 /**
@@ -69,7 +78,10 @@ export function fakePortal(overrides: Partial<FakePortal> = {}): FakePortal {
       discover: () => {
         throw new AppError("portal_parse_failed", "the fake adapter does not discover");
       },
-      client: (_endpoint, jar) => client(jar),
+      client: (_endpoint, jar, deps) => {
+        state.clientDeps.push(deps);
+        return client(jar);
+      },
     },
     visits: [],
     alive: true,
@@ -78,6 +90,7 @@ export function fakePortal(overrides: Partial<FakePortal> = {}): FakePortal {
     loadError: null,
     calls: { logins: 0, sendCodes: 0, validates: 0, loadUpcoming: 0, sessionChecks: 0 },
     submitted: [],
+    clientDeps: [],
     ...overrides,
   };
 
@@ -146,7 +159,7 @@ export function portalVisit(overrides: Partial<PortalVisit> & { csn: string }): 
 export async function seedPortalAccount(
   ctx: Ctx,
   providerId: string,
-  options: { active?: boolean } = {},
+  options: { active?: boolean; mfaContact?: string; apiBasePath?: string } = {},
 ): Promise<void> {
   const repos = makeRepos(ctx);
   await repos.portalAccounts.setEndpoint(providerId, {
@@ -157,11 +170,13 @@ export async function seedPortalAccount(
       mountPath: PORTAL_MOUNT,
       usernameField: "LoginIdentifier",
       antiforgeryFieldName: "__RequestVerificationToken",
+      ...(options.apiBasePath !== undefined && { apiBasePath: options.apiBasePath }),
     },
   });
   await repos.portalAccounts.setCredentials(providerId, {
     username: PORTAL_USERNAME,
     password: PORTAL_PASSWORD,
+    ...(options.mfaContact !== undefined && { mfaContact: options.mfaContact }),
   });
   await repos.portalAccounts.saveCookieJar(providerId, JSON.stringify({ v: 1, cookies: [] }));
   if (options.active !== false) await repos.portalAccounts.markActive(providerId);

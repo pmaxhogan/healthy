@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   parseArgs,
+  portalMfaContactAad,
   portalPasswordAad,
   portalUsernameAad,
   sealPortalCredentials,
@@ -34,10 +35,15 @@ describe("portal credential AADs", () => {
       aadFor("portal_accounts", "password_enc", PROVIDER_ID),
     );
     expect(portalUsernameAad(PROVIDER_ID)).toBe(`portal_accounts.username_enc.${PROVIDER_ID}`);
+    expect(portalMfaContactAad(PROVIDER_ID)).toBe(
+      aadFor("portal_accounts", "mfa_contact_enc", PROVIDER_ID),
+    );
   });
 
-  it("differ between the two columns, so neither opens the other", () => {
+  it("differ between the columns, so none opens another", () => {
     expect(portalUsernameAad(PROVIDER_ID)).not.toBe(portalPasswordAad(PROVIDER_ID));
+    expect(portalUsernameAad(PROVIDER_ID)).not.toBe(portalMfaContactAad(PROVIDER_ID));
+    expect(portalPasswordAad(PROVIDER_ID)).not.toBe(portalMfaContactAad(PROVIDER_ID));
   });
 });
 
@@ -118,10 +124,20 @@ describe("parseArgs", () => {
     expect(parseArgs(["--provider", PROVIDER_ID, "--remote"])).toEqual({
       providerId: PROVIDER_ID,
       target: "--remote",
+      mfaContact: false,
     });
     expect(parseArgs(["--provider", PROVIDER_ID, "--local"])).toEqual({
       providerId: PROVIDER_ID,
       target: "--local",
+      mfaContact: false,
+    });
+  });
+
+  it("sets mfaContact when --mfa-contact is given", () => {
+    expect(parseArgs(["--provider", PROVIDER_ID, "--remote", "--mfa-contact"])).toEqual({
+      providerId: PROVIDER_ID,
+      target: "--remote",
+      mfaContact: true,
     });
   });
 

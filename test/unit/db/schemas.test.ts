@@ -51,6 +51,9 @@ describe("the settings catalogue", () => {
       // Three, chosen against the portal's own lockout rather than against our
       // convenience. A setting so live QA can raise it for an afternoon.
       portal_login_attempt_limit: 3,
+      // No default is possible: absent for almost every deployment, and there is
+      // no admin UI for it -- set directly in D1 for the rare account that needs it.
+      portal_api_base_path: null,
     });
   });
 

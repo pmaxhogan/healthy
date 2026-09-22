@@ -1,0 +1,17 @@
+-- Healthy: a place to store where an emailed verification code should go, when
+-- the portal's own login flow will not say.
+--
+-- Apply with `npm run migrate:local` (Miniflare) or `npm run migrate:remote`
+-- (production) BEFORE deploying code that depends on it.
+--
+-- Most deployments hand the code's destination back in the login response, and
+-- the sign-in reads it from there -- see `worker/providers/mychart/custom-oidc/
+-- client.ts`. Some do not, and for those the owner has to say once, up front,
+-- which address the portal should be sending to. Sealed exactly like
+-- `username_enc` and `password_enc`, with the AAD bound to
+-- `portal_accounts.mfa_contact_enc.<providerId>`, because an email address read
+-- from a health record is exactly the kind of value this table exists to protect.
+--
+-- Nullable, with no default: most accounts never set this, and the sign-in falls
+-- back to whatever the portal's own login response volunteers.
+ALTER TABLE portal_accounts ADD COLUMN mfa_contact_enc TEXT;

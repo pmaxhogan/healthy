@@ -14,6 +14,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { setSetting } from "../../../worker/db/settings.ts";
 import { AppError } from "../../../worker/lib/errors.ts";
 import { runCalendarSync } from "../../../worker/sync/calendar-sync.ts";
 import {
@@ -320,6 +321,54 @@ describe("portal sessions", () => {
     // The code is single use: nothing may claim it twice.
     const again = await syncRepos(fix.ctx).mailInbox.takeFreshOtp({ since: 0, now: T0 });
     expect(again).toBeNull();
+  });
+
+  it("passes the shell API base and the MFA contact to the adapter when signing in", async () => {
+    const ctx = syncCtx();
+    const provider = await seedConnectedProvider(ctx, { host: HOST });
+    await seedGoogle(ctx);
+    await seedSettings(ctx);
+    // Falls back to the setting: the account's own endpoint never learned one.
+    await setSetting(ctx, "portal_api_base_path", "/api/shell/v1");
+    await seedPortalAccount(ctx, provider.providerId, {
+      mfaContact: "owner@example.test",
+    });
+    const portal = fakePortal({ alive: false, loginStatus: "awaiting_code" });
+    await seedOtp(ctx, "135790");
+    const upstreams = stubUpstreams({ [HOST]: fhirServer({ patientId: provider.patientId }) });
+
+    await runCalendarSync(ctx, {
+      trigger: "manual",
+      portalOnly: true,
+      deps: { ...upstreams.deps, portalAdapter: portal.adapter },
+    });
+
+    expect(portal.clientDeps.length).toBeGreaterThan(0);
+    for (const deps of portal.clientDeps) {
+      expect(deps.custom).toStrictEqual({
+        apiBasePath: "/api/shell/v1",
+        mfaContact: "owner@example.test",
+      });
+    }
+  });
+
+  it("prefers the endpoint's own API base over the settings fallback", async () => {
+    const ctx = syncCtx();
+    const provider = await seedConnectedProvider(ctx, { host: HOST });
+    await seedGoogle(ctx);
+    await seedSettings(ctx);
+    await setSetting(ctx, "portal_api_base_path", "/from/settings");
+    await seedPortalAccount(ctx, provider.providerId, { apiBasePath: "/from/endpoint" });
+    const portal = fakePortal({ alive: true, visits: [] });
+    const upstreams = stubUpstreams({ [HOST]: fhirServer({ patientId: provider.patientId }) });
+
+    await runCalendarSync(ctx, {
+      trigger: "manual",
+      portalOnly: true,
+      deps: { ...upstreams.deps, portalAdapter: portal.adapter },
+    });
+
+    expect(portal.clientDeps.at(-1)?.custom?.apiBasePath).toBe("/from/endpoint");
   });
 
   it("marks the account and opens one reconnect card when the code never arrives", async () => {

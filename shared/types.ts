@@ -104,6 +104,16 @@ export interface SettingsDto {
    * our convenience.
    */
   portalLoginAttemptLimit: number;
+  /**
+   * The patient-portal login shell's API path prefix, when the deployment needs
+   * one and discovery could not learn it on its own.
+   *
+   * Null for almost every deployment: the value normally comes out of discovery
+   * and is stored on the account's own endpoint instead. This is the fallback of
+   * last resort, and there is no admin UI for it today -- it is set directly in
+   * D1 for the rare account that needs it.
+   */
+  portalApiBasePath: string | null;
 }
 
 export type SettingsPatch = Partial<SettingsDto>;
@@ -357,6 +367,8 @@ export interface PortalAccountDto {
   hasCredentials: boolean;
   /** True when a cookie jar is stored, whether or not it still works. */
   hasSession: boolean;
+  /** True when an address to email a verification code to is stored. */
+  hasMfaContact: boolean;
   state: PortalSessionState;
   lastLoginAt: string | null;
   lastOkAt: string | null;
@@ -380,6 +392,12 @@ export interface SetPortalCredentialsRequest {
   password: string;
   baseUrl?: string | undefined;
   mountPath?: string | undefined;
+  /**
+   * Where the portal should email a verification code, when its own login
+   * response does not say. Omitted leaves whatever is already stored alone;
+   * there is no way to clear it once set except storing a new value.
+   */
+  mfaContact?: string | undefined;
 }
 
 /**
@@ -395,6 +413,12 @@ export interface PutPortalAccountRequest {
   password: string;
   baseUrl?: string | undefined;
   mountHint?: string | undefined;
+  /**
+   * Where the portal should email a verification code, when its own login
+   * response does not say. Optional, and left alone when omitted -- most
+   * deployments never need it.
+   */
+  mfaContact?: string | undefined;
 }
 
 /**

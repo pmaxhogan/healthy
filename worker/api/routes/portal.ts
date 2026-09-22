@@ -81,6 +81,7 @@ function emptyAccount(providerId: string): PortalAccountDto {
     mountPath: null,
     hasCredentials: false,
     hasSession: false,
+    hasMfaContact: false,
     state: "none",
     lastLoginAt: null,
     lastOkAt: null,
@@ -204,6 +205,7 @@ portalRouter.put("/:id/portal", async (c) => {
   await api.repos.portalAccounts.setCredentials(row.id, {
     username: body.username,
     password: body.password,
+    ...(body.mfaContact !== undefined && { mfaContact: body.mfaContact }),
   });
   return c.json(await portalStatus(api, row.id), 200, NO_STORE);
 });

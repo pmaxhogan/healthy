@@ -47,6 +47,8 @@ export interface PortalAccountSecrets {
   password: string | null;
   /** The serialised cookie jar, for `CookieJar.deserialise`. */
   cookieJar: string | null;
+  /** Where to email a verification code, when the portal's own flow will not say. */
+  mfaContact: string | null;
 }
 
 export interface PortalEndpointPatch {
@@ -93,6 +95,7 @@ function toPortalAccountDto(row: PortalAccountRow, now: number): PortalAccountDt
     mountPath: row.mount_path,
     hasCredentials: row.username_enc !== null && row.password_enc !== null,
     hasSession: row.cookie_jar_enc !== null,
+    hasMfaContact: row.mfa_contact_enc !== null,
     state: row.session_state,
     lastLoginAt: iso(row.last_login_at),
     lastOkAt: iso(row.last_ok_at),
@@ -231,12 +234,21 @@ export function makePortalAccountsRepo(ctx: Ctx) {
       };
       if (input.baseUrl !== undefined) columns.base_url = input.baseUrl;
       if (input.mountPath !== undefined) columns.mount_path = input.mountPath;
+      // Undefined leaves whatever is already stored alone -- most callers never
+      // pass this, and a credential change is not a reason to forget it.
+      if (input.mfaContact !== undefined) {
+        columns.mfa_contact_enc = await seal(
+          ctx.env,
+          input.mfaContact,
+          aad("mfa_contact_enc", providerId),
+        );
+      }
       await patch(providerId, columns);
       ctx.log.info("portal_accounts.credentials_set", { providerId });
       return require_(providerId);
     },
 
-    /** Decrypt the three sealed columns. The only way out of the db layer. */
+    /** Decrypt the four sealed columns. The only way out of the db layer. */
     async getSecrets(providerId: string): Promise<PortalAccountSecrets | null> {
       const row = await byProvider(providerId);
       if (row === null) return null;
@@ -244,6 +256,11 @@ export function makePortalAccountsRepo(ctx: Ctx) {
         username: await openOrNull(ctx.env, row.username_enc, aad("username_enc", providerId)),
         password: await openOrNull(ctx.env, row.password_enc, aad("password_enc", providerId)),
         cookieJar: await openOrNull(ctx.env, row.cookie_jar_enc, aad("cookie_jar_enc", providerId)),
+        mfaContact: await openOrNull(
+          ctx.env,
+          row.mfa_contact_enc,
+          aad("mfa_contact_enc", providerId),
+        ),
       };
     },
 

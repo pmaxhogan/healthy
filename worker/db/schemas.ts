@@ -76,6 +76,15 @@ export const settingSchemas = {
    * real portal, where three attempts is a short afternoon. The default is three.
    */
   portal_login_attempt_limit: z.number().int().min(1).max(20),
+  /**
+   * The patient-portal login shell's API path prefix, for the rare deployment
+   * that needs one and that discovery could not learn on its own.
+   *
+   * No default in source is possible either way -- unlike a real default, this
+   * is genuinely absent for almost every install, not merely undisclosed. See
+   * `PortalAdapterDeps.custom` in `worker/providers/mychart/index.ts`.
+   */
+  portal_api_base_path: z.string().min(1).max(200).nullable(),
 } as const;
 
 export type SettingKey = keyof typeof settingSchemas;
@@ -99,6 +108,7 @@ export const SETTING_DEFAULTS: Settings = {
   mcp_enabled: true,
   mail_sender_allowlist: DEFAULT_MAIL_SENDER_ALLOWLIST_CSV,
   portal_login_attempt_limit: 3,
+  portal_api_base_path: null,
 };
 
 export const SETTING_KEYS = Object.keys(settingSchemas) as SettingKey[];
