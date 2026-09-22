@@ -33,11 +33,17 @@ export const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
  * Cookie attributes, all of them load-bearing:
  *   HttpOnly         -- script cannot read it, so an XSS cannot exfiltrate it
  *   Secure           -- never sent over plaintext
- *   SameSite=Strict  -- no cross-site request carries it, which is the second
- *                       half of the CSRF defence (see csrf.ts)
+ *   SameSite=Lax     -- carried on top-level GET navigations only, which is what
+ *                       the OAuth redirect back from a provider is; never on a
+ *                       cross-site POST or subresource request. Strict was
+ *                       tried first and dropped the cookie on every
+ *                       /oauth/callback, bouncing each connect through the
+ *                       password page (owner decision, 2026-09-22). Mutations
+ *                       are still covered by the header + origin checks in
+ *                       csrf.ts.
  *   Path=/           -- the whole admin surface is gated, so the whole origin
  */
-const COOKIE_ATTRIBUTES = "HttpOnly; Secure; SameSite=Strict; Path=/";
+const COOKIE_ATTRIBUTES = "HttpOnly; Secure; SameSite=Lax; Path=/";
 
 /**
  * The signed message. `healthy.` is a domain separator so a secret shared with

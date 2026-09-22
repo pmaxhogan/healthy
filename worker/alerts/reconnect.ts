@@ -12,7 +12,7 @@
  * occurrence time is rendered in UTC and labeled as such instead.
  */
 
-export type ReconnectKind = "epic" | "google";
+type ReconnectKind = "epic" | "google";
 
 export interface BuildReconnectCardInput {
   kind: ReconnectKind;

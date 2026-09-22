@@ -254,7 +254,7 @@ CREATE INDEX run_log_started ON run_log (started_at);
 CREATE INDEX run_log_kind ON run_log (kind, started_at);
 
 -- ---------------------------------------------------------------------------
--- Password-gate rate limiting. Keyed by a salted hash of the client IP: the
+-- Password-gate rate limiting. Keyed by an unsalted sha256 of the client IP: the
 -- raw address is never stored.
 -- ---------------------------------------------------------------------------
 CREATE TABLE login_attempts (

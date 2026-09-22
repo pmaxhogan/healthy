@@ -1,12 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": [
-    "worker/index.ts",
-    "src/main.ts",
-    "scripts/*.{ts,mjs}",
-    "test/**/*.test.ts",
-    "test/**/setup.ts"
-  ],
+  "entry": ["scripts/*.{ts,mjs}", "test/**/*.test.ts", "test/**/setup.ts"],
   "project": [
     "worker/**/*.ts",
     "src/**/*.{ts,vue}",
@@ -14,13 +8,7 @@
     "scripts/**/*.{ts,mjs}",
     "test/**/*.ts"
   ],
-  "ignoreDependencies": [
-    "@cloudflare/workers-oauth-provider",
-    "@modelcontextprotocol/sdk",
-    "agents",
-    "cloudflare",
-    "jose"
-  ],
+  "ignoreDependencies": ["cloudflare"],
   "vite": { "config": ["vite.config.ts"] },
   "vitest": { "config": ["vitest.config.ts"] },
   "wrangler": { "config": ["wrangler.jsonc"] }

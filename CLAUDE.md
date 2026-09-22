@@ -72,3 +72,12 @@ Also worth knowing:
 - The brands data pipeline (`scripts/slim-brands.mjs`, `scripts/lib/**`,
   `data/**`, `.github/workflows/brands.yml`) is owned separately and has a
   temporary lint carve-out at the bottom of `eslint.config.js`.
+
+## Browser automation in this repository
+
+For this project the owner's instruction is that browser automation uses the
+`mcp__claude-in-chrome__*` tools, driving the owner's real Chrome so existing
+logins (Cloudflare, Google, the Epic developer portal) work. This deliberately
+overrides the owner's global "use /browse, never claude-in-chrome" rule, for
+this repository only. Patient-portal logins are never automated; only the owner
+types those.

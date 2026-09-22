@@ -56,6 +56,7 @@ export class AppError extends Error {
   ) {
     super(message ?? code, options?.cause === undefined ? undefined : { cause: options.cause });
     this.name = "AppError";
+    // `STATUS[code]`: `code` is the `ErrorCode` union, so this is a total lookup.
     this.status = STATUS[code];
     this.retryAfterMs = options?.retryAfterMs;
   }

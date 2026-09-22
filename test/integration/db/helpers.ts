@@ -166,6 +166,7 @@ export async function resetDb(): Promise<void> {
  */
 export async function column<T, K extends keyof T>(promise: Promise<T[]>, key: K): Promise<T[K][]> {
   const rows = await promise;
+  // `row[key]`: `K extends keyof T`, so the compiler has already proved the index.
   return rows.map((row) => row[key]);
 }
 

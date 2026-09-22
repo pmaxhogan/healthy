@@ -31,45 +31,11 @@ import type * as fhir4 from "fhir/r4";
 
 export type {
   NormalizeCtx,
-  NormalizedAddress,
-  NormalizedAllergy,
-  NormalizedAllergyReaction,
   NormalizedAppointmentView,
-  NormalizedBase,
-  NormalizedCarePlan,
-  NormalizedCareTeam,
-  NormalizedCareTeamParticipant,
-  NormalizedCodeableConcept,
-  NormalizedCondition,
-  NormalizedCoverage,
-  NormalizedDevice,
-  NormalizedDiagnosticReport,
-  NormalizedDocumentAttachment,
-  NormalizedDocumentReference,
   NormalizedEncounter,
-  NormalizedGeneric,
-  NormalizedGoal,
-  NormalizedImmunization,
-  NormalizedLocation,
-  NormalizedLocationRef,
-  NormalizedMedicationDispense,
-  NormalizedMedicationRequest,
-  NormalizedObservation,
-  NormalizedObservationComponent,
-  NormalizedObservationValue,
-  NormalizedOrganization,
-  NormalizedPatient,
-  NormalizedPractitioner,
-  NormalizedPractitionerRef,
-  NormalizedProcedure,
-  NormalizedProcedurePerformer,
   NormalizedResource,
-  NormalizedServiceRequest,
-  NormalizedSpecimen,
 } from "./types.ts";
 export { mapResolver } from "./refs.ts";
-export type { RefResolver } from "./refs.ts";
-
 /** Every resource type this module has a dedicated normalizer for. Anything
  * else falls back to the generic shape in {@link normalizeResource}. */
 export const NORMALIZED_TYPES = [

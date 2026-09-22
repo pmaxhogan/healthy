@@ -42,6 +42,8 @@ export async function getSetting<K extends SettingKey>(ctx: Ctx, key: K): Promis
   const row = await one<Pick<SettingRow, "value_json">>(
     ctx.db.prepare("SELECT value_json FROM settings WHERE key = ?").bind(key),
   );
+  // `SETTING_DEFAULTS[key]`: `K extends SettingKey`, so the index is one of a
+  // closed set of literals checked at compile time -- not a sink.
   return row === null ? SETTING_DEFAULTS[key] : parseSetting(key, row.value_json);
 }
 

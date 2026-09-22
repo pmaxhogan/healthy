@@ -14,8 +14,21 @@
  * conditional UPDATE, and D1 reports how many rows it changed; exactly one caller
  * can see `changes === 1`. Expiry is in the predicate rather than a sweeper, so a
  * Worker that died holding a lease blocks nothing beyond the TTL.
+ *
+ * **Every token write carries the lease in its own predicate.** Holding the lease
+ * when the refresh starts is not enough: a slow token endpoint can outlast the TTL,
+ * a second refresher can take the lease and store its own rotated refresh token,
+ * and the first one's write would then land on top -- leaving D1 holding a token
+ * Epic has already invalidated, which is `invalid_grant` on the next run and a
+ * re-auth for the owner. So `upsertTokensLeased` writes `WHERE lease_owner = ? AND
+ * lease_expires_at > now` and answers `null` when that no longer holds, while
+ * `upsertTokens` (the authorization callback, which holds no lease) writes only
+ * while no *live* lease exists. An expired lease does not block the callback: a
+ * Worker that died holding one leaves `lease_owner` set, and the owner reconnecting
+ * must not be hostage to it.
  */
 
+import { AppError } from "../../lib/errors.ts";
 import { newId } from "../../lib/ids.ts";
 import { all, one, run, ttlSeconds } from "../client.ts";
 import { aadFor, openOrNull, seal } from "../crypto.ts";
@@ -91,6 +104,59 @@ export function makeConnectionsRepo(ctx: Ctx) {
     return changes > 0;
   };
 
+  /** One token write, guarded by whatever predicate the caller's lease demands. */
+  const writeTokens = async (
+    providerId: string,
+    patch: TokenPatch,
+    guard: { clause: string; values: unknown[] },
+  ): Promise<ConnectionRow | null> => {
+    const row = await ensure(providerId);
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    const put = (column: string, value: unknown): void => {
+      sets.push(`${column} = ?`);
+      values.push(value);
+    };
+
+    if (patch.patientFhirId !== undefined) {
+      put(
+        "patient_fhir_id_enc",
+        await seal(ctx.env, patch.patientFhirId, aad("patient_fhir_id_enc", row.id)),
+      );
+    }
+    if (patch.accessToken !== undefined) {
+      put(
+        "access_token_enc",
+        await seal(ctx.env, patch.accessToken, aad("access_token_enc", row.id)),
+      );
+    }
+    if (patch.refreshToken !== undefined) {
+      put(
+        "refresh_token_enc",
+        await seal(ctx.env, patch.refreshToken, aad("refresh_token_enc", row.id)),
+      );
+    }
+    if (patch.accessExpiresAt !== undefined) put("access_expires_at", patch.accessExpiresAt);
+    if (patch.scope !== undefined) put("scope", patch.scope);
+    if (patch.status !== undefined) put("status", patch.status);
+    // Only a write that actually moved a token counts as a refresh: the keepalive
+    // reads this column to decide whether one is due, and a status-only patch must
+    // not make a stale token look fresh.
+    if (patch.accessToken !== undefined || patch.refreshToken !== undefined) {
+      put("last_refresh_at", ctx.now());
+    }
+    put("updated_at", ctx.now());
+
+    const { changes } = await run(
+      ctx.db
+        .prepare(`UPDATE connections SET ${sets.join(", ")} WHERE id = ? ${guard.clause}`)
+        .bind(...values, row.id, ...guard.values),
+    );
+    if (changes === 0) return null;
+    const updated = await byId(row.id);
+    return updated ?? row;
+  };
+
   return {
     get: byId,
     getForProvider: byProvider,
@@ -115,57 +181,51 @@ export function makeConnectionsRepo(ctx: Ctx) {
     },
 
     /**
-     * Store whichever token fields the caller has, sealed.
+     * Store whichever token fields the caller has, sealed, while no refresh is in
+     * flight.
+     *
+     * For the authorization callback, which holds no lease. Throws `conflict` when a
+     * live lease says a refresh is mid-flight: the alternative is overwriting a
+     * refresh token that has just been rotated, and a 409 the owner can retry is
+     * cheaper than a connection that needs re-authorising.
      *
      * Callers must persist a new refresh token *before* using the access token it
      * came with: if the write fails after a successful refresh, the old refresh
      * token is already dead and the connection is unrecoverable without a re-auth.
      */
     async upsertTokens(providerId: string, patch: TokenPatch): Promise<ConnectionRow> {
-      const row = await ensure(providerId);
-      const sets: string[] = [];
-      const values: unknown[] = [];
-      const put = (column: string, value: unknown): void => {
-        sets.push(`${column} = ?`);
-        values.push(value);
-      };
+      const row = await writeTokens(providerId, patch, {
+        clause: "AND (lease_expires_at IS NULL OR lease_expires_at <= ?)",
+        values: [ctx.now()],
+      });
+      if (row === null) {
+        ctx.log.warn("connections.token_write_blocked", { providerId });
+        throw new AppError("conflict", "a token refresh holds the connection lease", {
+          providerId,
+        });
+      }
+      return row;
+    },
 
-      if (patch.patientFhirId !== undefined) {
-        put(
-          "patient_fhir_id_enc",
-          await seal(ctx.env, patch.patientFhirId, aad("patient_fhir_id_enc", row.id)),
-        );
-      }
-      if (patch.accessToken !== undefined) {
-        put(
-          "access_token_enc",
-          await seal(ctx.env, patch.accessToken, aad("access_token_enc", row.id)),
-        );
-      }
-      if (patch.refreshToken !== undefined) {
-        put(
-          "refresh_token_enc",
-          await seal(ctx.env, patch.refreshToken, aad("refresh_token_enc", row.id)),
-        );
-      }
-      if (patch.accessExpiresAt !== undefined) put("access_expires_at", patch.accessExpiresAt);
-      if (patch.scope !== undefined) put("scope", patch.scope);
-      if (patch.status !== undefined) put("status", patch.status);
-      // Only a write that actually moved a token counts as a refresh: the
-      // keepalive reads this column to decide whether one is due, and a
-      // status-only patch must not make a stale token look fresh.
-      if (patch.accessToken !== undefined || patch.refreshToken !== undefined) {
-        put("last_refresh_at", ctx.now());
-      }
-      put("updated_at", ctx.now());
-
-      await run(
-        ctx.db
-          .prepare(`UPDATE connections SET ${sets.join(", ")} WHERE id = ?`)
-          .bind(...values, row.id),
-      );
-      const updated = await byId(row.id);
-      return updated ?? row;
+    /**
+     * Store tokens under the lease this caller holds.
+     *
+     * `null` means the write was rejected -- the lease expired, or somebody else
+     * took it -- and the caller must discard the tokens it just obtained rather
+     * than write them anyway: the winner's rotated refresh token is the one the
+     * organisation will accept next time.
+     */
+    async upsertTokensLeased(
+      providerId: string,
+      owner: string,
+      patch: TokenPatch,
+    ): Promise<ConnectionRow | null> {
+      const row = await writeTokens(providerId, patch, {
+        clause: "AND lease_owner = ? AND lease_expires_at > ?",
+        values: [owner, ctx.now()],
+      });
+      if (row === null) ctx.log.warn("connections.lease_lost", { providerId });
+      return row;
     },
 
     /** Decrypt the three sealed columns. The only way out of the db layer. */
@@ -229,14 +289,23 @@ export function makeConnectionsRepo(ctx: Ctx) {
       return setStatus(id, "error", { errorCode });
     },
 
-    /** Forget the tokens, keeping the row so its history survives. */
+    /**
+     * Forget everything the grant gave us, keeping the row so its history survives.
+     *
+     * The patient identifier goes with the tokens, and the scope and the lease with
+     * it. The privacy page says disconnecting revokes what is stored, and a sealed
+     * identifier left behind would make that only mostly true -- it is the one
+     * column here that names a person.
+     */
     async disconnect(id: string): Promise<boolean> {
       const { changes } = await run(
         ctx.db
           .prepare(
             `UPDATE connections
                 SET status = 'disconnected', access_token_enc = NULL, refresh_token_enc = NULL,
-                    access_expires_at = NULL, needs_reauth_since = NULL, updated_at = ?
+                    patient_fhir_id_enc = NULL, scope = NULL, access_expires_at = NULL,
+                    needs_reauth_since = NULL, lease_owner = NULL, lease_expires_at = NULL,
+                    updated_at = ?
               WHERE id = ?`,
           )
           .bind(ctx.now(), id),

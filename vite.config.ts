@@ -25,6 +25,11 @@ export default defineConfig({
     proxy: {
       "/api": "http://localhost:8787",
       "/auth": "http://localhost:8787",
+      // The OAuth starts, callbacks and reconnect links are full page navigations
+      // the SPA hands off to the Worker; without them proxied, every Connect
+      // button in `npm run dev` would 404 against Vite. The reconnect route lives
+      // under /oauth too, so this one entry covers all of them.
+      "/oauth": "http://localhost:8787",
     },
   },
 });

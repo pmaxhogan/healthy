@@ -35,6 +35,8 @@ const USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
 const PRIMARY_CALENDAR_URL = "https://www.googleapis.com/calendar/v3/users/me/calendarList/primary";
 
 const FORM_CONTENT_TYPE = "application/x-www-form-urlencoded";
+/** Ceiling on one token-endpoint POST. See `postForm`. */
+const TOKEN_TIMEOUT_MS = 20_000;
 
 /**
  * The only two scopes the sync needs.
@@ -189,11 +191,15 @@ export function createGoogleOAuth(options: GoogleOAuthOptions): GoogleOAuth {
   const log = options.logger ?? noopLogger;
   const now = options.now ?? Date.now;
 
+  // Single attempt on purpose -- a token grant is single-use -- but bounded: a
+  // hung token endpoint would otherwise pin the invocation until the platform
+  // kills it, and on the OAuth callback that is the owner watching a blank page.
   const postForm = async (url: string, form: URLSearchParams): Promise<Response> =>
     fetchImpl(url, {
       method: "POST",
       headers: { "content-type": FORM_CONTENT_TYPE },
       body: form.toString(),
+      signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS),
     });
 
   const expiresAtFrom = (expiresIn: unknown): number => {

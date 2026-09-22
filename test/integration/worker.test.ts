@@ -3,6 +3,14 @@ import { describe, expect, it } from "vitest";
 
 import { PBKDF2_ITERATIONS } from "@shared/password.ts";
 
+import {
+  MAX_PBKDF2_ITERATIONS,
+  MIN_PBKDF2_ITERATIONS,
+  hashPassword,
+  isCostUnsupported,
+  verifyPassword,
+} from "../../worker/auth/password.ts";
+
 describe("the Worker", () => {
   it("answers GET /health publicly, with a body that leaks nothing", async () => {
     const response = await SELF.fetch("https://healthy.example/health");
@@ -70,6 +78,28 @@ describe("D1 migrations", () => {
 });
 
 describe("WebCrypto in workerd", () => {
+  it("pins the iteration count to the cap the deployed runtime enforces", async () => {
+    // This assertion is a value, not a behaviour, on purpose: *this* workerd --
+    // the one the vitest pool runs -- happily derives at 600,000, while the
+    // deployed one throws "iteration counts above 100000 are not supported". So
+    // no test here can catch an over-cap cost by exercising it, which is exactly
+    // how a 600,000-iteration hash passed everything and then 500'd the first
+    // real login (2026-09-22). Raising this number means proving a real deploy
+    // logs in, and changing this line is the reminder to do it.
+    expect(PBKDF2_ITERATIONS).toBe(100_000);
+    // The floor and the ceiling agree with it, so a valid hash has exactly one cost.
+    expect(MIN_PBKDF2_ITERATIONS).toBe(PBKDF2_ITERATIONS);
+    expect(MAX_PBKDF2_ITERATIONS).toBe(PBKDF2_ITERATIONS);
+
+    // And a hash minted at that cost round-trips through this runtime's WebCrypto,
+    // which is the half a local test can genuinely prove.
+    const stored = await hashPassword("the-owners-password", PBKDF2_ITERATIONS);
+    expect(stored.split("$", 3)[2]).toBe(String(PBKDF2_ITERATIONS));
+    expect(isCostUnsupported(stored)).toBe(false);
+    await expect(verifyPassword("the-owners-password", stored)).resolves.toBe(true);
+    await expect(verifyPassword("not-the-password", stored)).resolves.toBe(false);
+  });
+
   it(`can derive PBKDF2-SHA256 at the configured ${String(PBKDF2_ITERATIONS)} iterations`, async () => {
     // The Workers runtime caps PBKDF2 iterations, and the cap has moved over
     // time. A PASSWORD_HASH minted above the cap cannot be verified in

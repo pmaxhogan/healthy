@@ -119,7 +119,7 @@ describe("checkCsrf", () => {
   describe("with the header waived (the /auth/login form)", () => {
     // An HTML form cannot set a request header, so login is checked with the
     // origin proof alone. Origin is sent on every browser POST, and the session
-    // cookie it returns is SameSite=Strict.
+    // cookie it returns is SameSite=Lax.
     const options = { requireHeader: false };
 
     it("accepts origin proof alone", () => {
