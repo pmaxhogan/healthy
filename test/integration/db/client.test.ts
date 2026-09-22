@@ -164,6 +164,7 @@ describe("reposFor", () => {
         "fhirSyncState",
         "google",
         "loginAttempts",
+        "mailInbox",
         "mcpAudit",
         "mcpPolicy",
         "oauthStates",

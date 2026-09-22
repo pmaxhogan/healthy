@@ -126,6 +126,7 @@ export async function seedProvider(
 // Every table, child before parent so the deletes never trip a foreign key.
 const TABLES = [
   "login_attempts",
+  "mail_inbox",
   "portal_accounts",
   "mcp_policy",
   "mcp_audit",

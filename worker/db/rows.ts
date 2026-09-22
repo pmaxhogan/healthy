@@ -27,6 +27,8 @@ export type PolicyRuleType = "tool" | "resource" | "field" | "provider";
 export type ProviderEnvironment = "prod" | "sandbox";
 /** Which authorization flow an in-flight state belongs to. */
 export type OAuthStateKind = "epic" | "google";
+/** 'otp' | 'forward_verify' | 'other' (CHECK-constrained). */
+export type MailKind = "otp" | "forward_verify" | "other";
 /**
  * Where a calendar row came from.
  *
@@ -189,6 +191,18 @@ export interface LoginAttemptRow {
   ip_hash: string;
   count: number;
   window_start: number;
+}
+
+export interface MailInboxRow {
+  id: string;
+  received_at: number;
+  from_addr: string;
+  subject: string | null;
+  kind: MailKind;
+  code_enc: string | null;
+  consumed_at: number | null;
+  expires_at: number | null;
+  raw_size: number;
 }
 
 /**

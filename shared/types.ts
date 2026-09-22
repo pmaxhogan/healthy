@@ -10,6 +10,7 @@ export type ProviderEnvironment = "prod" | "sandbox";
 export type ConnectionStatus = "connected" | "needs_reauth" | "error" | "disconnected";
 export type RunKind = "calendar" | "full" | "refresh" | "manual";
 export type PolicyRuleType = "tool" | "resource" | "field" | "provider";
+export type MailKind = "otp" | "forward_verify" | "other";
 
 /** Per-provider configuration, editable in the UI. */
 export interface ProviderConfig {
@@ -275,6 +276,34 @@ export interface AlertTestResponse {
  */
 export interface HealthResponse {
   ok: true;
+}
+
+/**
+ * One `mail_inbox` row, as the Mail admin page shows it.
+ *
+ * `fromDomain` only -- never the full sender address, matching the page's own
+ * design ("table of recent entries ... sender domain"). `pendingCode` and
+ * `pendingUrl` are only ever non-null for `kind === "forward_verify"`: the
+ * Worker never returns an 'otp' row's code over this API, even though the
+ * value exists sealed in D1 -- see `worker/db/repos/mail-inbox.ts`.
+ */
+export interface MailInboxEntryDto {
+  id: string;
+  receivedAt: string;
+  fromDomain: string;
+  subject: string | null;
+  kind: MailKind;
+  consumedAt: string | null;
+  expiresAt: string | null;
+  rawSize: number;
+  pendingCode: string | null;
+  pendingUrl: string | null;
+}
+
+/** `GET /api/mail/settings` and the body of its `PUT`. */
+export interface MailSettingsDto {
+  /** Sender domains the inbound email handler accepts mail from. */
+  allowlist: string[];
 }
 
 /** Health of a provider's portal session. Mirrors `portal_accounts.session_state`. */

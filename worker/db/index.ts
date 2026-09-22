@@ -19,6 +19,7 @@ import { makeFhirCacheRepo } from "./repos/fhir-cache.ts";
 import { makeFhirSyncStateRepo } from "./repos/fhir-sync-state.ts";
 import { makeGoogleAccountRepo } from "./repos/google-account.ts";
 import { makeLoginAttemptsRepo } from "./repos/login-attempts.ts";
+import { makeMailInboxRepo } from "./repos/mail-inbox.ts";
 import { makeMcpAuditRepo } from "./repos/mcp-audit.ts";
 import { makeMcpPolicyRepo } from "./repos/mcp-policy.ts";
 import { makeOAuthStatesRepo } from "./repos/oauth-states.ts";
@@ -45,6 +46,7 @@ export function makeRepos(ctx: Ctx) {
     runLog: makeRunLogRepo(ctx),
     loginAttempts: makeLoginAttemptsRepo(ctx),
     portalAccounts: makePortalAccountsRepo(ctx),
+    mailInbox: makeMailInboxRepo(ctx),
   };
 }
 
