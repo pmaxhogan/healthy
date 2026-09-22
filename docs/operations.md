@@ -192,7 +192,7 @@ to the logger in the first place:
 - Any string containing a `Bearer <token>` or `Basic <token>` has the
   token portion redacted.
 - Any whitespace-delimited token containing `@` is replaced with `[email]`.
-- Any opaque-looking string 40 characters or longer (the shape of a token
+- Any opaque-looking string 32 characters or longer, dots included (the shape of a token
   or an id) is collapsed to `[opaque:<length>]`.
 - Anything nested more than six levels deep becomes `[deep]`, which both
   caps the cost of an accidentally-logged resource and makes a
