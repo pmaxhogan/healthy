@@ -11,7 +11,12 @@ const START = 1_769_960_000;
 async function seedEvent(
   repos: Repos,
   providerId: string,
-  overrides: { encounterId?: string; fingerprint?: string; startAt?: number } = {},
+  overrides: {
+    encounterId?: string;
+    fingerprint?: string;
+    startAt?: number;
+    restore?: boolean;
+  } = {},
 ) {
   const encounterId = overrides.encounterId ?? "enc-1";
   return repos.calendarEvents.upsert({
@@ -22,6 +27,7 @@ async function seedEvent(
     googleEventId: `google-${encounterId}`,
     fingerprint: overrides.fingerprint ?? "fingerprint-a",
     startAt: overrides.startAt ?? START,
+    ...(overrides.restore !== undefined && { restore: overrides.restore }),
   });
 }
 
@@ -144,16 +150,59 @@ describe("ghosting and restoring", () => {
     expect(await repos.calendarEvents.restore(row.event_key)).toBe(false);
   });
 
-  it("un-ghosts through a plain upsert, because reappearing upstream is the signal", async () => {
+  it("un-ghosts through a restoring upsert, because reappearing upstream is the signal", async () => {
     const repos = testRepos();
     const providerId = await seedProvider(repos);
     const row = await seedEvent(repos, providerId);
     await repos.calendarEvents.markGhost(row.event_key);
 
-    const back = await seedEvent(repos, providerId);
+    const back = await seedEvent(repos, providerId, { restore: true });
 
     expect(back.state).toBe("active");
     expect(back.ghosted_at).toBeNull();
+  });
+
+  it("leaves a ghost ghosted through a plain upsert", async () => {
+    // The ghost write patches the calendar entry and then records its fingerprint.
+    // If that upsert un-ghosted the row, the next run would stamp a fresh
+    // `ghosted_at`, re-render the "as of" line, and patch the event again for ever.
+    const time = clock();
+    const repos = testRepos({ now: time.now });
+    const providerId = await seedProvider(repos);
+    const row = await seedEvent(repos, providerId);
+    await repos.calendarEvents.markGhost(row.event_key);
+
+    time.advance(3600);
+    const again = await seedEvent(repos, providerId, { fingerprint: "fingerprint-ghost" });
+
+    expect(again.state).toBe("ghost");
+    expect(again.ghosted_at).toBe(T0);
+    expect(again.fingerprint).toBe("fingerprint-ghost");
+  });
+
+  it("moves the fingerprint of a row that is already a ghost, and only then", async () => {
+    const time = clock();
+    const repos = testRepos({ now: time.now });
+    const providerId = await seedProvider(repos);
+    const row = await seedEvent(repos, providerId);
+
+    expect(await repos.calendarEvents.markGhost(row.event_key, { fingerprint: "ghost-1" })).toBe(
+      true,
+    );
+    time.advance(86_400);
+    // Already a ghost and nothing new to say: no write, so nothing moves.
+    expect(await repos.calendarEvents.markGhost(row.event_key)).toBe(false);
+    // Already a ghost but the ghost variant re-rendered: the fingerprint moves and
+    // `ghosted_at` does not, which is what lets the next run settle.
+    expect(await repos.calendarEvents.markGhost(row.event_key, { fingerprint: "ghost-2" })).toBe(
+      true,
+    );
+
+    await expect(repos.calendarEvents.getByKey(row.event_key)).resolves.toMatchObject({
+      state: "ghost",
+      ghosted_at: T0,
+      fingerprint: "ghost-2",
+    });
   });
 
   it("reports nothing to do for a key it does not have", async () => {

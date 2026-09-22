@@ -8,12 +8,13 @@ import { describe, expect, it } from "vitest";
 
 import { freshOwner, json, testRepos } from "./helpers.ts";
 
+import type { RunSummaryInput } from "../../../worker/db/schemas.ts";
 import type { RunDto, RunKind } from "@shared/types.ts";
 
 const owner = freshOwner();
 
 /** Write one finished run of a kind, oldest first. */
-async function seedRun(kind: RunKind, summary: Record<string, number> = {}): Promise<string> {
+async function seedRun(kind: RunKind, summary: RunSummaryInput = {}): Promise<string> {
   const repos = testRepos();
   const id = await repos.runLog.start(kind);
   await repos.runLog.finish(id, { ok: true, summary });
@@ -98,6 +99,34 @@ describe("GET /api/runs", () => {
     expect(summary?.warnings).toBe(0);
     expect(runs[0]?.ok).toBe(true);
     expect(runs[0]?.finishedAt).not.toBeNull();
+  });
+
+  it("shows the flags and the warning count the sync recorded", async () => {
+    await seedRun("calendar", {
+      warnings: ["4119"],
+      warningCount: 7,
+      filteredView: true,
+      backedOff: true,
+    });
+
+    const runs = await json<RunDto[]>(await owner().get("/api/runs"));
+    const summary = runs[0]?.summary;
+
+    // Seven warnings all carrying one code. The dashboard shows how many there
+    // were; a row that only stored the codes could not say.
+    expect(summary?.warnings).toBe(7);
+    // These two are why a run with no changes is not a mystery.
+    expect(summary?.filteredView).toBe(true);
+    expect(summary?.backedOff).toBe(true);
+  });
+
+  it("falls back to the distinct codes for a row written before the count existed", async () => {
+    await seedRun("calendar", { warnings: ["4119", "4101"] });
+
+    const runs = await json<RunDto[]>(await owner().get("/api/runs"));
+
+    expect(runs[0]?.summary?.warnings).toBe(2);
+    expect(runs[0]?.summary?.filteredView).toBe(false);
   });
 
   it("shows a run that was cut off mid-flight rather than hiding it", async () => {

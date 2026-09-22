@@ -28,7 +28,7 @@ import { TOOL_CATALOG } from "../tool-catalog.ts";
 
 import type { AppHonoEnv } from "../../auth/gate.ts";
 import type { GrantLike } from "../ports.ts";
-import type { McpGrantDto } from "@shared/types.ts";
+import type { CreatePolicyRuleRequest, McpGrantDto } from "@shared/types.ts";
 
 /** Audit rows per page when the caller does not say. */
 const DEFAULT_AUDIT_LIMIT = 100;
@@ -49,7 +49,9 @@ mcpRouter.get("/policy", async (c) => {
 
 mcpRouter.post("/policy", async (c) => {
   const api = apiContext(c);
-  const body = await readJson(c, policyRuleSchema);
+  // Typed against the shared contract as well as the schema, so the SPA's payload
+  // and the Worker's parser cannot drift apart without a compile error.
+  const body: CreatePolicyRuleRequest = await readJson(c, policyRuleSchema);
   const row = await api.repos.mcpPolicy.add(body.ruleType, body.target, body.note);
   return c.json(toPolicyRuleDto(row), 201, NO_STORE);
 });

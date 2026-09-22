@@ -21,6 +21,7 @@ import { toAlertDto } from "../dto.ts";
 import { NO_STORE, apiContext, limitQuerySchema, readQuery } from "../http.ts";
 
 import type { AppHonoEnv } from "../../auth/gate.ts";
+import type { AlertTestResponse } from "@shared/types.ts";
 
 /** Alerts per page when the caller does not say. */
 const DEFAULT_ALERT_LIMIT = 50;
@@ -58,7 +59,7 @@ alertsRouter.post("/test", async (c) => {
   // the integration works, and a link to a reconnect flow that is not broken would
   // be actively confusing.
   const cardId = await trello.createTestCard(new URL("/", c.req.url).href);
-  return c.json({ cardId }, 201, NO_STORE);
+  return c.json<AlertTestResponse>({ cardId }, 201, NO_STORE);
 });
 
 /** Archive a card this endpoint created. See the module comment. */

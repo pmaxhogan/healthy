@@ -21,6 +21,7 @@ import { Hono } from "hono";
 import { all, one } from "../../db/client.ts";
 import { getAllSettings } from "../../db/settings.ts";
 import { isAppError } from "../../lib/errors.ts";
+import { logLine } from "../../lib/log.ts";
 import { DAY_SECONDS } from "../../lib/time.ts";
 import { isDiscoveryCacheType } from "../../sync/index.ts";
 import { toAlertDto, toRunDto, toSettingsDto } from "../dto.ts";
@@ -83,7 +84,7 @@ async function countGrants(api: ApiContext, env: Env): Promise<number> {
     const grants = await api.ports.grants.listGrants(env);
     return grants.length;
   } catch (error) {
-    console.warn("api_grants_unavailable", {
+    logLine("warn", "api_grants_unavailable", {
       code: isAppError(error) ? error.code : "unknown",
     });
     return 0;

@@ -93,11 +93,11 @@ Three separate vitest projects, configured in `vitest.config.ts`:
   calendar sync end-to-end against fixture FHIR data and an in-memory
   Google mock (ghosting included), and MCP tool calls through the real
   Durable Object with policy denials and audit rows.
-- **`spa`** — happy-dom, `test/spa/**`. Vue component and helper tests
-  against a DOM but no Worker runtime. There is no dedicated
-  `npm run test:spa` script; run it directly with
-  `npx vitest run --project spa` if you want just this one, or `npm run
-test` for all three together.
+- **`spa`** (`npm run test:spa`) — happy-dom, `test/spa/**`. Vue component
+  and helper tests against a DOM but no Worker runtime: the fake `fetch`
+  in `test/spa/helpers.ts` answers 404 for any path a test did not
+  declare, so an unexpected request fails loudly. `npm run test` runs all
+  three projects together.
 
 ## Fixtures policy
 

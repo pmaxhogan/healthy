@@ -11,8 +11,12 @@ import { computed, ref } from "vue";
 
 import { RESOURCE_TYPES } from "../lib/fhir-resources.ts";
 
-import type { CreatePolicyRuleRequest } from "../api/endpoints.ts";
-import type { McpToolInfoDto, PolicyRuleType, ProviderDto } from "@shared/types.ts";
+import type {
+  CreatePolicyRuleRequest,
+  McpToolInfoDto,
+  PolicyRuleType,
+  ProviderDto,
+} from "@shared/types.ts";
 
 const props = withDefaults(
   defineProps<{

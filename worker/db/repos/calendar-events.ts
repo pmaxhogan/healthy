@@ -28,6 +28,16 @@ interface UpsertEvent {
   fingerprint: string;
   /** Unix second the appointment starts, for window queries. */
   startAt?: number | null;
+  /**
+   * True when this write is a ghost coming back to life.
+   *
+   * Only a restore may move a row out of `ghost`. Without the flag, writing a
+   * ghost's own fingerprint back -- which is exactly what ghosting does, since the
+   * calendar entry has just been patched to the ghost variant -- would clear
+   * `ghosted_at`, and the next run would stamp a new one, re-render the "as of"
+   * line, get a different fingerprint and patch the same event again, for ever.
+   */
+  restore?: boolean;
 }
 
 const SELECT = "SELECT * FROM calendar_events";
@@ -40,11 +50,16 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
     /**
      * Record an event the sync just inserted or patched.
      *
-     * An upsert of a key that is currently a ghost restores it: the appointment
-     * has reappeared upstream, which is precisely the signal to un-ghost.
+     * A new row is always active. An upsert over an existing one moves the
+     * fingerprint and the ids but leaves `state` and `ghosted_at` exactly as they
+     * are, unless `restore` says the appointment has reappeared upstream -- which
+     * is the one signal that legitimately un-ghosts a row. The two columns move
+     * together because the migration's CHECK ties them: `state = 'ghost'` exactly
+     * when `ghosted_at` is set.
      */
     async upsert(input: UpsertEvent): Promise<CalendarEventRow> {
       const at = ctx.now();
+      const restoring = input.restore === true ? 1 : 0;
       await run(
         ctx.db
           .prepare(
@@ -56,10 +71,10 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
                calendar_id = excluded.calendar_id,
                google_event_id = excluded.google_event_id,
                fingerprint = excluded.fingerprint,
-               state = 'active',
+               state = CASE WHEN ? THEN 'active' ELSE calendar_events.state END,
                start_at = excluded.start_at,
                last_seen_at = excluded.last_seen_at,
-               ghosted_at = NULL,
+               ghosted_at = CASE WHEN ? THEN NULL ELSE calendar_events.ghosted_at END,
                updated_at = excluded.updated_at`,
           )
           .bind(
@@ -73,6 +88,8 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
             at,
             at,
             at,
+            restoring,
+            restoring,
           ),
       );
       const row = await byKey(input.eventKey);
@@ -113,20 +130,42 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
     },
 
     /**
-     * Mark an event as vanished upstream. Idempotent, and it keeps the original
-     * `ghosted_at`: the timestamp records when it first disappeared, and the
-     * calendar description quotes it.
+     * Mark an event as vanished upstream, in one statement.
+     *
+     * Both halves of ghosting have to land together: the state moves to `ghost`
+     * *and* the fingerprint becomes the ghost variant's, or the next run sees a
+     * stale fingerprint, patches the calendar entry again, and every hourly sync
+     * re-writes every ghost for ever. Doing it as `upsert` then a state-only
+     * `markGhost` cannot work -- that is what the `restore` flag on `upsert` is
+     * about -- so the fingerprint comes through here.
+     *
+     * `COALESCE(ghosted_at, ?)` is what keeps the original disappearance time: the
+     * timestamp records when it *first* vanished and the calendar description
+     * quotes it, so a moving one would change the ghost's own fingerprint every
+     * run. `COALESCE(?, fingerprint)` lets a row-only ghost -- one where no Google
+     * write happened -- keep the fingerprint that still describes the calendar.
+     *
+     * Idempotent: a row that is already a ghost is only touched when the caller
+     * brought a fingerprint, so `true` always means something moved.
      */
-    async markGhost(eventKey: string): Promise<boolean> {
+    async markGhost(
+      eventKey: string,
+      options: { fingerprint?: string | null; ghostedAt?: number } = {},
+    ): Promise<boolean> {
       const at = ctx.now();
+      const fingerprint = options.fingerprint ?? null;
       const { changes } = await run(
         ctx.db
           .prepare(
             `UPDATE calendar_events
-                SET state = 'ghost', ghosted_at = COALESCE(ghosted_at, ?), updated_at = ?
-              WHERE event_key = ? AND state <> 'ghost'`,
+                SET state = 'ghost',
+                    ghosted_at = COALESCE(ghosted_at, ?),
+                    fingerprint = COALESCE(?, fingerprint),
+                    last_seen_at = ?,
+                    updated_at = ?
+              WHERE event_key = ? AND (state <> 'ghost' OR ? IS NOT NULL)`,
           )
-          .bind(at, at, eventKey),
+          .bind(options.ghostedAt ?? at, fingerprint, at, at, eventKey, fingerprint),
       );
       if (changes > 0) ctx.log.info("calendar_events.ghosted", { eventKey });
       return changes > 0;

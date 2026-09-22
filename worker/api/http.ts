@@ -25,7 +25,7 @@ import { z } from "zod";
 
 import { reposFor } from "../db/index.ts";
 import { AppError, isAppError } from "../lib/errors.ts";
-import { makeLogger } from "../lib/log.ts";
+import { logLine, makeLogger } from "../lib/log.ts";
 
 import { getPorts } from "./ports.ts";
 
@@ -75,7 +75,7 @@ export function afterResponse(
     try {
       await start();
     } catch (error) {
-      console.warn("api_background_failed", {
+      logLine("warn", "api_background_failed", {
         event,
         code: isAppError(error) ? error.code : "unknown",
       });
@@ -187,7 +187,9 @@ export function apiErrorHandler(error: Error, c: Context<AppHonoEnv>): Response 
   const { body, status } = errorBody(error);
   // The code, never the message: the message is what may quote an upstream body,
   // and the logger is not a place to find that out.
-  if (status >= 500) console.error("api_error", { code: body.error, path: c.req.path });
-  else console.warn("api_rejected", { code: body.error, path: c.req.path });
+  // One redacted JSON line, like every other log this Worker writes. The path is
+  // safe (ids of our own rows) and the redactor is what keeps it that way.
+  if (status >= 500) logLine("error", "api_error", { code: body.error, path: c.req.path });
+  else logLine("warn", "api_rejected", { code: body.error, path: c.req.path });
   return c.json<ApiError>(body, status, NO_STORE);
 }

@@ -4,9 +4,12 @@
  * There are genuinely two. `RunSummary` in `shared/types.ts` is the DTO the admin
  * UI renders: camelCase, with `filteredView` and `backedOff` flags and errors as
  * `{providerId, code}` pairs. `runSummarySchema` in `worker/db/schemas.ts` is what
- * `run_log.summary_json` stores: shorter names, errors and warnings as plain
- * string arrays, and a `unchanged` count the DTO has no field for. `toStoredSummary`
- * is the one place that translates, and `providerId` is dropped on the way in --
+ * `run_log.summary_json` stores: shorter names, warnings as both a count and the
+ * distinct codes, errors as plain strings, and a `unchanged` count the DTO has no
+ * field for. `toStoredSummary` is the one place that translates, and every field
+ * the DTO has now survives the round trip -- a run that reports no changes is
+ * explained by `filteredView` or `backedOff` or by nothing, and reading the row
+ * back has to be able to say which. `providerId` is dropped on the way in --
  * the run log is the table an operator reads casually, and a provider id there is
  * one join away from naming a health system.
  *
@@ -49,8 +52,9 @@ export function emptySummary(): RunSummary {
  * The run's mutable state.
  *
  * `unchanged` and `warningCodes` exist because the stored row wants them and the
- * DTO does not: the DTO reports how *many* warnings, the row reports *which*
- * codes, which is what makes "this org has been returning 4119 all week" visible.
+ * DTO does not: the DTO reports how *many* warnings, the row reports that *and*
+ * which codes, which is what makes "this org has been returning 4119 all week"
+ * visible.
  */
 export interface RunState {
   summary: RunSummary;
@@ -77,6 +81,10 @@ function toStoredSummary(state: RunState): RunSummaryInput {
     errors: summary.errors.map((error) => error.code),
     // eslint-disable-next-line unicorn/no-array-sort -- `toSorted` is ES2023 and the Worker compiles against the ES2022 lib; the array is a fresh one from the spread, so sorting in place mutates nothing shared.
     warnings: [...state.warningCodes].sort((a, b) => a.localeCompare(b)),
+    // The count as well as the codes: see `runSummarySchema`.
+    warningCount: summary.warnings,
+    filteredView: summary.filteredView,
+    backedOff: summary.backedOff,
   };
 }
 

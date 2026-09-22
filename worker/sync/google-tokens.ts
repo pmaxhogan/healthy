@@ -118,12 +118,18 @@ export async function withGoogleAccessToken(
     if (!(await repos.google.acquireLease(owner, LEASE_TTL_MS))) return awaitOtherRefresh();
     try {
       const tokens = await oauth.refresh(state.refreshToken);
-      await repos.google.upsertTokens({
+      // Under the lease: a refresh that outlasted its TTL must not overwrite the
+      // token of whoever took the lease next. See the repo's module comment.
+      const stored = await repos.google.upsertTokensLeased(owner, {
         accessToken: tokens.accessToken,
         accessExpiresAt: Math.floor(tokens.expiresAt / 1000),
         // An empty scope means "unchanged"; see the module comment.
         ...(tokens.scope !== "" && { scope: tokens.scope }),
       });
+      if (stored === null) {
+        ctx.log.warn("sync.google_token.lease_lost");
+        return await awaitOtherRefresh();
+      }
       await repos.google.markConnected();
       state.accessToken = tokens.accessToken;
       state.expiresAtMs = tokens.expiresAt;

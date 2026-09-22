@@ -35,6 +35,7 @@ const secrets = env as unknown as Record<string, unknown>;
 
 describe("the integration environment", () => {
   it("binds a dummy for every secret, overriding .dev.vars", () => {
+    // `secrets[name]`: names come from `Object.entries` of a const in this file.
     for (const [name, value] of Object.entries(EXPECTED)) {
       expect(secrets[name], name).toBe(value);
     }

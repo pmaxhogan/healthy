@@ -23,6 +23,7 @@
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
+    "test:spa": "vitest run --project spa",
     "test:watch": "vitest",
     "check": "npm run lint && npm run typecheck && npm run knip && npm run test && npm run build",
     "fix": "npm run lint:fix && npm run format",

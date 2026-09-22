@@ -48,16 +48,31 @@ const TEST_ENV = { ...env, ...overrides } as unknown as Env;
  */
 const client = { ip: "", counter: 0 };
 
+/**
+ * A second env whose PASSWORD_HASH names a cost the deployed runtime refuses.
+ *
+ * Built by rewriting the cost in a real envelope, so the salt and digest are
+ * genuine and only the number is wrong -- which is exactly the shape the minting
+ * script produced before 2026-09-22. Top-level `await`, like the overrides above:
+ * a `describe` callback is not async.
+ */
+const atTheFloor = await hashPassword(PASSWORD, MIN_PBKDF2_ITERATIONS);
+const OVER_CAP_ENV = {
+  ...env,
+  ...overrides,
+  PASSWORD_HASH: atTheFloor.replace(`$${String(MIN_PBKDF2_ITERATIONS)}$`, "$600000$"),
+} as unknown as Env;
+
 beforeEach(() => {
   client.counter += 1;
   client.ip = `203.0.113.${String(client.counter)}`;
 });
 
-async function call(path: string, init: RequestInit = {}): Promise<Response> {
+async function call(path: string, init: RequestInit = {}, env = TEST_ENV): Promise<Response> {
   const request = new Request(ORIGIN + path, init);
   request.headers.set("cf-connecting-ip", client.ip);
   const ctx = createExecutionContext();
-  const response = await app.fetch(request, TEST_ENV, ctx);
+  const response = await app.fetch(request, env, ctx);
   await waitOnExecutionContext(ctx);
   return response;
 }
@@ -503,5 +518,42 @@ describe("CSRF", () => {
     const response = await call("/api/whoami", { headers: { cookie } });
 
     expect(response.status).toBe(200);
+  });
+});
+
+describe("a PASSWORD_HASH the runtime cannot derive", () => {
+  // The 2026-09-22 incident: the secret was minted at 600,000 iterations, deployed
+  // workerd refuses anything above 100,000, and every login threw -- which reached
+  // the owner as `{"error":"internal_error"}` in the viewport, because this page
+  // has no SPA to catch a 500. The cost is checked before WebCrypto sees it, so
+  // this is deterministic here even though *this* runtime would derive at 600,000.
+  it("answers the form POST with the login page, not a JSON body", async () => {
+    const response = await call(
+      "/auth/login",
+      { method: "POST", headers: { origin: ORIGIN }, body: loginBody() },
+      OVER_CAP_ENV,
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(html).toContain('name="password"');
+    expect(html).toContain("set-password");
+    // The thing that actually shipped to the owner, and must not again.
+    expect(html).not.toContain("internal_error");
+    // No session, and nothing about the secret itself.
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(html).not.toContain("600000");
+  });
+
+  it("still refuses the right password, rather than letting it through", async () => {
+    const response = await call(
+      "/auth/login",
+      { method: "POST", headers: { origin: ORIGIN }, body: loginBody() },
+      OVER_CAP_ENV,
+    );
+    await drain(response);
+
+    expect(response.status).not.toBe(303);
   });
 });

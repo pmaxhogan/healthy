@@ -21,6 +21,7 @@
  */
 
 import { toIso } from "../lib/time.ts";
+import { buildRules } from "../policy/rules.ts";
 
 import type { AlertRow, ConnectionRow, McpPolicyRow, ProviderRow } from "../db/rows.ts";
 import type {
@@ -308,11 +309,14 @@ function toRunError(entry: string): { providerId: string; code: string } {
  *    upstream, which is everything it inserted, patched, restored or left
  *    unchanged. Ghosts are excluded on purpose: a ghost is an appointment that
  *    was *not* there.
- *  - `warnings` collapses the list of OperationOutcome codes to a count; the
- *    codes themselves are not in the DTO.
- *  - `filteredView` and `backedOff` have no column. They are reported false until
- *    the sync engine records them, which is a widening of `runSummarySchema` and
- *    so is that module's change to make, not this one's.
+ *  - `warnings` is how many warnings there were, not how many distinct codes. The
+ *    stored row has both; the codes themselves are not in the DTO. A row written
+ *    before `warningCount` existed has it at zero, so the number of distinct codes
+ *    is the floor -- which is why this is a `max` and not a read.
+ *  - `filteredView` and `backedOff` come straight off the stored summary. A run
+ *    that saw a filtered schedule is the run that refused to ghost anything, and a
+ *    backed-off one did almost nothing at all: both are the first thing to look at
+ *    when a run reports no changes.
  */
 export function toRunSummaryDto(summary: DbRunSummary): RunSummary {
   return {
@@ -323,9 +327,9 @@ export function toRunSummaryDto(summary: DbRunSummary): RunSummary {
     eventsGhosted: summary.ghosted,
     eventsRestored: summary.restored,
     resourcesCached: summary.resources,
-    warnings: summary.warnings.length,
-    filteredView: false,
-    backedOff: false,
+    warnings: Math.max(summary.warningCount, summary.warnings.length),
+    filteredView: summary.filteredView,
+    backedOff: summary.backedOff,
     errors: summary.errors.map((entry) => toRunError(entry)),
   };
 }
@@ -362,6 +366,15 @@ export function toAlertDto(row: AlertRow): AlertDto {
   };
 }
 
+/**
+ * Project one policy rule, saying whether the engine could parse it.
+ *
+ * `unparsed` is answered by the engine itself, on this one row, rather than by a
+ * second copy of the target grammar here. A rule the engine makes nothing of
+ * enforces nothing, and the owner has no way to tell from the row: it looks
+ * stored, because it is. That is the one lie this surface can tell, so the UI
+ * gets told. See `PolicyRules.unparsed`.
+ */
 export function toPolicyRuleDto(row: McpPolicyRow): PolicyRuleDto {
   return {
     id: row.id,
@@ -369,6 +382,7 @@ export function toPolicyRuleDto(row: McpPolicyRow): PolicyRuleDto {
     target: row.target,
     note: row.note,
     createdAt: toIso(row.created_at),
+    unparsed: buildRules([row]).unparsed.length > 0,
   };
 }
 

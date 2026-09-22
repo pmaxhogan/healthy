@@ -139,6 +139,33 @@ export interface PolicyRuleDto {
   target: string;
   note: string | null;
   createdAt: string;
+  /**
+   * True when the policy engine could make nothing of this target.
+   *
+   * A stored rule that parses to nothing is the worst kind of wrong: the owner
+   * believes an exposure is denied and it is not. Only a malformed `field` target
+   * (or a blank one) can land here -- a `tool`, `resource` or `provider` target is
+   * taken literally, so a valid-looking name that simply matches no tool is not
+   * reported. The admin UI shows a warning next to the row.
+   */
+  unparsed: boolean;
+}
+
+/**
+ * The payload of `POST /api/mcp/policy`: a rule without its server-assigned parts.
+ *
+ * Mirrors `policyRuleSchema` on the Worker side, which is strict -- an extra key is
+ * a 400, and `note` must be absent rather than empty.
+ */
+export interface CreatePolicyRuleRequest {
+  ruleType: PolicyRuleType;
+  target: string;
+  /**
+   * `| undefined` explicitly, under `exactOptionalPropertyTypes`: this is the type
+   * the Worker's own parser produces for an absent optional field, and the route
+   * is typed against this interface so the two cannot drift.
+   */
+  note?: string | undefined;
 }
 
 export interface McpGrantDto {
@@ -209,6 +236,17 @@ export interface UpdateProviderRequest {
 
 export interface SetProviderSecretRequest {
   clientSecret: string;
+}
+
+/**
+ * The 201 body of `POST /api/alerts/test`.
+ *
+ * A Trello card id, not an alert id: the endpoint deliberately writes no `alerts`
+ * row, because a test is not an alert and one there would make the dashboard's
+ * open-alert count lie.
+ */
+export interface AlertTestResponse {
+  cardId: string;
 }
 
 /**

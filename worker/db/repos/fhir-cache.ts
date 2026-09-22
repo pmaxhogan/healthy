@@ -37,6 +37,15 @@ export interface CachedResource {
   resource: unknown;
 }
 
+/**
+ * The AAD for one cached payload.
+ *
+ * The column name here is `payload`, but the column is `payload_enc`. That is a
+ * mismatch with every other `aadFor` call in the db layer, and it is deliberate
+ * now: the AAD is part of the ciphertext's authentication tag, so "correcting" it
+ * would make every row already in the cache fail to open. If it is ever worth
+ * fixing it has to be a migration that re-seals, not an edit here.
+ */
 const aad = (providerId: string, resourceType: string, resourceId: string): string =>
   aadFor("fhir_cache", "payload", `${providerId}:${resourceType}:${resourceId}`);
 
@@ -97,6 +106,8 @@ export function makeFhirCacheRepo(ctx: Ctx) {
         const hash = await sha256Hex(plaintext);
         const lastUpdated = parseLastUpdated(resource.meta?.lastUpdated);
 
+        // security/detect-possible-timing-attacks warns because the variable is
+        // called `hash`: it is a content digest for change detection, not a secret.
         if (existing.get(`${resource.resourceType}:${resource.id}`) === hash) {
           report.unchanged += 1;
           statements.push(

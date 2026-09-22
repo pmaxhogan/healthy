@@ -32,7 +32,7 @@ import { Hono } from "hono";
 import { isLiveProvider } from "../api/routes/providers.ts";
 import { reposFor } from "../db/index.ts";
 import { isAppError } from "../lib/errors.ts";
-import { makeLogger } from "../lib/log.ts";
+import { logLine, makeLogger } from "../lib/log.ts";
 
 import { epicRouter } from "./epic.ts";
 import { googleOAuthRouter, unknownConnectionPage } from "./google.ts";
@@ -54,7 +54,7 @@ export const oauthRouter = new Hono<AppHonoEnv>();
 oauthRouter.onError((error, c) => {
   const code = isAppError(error) ? error.code : "internal";
   const status = (isAppError(error) ? error.status : 500) as ContentfulStatusCode;
-  console.warn("oauth_failed", { code, path: c.req.path });
+  logLine("warn", "oauth_failed", { code, path: c.req.path });
   return oauthPage({
     nonce: c.get("nonce"),
     heading: "That did not work",

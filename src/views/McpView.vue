@@ -14,7 +14,7 @@ import { formatDateTime, formatDuration, relativeTime } from "../lib/format.ts";
 import { toastSuccess } from "../lib/toasts.ts";
 import { useAction, useLoad } from "../lib/use-load.ts";
 
-import type { CreatePolicyRuleRequest } from "../api/endpoints.ts";
+import type { CreatePolicyRuleRequest } from "@shared/types.ts";
 
 const AUDIT_LIMITS = [25, 50, 100, 250] as const;
 
@@ -46,6 +46,12 @@ const providerNames = computed(
 function nameProvider(id: string): string {
   return providerNames.value.get(id) ?? id;
 }
+
+// A rule the policy engine cannot parse is stored, listed, and enforcing nothing.
+// That is the one way this page can mislead -- the owner reads the row and
+// believes the exposure is denied -- so it is called out rather than left to be
+// noticed. Only a malformed `field` target can get here; see PolicyRuleDto.
+const unparsedRules = computed(() => (rules.data.value ?? []).filter((rule) => rule.unparsed));
 
 async function setEnabled(next: boolean): Promise<void> {
   const ok = await toggle.run(async () => {
@@ -174,6 +180,14 @@ async function onRevoke(id: string): Promise<void> {
         @submit="onAddRule"
       />
 
+      <p v-if="unparsedRules.length > 0" class="warn-text">
+        {{ unparsedRules.length === 1 ? "One rule below denies" : "Some rules below deny" }}
+        nothing: the policy engine could not read
+        {{ unparsedRules.map((rule) => rule.target).join(", ") }}. A field rule has to be
+        <code>ResourceType.path.to.field</code> (or <code>allow:</code> one). Delete and re-add it —
+        until then that exposure is open.
+      </p>
+
       <StateBlock
         :loading="rules.loading.value"
         :error="rules.error.value"
@@ -197,6 +211,13 @@ async function onRevoke(id: string): Promise<void> {
                 <td class="nowrap">{{ rule.ruleType }}</td>
                 <td>
                   <code>{{ rule.target }}</code>
+                  <span
+                    v-if="rule.unparsed"
+                    class="warn-text"
+                    title="The policy engine cannot read this target, so the rule denies nothing."
+                  >
+                    — not enforced
+                  </span>
                 </td>
                 <td>{{ rule.note ?? "—" }}</td>
                 <td class="nowrap">{{ relativeTime(rule.createdAt) }}</td>
@@ -272,6 +293,11 @@ async function onRevoke(id: string): Promise<void> {
 <style scoped>
 h2 {
   font-size: 1.05rem;
+}
+
+.warn-text {
+  color: var(--warn);
+  font-size: 0.88rem;
 }
 
 .toggle {

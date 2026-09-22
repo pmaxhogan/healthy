@@ -44,6 +44,7 @@ describe("the policy CRUD", () => {
     expect(rule.ruleType).toBe("resource");
     expect(rule.target).toBe("DocumentReference");
     expect(rule.note).toBe("notes stay out of the assistant");
+    expect(rule.unparsed).toBe(false);
     expect(Number.isNaN(Date.parse(rule.createdAt))).toBe(false);
 
     const listed = await json<PolicyRuleDto[]>(await owner().get("/api/mcp/policy"));
@@ -52,6 +53,28 @@ describe("the policy CRUD", () => {
     const deleted = await owner().send("DELETE", `/api/mcp/policy/${rule.id}`);
     expect(deleted.status).toBe(200);
     expect(await json<PolicyRuleDto[]>(await owner().get("/api/mcp/policy"))).toStrictEqual([]);
+  });
+
+  it("reports a field rule the engine cannot read, so a typo is not a silent no-op", async () => {
+    // "Patient" alone is a resource, not a field path, and the engine makes
+    // nothing of it as a `field` target. Stored, listed, denying nothing: the one
+    // way this surface could mislead the owner, so it is reported.
+    const typo = await json<PolicyRuleDto>(
+      await owner().send("POST", "/api/mcp/policy", { ruleType: "field", target: "Patient" }),
+    );
+    const good = await json<PolicyRuleDto>(
+      await owner().send("POST", "/api/mcp/policy", {
+        ruleType: "field",
+        target: "Patient.telecom",
+      }),
+    );
+
+    expect(typo.unparsed).toBe(true);
+    expect(good.unparsed).toBe(false);
+    const listed = await json<PolicyRuleDto[]>(await owner().get("/api/mcp/policy"));
+    expect(listed.filter((entry) => entry.unparsed).map((entry) => entry.target)).toStrictEqual([
+      "Patient",
+    ]);
   });
 
   it("adding the same rule twice returns the same row, so the UI can be fire and forget", async () => {

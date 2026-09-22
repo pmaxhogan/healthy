@@ -21,7 +21,7 @@ surface, and the MCP surface.
 | Patient identifiers                   | D1             | AES-GCM-256, application layer                  |
 | Cached FHIR resources                 | D1             | AES-GCM-256, application layer                  |
 | MCP access and refresh tokens         | Workers KV     | Managed by `@cloudflare/workers-oauth-provider` |
-| Admin password                        | Worker secret  | PBKDF2-SHA256, 600k iterations, per-hash salt   |
+| Admin password                        | Worker secret  | PBKDF2-SHA256, 100k iterations, per-hash salt   |
 | Encryption key, API credentials       | Worker secrets | Cloudflare-managed                              |
 | Configuration (calendar, templates)   | D1 `settings`  | Plaintext (non-sensitive by construction)       |
 
@@ -69,11 +69,34 @@ refuses to read or modify any event that does not carry its own
 `extendedProperties.private.healthy = "1"` marker, so it cannot touch an entry a
 human created, and it never deletes.
 
-**No PHI in logs.** Logs are structured JSON with an explicit field allowlist.
-Tokens, bearer headers, email addresses, patient identifiers, clinical content
-and health-system names are never logged, and there are redaction tests that fail
-if they appear. The MCP audit trail records _that_ a tool ran, by whom, against
-which providers, and how many rows came back — never the rows.
+**No PHI in logs.** Logs are structured JSON, one object per line, and every
+field passes through a redactor (`worker/lib/log.ts`) before it is written. The
+guarantee is two parts, and it is worth being precise about which is which:
+
+- _Enforced_ by the redactor: keys that name a credential (`token`, `secret`,
+  `password`, `authorization`, `cookie`, `refresh`, `verifier`, `api_key`,
+  `private`, `email`), the exact keys `code` and `state`, and keys naming a
+  patient or FHIR identifier are replaced wholesale. By shape, it strips
+  `Bearer`/`Basic` credentials, the value of a credential-bearing query
+  parameter (`?code=`, `access_token=`, `token=`…), anything address-shaped, and
+  any long opaque run — 32 or more characters of base64url, dots included, which
+  is what a JWT (`a.b.c`) and a `ya29.`-prefixed Google token look like — whether
+  it is the whole value or embedded in a sentence. `/` and `:` end a run, so a
+  request path and a URL's host stay readable while a credential inside one does
+  not. Nesting deeper than six levels
+  is dropped, so a resource handed to the logger by mistake cannot be serialised.
+- _Convention_, not enforcement: callers pass counts, ids of this app's own
+  rows, durations, HTTP statuses and stable error codes, and nothing else. This
+  is not an allowlist — an unrecognised key with an innocuous-looking value is
+  written as given — so clinical content, practitioner names, addresses and
+  organisation identities must not be handed to the logger at all. Reviews check
+  new log calls against that rule.
+
+`test/unit/lib/log.test.ts` pins every rule above, including a JWT, a `ya29.`
+token, a callback URL carrying `?code=`, and a 24-character Epic patient id under
+a key that shape alone would not catch. The MCP audit trail records _that_ a tool
+ran, by whom, against which providers, and how many rows came back — never the
+rows.
 
 **No personal data in the repository.** Endpoints, organisation identities, the
 Access team domain and AUD, credentials, timezone and location are all runtime

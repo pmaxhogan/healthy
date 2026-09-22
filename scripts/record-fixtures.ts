@@ -241,6 +241,7 @@ function makePageSink(
 function redactTokenResponse(body: unknown): unknown {
   if (!isRecord(body)) return body;
   const out: Record<string, unknown> = {};
+  // `out[key]`: keys from `Object.entries` of the same object, into a fresh literal.
   for (const [key, value] of Object.entries(body)) {
     out[key] = TOKEN_FIELDS_TO_REDACT.has(key) ? "REDACTED" : value;
   }

@@ -57,7 +57,6 @@ import { DAY_SECONDS, dateInZone, fromIso, startOfDayInZone, toIso } from "../li
 import { resolveReconnectAlert } from "./alerts.ts";
 import { backoffUntilSeconds, rateLimitOf } from "./backoff.ts";
 import { getCapabilityIndex } from "./discovery.ts";
-import { writeGhost } from "./events.ts";
 import { getGoogleCalendarFor } from "./google-tokens.ts";
 import { buildCalendarModel, ghostModel } from "./mapping.ts";
 import { eventKeyOf, planChanges } from "./plan.ts";
@@ -609,16 +608,18 @@ async function writePatch(
     entry.googleEventId,
     buildEventBody(model),
   );
+  // Only a restore may move the row out of `ghost`; see `upsert` in the repo.
+  const restore = entry.action === "restore";
   if (patched === null) {
     // The event went away between the list and the patch. Re-inserting is the
     // same decision the plan would have made had it known.
     const created = await run.calendar.insertEvent(run.calendarId, buildEventBody(model));
-    await persistRow(run, providerId, entry.key, created.id, model);
+    await persistRow(run, providerId, entry.key, created.id, model, restore);
     run.state.summary.eventsInserted += 1;
     return;
   }
-  await persistRow(run, providerId, entry.key, patched.id, model);
-  if (entry.action === "restore") run.state.summary.eventsRestored += 1;
+  await persistRow(run, providerId, entry.key, patched.id, model, restore);
+  if (restore) run.state.summary.eventsRestored += 1;
   else run.state.summary.eventsPatched += 1;
 }
 
@@ -637,8 +638,7 @@ async function writeGhostPatch(
   );
   // A null patch means the owner deleted it. The row still becomes a ghost: the
   // appointment really is gone, and re-creating a deleted event is never wanted.
-  await writeGhost(run.ctx, {
-    eventKey: entry.key,
+  await run.repos.calendarEvents.markGhost(entry.key, {
     fingerprint: patched === null ? null : ghost.fingerprint,
     ghostedAt: ghostedAtFor(entry.key, rows, run.ctx.now()),
   });
@@ -651,8 +651,7 @@ async function writeGhostRow(
   rows: readonly CalendarEventRow[],
 ): Promise<void> {
   run.ctx.log.info("sync.ghost.row_only", { eventKey: entry.key, reasonCode: entry.reason });
-  await writeGhost(run.ctx, {
-    eventKey: entry.key,
+  await run.repos.calendarEvents.markGhost(entry.key, {
     // No Google write happened, so the stored fingerprint must keep describing
     // whatever is actually on the calendar.
     fingerprint: null,
@@ -671,6 +670,7 @@ async function persistRow(
   key: string,
   googleEventId: string,
   model: CalendarEventModel,
+  restore = false,
 ): Promise<void> {
   await run.repos.calendarEvents.upsert({
     eventKey: key,
@@ -680,6 +680,7 @@ async function persistRow(
     googleEventId,
     fingerprint: model.fingerprint,
     startAt: fromIso(model.start),
+    restore,
   });
 }
 

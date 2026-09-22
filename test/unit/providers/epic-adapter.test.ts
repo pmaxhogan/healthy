@@ -39,6 +39,17 @@ function adapter(fetchImpl: typeof fetch): ReturnType<typeof createEpicAdapter> 
   return createEpicAdapter({ fetchImpl, logger: noopLogger, now: () => NOW });
 }
 
+/** The `AppError` a synchronous call threw, as the async helper below does. */
+function appErrorFrom(run: () => unknown): AppError {
+  try {
+    run();
+  } catch (error) {
+    expect(error).toBeInstanceOf(AppError);
+    return error as AppError;
+  }
+  throw new Error("expected the call to throw");
+}
+
 async function expectAppError(promise: Promise<unknown>): Promise<AppError> {
   try {
     await promise;
@@ -109,6 +120,32 @@ describe("parseSmartConfiguration", () => {
 
   it("rejects a body that is not an object", () => {
     expect(() => parseSmartConfiguration("not json")).toThrow(AppError);
+  });
+
+  it("refuses an endpoint that is not https, and says which one", () => {
+    // The token endpoint receives the client secret, the code and the PKCE
+    // verifier. A discovery document is the organisation's to write, so its word
+    // on where to send them is not enough on its own.
+    const error = appErrorFrom(() =>
+      parseSmartConfiguration({
+        authorization_endpoint: "https://example.test/authorize",
+        // eslint-disable-next-line unicorn/prefer-https -- a non-https endpoint is the input under test; the assertion is that it is refused.
+        token_endpoint: "http://example.test/token",
+      }),
+    );
+
+    expect(error.details).toMatchObject({ authorizeIsHttps: true, tokenIsHttps: false });
+    // Never the URL itself: a FHIR endpoint names the health system.
+    expect(JSON.stringify(error.details)).not.toContain("example.test");
+  });
+
+  it("refuses an endpoint that is not an absolute URL at all", () => {
+    expect(() =>
+      parseSmartConfiguration({
+        authorization_endpoint: "/authorize",
+        token_endpoint: "https://example.test/token",
+      }),
+    ).toThrow(AppError);
   });
 });
 

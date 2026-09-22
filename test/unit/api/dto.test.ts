@@ -287,6 +287,9 @@ describe("toRunSummaryDto", () => {
     resources: 120,
     errors: ["PROV1:upstream_unavailable", "needs_reauth"],
     warnings: ["4119", "4101"],
+    warningCount: 9,
+    filteredView: true,
+    backedOff: false,
   };
 
   it("counts an appointment as seen when it was inserted, patched, restored or unchanged", () => {
@@ -304,8 +307,19 @@ describe("toRunSummaryDto", () => {
     expect(dto.resourcesCached).toBe(120);
   });
 
-  it("collapses the warning codes to a count", () => {
-    expect(toRunSummaryDto(stored).warnings).toBe(2);
+  it("reports how many warnings there were, not how many distinct codes", () => {
+    expect(toRunSummaryDto(stored).warnings).toBe(9);
+  });
+
+  it("falls back to the distinct codes for a row written before the count existed", () => {
+    // `warningCount` defaults to 0 on an older `summary_json`, and two codes cannot
+    // have arrived in fewer than two warnings.
+    expect(toRunSummaryDto({ ...stored, warningCount: 0 }).warnings).toBe(2);
+  });
+
+  it("carries the flags that explain a run with no changes", () => {
+    expect(toRunSummaryDto(stored).filteredView).toBe(true);
+    expect(toRunSummaryDto({ ...stored, backedOff: true }).backedOff).toBe(true);
   });
 
   it("splits an error into its provider and its code, tolerating a bare code", () => {
@@ -334,6 +348,9 @@ describe("toRunDto", () => {
         resources: 0,
         errors: [],
         warnings: [],
+        warningCount: 0,
+        filteredView: false,
+        backedOff: false,
       },
     });
 
@@ -378,7 +395,32 @@ describe("toPolicyRuleDto and toAuditDto", () => {
       target: "Observation.valueQuantity",
       note: null,
       createdAt: "2026-01-01T00:00:00.000Z",
+      unparsed: false,
     });
+  });
+
+  it("flags a field rule the policy engine cannot parse", () => {
+    // "Observation" alone is a resource type, not a field path: stored, listed, and
+    // denying nothing. The DTO says so rather than letting the UI imply otherwise.
+    expect(
+      toPolicyRuleDto({
+        id: "RULE2",
+        rule_type: "field",
+        target: "Observation",
+        note: null,
+        created_at: T0,
+      }).unparsed,
+    ).toBe(true);
+    // A tool target is taken literally, so it can never be unparsed.
+    expect(
+      toPolicyRuleDto({
+        id: "RULE3",
+        rule_type: "tool",
+        target: "anything at all",
+        note: null,
+        created_at: T0,
+      }).unparsed,
+    ).toBe(false);
   });
 
   it("names an unknown client rather than leaving it blank", () => {

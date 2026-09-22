@@ -228,12 +228,22 @@ export async function withAccessToken(
       // One statement, and it happens before the new access token is returned:
       // see rule 3 in the module comment. A null `refreshToken` means Epic did
       // not rotate it, so the stored one stays -- writing null would erase it.
-      await repos.connections.upsertTokens(providerId, {
+      // The write carries the lease: if this refresh outlasted its TTL and another
+      // one has since stored *its* rotated refresh token, ours must not land on
+      // top -- that is how both end up invalid and the owner has to reconnect.
+      const stored = await repos.connections.upsertTokensLeased(providerId, owner, {
         accessToken: tokens.accessToken,
         accessExpiresAt: Math.floor(tokens.expiresAt / 1000),
         ...(tokens.refreshToken !== null && { refreshToken: tokens.refreshToken }),
         ...(tokens.scope !== "" && { scope: tokens.scope }),
       });
+      if (stored === null) {
+        // Discard what we just obtained and follow whoever holds the lease now.
+        // Nothing else is stamped either: marking the connection connected or
+        // resolving its alert would be claiming credit for someone else's write.
+        ctx.log.warn("sync.token.lease_lost", { providerId });
+        return await awaitOtherRefresh();
+      }
       await repos.connections.markConnected(connection.id);
       state.accessToken = tokens.accessToken;
       state.expiresAtMs = tokens.expiresAt;

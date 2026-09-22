@@ -13,7 +13,7 @@ import {
 const ENV: SessionEnv = {
   // Not a credential: a fixed value so the HMAC is deterministic across runs.
   SESSION_SECRET: "unit-test-signing-material",
-  PASSWORD_HASH: "pbkdf2$sha256$600000$c2FsdA$aGFzaA",
+  PASSWORD_HASH: "pbkdf2$sha256$100000$c2FsdA$aGFzaA",
 };
 
 const NOW = Date.UTC(2026, 0, 15, 12, 0, 0);

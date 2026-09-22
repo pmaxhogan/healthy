@@ -246,6 +246,39 @@ describe("the second run", () => {
     expect(third.eventsGhosted).toBe(0);
     expect(h.upstreams.calendar.patches).toBe(patches);
   });
+
+  it("writes the ghost row once and leaves it alone on every run after", async () => {
+    // The regression this pins: ghosting has to move the state and the fingerprint
+    // in the same statement, and leave `ghosted_at` where it first landed. Move
+    // either half on its own and the third run sees a stale fingerprint, patches
+    // the same event again, re-stamps `ghosted_at`, and so does every run after it.
+    const h = await setup();
+    const key = `${h.providerId}:enc-2`;
+    const repos = syncRepos(h.ctx);
+    await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
+    const active = await repos.calendarEvents.getByKey(key);
+
+    h.time.advance(3600);
+    h.server.encounters = searchBundle([encounter({ id: "enc-1", start: UPCOMING })]);
+    const second = await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
+    const ghosted = await repos.calendarEvents.getByKey(key);
+
+    h.time.advance(3600);
+    const third = await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
+    const settled = await repos.calendarEvents.getByKey(key);
+
+    expect(second.eventsGhosted).toBe(1);
+    expect(third.eventsGhosted).toBe(0);
+    // The one patch is the ghost dressing, and the fingerprint now describes it.
+    expect(ghosted?.state).toBe("ghost");
+    expect(ghosted?.ghosted_at).toBe(T0 + 3600);
+    expect(ghosted?.fingerprint).not.toBe(active?.fingerprint);
+    // Third run: still a ghost, same disappearance time, same fingerprint. Only
+    // `last_seen_at` is allowed to move, and `touch` is what moves it.
+    expect(settled?.state).toBe("ghost");
+    expect(settled?.ghosted_at).toBe(T0 + 3600);
+    expect(settled?.fingerprint).toBe(ghosted?.fingerprint);
+  });
 });
 
 describe("the third run", () => {

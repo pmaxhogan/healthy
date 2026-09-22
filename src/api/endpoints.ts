@@ -4,19 +4,20 @@
 // a contract rather than a habit: if the Worker moves a route, exactly one file
 // here changes and the compiler finds the call sites.
 //
-// Two shapes are NOT in shared/types.ts and are declared locally, flagged as
-// contract gaps: the response to POST /api/alerts/test, and the payload of
-// POST /api/mcp/policy (which is PolicyRuleDto without its server-assigned
-// fields).
+// Every request and response shape lives in shared/types.ts, including the ones
+// that used to be declared here as contract gaps: the POST /api/alerts/test
+// response and the POST /api/mcp/policy payload.
 
 import { api, ApiRequestError } from "./client.ts";
 
 import type {
   AlertDto,
+  AlertTestResponse,
   BrandDto,
   CalendarOptionDto,
   ConnectionDto,
   ColorOptionDto,
+  CreatePolicyRuleRequest,
   CreateProviderRequest,
   GoogleAccountDto,
   McpAuditDto,
@@ -24,7 +25,6 @@ import type {
   McpToolInfoDto,
   OverviewDto,
   PolicyRuleDto,
-  PolicyRuleType,
   ProviderDto,
   RunDto,
   SettingsDto,
@@ -32,31 +32,9 @@ import type {
   UpdateProviderRequest,
 } from "@shared/types.ts";
 
-/**
- * CONTRACT GAP: the test-card response is not in shared/types.ts.
- *
- * `POST /api/alerts/test` answers `201 { cardId }` -- the Trello card id, not an
- * alert id, because the endpoint deliberately writes no `alerts` row.
- */
-export interface TestAlertDto {
-  cardId: string;
-}
-
 /** The 202 body of every route whose work outlives the response. */
 export interface Accepted {
   accepted: boolean;
-}
-
-/**
- * CONTRACT GAP: the create-rule payload is not in shared/types.ts.
- *
- * Matches `policyRuleSchema` on the Worker side, which is a strict object -- an
- * extra key is a 400, and `note` must be absent rather than empty.
- */
-export interface CreatePolicyRuleRequest {
-  ruleType: PolicyRuleType;
-  target: string;
-  note?: string;
 }
 
 export const endpoints = {
@@ -113,7 +91,7 @@ export const endpoints = {
     api.get(`/api/mcp/audit?limit=${String(limit)}`, signal),
 
   alerts: (signal?: AbortSignal): Promise<AlertDto[]> => api.get("/api/alerts", signal),
-  sendTestAlert: (): Promise<TestAlertDto> => api.post("/api/alerts/test"),
+  sendTestAlert: (): Promise<AlertTestResponse> => api.post("/api/alerts/test"),
   archiveTestAlert: (id: string): Promise<void> =>
     api.delete(`/api/alerts/test/${encodeURIComponent(id)}`),
 

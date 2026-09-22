@@ -7,7 +7,7 @@ feature PRs is "does it help someone running their own instance" rather than
 ## Before you open a PR
 
 ```sh
-npm install        # installs the git hooks too
+npm ci             # installs the git hooks too, from the committed lockfile
 npm run check      # lint, typecheck, knip, test, build
 ```
 
