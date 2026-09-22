@@ -220,6 +220,7 @@ export function freshOwner(): () => Session {
 // Every table, child before parent so the deletes never trip a foreign key.
 const TABLES = [
   "login_attempts",
+  "mail_inbox",
   "mcp_policy",
   "mcp_audit",
   "run_log",

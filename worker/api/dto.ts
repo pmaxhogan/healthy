@@ -21,9 +21,10 @@
  */
 
 import { toIso } from "../lib/time.ts";
+import { domainOf, parseAllowlistCsv } from "../mail/classify.ts";
 import { buildRules } from "../policy/rules.ts";
 
-import type { AlertRow, ConnectionRow, McpPolicyRow, ProviderRow } from "../db/rows.ts";
+import type { AlertRow, ConnectionRow, MailKind, McpPolicyRow, ProviderRow } from "../db/rows.ts";
 import type {
   ProviderConfig as DbProviderConfig,
   ProviderConfigInput,
@@ -34,6 +35,8 @@ import type {
   AlertDto,
   ConnectionDto,
   GoogleAccountDto,
+  MailInboxEntryDto,
+  MailSettingsDto,
   McpAuditDto,
   PolicyRuleDto,
   ProviderConfig,
@@ -378,6 +381,52 @@ export function toPolicyRuleDto(row: McpPolicyRow): PolicyRuleDto {
     createdAt: toIso(row.created_at),
     unparsed: buildRules([row]).unparsed.length > 0,
   };
+}
+
+// ---------------------------------------------------------------------------
+// mail_inbox
+// ---------------------------------------------------------------------------
+
+/**
+ * The decoded `mail_inbox` entry `worker/db/repos/mail-inbox.ts` returns.
+ *
+ * Mirrored rather than imported, for the same reason as `RunEntryLike` above.
+ * `fromAddr` is the plaintext address (the repo never returns the sealed
+ * column); this projection is what reduces it to a domain before it reaches
+ * the SPA. `pendingCode`/`pendingUrl` are already the repo's own "never an
+ * otp row's code" answer -- this function does not re-decide that.
+ */
+export interface MailInboxEntryLike {
+  id: string;
+  receivedAt: number;
+  fromAddr: string;
+  subject: string | null;
+  kind: MailKind;
+  consumedAt: number | null;
+  expiresAt: number | null;
+  rawSize: number;
+  pendingCode: string | null;
+  pendingUrl: string | null;
+}
+
+export function toMailInboxEntryDto(entry: MailInboxEntryLike): MailInboxEntryDto {
+  return {
+    id: entry.id,
+    receivedAt: toIso(entry.receivedAt),
+    fromDomain: domainOf(entry.fromAddr),
+    subject: entry.subject,
+    kind: entry.kind,
+    consumedAt: isoOrNull(entry.consumedAt),
+    expiresAt: isoOrNull(entry.expiresAt),
+    rawSize: entry.rawSize,
+    pendingCode: entry.pendingCode,
+    pendingUrl: entry.pendingUrl,
+  };
+}
+
+/** The `mail_sender_allowlist` setting's stored CSV -> the SPA's array. */
+export function toMailSettingsDto(allowlistCsv: string): MailSettingsDto {
+  return { allowlist: parseAllowlistCsv(allowlistCsv) };
 }
 
 export function toAuditDto(entry: AuditEntryLike): McpAuditDto {

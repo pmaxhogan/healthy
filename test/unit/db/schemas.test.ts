@@ -47,6 +47,7 @@ describe("the settings catalogue", () => {
       default_arrival_offset_min: 0,
       sync_backoff_until: null,
       mcp_enabled: true,
+      mail_sender_allowlist: "mychart.,google.com",
     });
   });
 

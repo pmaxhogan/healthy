@@ -34,6 +34,7 @@
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 
 import { app } from "./app.ts";
+import { handleInboundEmail } from "./mail/handler.ts";
 import { MCP_API_ROUTE, OAUTH_CORE } from "./mcp/oauth-config.ts";
 import { HealthyMcp } from "./mcp/server.ts";
 import { handleScheduled } from "./sync/index.ts";
@@ -91,5 +92,14 @@ export default {
    */
   scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     return handleScheduled(env, controller.cron, ctx);
+  },
+
+  /**
+   * The 2FA mailbox: `2fa@<the Worker's own hostname>`, routed by Cloudflare
+   * Email Routing straight to this Worker. See `worker/mail/handler.ts` for
+   * the allowlist-then-classify pipeline and `docs/mail.md` for the setup.
+   */
+  email(message: ForwardableEmailMessage, env: Env, ctx: ExecutionContext): Promise<void> {
+    return handleInboundEmail(message, env, ctx);
   },
 } satisfies ExportedHandler<Env>;

@@ -18,6 +18,7 @@
 import { z } from "zod";
 
 import { AppError } from "../lib/errors.ts";
+import { DEFAULT_MAIL_SENDER_ALLOWLIST_CSV } from "../mail/classify.ts";
 
 /** Parse one JSON column, reporting where the bad value came from. */
 export function parseJsonColumn<T>(schema: z.ZodType<T>, value: string, what: string): T {
@@ -65,6 +66,8 @@ export const settingSchemas = {
   sync_backoff_until: z.number().int().nonnegative().nullable(),
   /** Master switch for the MCP surface. */
   mcp_enabled: z.boolean(),
+  /** Comma-separated sender domains the inbound email handler accepts mail from. */
+  mail_sender_allowlist: z.string().min(1),
 } as const;
 
 export type SettingKey = keyof typeof settingSchemas;
@@ -86,6 +89,7 @@ export const SETTING_DEFAULTS: Settings = {
   default_arrival_offset_min: 0,
   sync_backoff_until: null,
   mcp_enabled: true,
+  mail_sender_allowlist: DEFAULT_MAIL_SENDER_ALLOWLIST_CSV,
 };
 
 export const SETTING_KEYS = Object.keys(settingSchemas) as SettingKey[];

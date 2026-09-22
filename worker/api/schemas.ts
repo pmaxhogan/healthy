@@ -144,3 +144,8 @@ export const syncRequestSchema = z.strictObject({
 export const brandQuerySchema = z.object({
   q: z.string().max(200).optional(),
 });
+
+/** `PUT /api/mail/settings`. Replaces the whole allowlist -- there is only one field. */
+export const mailAllowlistSchema = z.strictObject({
+  allowlist: z.array(z.string().min(1).max(200)).min(1).max(50),
+});

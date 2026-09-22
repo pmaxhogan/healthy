@@ -255,9 +255,13 @@ describe("the settings mapping", () => {
     expect(fromSettingsPatch({ syncBackoffUntil: "2026-01-01T00:00:00.000Z" })).toStrictEqual({});
   });
 
-  it("has a DTO field for every settings key, so nothing is silently unreachable", () => {
+  it("has a DTO field for every settings key not owned by its own route, so nothing is silently unreachable", () => {
     // `sync_backoff_until` is deliberately read-only; every other key must be
-    // writable through the API or the UI cannot configure it at all.
+    // writable through this API or the UI cannot configure it at all --
+    // except a key with its own dedicated route, which this patch deliberately
+    // does not cover. `mail_sender_allowlist` is edited through
+    // `PUT /api/mail/settings` instead, the same way `SettingsPatch` itself
+    // never grew a field for anything the /mcp or /providers routes own.
     const writable = Object.keys(
       fromSettingsPatch({
         timezone: "UTC",
@@ -270,7 +274,9 @@ describe("the settings mapping", () => {
         mcpEnabled: true,
       }),
     );
-    const expected = Object.keys(SETTING_DEFAULTS).filter((key) => key !== "sync_backoff_until");
+    const expected = Object.keys(SETTING_DEFAULTS).filter(
+      (key) => key !== "sync_backoff_until" && key !== "mail_sender_allowlist",
+    );
 
     expect(writable.toSorted(alphabetical)).toStrictEqual(expected.toSorted(alphabetical));
   });

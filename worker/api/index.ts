@@ -23,6 +23,7 @@ import { NO_STORE, apiErrorHandler } from "./http.ts";
 import { alertsRouter } from "./routes/alerts.ts";
 import { brandsRouter } from "./routes/brands.ts";
 import { googleRouter } from "./routes/google.ts";
+import { mailRouter } from "./routes/mail.ts";
 import { mcpRouter } from "./routes/mcp.ts";
 import { overviewRouter } from "./routes/overview.ts";
 import { providersRouter, syncRouter } from "./routes/providers.ts";
@@ -55,6 +56,7 @@ apiRouter.route("/mcp", mcpRouter);
 apiRouter.route("/alerts", alertsRouter);
 apiRouter.route("/runs", runsRouter);
 apiRouter.route("/brands", brandsRouter);
+apiRouter.route("/mail", mailRouter);
 
 /**
  * An unknown /api path must be a JSON 404, never the SPA's index.html: the SPA
