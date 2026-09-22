@@ -1,0 +1,18 @@
+# gitleaks configuration.
+#
+# Start from the full upstream rule set and add nothing. Allowlist entries are
+# only ever added for a false positive that was actually hit, with a comment
+# naming the file and the rule -- never pre-emptively, and never for a path that
+# could plausibly hold a real credential.
+#
+# Everything genuinely secret in this project lives in Worker secrets, the D1
+# `settings` table, or gitignored files (`.dev.vars`, `.local/`), so a hit here
+# should be treated as a real leak until proven otherwise.
+
+# There is deliberately no [[allowlists]] block yet. gitleaks rejects an
+# allowlist with no checks in it, and an empty one would be a placeholder
+# inviting a blanket path exclusion later. Add an entry only for a false positive
+# you have actually hit, naming the file and the rule.
+
+[extend]
+useDefault = true

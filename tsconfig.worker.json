@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    // ES2022 only: no DOM. Every runtime global the Worker actually has
+    // (Request, KVNamespace, D1Database, DurableObject, ...) comes from the
+    // generated worker-configuration.d.ts instead, which is the authoritative
+    // shape of the deployed runtime.
+    "lib": ["ES2022"],
+    // Empty on purpose. Pulling in @types/node here would redeclare fetch,
+    // Request and Response with Node's shapes and silently mask workerd's.
+    "types": [],
+    "baseUrl": "."
+  },
+  // worker-configuration.d.ts is generated (and gitignored) by the `wrangler
+  // types` step at the head of `npm run typecheck`, so it must be listed
+  // explicitly -- it lives at the repo root, outside worker/.
+  "include": ["worker/**/*.ts", "shared/**/*.ts", "worker-configuration.d.ts"]
+}

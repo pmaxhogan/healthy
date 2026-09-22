@@ -1,0 +1,30 @@
+{
+  // Options shared by every project in the repo. The per-project configs add
+  // only what differs: which files they own, which libs, which global types.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "useDefineForClassFields": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+
+    // Strictness. These three are the ones that catch the bugs that matter for
+    // this project: unchecked D1 row indexing, and optional-vs-undefined
+    // confusion in the many partially-populated FHIR shapes.
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "paths": {
+      "@shared/*": ["./shared/*"]
+    }
+  }
+}

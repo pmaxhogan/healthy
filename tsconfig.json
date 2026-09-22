@@ -1,0 +1,17 @@
+{
+  // Solution-style root: owns no files itself, just points at the four real
+  // projects. This is what lets typescript-eslint's project service find a
+  // project for every file in the repo, and what `tsc -b` would walk.
+  //
+  // It extends the base config purely so that `paths` is visible here too:
+  // tsx reads the *root* tsconfig when it runs the scripts/ CLIs under plain
+  // Node, and without the alias `@shared/...` fails to resolve at runtime.
+  "extends": "./tsconfig.base.json",
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.worker.json" },
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.node.json" },
+    { "path": "./tsconfig.test.json" }
+  ]
+}

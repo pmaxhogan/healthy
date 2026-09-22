@@ -1,0 +1,105 @@
+/* Design tokens. Same approach as the sibling `walk` project: one flat set of
+   custom properties on :root, overridden wholesale under
+   prefers-color-scheme: dark. No theme switcher, no runtime class toggling --
+   the OS decides. */
+
+:root {
+  --bg: #ffffff;
+  --bg-raised: #f6f7f9;
+  --bg-input: #eef0f3;
+  --text: #17202a;
+  --text-dim: #5b6572;
+  --border: #dde2e8;
+  --accent: #0d9488;
+  --accent-text: #ffffff;
+  --danger: #dc2626;
+  --warn: #b45309;
+  --ok: #059669;
+  --shadow: 0 4px 24px rgba(15, 23, 42, 0.14);
+  --radius: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101418;
+    --bg-raised: #1a2027;
+    --bg-input: #232b34;
+    --text: #e8ecf1;
+    --text-dim: #93a0ae;
+    --border: #2c353f;
+    --accent: #2dd4bf;
+    --accent-text: #06201d;
+    --danger: #f87171;
+    --warn: #fbbf24;
+    --ok: #34d399;
+    --shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.5;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.2;
+  margin: 0;
+}
+
+a {
+  color: var(--accent);
+}
+
+button {
+  font: inherit;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  background: var(--bg-input);
+  color: var(--text);
+  padding: 8px 12px;
+}
+
+button.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+input,
+select {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+input:focus,
+select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}

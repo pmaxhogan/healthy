@@ -1,0 +1,59 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "healthy",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-09-01",
+  // node:crypto / node:buffer are used by the crypto + token code paths.
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "9c20c14daa20466a2d761a47162f719a",
+  // The Worker is only ever reached through its custom domain, which sits
+  // behind Cloudflare Access. A workers.dev hostname would be a second,
+  // un-gated front door, so it stays off.
+  "workers_dev": false,
+  "routes": [{ "pattern": "healthy.maxhogan.dev", "custom_domain": true }],
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    // The Worker must see every request first: it enforces the Access +
+    // password gates before any SPA asset is served.
+    "run_worker_first": true,
+    "not_found_handling": "single-page-application",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "healthy",
+      "database_id": "49223075-700b-4efd-b215-c24267465491",
+      "migrations_dir": "migrations",
+    },
+  ],
+  // @cloudflare/workers-oauth-provider requires the binding to be named
+  // exactly OAUTH_KV; it is not configurable.
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "1c1ca4bf60c543cd8ebbee8676b76123" }],
+  "durable_objects": {
+    "bindings": [{ "name": "HEALTHY_MCP", "class_name": "HealthyMcp" }],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      // SQLite-backed (not KV-backed) so McpAgent can keep per-session state.
+      "new_sqlite_classes": ["HealthyMcp"],
+    },
+  ],
+  "triggers": {
+    "crons": [
+      // Hourly appointment sync, offset off the hour to dodge the rush.
+      "7 * * * *",
+      // Daily full-scope refresh that repopulates the MCP read cache.
+      "23 6 * * *",
+    ],
+  },
+  "observability": { "enabled": true },
+  // A full refresh walks every resource type for every connected provider.
+  "limits": { "cpu_ms": 300000 },
+  // Deliberately the ONLY var. Every piece of real configuration -- provider
+  // endpoints, credentials, calendar and timezone settings, alert routing --
+  // lives in Worker secrets or the D1 `settings` table, never in this file or
+  // in source, so the repository carries no personal data.
+  "vars": { "DEV_MODE": "false" },
+}

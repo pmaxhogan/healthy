@@ -1,0 +1,42 @@
+name: CI
+
+# Deploys are run by Cloudflare Workers Builds, not by Actions, so there is no
+# deploy job here. Workers Builds runs `npm run check` as its build command,
+# which means this workflow and the deploy gate are literally the same command.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Lets a run be replayed from the Actions tab without an empty commit.
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      # `npm ci` fails loudly when package.json and the lockfile disagree,
+      # which is the point: it is also what Workers Builds runs, so a lockfile
+      # that installs here installs there.
+      - run: npm ci
+
+      # lint -> typecheck -> knip -> test -> build, in that order.
+      - run: npm run check
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # gitleaks scans history, not just the tip, so it needs all of it.
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

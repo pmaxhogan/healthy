@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.wrangler/
+worker-configuration.d.ts
+*.tsbuildinfo
+
+# Secrets / local config — NEVER commit
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+!.env.example
+.local/
+
+# Private reference material (personal data)
+epic_mychart_gcal_sync_reference.md
+session-prompt.md
+
+# Agent harness scratch state
+.claude/scheduled_tasks.lock
+.claude/worktrees/
+
+# Test / tooling output
+coverage/
+*.log
+npm-debug.log*
+yarn-error.log*
+.vitest/
+.eslintcache
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editors
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+*~

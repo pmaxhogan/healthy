@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    // Integration tests execute inside workerd, so they get the Worker runtime
+    // globals (from worker-configuration.d.ts) plus the `cloudflare:test`
+    // module declarations that @cloudflare/vitest-pool-workers ships.
+    "types": ["@cloudflare/vitest-pool-workers/types"],
+    "baseUrl": "."
+  },
+  "include": [
+    "test/integration/**/*.ts",
+    "worker/**/*.ts",
+    "shared/**/*.ts",
+    "worker-configuration.d.ts"
+  ]
+}

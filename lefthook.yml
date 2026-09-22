@@ -1,0 +1,32 @@
+# Git hooks. Installed automatically by the `prepare` npm script.
+#
+# Split by cost: pre-commit stays fast (staged files only, plus the unit suite
+# and a secret scan), pre-push runs the same `npm run check` that CI runs, so a
+# push that lands is a push CI will agree with.
+#
+# `gitleaks` must be on PATH. Install it with `winget install Gitleaks.Gitleaks`
+# (Windows), `brew install gitleaks` (macOS), or from the GitHub releases.
+# Older gitleaks releases spelled this `gitleaks protect --staged`; that verb
+# was removed in 8.x in favour of `gitleaks git --pre-commit --staged`.
+
+pre-commit:
+  parallel: true
+  jobs:
+    - name: eslint
+      glob: "*.{ts,mts,cts,js,mjs,vue}"
+      run: npx eslint --no-warn-ignored {staged_files}
+
+    - name: prettier
+      glob: "*.{ts,mts,cts,js,mjs,vue,json,jsonc,css,html,md,yml,yaml}"
+      run: npx prettier --check --ignore-unknown {staged_files}
+
+    - name: gitleaks
+      run: gitleaks git --pre-commit --staged --redact --no-banner
+
+    - name: unit tests
+      run: npm run test:unit
+
+pre-push:
+  jobs:
+    - name: check
+      run: npm run check

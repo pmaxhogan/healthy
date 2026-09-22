@@ -1,0 +1,27 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    // Node 26 is the only runtime these files ever see (see .node-version), so
+    // they get the full modern library -- Array.fromAsync and friends.
+    // ESNext.Array is there for Array.fromAsync, which Node 26 has but which
+    // TypeScript has not yet folded into a numbered ES lib.
+    "lib": ["ES2024", "ESNext.Array"],
+    "types": ["node"],
+    "baseUrl": ".",
+    // The brands slimmer is plain .mjs (it runs under bare `node`, with no
+    // build step). allowJs lets tsc infer its types from the implementation so
+    // its unit tests are still fully checked, instead of resolving the import
+    // to `any`.
+    "allowJs": true
+  },
+  // Everything that runs in plain Node: the CLI helper scripts, the build and
+  // test config files, and the node-environment unit tests.
+  "include": [
+    "scripts/**/*.ts",
+    "scripts/**/*.mjs",
+    "test/unit/**/*.ts",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "eslint.config.js"
+  ]
+}
