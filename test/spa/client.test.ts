@@ -144,6 +144,30 @@ describe("api client", () => {
     expect(calls[0]?.init?.signal).toBe(controller.signal);
   });
 
+  it("maps a bare 5xx error code to a short human sentence", async () => {
+    stub(fakeResponse({ status: 502, body: { error: "upstream_auth" } }));
+    const failure = (await failureOf(api.post("/api/alerts/test"))) as ApiRequestError;
+
+    expect(failure.code).toBe("upstream_auth");
+    expect(errorMessage(failure)).toContain("credentials");
+    // Not Trello-specific: the same code fires for Epic and Google too.
+    expect(errorMessage(failure)).not.toContain("Trello");
+  });
+
+  it("falls back to the spaced code for a mapped code the client does not know", async () => {
+    stub(fakeResponse({ status: 500, body: { error: "some_new_code" } }));
+    const failure = (await failureOf(api.post("/api/alerts/test"))) as ApiRequestError;
+
+    expect(errorMessage(failure)).toBe("some new code");
+  });
+
+  it("still prefers a distinct server-supplied message over the code map", async () => {
+    stub(fakeResponse({ status: 502, body: { error: "upstream_auth", message: "custom detail" } }));
+    const failure = (await failureOf(api.post("/api/alerts/test"))) as ApiRequestError;
+
+    expect(errorMessage(failure)).toBe("custom detail");
+  });
+
   it("reports a cancelled request as cancelled, and anything else generically", () => {
     // A DOMException rather than a mutated Error: assigning `name` on a built-in
     // error is what the runtime itself would never do, and lint says so.

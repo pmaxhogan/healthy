@@ -96,6 +96,20 @@ export function maskAccount(label: string | null): string {
     : `${local[0] ?? ""}…${local.at(-1) ?? ""}${domain}`;
 }
 
+/**
+ * Masks a calendar id for display when it looks like an email address.
+ *
+ * A primary Google calendar's id *is* the account's address, so without this
+ * the same address that `maskAccount` hides under "Account" reappears in plain
+ * text a few lines down as "Calendar" -- on the same screen. An id that is not
+ * an address (a real calendar id, "primary", a human-chosen name) is shown
+ * unchanged: `maskAccount` mangles non-address input (see its own tests), and
+ * there is nothing sensitive in a calendar id that is not the owner's email.
+ */
+export function maskCalendarId(id: string): string {
+  return id.includes("@") ? maskAccount(id) : id;
+}
+
 /** Sentence-cases a snake_case status or error code for display. */
 export function humanizeCode(code: string | null): string {
   return code ? code.replaceAll("_", " ") : "—";

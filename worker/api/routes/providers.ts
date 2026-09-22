@@ -17,8 +17,9 @@
  * destroyed by `connections.disconnect`.
  *
  * **The long-running actions answer 202.** A sync can take minutes and a full
- * refresh longer; both run in `waitUntil` after the response. The UI polls
- * `GET /api/runs`.
+ * refresh longer; both run in `waitUntil` after the response. The Runs page polls
+ * `GET /api/runs` every few seconds while a row is still `running`, so the 202
+ * itself carries no `runId` to report.
  */
 
 import { Hono } from "hono";
@@ -206,7 +207,8 @@ providersRouter.post("/:id/sync", async (c) => {
     api.ports.sync.runCalendarSync(api.ctx, { providerIds: [row.id], trigger: "manual" }),
   );
   // No `runId`: the row is opened by the sync engine after this response has been
-  // sent, so there is nothing to report yet. The UI polls GET /api/runs.
+  // sent, so there is nothing to report yet. RunsView polls GET /api/runs on an
+  // interval while any row is running, and stops once none is.
   return c.json({ accepted: true }, 202, NO_STORE);
 });
 

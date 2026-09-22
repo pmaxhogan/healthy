@@ -15,7 +15,7 @@ import ProviderStatusCard from "../components/ProviderStatusCard.vue";
 import RunsTable from "../components/RunsTable.vue";
 import StateBlock from "../components/StateBlock.vue";
 import StatusPill from "../components/StatusPill.vue";
-import { maskAccount, relativeTime } from "../lib/format.ts";
+import { maskAccount, maskCalendarId, relativeTime } from "../lib/format.ts";
 import { GOOGLE_START } from "../lib/oauth.ts";
 import { toastSuccess } from "../lib/toasts.ts";
 import { useAction, useLoad } from "../lib/use-load.ts";
@@ -106,7 +106,7 @@ async function runSyncNow(): Promise<void> {
             </div>
             <div>
               <dt>Calendar</dt>
-              <dd>{{ overview.data.value.google.calendarId }}</dd>
+              <dd>{{ maskCalendarId(overview.data.value.google.calendarId) }}</dd>
             </div>
             <div>
               <dt>Token</dt>

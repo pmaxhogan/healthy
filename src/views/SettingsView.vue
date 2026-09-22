@@ -15,7 +15,7 @@ import { computed } from "vue";
 
 import { endpoints } from "../api/endpoints.ts";
 import StateBlock from "../components/StateBlock.vue";
-import { formatDateTime, relativeTime } from "../lib/format.ts";
+import { formatDateTime, maskCalendarId, relativeTime } from "../lib/format.ts";
 import { toastSuccess } from "../lib/toasts.ts";
 import { useAction, useLoad } from "../lib/use-load.ts";
 
@@ -90,7 +90,7 @@ async function onToggleMcp(next: boolean): Promise<void> {
                 </tr>
                 <tr>
                   <th>Calendar</th>
-                  <td>{{ current.calendarId }}</td>
+                  <td>{{ maskCalendarId(current.calendarId) }}</td>
                 </tr>
                 <tr>
                   <th>Default title template</th>

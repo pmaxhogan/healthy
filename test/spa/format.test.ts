@@ -8,6 +8,7 @@ import {
   humanizeCode,
   isPast,
   maskAccount,
+  maskCalendarId,
   parseIso,
   relativeTime,
 } from "../../src/lib/format.ts";
@@ -106,6 +107,18 @@ describe("maskAccount", () => {
     expect(maskAccount("ab@example.test")).toBe("ab@example.test");
     expect(maskAccount(null)).toBe("—");
     expect(maskAccount("primary")).toBe("p…");
+  });
+});
+
+describe("maskCalendarId", () => {
+  it("masks a calendar id that is an email address, same as an account label", () => {
+    expect(maskCalendarId("owner@example.test")).toBe("o…r@example.test");
+  });
+
+  it("leaves a non-address calendar id alone", () => {
+    // These would be mangled by `maskAccount` itself -- the guard is the point.
+    expect(maskCalendarId("primary")).toBe("primary");
+    expect(maskCalendarId("family-appointments")).toBe("family-appointments");
   });
 });
 

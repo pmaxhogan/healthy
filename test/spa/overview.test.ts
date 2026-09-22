@@ -81,6 +81,15 @@ describe("OverviewView", () => {
     expect(wrapper.text()).toContain("2 ghost");
   });
 
+  it("masks the target calendar id too, when it is the same address", async () => {
+    const dto = overview();
+    dto.google.calendarId = "owner@example.test";
+    const wrapper = await mountOverview(dto);
+
+    expect(wrapper.text()).toContain("o…r@example.test");
+    expect(wrapper.text()).not.toContain("owner@example.test");
+  });
+
   it("offers Connect rather than Reconnect when Google is not linked", async () => {
     const dto = overview();
     const wrapper = await mountOverview({
@@ -135,14 +144,17 @@ describe("OverviewView", () => {
     expect(text).toContain("The cache is empty");
   });
 
-  it("shows an error and a retry when the request fails", async () => {
+  it("shows a human message and a retry when the request fails", async () => {
     installFakeApi({
       "/api/overview": () => fakeResponse({ status: 500, body: { error: "internal" } }),
     });
     const router = await testRouter();
     const wrapper = mount(OverviewView, { global: { plugins: [router] } });
     await flushPromises();
-    expect(wrapper.text()).toContain("internal");
+    // The bare code, not a mapped sentence: `errorMessage`'s own tests cover the
+    // mapping in full, and this only has to prove the page renders whatever it
+    // returns rather than the raw code.
+    expect(wrapper.text()).toContain("Something went wrong on our side.");
     expect(wrapper.find("button").text()).toBe("Try again");
   });
 

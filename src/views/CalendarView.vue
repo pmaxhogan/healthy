@@ -10,7 +10,7 @@ import StateBlock from "../components/StateBlock.vue";
 import StatusPill from "../components/StatusPill.vue";
 import TimezoneSelect from "../components/TimezoneSelect.vue";
 import TitleTemplateField from "../components/TitleTemplateField.vue";
-import { formatDateTime, maskAccount, relativeTime } from "../lib/format.ts";
+import { formatDateTime, maskAccount, maskCalendarId, relativeTime } from "../lib/format.ts";
 import { GOOGLE_START } from "../lib/oauth.ts";
 import { toastSuccess } from "../lib/toasts.ts";
 import { useAction, useLoad } from "../lib/use-load.ts";
@@ -200,7 +200,7 @@ async function onDisconnect(): Promise<void> {
             Target calendar
             <select v-model="draft.calendarId">
               <option v-for="option in calendarOptions" :key="option.id" :value="option.id">
-                {{ option.summary }}{{ option.primary ? " (primary)" : "" }}
+                {{ maskCalendarId(option.summary) }}{{ option.primary ? " (primary)" : "" }}
               </option>
             </select>
             <span v-if="calendars.loading.value" class="muted">Loading calendars…</span>

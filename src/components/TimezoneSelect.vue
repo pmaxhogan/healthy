@@ -6,7 +6,7 @@
 // personal configuration, and a hard-coded list with a hard-coded default is how
 // it would end up committed.
 
-import { computed } from "vue";
+import { computed, watch } from "vue";
 
 const props = defineProps<{ modelValue: string | null }>();
 const emit = defineEmits<{ "update:modelValue": [value: string] }>();
@@ -19,6 +19,21 @@ const detected = computed(() => {
     return "UTC";
   }
 });
+
+// The select below shows `modelValue ?? detected`, so with nothing chosen yet it
+// *displays* the detected zone while the model itself stays `null` -- and pressing
+// Save without touching the dropdown then persisted `timezone: null`. Emitting the
+// detected zone into the model whenever it is unset keeps what Save sends in sync
+// with what the control shows. `immediate` covers the page's first mount, and the
+// watch (rather than a one-shot `onMounted`) also covers the model going back to
+// `null` later, e.g. a reload after a failed save.
+watch(
+  () => props.modelValue,
+  (value) => {
+    if (value === null) emit("update:modelValue", detected.value);
+  },
+  { immediate: true },
+);
 
 const zones = computed(() => {
   let list: string[] = [];
