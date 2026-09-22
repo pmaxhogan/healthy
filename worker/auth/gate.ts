@@ -14,6 +14,7 @@ import { htmlPage, htmlResponse } from "../public/html.ts";
 
 import { verifyAccess } from "./access.ts";
 import { AUTH_REQUIRED_HEADER, AUTH_REQUIRED_VALUE, loginPage } from "./login-page.ts";
+import { safeNextPath } from "./safe-next-path.ts";
 import { verifySession } from "./session.ts";
 
 import type { AuthVariables } from "./security-headers.ts";
@@ -52,18 +53,6 @@ function wantsJson(pathname: string): boolean {
   // URL. (The machine-facing /oauth/token and /oauth/register are served by
   // @cloudflare/workers-oauth-provider, outside this app and outside this gate.)
   return pathname === "/api" || pathname.startsWith("/api/");
-}
-
-/** Only same-origin absolute paths survive, so `?next` can never be an open redirect. */
-export function safeNextPath(candidate: string | undefined | null): string | null {
-  if (!candidate) return null;
-  // `//host` is protocol-relative and `\` is treated as `/` by some browsers;
-  // both would leave the origin.
-  if (!candidate.startsWith("/") || candidate.startsWith("//") || candidate.includes("\\")) {
-    return null;
-  }
-  // Bouncing back to the auth endpoints after login is at best a loop.
-  return candidate === "/auth" || candidate.startsWith("/auth/") ? null : candidate;
 }
 
 /** The path (with query) the login form should return to. */
@@ -123,3 +112,11 @@ export const ownerGate = createMiddleware<AppHonoEnv>(async (c, next) => {
   }
   return loginPage({ nonce: c.get("nonce"), next: currentPath(request) });
 });
+
+// Re-exported (rather than only imported above) so `worker/app.ts`'s existing
+// `import { ownerGate, safeNextPath, ... } from "./auth/gate.ts"` keeps
+// working unchanged -- the validation logic itself moved to
+// ./safe-next-path.ts so it stays free of the `Env` import gate.ts needs for
+// `AppHonoEnv`, which is what let `test/unit/auth/gate.test.ts` unit-test it
+// without pulling worker-configuration.d.ts into the plain-Node tsconfig.
+export { safeNextPath } from "./safe-next-path.ts";

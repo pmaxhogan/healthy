@@ -21,6 +21,11 @@
  *    anyway: claude.ai registers itself through Dynamic Client Registration as a
  *    public client, and without DCR the connector cannot be added at all.
  *  - `allowPlainPKCE: false` requires S256, per OAuth 2.1.
+ *  - `clientRegistrationTTL` is set well past the library's 90-day default: a
+ *    registration expiring is what forces claude.ai to re-run DCR, which forces
+ *    the owner back through the consent page. Refresh tokens already rotate and
+ *    expire independently (`REFRESH_TOKEN_TTL`), so the registration itself does
+ *    not need a short leash to keep access time-bounded.
  */
 
 import { getOAuthApi } from "@cloudflare/workers-oauth-provider";
@@ -47,6 +52,15 @@ const REGISTER_PATH = "/oauth/register";
 const ACCESS_TOKEN_TTL = 3600;
 /** Thirty days. */
 const REFRESH_TOKEN_TTL = 30 * 24 * 3600;
+/**
+ * One year. The library defaults a dynamically-registered client to 90 days,
+ * which would make claude.ai silently re-register -- and the owner re-approve
+ * the consent page -- every three months even though nothing about the
+ * connection changed. Refresh tokens still rotate and expire on their own
+ * schedule (`REFRESH_TOKEN_TTL`), so lengthening this does not lengthen how
+ * long a stolen token stays useful.
+ */
+const CLIENT_REGISTRATION_TTL = 365 * 24 * 3600;
 
 /** `Env` as the provider hands it to the default handler. */
 type OAuthEnv = Env & { OAUTH_PROVIDER?: OAuthHelpers };
@@ -89,6 +103,7 @@ export const OAUTH_CORE = {
   disallowPublicClientRegistration: false,
   accessTokenTTL: ACCESS_TOKEN_TTL,
   refreshTokenTTL: REFRESH_TOKEN_TTL,
+  clientRegistrationTTL: CLIENT_REGISTRATION_TTL,
   resourceMetadata: {
     resource_name: "Healthy",
     scopes_supported: [MCP_SCOPE],
