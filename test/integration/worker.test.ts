@@ -11,13 +11,14 @@ describe("the Worker", () => {
     expect(await response.json()).toStrictEqual({ ok: true });
   });
 
-  it("404s as JSON rather than falling through to the SPA assets", async () => {
-    // Guards the wave-0 posture: no route is reachable before its gate exists,
-    // so an unknown path must not serve the admin UI.
+  it("refuses unauthenticated API requests as JSON rather than serving the SPA", async () => {
+    // wrangler.jsonc ships DEV_MODE=false and no Access secrets are bound here,
+    // so the Access gate fails closed with 403. The auth suite covers both postures.
     const response = await SELF.fetch("https://healthy.example/api/overview");
 
-    expect(response.status).toBe(404);
-    expect(await response.json()).toStrictEqual({ error: "not_found" });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toStrictEqual({ error: "forbidden" });
+    expect(response.headers.get("x-healthy-auth")).toBe("required");
   });
 });
 

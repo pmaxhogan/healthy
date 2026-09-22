@@ -1,0 +1,14 @@
+{
+  "resourceType": "OperationOutcome",
+  "issue": [
+    {
+      "severity": "error",
+      "code": "expired",
+      "details": {
+        "coding": [{ "system": "urn:oid:0.0.0.1", "code": "4113" }],
+        "text": "The paged search session has expired."
+      },
+      "diagnostics": "paging session expired"
+    }
+  ]
+}

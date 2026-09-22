@@ -1,0 +1,56 @@
+{
+  "resourceType": "Bundle",
+  "id": "synthetic-filtered-view",
+  "type": "searchset",
+  "total": 1,
+  "link": [
+    {
+      "relation": "self",
+      "url": "https://fhir.example-health.test/api/FHIR/R4/Encounter?patient=synthetic-patient-1&date=ge2026-06-23&_count=100"
+    }
+  ],
+  "entry": [
+    {
+      "fullUrl": "https://fhir.example-health.test/api/FHIR/R4/Encounter/enc-6",
+      "search": { "mode": "match" },
+      "resource": {
+        "resourceType": "Encounter",
+        "id": "enc-6",
+        "status": "planned",
+        "class": {
+          "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+          "code": "AMB",
+          "display": "ambulatory"
+        },
+        "type": [{ "text": "Office Visit" }],
+        "period": { "start": "2026-11-12T19:00:00Z", "end": "2026-11-12T19:30:00Z" },
+        "identifier": [{ "system": "urn:oid:0.0.0.0", "value": "000000006" }]
+      }
+    },
+    {
+      "search": { "mode": "outcome" },
+      "resource": {
+        "resourceType": "OperationOutcome",
+        "issue": [
+          {
+            "severity": "warning",
+            "code": "suppressed",
+            "details": {
+              "coding": [{ "system": "urn:oid:0.0.0.1", "code": "4119" }],
+              "text": "Some results were not returned because of the patient-facing view."
+            },
+            "diagnostics": "filtered by patient view"
+          },
+          {
+            "severity": "warning",
+            "code": "not-supported",
+            "details": {
+              "coding": [{ "system": "urn:oid:0.0.0.1", "code": "4122" }],
+              "text": "An unknown search parameter was ignored."
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

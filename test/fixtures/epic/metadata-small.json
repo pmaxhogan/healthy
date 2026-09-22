@@ -1,0 +1,60 @@
+{
+  "resourceType": "CapabilityStatement",
+  "status": "active",
+  "date": "2026-01-01",
+  "publisher": "Synthetic Test Fixture",
+  "kind": "instance",
+  "fhirVersion": "4.0.1",
+  "format": ["application/fhir+json"],
+  "rest": [
+    {
+      "mode": "server",
+      "resource": [
+        {
+          "type": "Patient",
+          "interaction": [{ "code": "read" }, { "code": "search-type" }],
+          "searchParam": [
+            { "name": "_id", "type": "token" },
+            { "name": "identifier", "type": "token" },
+            { "name": "birthdate", "type": "date" }
+          ]
+        },
+        {
+          "type": "Encounter",
+          "interaction": [{ "code": "read" }, { "code": "search-type" }],
+          "searchParam": [
+            { "name": "_id", "type": "token" },
+            { "name": "patient", "type": "reference" },
+            { "name": "date", "type": "date" },
+            { "name": "class", "type": "token" },
+            { "name": "identifier", "type": "token" }
+          ]
+        },
+        {
+          "type": "Observation",
+          "interaction": [{ "code": "read" }, { "code": "search-type" }],
+          "searchParam": [
+            { "name": "_id", "type": "token" },
+            { "name": "patient", "type": "reference" },
+            { "name": "category", "type": "token" },
+            { "name": "code", "type": "token" },
+            { "name": "date", "type": "date" }
+          ]
+        },
+        {
+          "type": "Location",
+          "interaction": [{ "code": "read" }],
+          "searchParam": [{ "name": "_id", "type": "token" }]
+        },
+        {
+          "type": "Practitioner",
+          "interaction": [{ "code": "read" }, { "code": "search-type" }],
+          "searchParam": [
+            { "name": "_id", "type": "token" },
+            { "name": "identifier", "type": "token" }
+          ]
+        }
+      ]
+    }
+  ]
+}

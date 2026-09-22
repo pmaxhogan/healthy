@@ -1,0 +1,152 @@
+/**
+ * Typed accessors over the `settings` table.
+ *
+ * Every read falls back to `SETTING_DEFAULTS` when the row is absent, so the app
+ * works on a freshly migrated database with an empty table.
+ *
+ * `timezone` is the exception worth reading twice. It has no default in source --
+ * a real one would disclose where the owner lives, which this repository must not
+ * do -- so the stored value is the only correct answer. When it is unset,
+ * `getTimezone` returns "UTC" and warns once per isolate: the sync still runs, and
+ * its local-day window is simply a UTC day until the owner sets the zone in the UI.
+ */
+
+import { all, batch, one, run } from "./client.ts";
+import {
+  SETTING_DEFAULTS,
+  SETTING_KEYS,
+  encodeSetting,
+  isSettingKey,
+  parseSetting,
+} from "./schemas.ts";
+
+import type { Ctx } from "./client.ts";
+import type { SettingRow } from "./rows.ts";
+import type { SettingKey, Settings } from "./schemas.ts";
+
+/** The zone used when nothing is stored. Not a default -- a last resort. */
+export const FALLBACK_TIMEZONE = "UTC";
+
+// Once per isolate, not once per call: the hourly sync would otherwise emit the
+// same warning for every provider on every run. A one-field object rather than a
+// bare `let`, because a module-level `let` reassigned from inside a function is
+// exactly the pattern that makes state like this hard to find.
+const warned = { timezone: false };
+
+/** Reset the once-per-isolate warning latch. Tests only. */
+export function resetTimezoneWarning(): void {
+  warned.timezone = false;
+}
+
+export async function getSetting<K extends SettingKey>(ctx: Ctx, key: K): Promise<Settings[K]> {
+  const row = await one<Pick<SettingRow, "value_json">>(
+    ctx.db.prepare("SELECT value_json FROM settings WHERE key = ?").bind(key),
+  );
+  return row === null ? SETTING_DEFAULTS[key] : parseSetting(key, row.value_json);
+}
+
+export async function setSetting<K extends SettingKey>(
+  ctx: Ctx,
+  key: K,
+  value: Settings[K],
+): Promise<void> {
+  await run(
+    ctx.db
+      .prepare(
+        `INSERT INTO settings (key, value_json, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT (key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
+      )
+      .bind(key, encodeSetting(key, value), ctx.now()),
+  );
+}
+
+/** Every setting, defaults filled in for the rows that are not there. */
+export async function getAllSettings(ctx: Ctx): Promise<Settings> {
+  const rows = await all<SettingRow>(ctx.db.prepare("SELECT * FROM settings"));
+  const settings: Settings = { ...SETTING_DEFAULTS };
+  for (const row of rows) {
+    if (!isSettingKey(row.key)) {
+      // A key no version of the code knows: left in place, not deleted, but not
+      // guessed at either.
+      ctx.log.warn("settings.unknown_key", { settingKey: row.key });
+      continue;
+    }
+    assign(settings, row.key, parseSetting(row.key, row.value_json));
+  }
+  return settings;
+}
+
+/**
+ * Write several settings at once, validating all of them before writing any.
+ *
+ * That ordering is what stops a half-applied PUT /api/settings: one bad field
+ * rejects the whole payload.
+ */
+export async function setSettings(ctx: Ctx, values: Partial<Settings>): Promise<void> {
+  const at = ctx.now();
+  const statements: D1PreparedStatement[] = [];
+  for (const key of SETTING_KEYS) {
+    if (!Object.hasOwn(values, key)) continue;
+    // `Object.hasOwn` does not narrow Partial<Settings>[K] to Settings[K]; the
+    // guard above is the proof, and `encodeSetting` validates the value anyway.
+    const value = values[key] as Settings[typeof key];
+    statements.push(
+      ctx.db
+        .prepare(
+          `INSERT INTO settings (key, value_json, updated_at) VALUES (?, ?, ?)
+           ON CONFLICT (key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
+        )
+        .bind(key, encodeSetting(key, value), at),
+    );
+  }
+  await batch(ctx.db, statements);
+}
+
+/**
+ * The display and windowing zone.
+ *
+ * Returns the stored value, or "UTC" with a one-time warning when nothing is
+ * stored. Never a guess at the owner's real zone.
+ */
+export async function getTimezone(ctx: Ctx): Promise<string> {
+  const stored = await getSetting(ctx, "timezone");
+  if (stored !== null) return stored;
+  if (!warned.timezone) {
+    warned.timezone = true;
+    ctx.log.warn("settings.timezone_unset", { using: FALLBACK_TIMEZONE });
+  }
+  return FALLBACK_TIMEZONE;
+}
+
+/** The calendar the sync writes to. */
+export async function getCalendarId(ctx: Ctx): Promise<string> {
+  return getSetting(ctx, "calendar_id");
+}
+
+/** True when a 429 backoff is still in force at `ctx.now()`. */
+export async function isSyncBackedOff(ctx: Ctx): Promise<boolean> {
+  const until = await getSetting(ctx, "sync_backoff_until");
+  return until !== null && until > ctx.now();
+}
+
+/** Back every sync off until `until` (a unix second), keeping the later of the two. */
+export async function setSyncBackoff(ctx: Ctx, until: number): Promise<void> {
+  const current = await getSetting(ctx, "sync_backoff_until");
+  await setSetting(ctx, "sync_backoff_until", Math.max(until, current ?? 0));
+}
+
+/** Clear the backoff, e.g. when the owner presses "sync now". */
+export async function clearSyncBackoff(ctx: Ctx): Promise<void> {
+  await setSetting(ctx, "sync_backoff_until", null);
+}
+
+/**
+ * Write one key of `Settings` without widening the whole object to `any`.
+ *
+ * `settings[key] = value` does not narrow for a generic K, because TypeScript
+ * cannot prove the value matches the slot it is going into; the generic here is
+ * what supplies that proof.
+ */
+function assign<K extends SettingKey>(settings: Settings, key: K, value: Settings[K]): void {
+  settings[key] = value;
+}

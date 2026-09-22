@@ -1,0 +1,77 @@
+{
+  "resourceType": "Bundle",
+  "id": "synthetic-encounter-page-2",
+  "type": "searchset",
+  "total": 5,
+  "link": [
+    {
+      "relation": "self",
+      "url": "https://fhir.example-health.test/api/FHIR/R4/Encounter?patient=synthetic-patient-1&continue-token=synthetic-page-2"
+    },
+    {
+      "relation": "next",
+      "url": "https://fhir.example-health.test/api/FHIR/R4/Encounter?patient=synthetic-patient-1&continue-token=synthetic-page-3"
+    }
+  ],
+  "entry": [
+    {
+      "fullUrl": "https://fhir.example-health.test/api/FHIR/R4/Encounter/enc-3",
+      "search": { "mode": "match" },
+      "resource": {
+        "resourceType": "Encounter",
+        "id": "enc-3",
+        "status": "planned",
+        "class": {
+          "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+          "code": "VR",
+          "display": "virtual"
+        },
+        "type": [{ "text": "Video Visit" }],
+        "period": { "start": "2026-10-08T18:00:00Z" },
+        "participant": [
+          {
+            "individual": { "reference": "Practitioner/prac-1", "display": "Test Provider A" }
+          }
+        ],
+        "serviceProvider": { "reference": "Organization/org-1", "display": "Test Organization" },
+        "identifier": [{ "system": "urn:oid:0.0.0.0", "value": "000000003" }]
+      }
+    },
+    {
+      "fullUrl": "https://fhir.example-health.test/api/FHIR/R4/Encounter/enc-4",
+      "search": { "mode": "match" },
+      "resource": {
+        "resourceType": "Encounter",
+        "id": "enc-4",
+        "status": "finished",
+        "class": {
+          "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode",
+          "code": "AMB",
+          "display": "ambulatory"
+        },
+        "type": [{ "text": "Lab Draw" }],
+        "period": { "start": "2026-08-02T13:10:00Z", "end": "2026-08-02T13:20:00Z" },
+        "location": [{ "location": { "reference": "Location/loc-2", "display": "Test Site 2" } }],
+        "serviceProvider": { "reference": "Organization/org-1", "display": "Test Organization" },
+        "identifier": [{ "system": "urn:oid:0.0.0.0", "value": "000000004" }]
+      }
+    },
+    {
+      "fullUrl": "https://fhir.example-health.test/api/FHIR/R4/Location/loc-2",
+      "search": { "mode": "include" },
+      "resource": {
+        "resourceType": "Location",
+        "id": "loc-2",
+        "status": "active",
+        "name": "Test Site 2",
+        "telecom": [{ "system": "phone", "value": "555-0100" }],
+        "address": {
+          "line": ["1 Example Way"],
+          "city": "Testville",
+          "state": "XX",
+          "postalCode": "00000"
+        }
+      }
+    }
+  ]
+}

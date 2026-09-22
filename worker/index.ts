@@ -19,8 +19,11 @@
 // handler for now.
 
 import { app } from "./app.ts";
+import { makeLogger } from "./lib/log.ts";
 
 import type { Env } from "./env.ts";
+
+const cronLogger = makeLogger({ src: "cron" });
 
 // Re-exported because wrangler resolves Durable Object classes from the
 // configured `main` module, not from wherever the class happens to live.
@@ -32,23 +35,16 @@ export default {
   },
 
   scheduled(controller: ScheduledController, _env: Env, _ctx: ExecutionContext): void {
-    // The two cron expressions in wrangler.jsonc are dispatched here by exact
-    // string match, so a cron added to the config without a branch here is a
-    // visible no-op rather than a silent one.
-    switch (controller.cron) {
-      case "7 * * * *": {
-        // TODO(wave2): hourly Encounter-only calendar sync + token keepalive.
-        break;
-      }
-      case "23 6 * * *": {
-        // TODO(wave2): daily full-scope refresh of the MCP read cache, plus
-        // retention pruning (mcp_audit > 365d, expired oauth_states).
-        break;
-      }
-      default: {
-        console.warn("unhandled cron", { cron: controller.cron });
-        break;
-      }
-    }
+    // Logged, then returns. Wave 2 dispatches on the exact cron string, which is
+    // why the string is the only thing recorded here: the two expressions in
+    // wrangler.jsonc are the dispatch keys, so seeing which one fired is what
+    // makes a missing branch a visible no-op rather than a silent one.
+    //
+    // TODO(wave2): "7 * * * *"  -> hourly Encounter-only calendar sync + token
+    //              keepalive; "23 6 * * *" -> daily full-scope refresh of the MCP
+    //              read cache plus retention pruning (mcp_audit > 365d, expired
+    //              oauth_states). UTC, both of them -- never translated to local
+    //              time in a comment, because that would leak the timezone.
+    cronLogger.info("cron.received", { cron: controller.cron });
   },
 } satisfies ExportedHandler<Env>;

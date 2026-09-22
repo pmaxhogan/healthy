@@ -1,0 +1,31 @@
+{
+  "resourceType": "Bundle",
+  "id": "synthetic-no-results",
+  "type": "searchset",
+  "total": 0,
+  "link": [
+    {
+      "relation": "self",
+      "url": "https://fhir.example-health.test/api/FHIR/R4/Encounter?patient=synthetic-patient-1&date=ge2026-06-23&_count=100"
+    }
+  ],
+  "entry": [
+    {
+      "search": { "mode": "outcome" },
+      "resource": {
+        "resourceType": "OperationOutcome",
+        "issue": [
+          {
+            "severity": "warning",
+            "code": "not-found",
+            "details": {
+              "coding": [{ "system": "urn:oid:0.0.0.1", "code": "4101" }],
+              "text": "The resource request returned no results."
+            },
+            "diagnostics": "no results"
+          }
+        ]
+      }
+    }
+  ]
+}

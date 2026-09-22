@@ -1,0 +1,247 @@
+import { describe, expect, it, vi } from "vitest";
+
+import { AppError } from "../../../worker/lib/errors.ts";
+import {
+  errorFields,
+  makeLogger,
+  noopLogger,
+  redactFields,
+  redactString,
+  redactValue,
+} from "../../../worker/lib/log.ts";
+
+import type { LogLevel, Logger, LoggerOptions } from "../../../worker/lib/log.ts";
+
+/** A logger whose lines the test can read back as parsed objects. */
+function collector(
+  base: Record<string, unknown> = {},
+  options: Omit<LoggerOptions, "sink"> = {},
+): { log: Logger; lines: Record<string, unknown>[]; levels: LogLevel[] } {
+  const lines: Record<string, unknown>[] = [];
+  const levels: LogLevel[] = [];
+  const log = makeLogger(base, {
+    ...options,
+    sink: (level, line) => {
+      levels.push(level);
+      lines.push(JSON.parse(line) as Record<string, unknown>);
+    },
+  });
+  return { log, lines, levels };
+}
+
+describe("redactString", () => {
+  it("strips the credential out of an Authorization value", () => {
+    expect(redactString("Bearer eyJhbGciOi.payload.sig")).toBe("Bearer [redacted]");
+    expect(redactString("Basic dXNlcjpwYXNz")).toBe("Basic [redacted]");
+    expect(redactString("sent Bearer abc123 upstream")).toBe("sent Bearer [redacted] upstream");
+  });
+
+  it("replaces anything address-shaped", () => {
+    expect(redactString("owner@example.test")).toBe("[email]");
+    expect(redactString("login failed for owner@example.test twice")).toBe(
+      "login failed for [email] twice",
+    );
+  });
+
+  it("collapses a long opaque token to its length", () => {
+    const token = "a".repeat(64);
+
+    expect(redactString(token)).toBe("[opaque:64]");
+    // Short ids stay readable: an id is how a log line is joined to a row.
+    expect(redactString("01JRQ8ZVME000000000000000Z")).toBe("01JRQ8ZVME000000000000000Z");
+  });
+
+  it("leaves ordinary text alone", () => {
+    expect(redactString("sync finished, 3 inserted")).toBe("sync finished, 3 inserted");
+  });
+});
+
+describe("redactValue", () => {
+  it("redacts on a credential-shaped key whatever the value is", () => {
+    for (const key of [
+      "accessToken",
+      "refresh_token",
+      "client_secret",
+      "password",
+      "authorization",
+      "Cookie",
+      "code_verifier",
+      "apiKey",
+      "privateKey",
+    ]) {
+      expect(redactValue(key, "anything"), key).toBe("[redacted]");
+    }
+  });
+
+  it("redacts `code` and `state` only as whole names", () => {
+    expect(redactValue("code", "4/0Ab")).toBe("[redacted]");
+    expect(redactValue("state", "e3b0c442")).toBe("[redacted]");
+    // ...so the codes this project logs deliberately survive.
+    expect(redactValue("errorCode", "needs_reauth")).toBe("needs_reauth");
+    expect(redactValue("error_code", "invalid_grant")).toBe("invalid_grant");
+    expect(redactValue("statusCode", 503)).toBe(503);
+    expect(redactValue("eventState", "ghost")).toBe("ghost");
+  });
+
+  it("recurses into nested objects and arrays", () => {
+    expect(
+      redactValue("outer", {
+        counts: { inserted: 2 },
+        auth: { access_token: "secret-value" },
+        who: ["owner@example.test", "someone@example.test"],
+      }),
+    ).toStrictEqual({
+      counts: { inserted: 2 },
+      auth: { access_token: "[redacted]" },
+      who: ["[email]", "[email]"],
+    });
+  });
+
+  it("passes non-strings through untouched", () => {
+    expect(redactValue("count", 42)).toBe(42);
+    expect(redactValue("ok", true)).toBe(true);
+    expect(redactValue("missing", null)).toBeNull();
+  });
+});
+
+describe("redactFields", () => {
+  it("applies key and value rules across the whole record", () => {
+    expect(
+      redactFields({ tool: "get_appointments", token: "abc", note: "for owner@example.test" }),
+    ).toStrictEqual({ tool: "get_appointments", token: "[redacted]", note: "for [email]" });
+  });
+});
+
+describe("errorFields", () => {
+  it("names the error and keeps its stable code and status", () => {
+    expect(errorFields(new AppError("needs_reauth", "refresh rejected"))).toStrictEqual({
+      errorName: "AppError",
+      errorMessage: "refresh rejected",
+      status: 409,
+      errorCode: "needs_reauth",
+    });
+  });
+
+  it("redacts the message, which may quote an upstream response", () => {
+    expect(errorFields(new Error("rejected Bearer abc123"))).toMatchObject({
+      errorMessage: "rejected Bearer [redacted]",
+    });
+  });
+
+  it("handles a thrown non-Error", () => {
+    expect(errorFields("owner@example.test failed")).toStrictEqual({ error: "[email] failed" });
+  });
+});
+
+describe("makeLogger", () => {
+  it("emits one JSON object per line with level, event and timestamp", () => {
+    const at = new Date("2026-01-01T00:00:00.000Z");
+    const { log, lines, levels } = collector({}, { now: () => at });
+
+    log.info("sync.start", { providerCount: 2 });
+
+    expect(levels).toStrictEqual(["info"]);
+    expect(lines[0]).toStrictEqual({
+      level: "info",
+      event: "sync.start",
+      t: "2026-01-01T00:00:00.000Z",
+      providerCount: 2,
+    });
+  });
+
+  it("merges base fields into every line, redacted too", () => {
+    const { log, lines } = collector({ run: "abc", token: "leaky" });
+
+    log.warn("sync.slow");
+    log.error("sync.fail");
+
+    expect(lines).toHaveLength(2);
+    for (const line of lines) {
+      expect(line.run).toBe("abc");
+      expect(line.token).toBe("[redacted]");
+    }
+  });
+
+  it("drops anything below the minimum level", () => {
+    const { log, lines } = collector({}, { minLevel: "warn" });
+
+    log.debug("a");
+    log.info("b");
+    log.warn("c");
+    log.error("d");
+
+    expect(lines.map((line) => line.event)).toStrictEqual(["c", "d"]);
+  });
+
+  it("lets a child add fields without touching its parent", () => {
+    const { log, lines } = collector({ run: "abc" });
+
+    log.child({ providerId: "p1" }).info("provider.start");
+    log.info("run.start");
+
+    expect(lines[0]).toMatchObject({ run: "abc", providerId: "p1" });
+    expect(lines[1]).not.toHaveProperty("providerId");
+  });
+
+  it("times a successful operation and reports what the caller asks it to", async () => {
+    const { log, lines } = collector();
+
+    const value = await log.time(
+      "fetch",
+      () => Promise.resolve([1, 2, 3]),
+      (rows) => ({ count: rows.length }),
+    );
+
+    expect(value).toStrictEqual([1, 2, 3]);
+    expect(lines[0]).toMatchObject({ level: "info", event: "fetch.ok", count: 3 });
+    expect(lines[0]?.ms).toBeTypeOf("number");
+  });
+
+  it("times a failure, logs the error fields, and rethrows", async () => {
+    const { log, lines } = collector();
+
+    await expect(
+      log.time("fetch", () => Promise.reject(new AppError("upstream_unavailable", "gave up"))),
+    ).rejects.toThrow(AppError);
+
+    expect(lines[0]).toMatchObject({
+      level: "error",
+      event: "fetch.fail",
+      errorCode: "upstream_unavailable",
+    });
+  });
+
+  it("survives a self-referential field instead of overflowing the stack", () => {
+    const { log, lines } = collector();
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+
+    log.info("weird", { cyclic });
+
+    expect(lines[0]).toMatchObject({ event: "weird" });
+    expect(JSON.stringify(lines[0])).toContain("[deep]");
+  });
+});
+
+function swallow(): void {
+  // The spy must not print; anything it captured is asserted on instead.
+}
+
+describe("noopLogger", () => {
+  it("writes nothing to the console", () => {
+    const spies = [
+      vi.spyOn(console, "log").mockImplementation(swallow),
+      vi.spyOn(console, "warn").mockImplementation(swallow),
+      vi.spyOn(console, "error").mockImplementation(swallow),
+    ];
+
+    noopLogger.info("ignored");
+    noopLogger.warn("ignored");
+    noopLogger.error("ignored");
+
+    for (const spy of spies) {
+      expect(spy).not.toHaveBeenCalled();
+      spy.mockRestore();
+    }
+  });
+});

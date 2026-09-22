@@ -19,8 +19,7 @@
     "@modelcontextprotocol/sdk",
     "agents",
     "cloudflare",
-    "jose",
-    "zod"
+    "jose"
   ],
   "vite": { "config": ["vite.config.ts"] },
   "vitest": { "config": ["vitest.config.ts"] },
