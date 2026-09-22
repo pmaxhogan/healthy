@@ -76,12 +76,12 @@ Manage rules from the admin UI's **MCP → Exposure policy** section
 page), or via `POST /api/mcp/policy` and `DELETE /api/mcp/policy/:id`. Each
 rule has a `ruleType` and a `target`:
 
-| `ruleType` | `target`                                 | Effect                                                                                                  |
-| ---------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `tool`     | a tool name, e.g. `get_lab_results`      | That tool answers `policy_denied` and reads nothing at all.                                             |
-| `resource` | a FHIR resource type, e.g. `Observation` | Every item of that type disappears from every tool, the raw projection, and the cross-provider summary. |
-| `provider` | a provider id                            | That provider disappears everywhere, `list_providers` included, and is never even queried.              |
-| `field`    | a dotted path, see below                 | The named field is deep-deleted from the normalised item and the raw FHIR resource behind it.           |
+| `ruleType` | `target`                                 | Effect                                                                                                                                                                                                               |
+| ---------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tool`     | a tool name, e.g. `get_lab_results`      | That tool answers `policy_denied` and reads nothing at all.                                                                                                                                                          |
+| `resource` | a FHIR resource type, e.g. `Observation` | Every item of that type disappears from every tool, the raw projection, and the cross-provider summary.                                                                                                              |
+| `provider` | a provider id                            | That provider disappears everywhere, `list_providers` included, and is never even queried.                                                                                                                           |
+| `field`    | a dotted path, see below                 | The named field is deep-deleted from the normalised item and the raw FHIR resource behind it; the path may be written in either vocabulary, and a path that names nothing in both is refused with `400 bad_request`. |
 
 **Field paths** are `ResourceType.path.to.field`, or `*.path.to.field` to
 apply to every resource type. A path segment of `[]` — on its own, or as a
