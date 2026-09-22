@@ -187,7 +187,13 @@ describe("handleInboundEmail: logging", () => {
     await run(message);
 
     const accepted = loggedLines().find((line) => line.event === "mail.accepted");
-    expect(accepted).toMatchObject({ kind: "otp", fromDomain: "mychart.example.org" });
+    expect(accepted).toMatchObject({
+      kind: "otp",
+      fromDomain: "mychart.example.org",
+      // The keyword that tipped classification into 'otp' -- see
+      // worker/mail/classify.ts -- never the code itself (checked below).
+      otp_match: "code is",
+    });
     expect(accepted?.id).toEqual(expect.any(String));
     expect(JSON.stringify(accepted)).not.toContain("482913");
     expect(JSON.stringify(accepted)).not.toContain("noreply@");

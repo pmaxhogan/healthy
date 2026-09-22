@@ -75,7 +75,7 @@ describe("classify", () => {
       subject: "Your MyChart security code",
       text: "Your MyChart verification code is: 482913. This code expires in 15 minutes.",
     });
-    expect(result).toEqual({ kind: "otp", code: "482913", url: null });
+    expect(result).toEqual({ kind: "otp", code: "482913", url: null, reason: "code is" });
   });
 
   it("prefers the digit run nearest the word 'code' when several numbers appear", () => {
@@ -86,6 +86,20 @@ describe("classify", () => {
     });
     expect(result.kind).toBe("otp");
     expect(result.code).toBe("719284");
+  });
+
+  it("picks the code that follows the keyword over an unrelated number that merely sits closer by raw distance", () => {
+    // "1234567" is fewer characters away from the "one-time" anchor than the
+    // real code is -- it just happens to come first in the sentence. Picking
+    // by raw nearest-distance alone would return it; the real code always
+    // *follows* its keyword, so that must win instead.
+    const result = classify({
+      from: "noreply@myportal.example.test",
+      subject: "Account Notice",
+      text: "Your account reference number is 1234567. Your one-time code: 482913.",
+    });
+    expect(result.kind).toBe("otp");
+    expect(result.code).toBe("482913");
   });
 
   it("classifies Gmail's own forwarding-confirmation email by sender, extracting the code and link", () => {
@@ -171,7 +185,7 @@ describe("classify", () => {
       subject: "Your appointment reminder",
       text: "You have an upcoming appointment on Tuesday.",
     });
-    expect(result).toEqual({ kind: "other", code: null, url: null });
+    expect(result).toEqual({ kind: "other", code: null, url: null, reason: null });
   });
 
   it("falls back to 'other' for a hint word with no nearby digits at all", () => {
@@ -195,5 +209,82 @@ describe("classify", () => {
     });
     expect(result.kind).toBe("otp");
     expect(result.code).toBe("555000");
+  });
+
+  // Reproduces (synthetically -- made-up portal name, made-up digits) the
+  // real message shape that slipped through as 'other': a plain-text body
+  // whose only hint word is "verification token", with the code following
+  // "is" rather than the word "code".
+  it("recognises a synthetic 'MyPortal' verification-token email (full subject + body)", () => {
+    const result = classify({
+      from: "noreply@myportal.example.test",
+      subject: "Your MyPortal Verification Token",
+      text: [
+        "MyPortal Verification Token",
+        "Your temporary MyPortal verification token is 507218.",
+        "It will expire within 5 minutes.",
+        "This is an automated e-mail and this mailbox is not monitored.",
+      ].join(" "),
+    });
+    expect(result).toEqual({
+      kind: "otp",
+      code: "507218",
+      url: null,
+      reason: "verification token",
+    });
+  });
+
+  it("recognises the same message via the subject alone, when the body carries no keyword", () => {
+    const result = classify({
+      from: "noreply@myportal.example.test",
+      subject: "Your MyPortal Verification Token",
+      text: "Use this number to continue: 630182. This is an automated e-mail and this mailbox is not monitored.",
+    });
+    expect(result.kind).toBe("otp");
+    expect(result.code).toBe("630182");
+    expect(result.reason).toBe("verification token");
+  });
+
+  it("recognises the same message via the body alone, when the subject carries no keyword", () => {
+    const result = classify({
+      from: "noreply@myportal.example.test",
+      subject: "Account Notice",
+      text: "Your temporary MyPortal verification token is 741963. It will expire within 5 minutes. This is an automated e-mail and this mailbox is not monitored.",
+    });
+    expect(result.kind).toBe("otp");
+    expect(result.code).toBe("741963");
+    expect(result.reason).toBe("verification token");
+  });
+
+  it("does not mistake the '5 minutes' expiry window for the code", () => {
+    const result = classify({
+      from: "noreply@myportal.example.test",
+      subject: "Account Security Notice",
+      text: "Your MyPortal code is 208467. It expires within 5 minutes. This is an automated e-mail and this mailbox is not monitored.",
+    });
+    expect(result.kind).toBe("otp");
+    expect(result.code).toBe("208467");
+    expect(result.code).not.toBe("5");
+    expect(result.reason).toBe("code is");
+  });
+
+  it("classifies a marketing email with an order number as 'other', absent any OTP keyword", () => {
+    const result = classify({
+      from: "noreply@myportal.example.test",
+      subject: "Your Order Has Shipped",
+      text: "Thanks for your purchase! Your order number is 482913. Track your shipment for updates.",
+    });
+    expect(result).toEqual({ kind: "other", code: null, url: null, reason: null });
+  });
+
+  it("extracts an 8-digit code", () => {
+    const result = classify({
+      from: "noreply@myportal.example.test",
+      subject: "Your MyPortal One-Time Code",
+      text: "Your MyPortal one-time code is 48291035. This code expires in 15 minutes. This is an automated e-mail and this mailbox is not monitored.",
+    });
+    expect(result.kind).toBe("otp");
+    expect(result.code).toBe("48291035");
+    expect(result.reason).toBe("one-time");
   });
 });

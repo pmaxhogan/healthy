@@ -89,6 +89,10 @@ export async function handleInboundEmail(
       kind: entry.kind,
       fromDomain,
       rawSize: entry.rawSize,
+      // Which keyword tipped classification into 'otp' -- never the code
+      // itself -- so a future misclassification (like the one this field
+      // was added for) can be diagnosed from the logs alone.
+      ...(classification.reason !== null && { otp_match: classification.reason }),
     });
   } catch (error) {
     log.error("mail.insert_failed", { fromDomain, ...errorFields(error) });
