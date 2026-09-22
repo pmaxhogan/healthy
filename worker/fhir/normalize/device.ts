@@ -1,7 +1,19 @@
 import { codeText } from "./helpers.ts";
 
-import type { NormalizeCtx, NormalizedDevice } from "./types.ts";
+import type { FieldAlias, NormalizeCtx, NormalizedDevice } from "./types.ts";
 import type * as fhir4 from "fhir/r4";
+
+/** For the MCP policy's `field` rule engine, see `observation.ts`'s comment. */
+export const FIELD_ALIASES: readonly FieldAlias[] = [
+  { normalized: ["model"], raw: [["deviceName"]] },
+  {
+    normalized: ["udi"],
+    raw: [
+      ["udiCarrier", "[]", "carrierHRF"],
+      ["udiCarrier", "[]", "deviceIdentifier"],
+    ],
+  },
+];
 
 function deviceModel(deviceName?: fhir4.DeviceDeviceName[]): string | undefined {
   const modelName = deviceName?.find((name) => name.type === "model-name");

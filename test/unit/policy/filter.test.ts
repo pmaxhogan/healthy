@@ -8,11 +8,14 @@
 
 import { describe, expect, it } from "vitest";
 
+import { normalizeObservation } from "../../../worker/fhir/normalize/observation.ts";
 import { applyPolicy } from "../../../worker/policy/filter.ts";
 import { EMPTY_RULES, buildRules } from "../../../worker/policy/rules.ts";
+import { testCtx } from "../fhir/normalize/fixtures.ts";
 
 import type { ApplyPolicyInput, RawEntry } from "../../../worker/policy/filter.ts";
 import type { PolicyRuleInput, PolicyRules } from "../../../worker/policy/rules.ts";
+import type * as fhir4 from "fhir/r4";
 
 const rules = (...input: PolicyRuleInput[]): PolicyRules => buildRules(input);
 
@@ -198,6 +201,81 @@ describe("field rules", () => {
     });
 
     expect(item.address.city).toBe("Testville");
+  });
+});
+
+describe("field rules across the normalized/raw vocabulary divide", () => {
+  // Vuln 1 in .local/reviews/sec-entrypoints-egress.md: a `field` rule's path is
+  // one flat string applied verbatim to both shapes, so a rule written in one
+  // shape's vocabulary silently did nothing to the other. These fixtures are
+  // built by the real `normalizeObservation`, not hand-typed, so a regression in
+  // either the normalizer or the alias table would show up here.
+
+  const rawBloodPressure: fhir4.Observation = {
+    resourceType: "Observation",
+    id: "obs-bp",
+    status: "final",
+    code: { text: "Blood Pressure" },
+    component: [
+      { code: { text: "Systolic" }, valueQuantity: { value: 120, unit: "mmHg" } },
+      { code: { text: "Diastolic" }, valueQuantity: { value: 80, unit: "mmHg" } },
+    ],
+  };
+
+  const rawTemperature: fhir4.Observation = {
+    resourceType: "Observation",
+    id: "obs-temp",
+    status: "final",
+    code: { text: "Body Temperature" },
+    valueQuantity: { value: 98.6, unit: "degF" },
+  };
+
+  it("the documented example strips the value from both the normalized item and the raw resource", () => {
+    const item = { ...normalizeObservation(rawBloodPressure, testCtx()), providerId: "prov_a" };
+    const result = applyPolicy({
+      tool: "get_vitals",
+      items: [item],
+      rawItems: [{ provider: "Example Health", providerId: "prov_a", resource: rawBloodPressure }],
+      rules: rules({ rule_type: "field", target: "Observation.component[].valueQuantity.value" }),
+    });
+
+    const serialised = JSON.stringify({ items: result.items, raw: result.rawItems });
+    expect(serialised).not.toContain("120");
+    expect(serialised).not.toContain("80");
+    // The rule names the value, not the component: the labels survive in both.
+    expect(serialised).toContain("Systolic");
+    expect(serialised).toContain("Diastolic");
+    expect(result.warnings).toContain(
+      "policy_field_removed:Observation.component[].valueQuantity.value",
+    );
+  });
+
+  it("a rule written in the normalized vocabulary strips the raw value[x] behind it", () => {
+    const item = { ...normalizeObservation(rawTemperature, testCtx()), providerId: "prov_a" };
+    const result = applyPolicy({
+      tool: "get_vitals",
+      items: [item],
+      rawItems: [{ provider: "Example Health", providerId: "prov_a", resource: rawTemperature }],
+      rules: rules({ rule_type: "field", target: "Observation.value" }),
+    });
+
+    const serialised = JSON.stringify({ items: result.items, raw: result.rawItems });
+    expect(serialised).not.toContain("98.6");
+    expect(result.warnings).toContain("policy_field_removed:Observation.value");
+  });
+
+  it("a rule in either vocabulary is inert -- and silent -- against a shape with nothing to remove", () => {
+    // No `component[]` on this Observation, so the raw-vocabulary rule has
+    // nothing to strip there; it must not report a removal it did not make.
+    const item = { ...normalizeObservation(rawTemperature, testCtx()), providerId: "prov_a" };
+    const result = applyPolicy({
+      tool: "get_vitals",
+      items: [item],
+      rules: rules({ rule_type: "field", target: "Observation.component[].valueQuantity.value" }),
+    });
+
+    expect(result.items).toStrictEqual([item]);
+    expect(result.warnings).toStrictEqual([]);
   });
 });
 

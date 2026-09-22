@@ -6,8 +6,17 @@
 
 import { humanName } from "./helpers.ts";
 
-import type { NormalizeCtx, NormalizedPatient } from "./types.ts";
+import type { FieldAlias, NormalizeCtx, NormalizedPatient } from "./types.ts";
 import type * as fhir4 from "fhir/r4";
+
+/**
+ * No renames: `name`, `birthDate`, `gender` and `address` keep their raw FHIR
+ * names. `telecom` has no normalized counterpart at all -- it is dropped
+ * rather than projected (see the file comment above) -- so a `field` rule
+ * against it only ever has raw data to strip, which is exactly what
+ * `Patient.telecom` is for.
+ */
+export const FIELD_ALIASES: readonly FieldAlias[] = [];
 
 export function normalizePatient(resource: fhir4.Patient, ctx: NormalizeCtx): NormalizedPatient {
   const name = humanName(resource.name);

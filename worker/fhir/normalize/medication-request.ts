@@ -1,7 +1,14 @@
 import { codeText, dedupeStrings } from "./helpers.ts";
 
-import type { NormalizeCtx, NormalizedMedicationRequest } from "./types.ts";
+import type { FieldAlias, NormalizeCtx, NormalizedMedicationRequest } from "./types.ts";
 import type * as fhir4 from "fhir/r4";
+
+/** For the MCP policy's `field` rule engine, see `observation.ts`'s comment. */
+export const FIELD_ALIASES: readonly FieldAlias[] = [
+  { normalized: ["medication"], raw: [["medicationCodeableConcept"], ["medicationReference"]] },
+  { normalized: ["dosageText"], raw: [["dosageInstruction", "[]", "text"]] },
+  { normalized: ["reasons"], raw: [["reasonCode"]] },
+];
 
 export function normalizeMedicationRequest(
   resource: fhir4.MedicationRequest,

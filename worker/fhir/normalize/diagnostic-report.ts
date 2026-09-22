@@ -1,7 +1,17 @@
 import { codeText, dedupeStrings, pickDate } from "./helpers.ts";
 
-import type { NormalizeCtx, NormalizedDiagnosticReport } from "./types.ts";
+import type { FieldAlias, NormalizeCtx, NormalizedDiagnosticReport } from "./types.ts";
 import type * as fhir4 from "fhir/r4";
+
+/** For the MCP policy's `field` rule engine, see `observation.ts`'s comment. */
+export const FIELD_ALIASES: readonly FieldAlias[] = [
+  {
+    normalized: ["effective"],
+    raw: [["effectiveDateTime"], ["effectivePeriod", "start"]],
+  },
+  { normalized: ["resultRefs"], raw: [["result", "[]", "reference"]] },
+  { normalized: ["presentedFormRefs"], raw: [["presentedForm", "[]", "url"]] },
+];
 
 export function normalizeDiagnosticReport(
   resource: fhir4.DiagnosticReport,

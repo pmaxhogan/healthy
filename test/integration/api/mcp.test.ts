@@ -109,6 +109,48 @@ describe("the policy CRUD", () => {
     expect(response.status).toBe(400);
   });
 
+  it("refuses a field path that names nothing in either the normalized or the raw vocabulary", async () => {
+    // Vuln 1 in .local/reviews/sec-entrypoints-egress.md: a `field` rule that
+    // parses fine but matches nothing anywhere used to be stored -- and
+    // `unparsed: false`, so the owner had no signal it would never fire. It
+    // parses (a real dotted path below a real resource type), so this is a
+    // different rejection than the structural-parse-failure case above.
+    const response = await owner().send("POST", "/api/mcp/policy", {
+      ruleType: "field",
+      target: "Observation.nonesuch.deeper",
+    });
+    const body = await json<ApiError>(response);
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("bad_request");
+    expect(await json<PolicyRuleDto[]>(await owner().get("/api/mcp/policy"))).toStrictEqual([]);
+  });
+
+  it("still accepts a raw-vocabulary field with no normalized counterpart", async () => {
+    // Patient.telecom is dropped by normalization entirely (never projected),
+    // so it only ever resolves against the raw vocabulary -- it must keep
+    // working, since it is exactly what `raw: true` field rules are for.
+    const response = await owner().send("POST", "/api/mcp/policy", {
+      ruleType: "field",
+      target: "Patient.telecom",
+    });
+
+    expect(response.status).toBe(201);
+    const rule = await json<PolicyRuleDto>(response);
+    expect(rule.unparsed).toBe(false);
+  });
+
+  it("still accepts the documented example, written in the raw vocabulary", async () => {
+    const response = await owner().send("POST", "/api/mcp/policy", {
+      ruleType: "field",
+      target: "Observation.component[].valueQuantity.value",
+    });
+
+    expect(response.status).toBe(201);
+    const rule = await json<PolicyRuleDto>(response);
+    expect(rule.unparsed).toBe(false);
+  });
+
   it("404s deleting a rule that is not there", async () => {
     const response = await owner().send("DELETE", "/api/mcp/policy/NOPE");
 

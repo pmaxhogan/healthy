@@ -1,7 +1,25 @@
 import { codeText, dedupeStrings, period, pickDate } from "./helpers.ts";
 
-import type { NormalizeCtx, NormalizedCodeableConcept, NormalizedCondition } from "./types.ts";
+import type {
+  FieldAlias,
+  NormalizeCtx,
+  NormalizedCodeableConcept,
+  NormalizedCondition,
+} from "./types.ts";
 import type * as fhir4 from "fhir/r4";
+
+/** For the MCP policy's `field` rule engine, see `observation.ts`'s comment. */
+export const FIELD_ALIASES: readonly FieldAlias[] = [
+  {
+    normalized: ["onset"],
+    raw: [["onsetDateTime"], ["onsetPeriod", "start"], ["onsetString"]],
+  },
+  { normalized: ["recorded"], raw: [["recordedDate"]] },
+  {
+    normalized: ["abatement"],
+    raw: [["abatementDateTime"], ["abatementPeriod", "start"], ["abatementString"]],
+  },
+];
 
 function normalizedCode(cc?: fhir4.CodeableConcept): NormalizedCodeableConcept | undefined {
   const text = codeText(cc);

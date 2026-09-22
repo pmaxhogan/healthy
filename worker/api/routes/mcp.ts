@@ -21,6 +21,7 @@
 import { Hono } from "hono";
 
 import { AppError } from "../../lib/errors.ts";
+import { ALLOW_PREFIX, fieldRuleResolves, parseFieldTarget } from "../../policy/rules.ts";
 import { toAuditDto, toPolicyRuleDto } from "../dto.ts";
 import { NO_STORE, apiContext, limitQuerySchema, readJson, readQuery } from "../http.ts";
 import { policyRuleSchema } from "../schemas.ts";
@@ -52,6 +53,23 @@ mcpRouter.post("/policy", async (c) => {
   // Typed against the shared contract as well as the schema, so the SPA's payload
   // and the Worker's parser cannot drift apart without a compile error.
   const body: CreatePolicyRuleRequest = await readJson(c, policyRuleSchema);
+  // A `field` target that names nothing in either vocabulary is refused outright
+  // rather than stored as `unparsed`: it parses fine (it is a real dotted path
+  // below a real resource type), so the admin UI's typo signal never fires, and
+  // the owner would otherwise have no way to discover a rule that can never
+  // remove anything. A target that fails to parse at all -- `parseFieldTarget`
+  // returning `null` -- is unaffected; that is still reported via `unparsed`,
+  // as before, not rejected here.
+  if (body.ruleType === "field" && !body.target.startsWith(ALLOW_PREFIX)) {
+    const rule = parseFieldTarget(body.target);
+    if (rule !== null && !fieldRuleResolves(rule)) {
+      throw new AppError(
+        "bad_request",
+        "field rule matches nothing in either the normalized or the raw FHIR vocabulary",
+        { target: body.target },
+      );
+    }
+  }
   const row = await api.repos.mcpPolicy.add(body.ruleType, body.target, body.note);
   return c.json(toPolicyRuleDto(row), 201, NO_STORE);
 });

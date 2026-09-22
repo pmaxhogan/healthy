@@ -1,7 +1,21 @@
 import { codeText, pickDate } from "./helpers.ts";
 
-import type { NormalizeCtx, NormalizedImmunization } from "./types.ts";
+import type { FieldAlias, NormalizeCtx, NormalizedImmunization } from "./types.ts";
 import type * as fhir4 from "fhir/r4";
+
+/** For the MCP policy's `field` rule engine, see `observation.ts`'s comment. */
+export const FIELD_ALIASES: readonly FieldAlias[] = [
+  { normalized: ["vaccine"], raw: [["vaccineCode"]] },
+  { normalized: ["occurrence"], raw: [["occurrenceDateTime"], ["occurrenceString"]] },
+  { normalized: ["lot"], raw: [["lotNumber"]] },
+  {
+    normalized: ["doseNumber"],
+    raw: [
+      ["protocolApplied", "[]", "doseNumberPositiveInt"],
+      ["protocolApplied", "[]", "doseNumberString"],
+    ],
+  },
+];
 
 function doseNumber(protocolApplied?: fhir4.ImmunizationProtocolApplied[]): string | undefined {
   const first = protocolApplied?.[0];

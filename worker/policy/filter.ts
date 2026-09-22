@@ -25,6 +25,7 @@
  * record is empty.
  */
 
+import { expandPath } from "./aliases.ts";
 import {
   ARRAY_SEGMENT,
   fieldRulesFor,
@@ -33,6 +34,8 @@ import {
   isToolDenied,
   type PolicyRules,
 } from "./rules.ts";
+
+import type { AliasDirection } from "./aliases.ts";
 
 /** A raw FHIR resource as a tool hands it over, tagged with its provider. */
 export interface RawEntry {
@@ -157,21 +160,39 @@ function pruneRecord(
   return changed ? replaced(Object.fromEntries(entries)) : unchanged(value);
 }
 
-/** Apply every field rule that matches `resourceType` to one value. */
+/**
+ * Apply every field rule that matches `resourceType` to one value.
+ *
+ * `shape` says which of the two projections `value` is: a rule's `path` is
+ * whatever vocabulary the owner wrote it in, which is not necessarily this
+ * one, so it is expanded through `worker/policy/aliases.ts` into every path
+ * worth trying against `shape` before pruning -- the path exactly as written,
+ * plus its translation when a known rename applies. That is what makes one
+ * rule -- in either vocabulary -- strip the normalized item AND the raw
+ * resource behind it, which `SECURITY.md` requires of the one exposure choke
+ * point.
+ */
 function applyFieldRules(
   rules: PolicyRules,
   resourceType: string,
+  shape: "normalized" | "raw",
   value: unknown,
   warnings: Set<string>,
 ): unknown {
   let current = value;
+  const direction: AliasDirection = shape === "normalized" ? "toNormalized" : "toRaw";
   for (const rule of fieldRulesFor(rules, resourceType)) {
-    const next = prune(current, rule.path);
-    // `remove` is unreachable for a parsed rule: `parseFieldTarget` rejects an
-    // empty path, and only an empty path removes at the top level.
-    if (next.remove) continue;
-    if (next.changed) warnings.add(`policy_field_removed:${rule.target}`);
-    current = next.value;
+    let ruleChanged = false;
+    for (const candidate of expandPath(resourceType, rule.path, direction)) {
+      const next = prune(current, candidate);
+      // `remove` is unreachable for a parsed (or alias-translated) rule: every
+      // candidate keeps at least one segment, and only an empty path removes
+      // at the top level.
+      if (next.remove) continue;
+      if (next.changed) ruleChanged = true;
+      current = next.value;
+    }
+    if (ruleChanged) warnings.add(`policy_field_removed:${rule.target}`);
   }
   return current;
 }
@@ -332,7 +353,7 @@ function filterItems(
     }
     const resourceType = stringField(item, "resourceType");
     if (itemDenied(rules, resourceType, stringField(item, "providerId"), warnings)) continue;
-    const filtered = applyFieldRules(rules, resourceType, item, warnings);
+    const filtered = applyFieldRules(rules, resourceType, "normalized", item, warnings);
     items.push(
       isRecord(filtered) ? stripSensitive(rules, resourceType, filtered, warnings) : filtered,
     );
@@ -351,7 +372,7 @@ function filterRaw(
   for (const entry of input) {
     const resourceType = stringField(entry.resource, "resourceType");
     if (itemDenied(rules, resourceType, entry.providerId, warnings)) continue;
-    const filtered = applyFieldRules(rules, resourceType, entry.resource, warnings);
+    const filtered = applyFieldRules(rules, resourceType, "raw", entry.resource, warnings);
     const resource = stripSensitiveRaw(
       resourceType,
       sensitiveByType.get(resourceType) ?? EMPTY_FIELDS,

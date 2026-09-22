@@ -6,12 +6,39 @@
 import { codeText, dedupeStrings, pickDate, quantity } from "./helpers.ts";
 
 import type {
+  FieldAlias,
   NormalizeCtx,
   NormalizedObservation,
   NormalizedObservationComponent,
   NormalizedObservationValue,
 } from "./types.ts";
 import type * as fhir4 from "fhir/r4";
+
+/** The FHIR `value[x]` choice type this module collapses to `value`. */
+const VALUE_CHOICE_RAW: readonly (readonly string[])[] = [
+  ["valueQuantity"],
+  ["valueString"],
+  ["valueCodeableConcept"],
+  ["valueInteger"],
+  ["valueBoolean"],
+];
+
+/**
+ * For the MCP policy's `field` rule engine (`worker/policy/aliases.ts`): every
+ * rename this module performs between the raw resource and the normalized
+ * item, so a rule written in either vocabulary strips both. The component
+ * entry is separate from the top-level one because alias matching is
+ * root-anchored -- `components[].value` is not "components" plus "value"
+ * composed, it is its own prefix all the way down.
+ */
+export const FIELD_ALIASES: readonly FieldAlias[] = [
+  { normalized: ["value"], raw: VALUE_CHOICE_RAW },
+  { normalized: ["components"], raw: [["component"]] },
+  {
+    normalized: ["components", "[]", "value"],
+    raw: VALUE_CHOICE_RAW.map((choice) => ["component", "[]", ...choice]),
+  },
+];
 
 interface ValueCarrier {
   valueQuantity?: fhir4.Quantity | undefined;

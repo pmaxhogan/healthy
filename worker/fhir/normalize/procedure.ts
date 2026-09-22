@@ -1,7 +1,19 @@
 import { codeText, dedupeStrings, pickDate } from "./helpers.ts";
 
-import type { NormalizeCtx, NormalizedProcedure, NormalizedProcedurePerformer } from "./types.ts";
+import type {
+  FieldAlias,
+  NormalizeCtx,
+  NormalizedProcedure,
+  NormalizedProcedurePerformer,
+} from "./types.ts";
 import type * as fhir4 from "fhir/r4";
+
+/** For the MCP policy's `field` rule engine, see `observation.ts`'s comment. */
+export const FIELD_ALIASES: readonly FieldAlias[] = [
+  { normalized: ["performed"], raw: [["performedDateTime"], ["performedPeriod", "start"]] },
+  { normalized: ["performers"], raw: [["performer"]] },
+  { normalized: ["reasons"], raw: [["reasonCode"]] },
+];
 
 function toPerformer(
   performer: fhir4.ProcedurePerformer,

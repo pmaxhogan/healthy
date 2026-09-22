@@ -1,7 +1,12 @@
 import { codeText, dedupeStrings, humanName } from "./helpers.ts";
 
-import type { NormalizeCtx, NormalizedPractitioner } from "./types.ts";
+import type { FieldAlias, NormalizeCtx, NormalizedPractitioner } from "./types.ts";
 import type * as fhir4 from "fhir/r4";
+
+/** For the MCP policy's `field` rule engine, see `observation.ts`'s comment. */
+export const FIELD_ALIASES: readonly FieldAlias[] = [
+  { normalized: ["qualifications"], raw: [["qualification", "[]", "code"]] },
+];
 
 export function normalizePractitioner(
   resource: fhir4.Practitioner,

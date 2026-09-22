@@ -26,6 +26,10 @@
  * owner puts one back. Nothing else can widen exposure.
  */
 
+import { NORMALIZED_TYPES } from "../fhir/normalize/index.ts";
+
+import { fieldResolves } from "./aliases.ts";
+
 import type { PolicyRuleType } from "../db/rows.ts";
 
 /** Marks a field target that re-enables a `sensitive` field rather than denying one. */
@@ -236,4 +240,23 @@ export function fieldRulesFor(rules: PolicyRules, resourceType: string): FieldRu
   return rules.fields.filter(
     (rule) => rule.resourceType === "*" || rule.resourceType === resourceType,
   );
+}
+
+/**
+ * True when a structurally-parsed `field` rule names something real, in
+ * either vocabulary, for at least one resource type it could apply to --
+ * every type when `resourceType` is `*`. Used only at write time
+ * (`POST /api/mcp/policy`): a rule already stored is applied as-is regardless
+ * of what this says, so tightening the vocabulary here never breaks a rule
+ * that got in before it existed.
+ *
+ * See `worker/policy/aliases.ts` for what "resolves" means -- the path or one
+ * of its alias translations names a real normalized or raw field, checked
+ * against the vocabulary the normalize layer and the `fhir` package actually
+ * expose, not a rule that merely looks plausible.
+ */
+export function fieldRuleResolves(rule: FieldRule): boolean {
+  return rule.resourceType === "*"
+    ? NORMALIZED_TYPES.some((resourceType) => fieldResolves(resourceType, rule.path))
+    : fieldResolves(rule.resourceType, rule.path);
 }

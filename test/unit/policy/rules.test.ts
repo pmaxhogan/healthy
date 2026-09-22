@@ -10,6 +10,7 @@ import {
   ARRAY_SEGMENT,
   EMPTY_RULES,
   buildRules,
+  fieldRuleResolves,
   fieldRulesFor,
   isProviderDenied,
   isSensitiveAllowed,
@@ -123,6 +124,45 @@ describe("buildRules", () => {
     expect(rules.unparsed).toStrictEqual(["Patient", `${ALLOW_PREFIX}Patient.address.city`, "  "]);
     expect(rules.fields).toStrictEqual([]);
     expect(rules.allowedSensitive.size).toBe(0);
+  });
+});
+
+describe("fieldRuleResolves", () => {
+  it("accepts a path that only exists in the normalized vocabulary", () => {
+    expect(fieldRuleResolves(parseFieldTarget("Patient.address.city")!)).toBe(true);
+  });
+
+  it("accepts a path that only exists in the raw vocabulary", () => {
+    // Patient.telecom has no normalized counterpart (dropped, never projected)
+    // -- it must still resolve, since the raw resource really has it.
+    expect(fieldRuleResolves(parseFieldTarget("Patient.telecom")!)).toBe(true);
+  });
+
+  it("accepts a raw-vocabulary path via its alias into the normalized shape", () => {
+    expect(
+      fieldRuleResolves(parseFieldTarget("Observation.component[].valueQuantity.value")!),
+    ).toBe(true);
+  });
+
+  it("accepts a normalized-vocabulary path via its alias into the raw shape", () => {
+    expect(fieldRuleResolves(parseFieldTarget("Observation.value")!)).toBe(true);
+  });
+
+  it("rejects a path that names nothing in either vocabulary", () => {
+    expect(fieldRuleResolves(parseFieldTarget("Observation.nonesuch.deeper")!)).toBe(false);
+  });
+
+  it("accepts a wildcard that resolves for at least one resource type", () => {
+    // lastUpdated -> meta.lastUpdated is common to every type.
+    expect(fieldRuleResolves(parseFieldTarget("*.lastUpdated")!)).toBe(true);
+  });
+
+  it("rejects a wildcard that resolves for no resource type", () => {
+    expect(fieldRuleResolves(parseFieldTarget("*.nonesuch")!)).toBe(false);
+  });
+
+  it("cannot disprove a resource type it has no vocabulary for, so it accepts", () => {
+    expect(fieldRuleResolves(parseFieldTarget("Binary.data")!)).toBe(true);
   });
 });
 

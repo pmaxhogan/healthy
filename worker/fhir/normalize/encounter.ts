@@ -17,12 +17,32 @@ import { codeText, dedupeStrings, phone, address, period as periodOf } from "./h
 
 import type { RefResolver } from "./refs.ts";
 import type {
+  FieldAlias,
   NormalizeCtx,
   NormalizedEncounter,
   NormalizedLocationRef,
   NormalizedPractitionerRef,
 } from "./types.ts";
 import type * as fhir4 from "fhir/r4";
+
+/**
+ * For the MCP policy's `field` rule engine, see `observation.ts`'s comment.
+ *
+ * `department` and `telehealth` have no entry: both are heuristics this
+ * module derives (a best-effort second `location[]` entry, and a pattern
+ * match over the visit type and location name) rather than one raw field
+ * renamed, so there is nothing in the raw resource a rule against them could
+ * alias to.
+ */
+export const FIELD_ALIASES: readonly FieldAlias[] = [
+  { normalized: ["visitType"], raw: [["type"]] },
+  { normalized: ["start"], raw: [["period", "start"]] },
+  { normalized: ["end"], raw: [["period", "end"]] },
+  { normalized: ["practitioners"], raw: [["participant"]] },
+  { normalized: ["organization"], raw: [["serviceProvider"]] },
+  { normalized: ["reasons"], raw: [["reasonCode"]] },
+  { normalized: ["identifiers"], raw: [["identifier"]] },
+];
 
 const CSN_TYPE_CODE = "CSN";
 // v3 ParticipationType codes Epic uses to mark the primary/attending clinician.

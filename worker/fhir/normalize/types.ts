@@ -13,6 +13,31 @@ export interface NormalizeCtx {
   refs: RefResolver;
 }
 
+/**
+ * One rename between the normalized shape and the raw FHIR shape it was
+ * derived from, for the MCP exposure policy's `field` rule engine
+ * (`worker/policy/aliases.ts`). Declared next to the `normalizeX` function
+ * that performs the rename, so a future rename and its alias entry cannot
+ * drift apart in separate files.
+ *
+ * Matching is root-anchored: an alias is tried only against the start of a
+ * rule's path (right after the resource type), never re-scanned inside
+ * whatever is left over. A rename nested below another rename -- Observation's
+ * `component[].valueQuantity` becoming `components[].value` -- therefore needs
+ * its own entry naming the full prefix down to that point, not two entries
+ * composed automatically.
+ */
+export interface FieldAlias {
+  /** Path segments in the normalized shape, from the item root. */
+  normalized: readonly string[];
+  /**
+   * Equivalent path segments in the raw FHIR shape. More than one alternative
+   * means a FHIR `value[x]` choice type (or similar) collapsed to one
+   * normalized name -- resolving must try each alternative in turn.
+   */
+  raw: readonly (readonly string[])[];
+}
+
 /** Fields every normalized output object carries. */
 interface NormalizedBase {
   resourceType: string;

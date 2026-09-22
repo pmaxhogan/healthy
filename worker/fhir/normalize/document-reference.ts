@@ -5,11 +5,23 @@
 import { codeText, dedupeStrings } from "./helpers.ts";
 
 import type {
+  FieldAlias,
   NormalizeCtx,
   NormalizedDocumentAttachment,
   NormalizedDocumentReference,
 } from "./types.ts";
 import type * as fhir4 from "fhir/r4";
+
+/** For the MCP policy's `field` rule engine, see `observation.ts`'s comment. */
+export const FIELD_ALIASES: readonly FieldAlias[] = [
+  { normalized: ["attachments"], raw: [["content"]] },
+  {
+    normalized: ["attachments", "[]", "contentType"],
+    raw: [["content", "[]", "attachment", "contentType"]],
+  },
+  { normalized: ["attachments", "[]", "url"], raw: [["content", "[]", "attachment", "url"]] },
+  { normalized: ["attachments", "[]", "title"], raw: [["content", "[]", "attachment", "title"]] },
+];
 
 function toAttachment(
   content: fhir4.DocumentReferenceContent,

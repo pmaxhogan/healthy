@@ -282,6 +282,44 @@ describe("policy rows in D1", () => {
     expect(answer.items).toHaveLength(2);
   });
 
+  it("strips the documented field-rule example from both the normalized item and the raw resource", async () => {
+    // Vuln 1 in .local/reviews/sec-entrypoints-egress.md, exercised through a
+    // real tool call rather than `applyPolicy` directly: the rule targets the
+    // raw vocabulary (`docs/mcp.md`'s worked example), and both the default
+    // (normalized) answer and the `raw: true` projection must lose the value.
+    const day = 24 * 3600 * 1000;
+    await repos().fhirCache.upsertMany(
+      world.seeded.providerA,
+      [
+        {
+          resourceType: "Observation",
+          id: "obs-bp",
+          status: "final",
+          category: [{ coding: [{ code: "vital-signs" }] }],
+          code: { text: "Blood Pressure" },
+          component: [
+            { code: { text: "Systolic" }, valueQuantity: { value: 120, unit: "mmHg" } },
+            { code: { text: "Diastolic" }, valueQuantity: { value: 80, unit: "mmHg" } },
+          ],
+        },
+      ],
+      8 * day,
+    );
+
+    const before = await call(world.client, "get_vitals", { raw: true });
+    expect(before.text).toContain("120");
+    expect(before.text).toContain("80");
+
+    await repos().mcpPolicy.add("field", "Observation.component[].valueQuantity.value");
+    const after = await call(world.client, "get_vitals", { raw: true });
+
+    expect(after.text).not.toContain("120");
+    expect(after.text).not.toContain("80");
+    // The rule names the value, not the component: the labels survive.
+    expect(after.text).toContain("Systolic");
+    expect(after.text).toContain("Diastolic");
+  });
+
   it("removes a denied resource type", async () => {
     await repos().mcpPolicy.add("resource", "Condition");
 

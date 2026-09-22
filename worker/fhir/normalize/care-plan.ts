@@ -1,7 +1,12 @@
 import { codeText, dedupeStrings, period } from "./helpers.ts";
 
-import type { NormalizeCtx, NormalizedCarePlan } from "./types.ts";
+import type { FieldAlias, NormalizeCtx, NormalizedCarePlan } from "./types.ts";
 import type * as fhir4 from "fhir/r4";
+
+/** For the MCP policy's `field` rule engine, see `observation.ts`'s comment. */
+export const FIELD_ALIASES: readonly FieldAlias[] = [
+  { normalized: ["activities"], raw: [["activity"]] },
+];
 
 function activityText(activity: fhir4.CarePlanActivity): string | undefined {
   return codeText(activity.detail?.code);

@@ -1,7 +1,17 @@
 import { codeText } from "./helpers.ts";
 
-import type { NormalizeCtx, NormalizedCareTeam, NormalizedCareTeamParticipant } from "./types.ts";
+import type {
+  FieldAlias,
+  NormalizeCtx,
+  NormalizedCareTeam,
+  NormalizedCareTeamParticipant,
+} from "./types.ts";
 import type * as fhir4 from "fhir/r4";
+
+/** For the MCP policy's `field` rule engine, see `observation.ts`'s comment. */
+export const FIELD_ALIASES: readonly FieldAlias[] = [
+  { normalized: ["participants"], raw: [["participant"]] },
+];
 
 function toParticipant(
   participant: fhir4.CareTeamParticipant,
