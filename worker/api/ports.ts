@@ -29,7 +29,7 @@ import {
   refreshConnectionToken,
   resolveReconnectAlert,
   runCalendarSync,
-  runFullRefresh,
+  startFullRefresh,
 } from "../sync/index.ts";
 
 import type { TrelloAlerts } from "../alerts/trello.ts";
@@ -44,18 +44,23 @@ type ReconnectSubject = "google" | { providerId: string };
 /**
  * The sync engine's public surface, as the admin API uses it.
  *
- * The three run entry points resolve with `unknown` on purpose. The engine reports
- * a run summary, and the API neither reads nor forwards it: a manual run is kicked
- * off in `waitUntil` and has not finished by the time the 202 is written. Typing
- * the return as `unknown` is what keeps this contract from having to track the
+ * The run entry points resolve with `unknown` on purpose. The engine reports a run
+ * summary, and the API neither reads nor forwards it: a manual run is kicked off in
+ * `waitUntil` and has not finished by the time the 202 is written. Typing the
+ * return as `unknown` is what keeps this contract from having to track the
  * summary's shape, which belongs to `worker/sync/`.
+ *
+ * `startFullRefresh` is the one that is *not* fire-and-forget, and it is the one
+ * port method whose answer the API reads. A refresh outlives a `waitUntil`, so it is
+ * queued on a Durable Object instead; the call is a storage write, it is awaited,
+ * and `started: false` means one was already running for that provider.
  */
 interface SyncPort {
   runCalendarSync(
     ctx: Ctx,
     options: { providerIds?: string[]; trigger: "manual" },
   ): Promise<unknown>;
-  runFullRefresh(ctx: Ctx, options: { providerIds?: string[] }): Promise<unknown>;
+  startFullRefresh(ctx: Ctx, options: { providerId: string }): Promise<{ started: boolean }>;
   /** Forces a token refresh even when the current one has not expired. */
   refreshConnectionToken(ctx: Ctx, providerId: string, options: { force: true }): Promise<unknown>;
   /** A calendar client wired to the stored Google tokens, refresh included. */
@@ -123,7 +128,7 @@ function defaults(): Ports {
     fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
     sync: {
       runCalendarSync,
-      runFullRefresh,
+      startFullRefresh,
       refreshConnectionToken,
       getGoogleCalendarFor,
       resolveReconnectAlert,

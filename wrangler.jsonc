@@ -37,13 +37,22 @@
   // exactly OAUTH_KV; it is not configurable.
   "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "1c1ca4bf60c543cd8ebbee8676b76123" }],
   "durable_objects": {
-    "bindings": [{ "name": "HEALTHY_MCP", "class_name": "HealthyMcp" }],
+    "bindings": [
+      { "name": "HEALTHY_MCP", "class_name": "HealthyMcp" },
+      { "name": "FULL_REFRESH", "class_name": "FullRefreshRunner" },
+    ],
   },
   "migrations": [
     {
       "tag": "v1",
       // SQLite-backed (not KV-backed) so McpAgent can keep per-session state.
       "new_sqlite_classes": ["HealthyMcp"],
+    },
+    {
+      "tag": "v2",
+      // Drives a manual full refresh from an alarm, one chunk per invocation,
+      // because work in a request's waitUntil is cancelled after ~30 seconds.
+      "new_sqlite_classes": ["FullRefreshRunner"],
     },
   ],
   "triggers": {
@@ -55,7 +64,11 @@
     ],
   },
   "observability": { "enabled": true },
-  // A full refresh walks every resource type for every connected provider.
+  // A full refresh walks every resource type for every connected provider. This is
+  // the plan maximum and is not the binding constraint: a refresh is nearly all
+  // waiting on an organisation, so it spends hundreds of milliseconds of CPU across
+  // half a minute of wall clock. Wall clock is what limits it, which is why a
+  // manual refresh runs from a Durable Object alarm -- see worker/sync/runner.ts.
   "limits": { "cpu_ms": 300000 },
   // Deliberately the ONLY var. Every piece of real configuration -- provider
   // endpoints, credentials, calendar and timezone settings, alert routing --

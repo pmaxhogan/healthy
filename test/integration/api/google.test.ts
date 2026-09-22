@@ -77,7 +77,7 @@ function withCalendar(calendar: CalendarClient): void {
   usePorts({
     sync: {
       runCalendarSync: () => Promise.resolve({}),
-      runFullRefresh: () => Promise.resolve({}),
+      startFullRefresh: () => Promise.resolve({ started: true }),
       refreshConnectionToken: () => Promise.resolve({}),
       getGoogleCalendarFor: () => Promise.resolve(calendar),
       resolveReconnectAlert: () => Promise.resolve(),

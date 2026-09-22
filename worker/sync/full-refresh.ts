@@ -28,6 +28,27 @@
  *     (Practitioner, Location, Organization, Medication, Binary) exist to be
  *     resolved on demand, and reading them speculatively would be unbounded.
  *
+ * ### Why this is chunked, and what a chunk is
+ *
+ * A refresh of a large record is minutes of wall clock, nearly all of it waiting on
+ * the organisation. That is fine under cron, which gets minutes. It is *not* fine
+ * behind a request: work handed to `ctx.waitUntil` is cancelled about thirty
+ * seconds after the response is written, mid-`await`, with the invocation still
+ * reported as `ok`. That is exactly how a refresh came to leave half a record
+ * cached, `connections.last_full_refresh_at` NULL and a `run_log` row open forever.
+ *
+ * So `runFullRefreshChunk` takes a wall-clock `budgetMs` and a `RefreshJob`. When
+ * the budget is spent it stops between two resource types, hands back a job
+ * describing what is left, and leaves the run row open; `runner.ts` stores that job
+ * in a Durable Object and re-arms an alarm, so the next chunk is a fresh invocation
+ * with a fresh budget. `runFullRefresh` is the same thing with no budget, which is
+ * what cron still uses and what the tests drive.
+ *
+ * Resuming needs no new table. `fhir_sync_state.last_full_at` is already stamped
+ * per (provider, resource type) on success *and* on failure, so a type whose stamp
+ * is at or after the cycle's start instant is done for this cycle and is skipped --
+ * which also means a type that failed is not retried within one cycle.
+ *
  * Log lines carry provider ids, resource type names, counts and Epic codes. Never
  * a search URL -- the parameters carry the patient id -- and never a resource.
  */
@@ -46,7 +67,7 @@ import { syncTargets } from "./targets.ts";
 import { getFhirClientFor } from "./tokens.ts";
 
 import type { SyncDeps } from "./deps.ts";
-import type { RunState } from "./run.ts";
+import type { RunState, RunStateSnapshot } from "./run.ts";
 import type { SyncTarget } from "./targets.ts";
 import type { Ctx } from "../db/client.ts";
 import type { Repos } from "../db/index.ts";
@@ -62,6 +83,16 @@ const FULL_REFRESH_TTL_MS = 8 * 24 * 60 * 60 * 1000;
 /** Resource types whose retrieval is capped by Epic's daily document quota. */
 const DOCUMENT_TYPES: ReadonlySet<string> = new Set(["DocumentReference", "Binary"]);
 
+/**
+ * How much wall clock one chunk of a chunked refresh may spend.
+ *
+ * Twenty seconds against a thirty second cancellation deadline. The check happens
+ * *between* resource types, so a chunk overruns by however long its last type takes
+ * -- a few seconds for everything observed -- and ten seconds of headroom is what
+ * pays for that. Raising this trades margin for fewer alarms and is not worth it.
+ */
+export const CHUNK_BUDGET_MS = 20_000;
+
 export interface FullRefreshOptions {
   providerIds?: string[];
   trigger?: RunKind;
@@ -69,57 +100,225 @@ export interface FullRefreshOptions {
 }
 
 /**
- * Refresh every provider's cached record.
+ * What one chunk hands the next.
+ *
+ * `pending` is the providers still to walk, `cycleStartedAt` the instant the whole
+ * refresh began (the resume marker against `fhir_sync_state.last_full_at`), and
+ * `runId` plus `state` the one open run row and its counts so far. `runId` is null
+ * only before the first chunk has opened the row.
+ */
+export interface RefreshJob {
+  pending: string[];
+  cycleStartedAt: number;
+  runId: string | null;
+  state: RunStateSnapshot | null;
+}
+
+export interface FullRefreshResult {
+  summary: RunSummary;
+  /** Null when the refresh is done; otherwise what the next chunk needs. */
+  job: RefreshJob | null;
+}
+
+export interface ChunkOptions extends FullRefreshOptions {
+  /** Resume this job rather than starting a refresh. */
+  job?: RefreshJob;
+  /** Stop between resource types once this much wall clock has gone. */
+  budgetMs?: number;
+}
+
+/**
+ * Refresh every provider's cached record, start to finish, in this invocation.
  *
  * Writes one `run_log` row of kind "full" and resolves with its summary. Never
- * throws.
+ * throws. Safe only where the caller has minutes of wall clock -- cron does, a
+ * request's `waitUntil` does not; that path goes through `runner.ts`.
  */
 export async function runFullRefresh(
   ctx: Ctx,
   options: FullRefreshOptions = {},
 ): Promise<RunSummary> {
+  const { summary } = await runFullRefreshChunk(ctx, options);
+  return summary;
+}
+
+/**
+ * One chunk of a refresh: as many (provider, resource type) passes as the budget
+ * allows, then a job describing the rest.
+ *
+ * With no `budgetMs` this is `runFullRefresh` and `job` always comes back null.
+ */
+export async function runFullRefreshChunk(
+  ctx: Ctx,
+  options: ChunkOptions = {},
+): Promise<FullRefreshResult> {
   const deps = options.deps ?? {};
   const repos = makeRepos(ctx);
+  const resuming = options.job;
+  const cycleStartedAt = resuming?.cycleStartedAt ?? ctx.now();
+  // Null until some chunk has opened the run row, which is also the test for "this
+  // is the first chunk": the first chunk of a chunked refresh already carries a job,
+  // so asking whether `resuming` exists is the wrong question.
+  const openRunId = resuming?.runId ?? null;
+
   const settings = await getAllSettings(ctx);
   if (settings.sync_backoff_until !== null && settings.sync_backoff_until > ctx.now()) {
     ctx.log.info("sync.backoff.skip", {
       secondsRemaining: settings.sync_backoff_until - ctx.now(),
       kind: "full",
     });
-    return { ...emptySummary(), backedOff: true };
+    // A backoff set between two chunks -- by the hourly sync meeting a 429, say --
+    // ends this refresh, and the row an earlier chunk opened has to be closed here.
+    // Left open it would be swept half an hour later as `aborted`, which is not
+    // what happened: the counts so far are real and the reason is a rate limit.
+    if (openRunId === null) return { summary: { ...emptySummary(), backedOff: true }, job: null };
+    const stopped = await record(
+      ctx,
+      options.trigger ?? "full",
+      (state) => {
+        state.summary.backedOff = true;
+        return Promise.resolve();
+      },
+      { runId: openRunId, state: resuming?.state ?? null },
+    );
+    return { summary: stopped.summary, job: null };
   }
 
-  return record(ctx, options.trigger ?? "full", async (state) => {
-    const targets = await syncTargets(repos, options.providerIds);
-    state.summary.providers = targets.length;
-    for (const target of targets) {
-      try {
-        await refreshProvider(ctx, repos, target, state, deps);
-        await repos.connections.recordSync(target.connection.id, "full");
-      } catch (error) {
-        state.summary.errors.push({ providerId: target.provider.id, code: codeOf(error) });
-        ctx.log.error("refresh.provider_failed", {
-          providerId: target.provider.id,
-          ...errorFields(error),
-        });
-        const limit = rateLimitOf(error);
-        if (limit === null) continue;
-        await setBackoff(ctx, limit.retryAfterMs);
-        state.summary.backedOff = true;
-        return;
+  const nowMs = deps.nowMs ?? ((): number => Date.now());
+  const budget: Budget = {
+    startedMs: nowMs(),
+    limitMs: options.budgetMs ?? null,
+    nowMs,
+    processed: 0,
+  };
+  // Filled in by the callback when the budget runs out mid-refresh, and read after
+  // `record` has returned: the run's own state has nowhere to put it.
+  const deferred: { pending: string[] | null } = { pending: null };
+
+  const outcome = await record(
+    ctx,
+    options.trigger ?? "full",
+    async (state) => {
+      const targets = await syncTargets(repos, resuming?.pending ?? options.providerIds);
+      // Only on the chunk that opens the row. A later chunk sees just what is left
+      // of `targets`, so counting again there would report one provider for a
+      // refresh of three.
+      if (openRunId === null) state.summary.providers = targets.length;
+      for (const [index, target] of targets.entries()) {
+        try {
+          const stopped = await refreshProvider(ctx, repos, target, state, deps, {
+            cycleStartedAt,
+            chunked: resuming !== undefined,
+            budget,
+          });
+          if (stopped) {
+            deferred.pending = targets.slice(index).map((remaining) => remaining.provider.id);
+            ctx.log.info("refresh.deferred", {
+              providerId: target.provider.id,
+              pending: deferred.pending.length,
+              types: budget.processed,
+            });
+            break;
+          }
+          await repos.connections.recordSync(target.connection.id, "full");
+        } catch (error) {
+          state.summary.errors.push({ providerId: target.provider.id, code: codeOf(error) });
+          ctx.log.error("refresh.provider_failed", {
+            providerId: target.provider.id,
+            ...errorFields(error),
+          });
+          const limit = rateLimitOf(error);
+          if (limit === null) continue;
+          await setBackoff(ctx, limit.retryAfterMs);
+          state.summary.backedOff = true;
+          // Not deferred: a backoff is a decision to stop, not to come back in
+          // twenty seconds. The row is closed and the job is dropped.
+          return;
+        }
       }
-    }
-  });
+      // Not a return value: see `RunState.unfinished`.
+      state.unfinished = deferred.pending !== null;
+    },
+    { runId: openRunId, state: resuming?.state ?? null },
+  );
+
+  return {
+    summary: outcome.summary,
+    job:
+      outcome.unfinished && deferred.pending !== null
+        ? {
+            pending: deferred.pending,
+            cycleStartedAt,
+            runId: outcome.runId,
+            state: outcome.state,
+          }
+        : null,
+  };
 }
 
+/**
+ * How much wall clock this chunk may still spend.
+ *
+ * `processed` is what guarantees forward progress: at least one resource type is
+ * always attempted, so a single slow type can never make a chunk defer everything
+ * and re-arm forever.
+ */
+interface Budget {
+  startedMs: number;
+  limitMs: number | null;
+  nowMs: () => number;
+  processed: number;
+}
+
+function budgetSpent(budget: Budget): boolean {
+  if (budget.limitMs === null || budget.processed === 0) return false;
+  // Named rather than inlined: an early return and a bare comparison are what
+  // `unicorn/prefer-ternary` collapses into the ternary the next rule rejects.
+  const elapsedMs = budget.nowMs() - budget.startedMs;
+  return elapsedMs >= budget.limitMs;
+}
+
+/** How this pass resumes and when it must stop. */
+interface RefreshPass {
+  cycleStartedAt: number;
+  /** A chunked run consults `fhir_sync_state` to skip what is already done. */
+  chunked: boolean;
+  budget: Budget;
+}
+
+/**
+ * The resource types this provider has already had refreshed in this cycle.
+ *
+ * One query rather than one per entry, and only for a chunked run: an unchunked
+ * refresh has nothing to skip, and asking would make "run it twice in a row"
+ * -- which the tests do, on a fixed clock -- mean "do nothing the second time".
+ */
+async function completedTypes(
+  repos: Repos,
+  providerId: string,
+  cycleStartedAt: number,
+): Promise<ReadonlySet<string>> {
+  const states = await repos.fhirSyncState.listByProvider(providerId);
+  return new Set(
+    states
+      .filter((state) => state.lastFullAt !== null && state.lastFullAt >= cycleStartedAt)
+      .map((state) => state.resourceType),
+  );
+}
+
+/** True when the budget ran out and this provider still has resource types left. */
 async function refreshProvider(
   ctx: Ctx,
   repos: Repos,
   target: SyncTarget,
   state: RunState,
   deps: SyncDeps,
-): Promise<void> {
+  pass: RefreshPass,
+): Promise<boolean> {
   const providerId = target.provider.id;
+  const done = pass.chunked
+    ? await completedTypes(repos, providerId, pass.cycleStartedAt)
+    : new Set<string>();
   const session = await getFhirClientFor(ctx, providerId, deps);
   const capabilities = await getCapabilityIndex(
     ctx,
@@ -134,8 +333,15 @@ async function refreshProvider(
     capabilities === null ? [...SEARCH_REGISTRY] : filterSupported(SEARCH_REGISTRY, capabilities);
 
   // Set once a 4135 is seen, and honoured for the rest of this provider's pass.
+  // Deliberately *not* carried across a chunk boundary: the only entry that reads
+  // it and is not itself a document type is `Binary`, which is mode "read" and
+  // therefore never searched, so a fresh chunk starting with `reached: false`
+  // cannot spend any of the daily document quota it would have saved.
   const documentCap = { reached: false };
   for (const entry of entries) {
+    if (done.has(entry.resourceType)) continue;
+    if (budgetSpent(pass.budget)) return true;
+    pass.budget.processed += 1;
     if (documentCap.reached && DOCUMENT_TYPES.has(entry.resourceType)) {
       ctx.log.info("refresh.documents.capped", { providerId, resourceType: entry.resourceType });
       await repos.fhirSyncState.record(providerId, entry.resourceType, {
@@ -146,6 +352,7 @@ async function refreshProvider(
     }
     await refreshResourceType(ctx, repos, session, target, entry, state, documentCap);
   }
+  return false;
 }
 
 /** One (provider, resource type) pass. Failures are recorded, never rethrown. */

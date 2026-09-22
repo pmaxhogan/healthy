@@ -24,6 +24,15 @@ export interface SyncDeps {
   retry?: RetryOpts;
   /** Sleep used while waiting on someone else's refresh lease. */
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Wall clock in milliseconds, for the chunk budget in `full-refresh.ts`.
+   *
+   * Separate from `Ctx.now()`, which is whole unix seconds by the schema's own
+   * convention and therefore far too coarse to measure a twenty-second budget.
+   * Defaults to `Date.now`; a test hands in a counter so "the budget ran out after
+   * two resource types" is exact rather than a race against the machine.
+   */
+  nowMs?: () => number;
   /** Absolute origin reconnect links are built from. See `alerts.ts`. */
   origin?: string;
 }
@@ -38,6 +47,7 @@ export interface ResolvedDeps {
   trelloFetch: typeof fetch;
   retry: RetryOpts;
   sleep: (ms: number) => Promise<void>;
+  nowMs: () => number;
   origin: string | undefined;
 }
 
@@ -50,6 +60,7 @@ export function resolveDeps(deps: SyncDeps = {}): ResolvedDeps {
     trelloFetch: deps.trelloFetch ?? deps.fetchImpl ?? fetch,
     retry: deps.retry ?? {},
     sleep: deps.sleep ?? realSleep,
+    nowMs: deps.nowMs ?? ((): number => Date.now()),
     origin: deps.origin,
   };
 }

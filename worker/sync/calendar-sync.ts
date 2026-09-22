@@ -143,9 +143,10 @@ export async function runCalendarSync(
     ctx.log.info("sync.backoff.cleared");
   }
 
-  return record(ctx, options.trigger ?? "calendar", async (state) => {
+  const outcome = await record(ctx, options.trigger ?? "calendar", async (state) => {
     await syncAllProviders(ctx, repos, settings, state, options, deps);
   });
+  return outcome.summary;
 }
 
 /** Shared per-run context, so the per-provider functions take one argument. */

@@ -6,6 +6,10 @@
 // Everything personal or credential-shaped is a secret or a `settings` row.
 // Nothing here has a default baked into source.
 
+// Type-only, so this stays a declaration file in effect: the class is needed to
+// type the Durable Object stub's RPC methods, not at runtime.
+import type { FullRefreshRunner } from "./sync/runner.ts";
+
 export interface Env {
   // --- Bindings (see wrangler.jsonc) ---------------------------------------
   /** Primary datastore: providers, connections, FHIR cache, audit, run log. */
@@ -19,6 +23,12 @@ export interface Env {
   ASSETS: Fetcher;
   /** SQLite-backed Durable Object hosting the MCP session. */
   HEALTHY_MCP: DurableObjectNamespace;
+  /**
+   * One object per provider, driving a manual full refresh across as many alarm
+   * invocations as it takes. See `worker/sync/runner.ts` for why a request's
+   * `waitUntil` cannot do this job.
+   */
+  FULL_REFRESH: DurableObjectNamespace<FullRefreshRunner>;
 
   // --- Var (wrangler.jsonc) ------------------------------------------------
   /**

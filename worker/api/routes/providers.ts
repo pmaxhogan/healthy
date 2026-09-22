@@ -16,10 +16,12 @@
  * year of their calendar. `providers.deleted_at` hides the row; the tokens are
  * destroyed by `connections.disconnect`.
  *
- * **The long-running actions answer 202.** A sync can take minutes and a full
- * refresh longer; both run in `waitUntil` after the response. The Runs page polls
- * `GET /api/runs` every few seconds while a row is still `running`, so the 202
- * itself carries no `runId` to report.
+ * **The long-running actions answer 202, by two different mechanisms.** A calendar
+ * sync runs in `waitUntil` after the response. A full refresh cannot: `waitUntil` is
+ * cancelled about thirty seconds in, and a large record takes minutes, so that one is
+ * queued on a Durable Object alarm instead (`worker/sync/runner.ts`). Either way the
+ * Runs page polls `GET /api/runs` every few seconds while a row is still `running`,
+ * so the 202 itself carries no `runId` to report.
  */
 
 import { Hono } from "hono";
@@ -227,14 +229,21 @@ providersRouter.post("/:id/refresh-token", async (c) => {
   return c.json(toConnectionDto(connection), 200, NO_STORE);
 });
 
-/** Re-walk every resource type for this provider, repopulating the MCP cache. */
+/**
+ * Re-walk every resource type for this provider, repopulating the MCP cache.
+ *
+ * Queued, not detached. This is the one long action that `waitUntil` cannot carry:
+ * it is cancelled about thirty seconds after the response, which for the largest
+ * record meant a half-filled cache and a run row left open forever. `startFullRefresh`
+ * hands the work to a Durable Object alarm and returns, so the call awaited here is a
+ * storage write. `started: false` reports that one was already in flight for this
+ * provider -- still a 202, because the refresh the owner asked for is happening.
+ */
 providersRouter.post("/:id/full-refresh", async (c) => {
   const api = apiContext(c);
   const row = await requireProvider(api, c.req.param("id"));
-  afterResponse(c, "providers.full_refresh", () =>
-    api.ports.sync.runFullRefresh(api.ctx, { providerIds: [row.id] }),
-  );
-  return c.json({ accepted: true }, 202, NO_STORE);
+  const { started } = await api.ports.sync.startFullRefresh(api.ctx, { providerId: row.id });
+  return c.json({ accepted: true, started }, 202, NO_STORE);
 });
 
 /** `POST /api/sync/run`: every enabled provider. Mounted separately by index.ts. */

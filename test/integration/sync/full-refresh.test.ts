@@ -8,7 +8,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { setSetting } from "../../../worker/db/settings.ts";
-import { runFullRefresh } from "../../../worker/sync/full-refresh.ts";
+import { runFullRefresh, runFullRefreshChunk } from "../../../worker/sync/full-refresh.ts";
 
 import {
   T0,
@@ -29,6 +29,7 @@ import {
 
 import type { FhirServer, Upstreams } from "./helpers.ts";
 import type { Ctx } from "../../../worker/db/client.ts";
+import type { FullRefreshResult, RefreshJob } from "../../../worker/sync/full-refresh.ts";
 import type * as fhir4 from "fhir/r4";
 
 beforeEach(resetSyncDb);
@@ -370,5 +371,138 @@ describe("runFullRefresh", () => {
     expect(h.server.searchCalls).toBe(0);
     expect(summary.resourcesCached).toBe(0);
     expect(summary.errors).toStrictEqual([]);
+  });
+});
+
+/**
+ * A wall clock that jumps by a fixed step every time it is read.
+ *
+ * The budget is measured in milliseconds and `Ctx.now()` is whole seconds, so the
+ * chunk clock is its own injected dep. Stepping it by more than the budget makes
+ * "one resource type per chunk" exact instead of a race against the machine.
+ */
+function steppedMs(step: number): () => number {
+  const state = { at: 0 };
+  return () => {
+    state.at += step;
+    return state.at;
+  };
+}
+
+/** Deps that make every budget check after the first one report "spent". */
+function oneTypePerChunk(upstreams: Upstreams): Upstreams["deps"] {
+  return { ...upstreams.deps, nowMs: steppedMs(1000) };
+}
+
+const ONE_TYPE_BUDGET_MS = 500;
+
+describe("runFullRefreshChunk", () => {
+  it("never asks to be resumed when it was given no budget", async () => {
+    const h = await setup();
+
+    const result = await runFullRefreshChunk(h.ctx, { deps: h.upstreams.deps });
+
+    expect(result.job).toBeNull();
+    expect(result.summary.errors).toStrictEqual([]);
+  });
+
+  it("stops between resource types once the budget is spent, leaving the row open", async () => {
+    const h = await setup();
+
+    const result = await runFullRefreshChunk(h.ctx, {
+      deps: oneTypePerChunk(h.upstreams),
+      budgetMs: ONE_TYPE_BUDGET_MS,
+      job: { pending: [h.providerId], cycleStartedAt: T0, runId: null, state: null },
+    });
+
+    expect(result.job?.pending).toStrictEqual([h.providerId]);
+    const repos = syncRepos(h.ctx);
+    // Exactly one (provider, resource type) pass happened: a chunk always makes
+    // progress, and a spent budget stops it after the first.
+    const states = await repos.fhirSyncState.listByProvider(h.providerId);
+    expect(states).toHaveLength(1);
+    // The row is deliberately still open, and it is the one the job carries.
+    const runs = await repos.runLog.listRecent({ kind: "full" });
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.finishedAt).toBeNull();
+    expect(result.job?.runId).toBe(runs[0]?.id);
+    // And the provider is not stamped as refreshed, because it is not.
+    const connection = await repos.connections.getForProvider(h.providerId);
+    expect(connection?.last_full_refresh_at).toBeNull();
+  });
+
+  it("closes the open row when a backoff lands between two chunks", async () => {
+    const h = await setup();
+    const first = await runFullRefreshChunk(h.ctx, {
+      deps: oneTypePerChunk(h.upstreams),
+      budgetMs: ONE_TYPE_BUDGET_MS,
+      job: { pending: [h.providerId], cycleStartedAt: T0, runId: null, state: null },
+    });
+    const { job } = first;
+    if (job === null) throw new Error("the budgeted first chunk should have deferred");
+
+    // Something else -- the hourly sync meeting a 429 -- set a backoff while this
+    // refresh was between alarms.
+    await setSetting(h.ctx, "sync_backoff_until", T0 + 3600);
+    const second = await runFullRefreshChunk(h.ctx, {
+      deps: oneTypePerChunk(h.upstreams),
+      budgetMs: ONE_TYPE_BUDGET_MS,
+      job,
+    });
+
+    // The refresh stops, and the row does not sit open waiting to be swept as
+    // `aborted` half an hour later: it says what actually happened.
+    expect(second.job).toBeNull();
+    expect(second.summary.backedOff).toBe(true);
+    const runs = await syncRepos(h.ctx).runLog.listRecent({ kind: "full" });
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.finishedAt).toBe(T0);
+    expect(runs[0]?.summary.backedOff).toBe(true);
+  });
+
+  it("resumes where it stopped, asking for nothing twice, and closes one run row", async () => {
+    const h = await setup();
+    const unchunked = h.server.searchCalls;
+    let job: RefreshJob = {
+      pending: [h.providerId],
+      cycleStartedAt: T0,
+      runId: null,
+      state: null,
+    };
+    let result: FullRefreshResult;
+    let chunks = 0;
+    do {
+      result = await runFullRefreshChunk(h.ctx, {
+        deps: oneTypePerChunk(h.upstreams),
+        budgetMs: ONE_TYPE_BUDGET_MS,
+        job,
+      });
+      chunks += 1;
+      if (result.job !== null) job = result.job;
+    } while (result.job !== null && chunks < 30);
+
+    expect(result.job).toBeNull();
+    // More than one chunk, or the budget proved nothing.
+    expect(chunks).toBeGreaterThan(1);
+    // The resume marker is `fhir_sync_state.last_full_at`, and this is the
+    // assertion that it works: eleven searches is what one unchunked refresh of
+    // this organisation costs, so nothing was walked twice.
+    expect(h.server.searchCalls - unchunked).toBe(11);
+
+    const repos = syncRepos(h.ctx);
+    const runs = await repos.runLog.listRecent({ kind: "full" });
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.finishedAt).toBe(T0);
+    expect(runs[0]?.ok).toBe(true);
+    // Counts survived every chunk boundary rather than restarting at zero.
+    expect(runs[0]?.summary.resources).toBe(result.summary.resourcesCached);
+    expect(result.summary.providers).toBe(1);
+    const cached = await repos.fhirCache.countsByType();
+    const counts = new Map(cached.map((row) => [row.resourceType, row.count]));
+    expect(counts.get("Condition")).toBe(2);
+    expect(counts.get("Patient")).toBe(1);
+    // Only the chunk that finished the provider stamps its clock.
+    const connection = await repos.connections.getForProvider(h.providerId);
+    expect(connection?.last_full_refresh_at).toBe(T0);
   });
 });

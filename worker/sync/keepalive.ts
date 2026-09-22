@@ -94,7 +94,7 @@ export async function refreshConnectionToken(
  */
 export async function runTokenKeepalive(ctx: Ctx, deps: SyncDeps = {}): Promise<RunSummaryish> {
   const repos = makeRepos(ctx);
-  return record(ctx, "refresh", async (state) => {
+  const outcome = await record(ctx, "refresh", async (state) => {
     const targets = await syncTargets(repos);
     state.summary.providers = targets.length;
     for (const target of targets) {
@@ -117,10 +117,11 @@ export async function runTokenKeepalive(ctx: Ctx, deps: SyncDeps = {}): Promise<
       ctx.log.warn("sync.keepalive_failed", { providerId: "google", ...errorFields(error) });
     }
   });
+  return outcome.summary;
 }
 
 /** The keepalive's summary is the ordinary run summary; named for readability. */
-type RunSummaryish = Awaited<ReturnType<typeof record>>;
+type RunSummaryish = Awaited<ReturnType<typeof record>>["summary"];
 
 function codeOf(error: unknown): string {
   const code = (error as { code?: unknown } | null)?.code;

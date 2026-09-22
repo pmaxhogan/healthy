@@ -14,16 +14,17 @@ surface, and the MCP surface.
 
 ## Assets and where they live
 
-| Asset                                 | Store          | At rest                                         |
-| ------------------------------------- | -------------- | ----------------------------------------------- |
-| Health-system and Google OAuth tokens | D1             | AES-GCM-256, application layer                  |
-| Per-organisation client secrets       | D1             | AES-GCM-256, application layer                  |
-| Patient identifiers                   | D1             | AES-GCM-256, application layer                  |
-| Cached FHIR resources                 | D1             | AES-GCM-256, application layer                  |
-| MCP access and refresh tokens         | Workers KV     | Managed by `@cloudflare/workers-oauth-provider` |
-| Admin password                        | Worker secret  | PBKDF2-SHA256, 100k iterations, per-hash salt   |
-| Encryption key, API credentials       | Worker secrets | Cloudflare-managed                              |
-| Configuration (calendar, templates)   | D1 `settings`  | Plaintext (non-sensitive by construction)       |
+| Asset                                 | Store          | At rest                                          |
+| ------------------------------------- | -------------- | ------------------------------------------------ |
+| Health-system and Google OAuth tokens | D1             | AES-GCM-256, application layer                   |
+| Per-organisation client secrets       | D1             | AES-GCM-256, application layer                   |
+| Patient identifiers                   | D1             | AES-GCM-256, application layer                   |
+| Cached FHIR resources                 | D1             | AES-GCM-256, application layer                   |
+| MCP access and refresh tokens         | Workers KV     | Managed by `@cloudflare/workers-oauth-provider`  |
+| Admin password                        | Worker secret  | PBKDF2-SHA256, 100k iterations, per-hash salt    |
+| Encryption key, API credentials       | Worker secrets | Cloudflare-managed                               |
+| Configuration (calendar, templates)   | D1 `settings`  | Plaintext (non-sensitive by construction)        |
+| Full-refresh progress                 | Durable Object | Plaintext: provider ids, a run id, counts, codes |
 
 **Encryption at rest is applied by the application, not just by the platform.**
 Every sensitive column is sealed before it reaches D1 as

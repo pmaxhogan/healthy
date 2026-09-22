@@ -6,6 +6,10 @@
  * the middle of a sync -- leaves a row with `finished_at IS NULL`. That is the
  * only way to see those at all, which is why the two halves are separate calls.
  *
+ * Nothing *inside* such a run can close its own row: the invocation stopped
+ * existing, so neither a `catch` nor a `finally` ever ran. `sweepStale` is the net,
+ * and `worker/sync/run.ts` calls it at the head of every later run.
+ *
  * `summary_json` is counts and stable codes. See `runSummarySchema`.
  */
 
@@ -26,6 +30,14 @@ export interface RunEntry {
   ok: boolean | null;
   summary: RunSummary;
 }
+
+/**
+ * The error code a swept run carries.
+ *
+ * Stable, and deliberately not `internal`: "the invocation died" is a different
+ * fact from "the work threw", and the Runs page has to be able to say which.
+ */
+export const RUN_ABORTED_CODE = "aborted";
 
 export interface RunStats {
   kind: RunKind;
@@ -70,6 +82,31 @@ export function makeRunLogRepo(ctx: Ctx) {
           .bind(ctx.now(), outcome.ok ? 1 : 0, JSON.stringify(summary), id),
       );
       ctx.log.info("run.finished", { runId: id, ok: outcome.ok, ...summary });
+    },
+
+    /**
+     * Close every row still open from before `startedBefore`, as `aborted`.
+     *
+     * The only way a row stays open is an invocation that stopped existing --- a
+     * `waitUntil` past its deadline, a CPU limit, a deploy mid-run --- and none of
+     * those run cleanup code, so this has to be done by a *later* invocation.
+     *
+     * `ok = 0` with a single `aborted` error code, which `GET /api/runs` then
+     * shows. No partial counts are recovered because none were written:
+     * `summary_json` is only ever set by `finish`.
+     */
+    async sweepStale(startedBefore: number): Promise<number> {
+      const summary = runSummarySchema.parse({ errors: [RUN_ABORTED_CODE] });
+      const { changes } = await run(
+        ctx.db
+          .prepare(
+            `UPDATE run_log SET finished_at = ?, ok = 0, summary_json = ?
+              WHERE finished_at IS NULL AND started_at < ?`,
+          )
+          .bind(ctx.now(), JSON.stringify(summary), startedBefore),
+      );
+      if (changes > 0) ctx.log.warn("run.swept", { runs: changes, code: RUN_ABORTED_CODE });
+      return changes;
     },
 
     async get(id: string): Promise<RunEntry | null> {

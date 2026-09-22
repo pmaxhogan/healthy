@@ -59,7 +59,7 @@ function recordingSync(): { resolved: unknown[] } {
   usePorts({
     sync: {
       runCalendarSync: () => Promise.resolve({}),
-      runFullRefresh: () => Promise.resolve({}),
+      startFullRefresh: () => Promise.resolve({ started: true }),
       refreshConnectionToken: () => Promise.resolve({}),
       getGoogleCalendarFor: () => Promise.reject(new Error("not used")),
       resolveReconnectAlert: (_ctx, subject) => {

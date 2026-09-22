@@ -344,7 +344,7 @@ describe("the provider actions", () => {
           seen.push(options);
           return Promise.resolve({});
         },
-        runFullRefresh: () => Promise.resolve({}),
+        startFullRefresh: () => Promise.resolve({ started: true }),
         refreshConnectionToken: () => Promise.resolve({}),
         getGoogleCalendarFor: () => Promise.reject(new Error("not used")),
         resolveReconnectAlert: () => Promise.resolve(),
@@ -364,7 +364,7 @@ describe("the provider actions", () => {
     usePorts({
       sync: {
         runCalendarSync: () => Promise.reject(new Error("upstream down")),
-        runFullRefresh: () => Promise.resolve({}),
+        startFullRefresh: () => Promise.resolve({ started: true }),
         refreshConnectionToken: () => Promise.resolve({}),
         getGoogleCalendarFor: () => Promise.reject(new Error("not used")),
         resolveReconnectAlert: () => Promise.resolve(),
@@ -375,15 +375,15 @@ describe("the provider actions", () => {
     expect(response.status).toBe(202);
   });
 
-  it("runs a full refresh for one provider", async () => {
+  it("queues a full refresh for one provider and reports that it started", async () => {
     const id = await seedProvider();
-    const seen: { providerIds?: string[] }[] = [];
+    const seen: { providerId: string }[] = [];
     usePorts({
       sync: {
         runCalendarSync: () => Promise.resolve({}),
-        runFullRefresh: (_ctx, options) => {
+        startFullRefresh: (_ctx, options) => {
           seen.push(options);
-          return Promise.resolve({});
+          return Promise.resolve({ started: true });
         },
         refreshConnectionToken: () => Promise.resolve({}),
         getGoogleCalendarFor: () => Promise.reject(new Error("not used")),
@@ -394,7 +394,34 @@ describe("the provider actions", () => {
     const response = await owner().send("POST", `/api/providers/${id}/full-refresh`);
 
     expect(response.status).toBe(202);
-    expect(seen).toStrictEqual([{ providerIds: [id] }]);
+    expect(await json<{ accepted: boolean; started: boolean }>(response)).toStrictEqual({
+      accepted: true,
+      started: true,
+    });
+    // Awaited, unlike the calendar sync: queueing is a storage write, and the
+    // refresh itself happens in alarm invocations that outlive this request.
+    expect(seen).toStrictEqual([{ providerId: id }]);
+  });
+
+  it("still answers 202 when a refresh for that provider is already in flight", async () => {
+    const id = await seedProvider();
+    usePorts({
+      sync: {
+        runCalendarSync: () => Promise.resolve({}),
+        startFullRefresh: () => Promise.resolve({ started: false }),
+        refreshConnectionToken: () => Promise.resolve({}),
+        getGoogleCalendarFor: () => Promise.reject(new Error("not used")),
+        resolveReconnectAlert: () => Promise.resolve(),
+      },
+    });
+
+    const response = await owner().send("POST", `/api/providers/${id}/full-refresh`);
+
+    expect(response.status).toBe(202);
+    expect(await json<{ started: boolean }>(response)).toStrictEqual({
+      accepted: true,
+      started: false,
+    });
   });
 
   it("forces a token refresh and answers with the connection's new state", async () => {
@@ -404,7 +431,7 @@ describe("the provider actions", () => {
     usePorts({
       sync: {
         runCalendarSync: () => Promise.resolve({}),
-        runFullRefresh: () => Promise.resolve({}),
+        startFullRefresh: () => Promise.resolve({ started: true }),
         refreshConnectionToken: async (_ctx, providerId) => {
           await repos.connections.upsertTokens(providerId, {
             accessToken: "fresh",
@@ -435,7 +462,7 @@ describe("the provider actions", () => {
           seen.push(options);
           return Promise.resolve({});
         },
-        runFullRefresh: () => Promise.resolve({}),
+        startFullRefresh: () => Promise.resolve({ started: true }),
         refreshConnectionToken: () => Promise.resolve({}),
         getGoogleCalendarFor: () => Promise.reject(new Error("not used")),
         resolveReconnectAlert: () => Promise.resolve(),
@@ -456,7 +483,7 @@ describe("the provider actions", () => {
     usePorts({
       sync: {
         runCalendarSync: () => Promise.resolve({}),
-        runFullRefresh: () => Promise.resolve({}),
+        startFullRefresh: () => Promise.resolve({ started: true }),
         refreshConnectionToken: () =>
           Promise.reject(new AppError("upstream_unavailable", "epic said 503: <html>...")),
         getGoogleCalendarFor: () => Promise.reject(new Error("not used")),

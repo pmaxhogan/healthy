@@ -75,7 +75,14 @@ client — which cannot complete an interactive Access login — never has to.
 The MCP server itself lives in a SQLite-backed Durable Object.
 
 - **Storage.** Cloudflare D1 for everything durable; Workers KV for MCP OAuth
-  state; a Durable Object for the MCP session.
+  state; Durable Objects for the MCP session and for driving a manual full
+  refresh.
+- **Long work.** A calendar sync fits in the request's `waitUntil`. A full
+  refresh of a large record does not — `waitUntil` is cancelled about thirty
+  seconds after the response — so the manual refresh button queues the work on
+  a per-provider Durable Object whose alarm does one bounded chunk per
+  invocation and re-arms until the record is walked. The nightly refresh runs
+  straight through, because a cron invocation has the wall clock for it.
 - **Encryption.** Tokens, per-organisation client secrets, patient
   identifiers and every cached clinical payload are AES-GCM-256 encrypted by
   the application before they reach D1, with the AAD bound to the table,

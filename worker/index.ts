@@ -43,6 +43,7 @@ import type { Env } from "./env.ts";
 // Re-exported because wrangler resolves Durable Object classes from the
 // configured `main` module, not from wherever the class happens to live.
 export { HealthyMcp } from "./mcp/server.ts";
+export { FullRefreshRunner } from "./sync/runner.ts";
 
 /**
  * The library requires a non-optional `fetch` on the handlers it is given, while

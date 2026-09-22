@@ -75,6 +75,7 @@ export function syncEnv(options: TestEnvOptions = {}): Env {
     OAUTH_KV: bindings.OAUTH_KV,
     ASSETS: bindings.ASSETS,
     HEALTHY_MCP: bindings.HEALTHY_MCP,
+    FULL_REFRESH: bindings.FULL_REFRESH,
     DEV_MODE: "true",
     DATA_KEY,
     EPIC_CLIENT_ID_PROD: EPIC_CLIENT_ID,
