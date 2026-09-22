@@ -21,7 +21,7 @@ export const EXAMPLE_ORGANIZATION: fhir4.Organization = {
   telecom: [{ system: "phone", value: "555-010-0100", use: "work" }],
 };
 
-export const EXAMPLE_LOCATION: fhir4.Location = {
+const EXAMPLE_LOCATION: fhir4.Location = {
   resourceType: "Location",
   id: "loc-1",
   name: "Example Clinic",
@@ -29,7 +29,7 @@ export const EXAMPLE_LOCATION: fhir4.Location = {
   telecom: [{ system: "phone", value: "555-010-0199", use: "work" }],
 };
 
-export const EXAMPLE_PATIENT: fhir4.Patient = {
+const EXAMPLE_PATIENT: fhir4.Patient = {
   resourceType: "Patient",
   id: "pat-1",
   name: [{ use: "official", family: "Example", given: ["Pat"] }],

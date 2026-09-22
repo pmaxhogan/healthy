@@ -34,5 +34,6 @@ export function adapterFor(vendor: string, deps: AdapterDeps): ProviderAdapter {
   if (!isVendor(vendor)) {
     throw new AppError("bad_request", "unknown provider vendor", { vendor });
   }
+  // `isVendor` above is the guard: `vendor` is a key of this const map by then.
   return ADAPTER_FACTORIES[vendor](deps);
 }

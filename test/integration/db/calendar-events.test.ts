@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { T0, clock, column, resetDb, seedProvider, testRepos } from "./helpers.ts";
+import { T0, clock, column, recordingLog, resetDb, seedProvider, testRepos } from "./helpers.ts";
 
 import type { Repos } from "../../../worker/db/index.ts";
 
@@ -11,7 +11,12 @@ const START = 1_769_960_000;
 async function seedEvent(
   repos: Repos,
   providerId: string,
-  overrides: { encounterId?: string; fingerprint?: string; startAt?: number } = {},
+  overrides: {
+    encounterId?: string;
+    fingerprint?: string;
+    startAt?: number;
+    restore?: boolean;
+  } = {},
 ) {
   const encounterId = overrides.encounterId ?? "enc-1";
   return repos.calendarEvents.upsert({
@@ -22,6 +27,7 @@ async function seedEvent(
     googleEventId: `google-${encounterId}`,
     fingerprint: overrides.fingerprint ?? "fingerprint-a",
     startAt: overrides.startAt ?? START,
+    ...(overrides.restore !== undefined && { restore: overrides.restore }),
   });
 }
 
@@ -144,16 +150,59 @@ describe("ghosting and restoring", () => {
     expect(await repos.calendarEvents.restore(row.event_key)).toBe(false);
   });
 
-  it("un-ghosts through a plain upsert, because reappearing upstream is the signal", async () => {
+  it("un-ghosts through a restoring upsert, because reappearing upstream is the signal", async () => {
     const repos = testRepos();
     const providerId = await seedProvider(repos);
     const row = await seedEvent(repos, providerId);
     await repos.calendarEvents.markGhost(row.event_key);
 
-    const back = await seedEvent(repos, providerId);
+    const back = await seedEvent(repos, providerId, { restore: true });
 
     expect(back.state).toBe("active");
     expect(back.ghosted_at).toBeNull();
+  });
+
+  it("leaves a ghost ghosted through a plain upsert", async () => {
+    // The ghost write patches the calendar entry and then records its fingerprint.
+    // If that upsert un-ghosted the row, the next run would stamp a fresh
+    // `ghosted_at`, re-render the "as of" line, and patch the event again for ever.
+    const time = clock();
+    const repos = testRepos({ now: time.now });
+    const providerId = await seedProvider(repos);
+    const row = await seedEvent(repos, providerId);
+    await repos.calendarEvents.markGhost(row.event_key);
+
+    time.advance(3600);
+    const again = await seedEvent(repos, providerId, { fingerprint: "fingerprint-ghost" });
+
+    expect(again.state).toBe("ghost");
+    expect(again.ghosted_at).toBe(T0);
+    expect(again.fingerprint).toBe("fingerprint-ghost");
+  });
+
+  it("moves the fingerprint of a row that is already a ghost, and only then", async () => {
+    const time = clock();
+    const repos = testRepos({ now: time.now });
+    const providerId = await seedProvider(repos);
+    const row = await seedEvent(repos, providerId);
+
+    expect(await repos.calendarEvents.markGhost(row.event_key, { fingerprint: "ghost-1" })).toBe(
+      true,
+    );
+    time.advance(86_400);
+    // Already a ghost and nothing new to say: no write, so nothing moves.
+    expect(await repos.calendarEvents.markGhost(row.event_key)).toBe(false);
+    // Already a ghost but the ghost variant re-rendered: the fingerprint moves and
+    // `ghosted_at` does not, which is what lets the next run settle.
+    expect(await repos.calendarEvents.markGhost(row.event_key, { fingerprint: "ghost-2" })).toBe(
+      true,
+    );
+
+    await expect(repos.calendarEvents.getByKey(row.event_key)).resolves.toMatchObject({
+      state: "ghost",
+      ghosted_at: T0,
+      fingerprint: "ghost-2",
+    });
   });
 
   it("reports nothing to do for a key it does not have", async () => {
@@ -161,6 +210,36 @@ describe("ghosting and restoring", () => {
 
     expect(await repos.calendarEvents.markGhost("nope:nope")).toBe(false);
     expect(await repos.calendarEvents.getByKey("nope:nope")).toBeNull();
+  });
+
+  it("logs the provider id and a digest, never the encounter id, when ghosting or restoring", async () => {
+    // Regression: `eventKey` is `<providerId>:<encounterId>` -- the encounter half
+    // is Epic's own resource id, and the `:` defeats the log redactor's 32-char
+    // opaque-string rule (see worker/lib/log.ts's header and SECURITY.md, "No PHI
+    // in logs"). `calendar_events.ghosted` and `calendar_events.restored` must
+    // carry `providerId` (our own row id) and a short digest instead.
+    const { log, lines } = recordingLog();
+    const repos = testRepos({ log });
+    const providerId = await seedProvider(repos);
+    const row = await seedEvent(repos, providerId, { encounterId: "enc-secret" });
+
+    await repos.calendarEvents.markGhost(row.event_key);
+    await repos.calendarEvents.restore(row.event_key);
+
+    const parsed = lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+    const ghosted = parsed.filter((line) => line.event === "calendar_events.ghosted");
+    const restored = parsed.filter((line) => line.event === "calendar_events.restored");
+    expect(ghosted).toHaveLength(1);
+    expect(restored).toHaveLength(1);
+
+    for (const line of [...ghosted, ...restored]) {
+      expect(line.providerId).toBe(providerId);
+      expect(typeof line.eventKeyHash).toBe("string");
+      expect(line.eventKey).toBeUndefined();
+      const serialized = JSON.stringify(line);
+      expect(serialized).not.toContain("enc-secret");
+      expect(serialized).not.toContain(`${providerId}:`);
+    }
   });
 });
 

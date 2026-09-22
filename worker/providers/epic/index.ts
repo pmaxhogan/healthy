@@ -49,6 +49,8 @@ const VENDOR: Vendor = "epic";
 const JSON_MEDIA_TYPE = "application/json";
 const FHIR_JSON_MEDIA_TYPE = "application/fhir+json";
 const FORM_MEDIA_TYPE = "application/x-www-form-urlencoded";
+/** Ceiling on one token-endpoint POST. Long enough for a slow org, short enough to fail. */
+const TOKEN_TIMEOUT_MS = 20_000;
 
 /**
  * The one OAuth error code that means the grant itself is gone.
@@ -60,11 +62,14 @@ const FORM_MEDIA_TYPE = "application/x-www-form-urlencoded";
 const REAUTH_OAUTH_ERRORS: ReadonlySet<string> = new Set(["invalid_grant"]);
 
 function stringOf(source: Record<string, unknown>, key: string): string | null {
+  // `source[key]`: the keys are literals in this module and every read is
+  // type-checked below, so there is nothing an upstream body can inject.
   const value = source[key];
   return typeof value === "string" && value !== "" ? value : null;
 }
 
 function stringArrayOf(source: Record<string, unknown>, key: string): string[] {
+  // As `stringOf`: literal keys, and the value is filtered by type.
   const value = source[key];
   return Array.isArray(value)
     ? value.filter((entry): entry is string => typeof entry === "string")
@@ -82,6 +87,25 @@ function namesOf(value: unknown, key: string): string[] {
   return out;
 }
 
+/**
+ * True when a discovered endpoint is an absolute `https:` URL.
+ *
+ * The token endpoint receives the client secret, the authorization code and the
+ * PKCE verifier; the authorize endpoint receives the owner's browser. Both come
+ * out of a document fetched from the organisation, so a tampered or simply
+ * misconfigured one pointing at `http:` would put all of that on the wire in
+ * clear. The API layer already requires `https:` on the FHIR base a provider is
+ * created with; this is the same rule one layer in, where the values are not the
+ * owner's to vouch for.
+ */
+function isHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 /** Parse a SMART discovery document. Absent optional fields become empty lists. */
 export function parseSmartConfiguration(body: unknown): SmartConfig {
   if (!isRecord(body)) {
@@ -93,6 +117,13 @@ export function parseSmartConfiguration(body: unknown): SmartConfig {
     throw new AppError("upstream_error", "smart-configuration is missing its OAuth endpoints", {
       hasAuthorize: authorizeUrl !== null,
       hasToken: tokenUrl !== null,
+    });
+  }
+  if (!isHttpsUrl(authorizeUrl) || !isHttpsUrl(tokenUrl)) {
+    // Which one, never the URL itself: a base URL names the organisation.
+    throw new AppError("upstream_error", "smart-configuration endpoint is not https", {
+      authorizeIsHttps: isHttpsUrl(authorizeUrl),
+      tokenIsHttps: isHttpsUrl(tokenUrl),
     });
   }
   return {
@@ -261,6 +292,11 @@ export function createEpicAdapter(deps: AdapterDeps): ProviderAdapter {
         method: "POST",
         headers,
         body: body.toString(),
+        // Deliberately outside `retriedFetch` -- a token grant is single-use, so a
+        // retry can burn a code -- but still bounded: a hung token endpoint would
+        // otherwise pin this invocation until the platform kills it, and on the
+        // callback path that is the owner watching a blank page.
+        signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS),
       });
     } catch (error) {
       // A network failure here is indistinguishable from a slow gateway, and the

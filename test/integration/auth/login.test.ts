@@ -48,16 +48,31 @@ const TEST_ENV = { ...env, ...overrides } as unknown as Env;
  */
 const client = { ip: "", counter: 0 };
 
+/**
+ * A second env whose PASSWORD_HASH names a cost the deployed runtime refuses.
+ *
+ * Built by rewriting the cost in a real envelope, so the salt and digest are
+ * genuine and only the number is wrong -- which is exactly the shape the minting
+ * script produced before 2026-09-22. Top-level `await`, like the overrides above:
+ * a `describe` callback is not async.
+ */
+const atTheFloor = await hashPassword(PASSWORD, MIN_PBKDF2_ITERATIONS);
+const OVER_CAP_ENV = {
+  ...env,
+  ...overrides,
+  PASSWORD_HASH: atTheFloor.replace(`$${String(MIN_PBKDF2_ITERATIONS)}$`, "$600000$"),
+} as unknown as Env;
+
 beforeEach(() => {
   client.counter += 1;
   client.ip = `203.0.113.${String(client.counter)}`;
 });
 
-async function call(path: string, init: RequestInit = {}): Promise<Response> {
+async function call(path: string, init: RequestInit = {}, env = TEST_ENV): Promise<Response> {
   const request = new Request(ORIGIN + path, init);
   request.headers.set("cf-connecting-ip", client.ip);
   const ctx = createExecutionContext();
-  const response = await app.fetch(request, TEST_ENV, ctx);
+  const response = await app.fetch(request, env, ctx);
   await waitOnExecutionContext(ctx);
   return response;
 }
@@ -117,8 +132,8 @@ describe("the gate, with no session", () => {
   });
 
   it("keeps the query string in ?next, because an OAuth callback is nothing without it", async () => {
-    // SameSite=Strict drops the cookie on the cross-site redirect back from a
-    // provider, so the callback itself lands here and must be resumable whole.
+    // If the session expired mid-flow the callback itself lands here and must be
+    // resumable whole.
     const response = await call("/oauth/google/callback?code=abc&state=xyz");
     const html = await response.text();
 
@@ -163,7 +178,7 @@ describe("POST /auth/login", () => {
     expect(cookieHeader).toContain("healthy_session=");
     expect(cookieHeader).toContain("HttpOnly");
     expect(cookieHeader).toContain("Secure");
-    expect(cookieHeader).toContain("SameSite=Strict");
+    expect(cookieHeader).toContain("SameSite=Lax");
     expect(cookieHeader).toContain("Path=/");
   });
 
@@ -279,13 +294,16 @@ describe("a request carrying the session cookie", () => {
     expect(await response.json()).toStrictEqual({ error: "not_found" });
   });
 
-  it("gets 501 from the reserved /authorize route", async () => {
+  it("reaches the MCP consent page, which refuses a request with no OAuth parameters", async () => {
+    // The consent page itself is covered in test/integration/mcp/; what matters
+    // here is that a signed-in request gets past the gate to it at all.
     const cookie = cookieFrom(await formPost());
 
     const response = await call("/authorize", { headers: { cookie } });
+    const html = await response.text();
 
-    expect(response.status).toBe(501);
-    expect(await response.json()).toStrictEqual({ error: "not_implemented" });
+    expect(response.status).toBe(400);
+    expect(html).toContain("Cannot authorise");
   });
 
   it("reaches the SPA fallback, re-wrapped so the security headers stay writable", async () => {
@@ -303,10 +321,13 @@ describe("a request carrying the session cookie", () => {
     expect(response.headers.get("content-security-policy")).toContain("default-src 'self'");
   });
 
-  it("gets a JSON 404 from the /oauth placeholder router", async () => {
+  it("gets a JSON 404 from an unknown /oauth path", async () => {
+    // The real routes under /oauth answer with a 302 or an HTML page; an unknown
+    // path there is answered like any other unknown path. See
+    // test/integration/oauth/ for the routes themselves.
     const cookie = cookieFrom(await formPost());
 
-    const response = await call("/oauth/google/start", { headers: { cookie } });
+    const response = await call("/oauth/not-a-flow", { headers: { cookie } });
 
     expect(response.status).toBe(404);
     expect(await response.json()).toStrictEqual({ error: "not_found" });
@@ -327,7 +348,7 @@ describe("POST /auth/logout", () => {
     const cookieHeader = response.headers.get("set-cookie") ?? "";
     expect(cookieHeader).toContain("healthy_session=;");
     expect(cookieHeader).toContain("Max-Age=0");
-    expect(cookieHeader).toContain("SameSite=Strict");
+    expect(cookieHeader).toContain("SameSite=Lax");
   });
 
   it("works from a session that is already gone, so a distrusted cookie can be dropped", async () => {
@@ -441,8 +462,9 @@ describe("CSRF", () => {
   });
 
   it("guards POST /authorize, which matches neither /api/* nor /auth/*", async () => {
-    // Wave 2 turns this into the MCP consent approval. Guarding it now means the
-    // most sensitive POST in the app cannot ship unprotected by omission.
+    // POST /authorize is the MCP consent approval: the most sensitive POST in the
+    // app. An HTML form cannot send the CSRF header, so the same-origin proof is
+    // the whole defence and it has to hold.
     const cookie = cookieFrom(await formPost());
 
     const cross = await call("/authorize", {
@@ -452,11 +474,13 @@ describe("CSRF", () => {
     await drain(cross);
     expect(cross.status).toBe(403);
 
+    // Same-origin gets through the guard to the consent handler, which then
+    // refuses this particular body for having no authorisation request in it.
     const same = await call("/authorize", {
       method: "POST",
       headers: { origin: ORIGIN, cookie },
     });
-    expect(same.status).toBe(501);
+    expect(same.status).toBe(400);
     await drain(same);
   });
 
@@ -494,5 +518,42 @@ describe("CSRF", () => {
     const response = await call("/api/whoami", { headers: { cookie } });
 
     expect(response.status).toBe(200);
+  });
+});
+
+describe("a PASSWORD_HASH the runtime cannot derive", () => {
+  // The 2026-09-22 incident: the secret was minted at 600,000 iterations, deployed
+  // workerd refuses anything above 100,000, and every login threw -- which reached
+  // the owner as `{"error":"internal_error"}` in the viewport, because this page
+  // has no SPA to catch a 500. The cost is checked before WebCrypto sees it, so
+  // this is deterministic here even though *this* runtime would derive at 600,000.
+  it("answers the form POST with the login page, not a JSON body", async () => {
+    const response = await call(
+      "/auth/login",
+      { method: "POST", headers: { origin: ORIGIN }, body: loginBody() },
+      OVER_CAP_ENV,
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(html).toContain('name="password"');
+    expect(html).toContain("set-password");
+    // The thing that actually shipped to the owner, and must not again.
+    expect(html).not.toContain("internal_error");
+    // No session, and nothing about the secret itself.
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(html).not.toContain("600000");
+  });
+
+  it("still refuses the right password, rather than letting it through", async () => {
+    const response = await call(
+      "/auth/login",
+      { method: "POST", headers: { origin: ORIGIN }, body: loginBody() },
+      OVER_CAP_ENV,
+    );
+    await drain(response);
+
+    expect(response.status).not.toBe(303);
   });
 });

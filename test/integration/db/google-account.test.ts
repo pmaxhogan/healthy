@@ -140,3 +140,43 @@ describe("the google lease", () => {
     await expect(repos.google.get()).resolves.toMatchObject({ lease_owner: null });
   });
 });
+
+describe("a google token write under the lease", () => {
+  it("refuses the loser whose lease expired while its refresh was in flight", async () => {
+    const time = clock();
+    const repos = testRepos({ now: time.now });
+    await repos.google.upsertTokens({ accessToken: "access-0", refreshToken: "r" });
+
+    expect(await repos.google.acquireLease("worker-a", 30_000)).toBe(true);
+    time.advance(31);
+    expect(await repos.google.acquireLease("worker-b", 30_000)).toBe(true);
+    expect(
+      await repos.google.upsertTokensLeased("worker-b", { accessToken: "access-b" }),
+    ).not.toBeNull();
+
+    // Google's refresh tokens survive re-use, so this one is availability rather
+    // than a dead grant: A's access token is already superseded.
+    expect(
+      await repos.google.upsertTokensLeased("worker-a", { accessToken: "access-a" }),
+    ).toBeNull();
+
+    await expect(repos.google.getSecrets()).resolves.toMatchObject({ accessToken: "access-b" });
+  });
+
+  it("refuses an unleased write while a refresh holds the lease, and allows it after", async () => {
+    const time = clock();
+    const repos = testRepos({ now: time.now });
+    await repos.google.acquireLease("worker-a", 30_000);
+
+    await expect(repos.google.upsertTokens({ accessToken: "from-callback" })).rejects.toMatchObject(
+      {
+        code: "conflict",
+      },
+    );
+
+    time.advance(31);
+    await expect(
+      repos.google.upsertTokens({ accessToken: "from-callback" }),
+    ).resolves.toMatchObject({ id: 1 });
+  });
+});

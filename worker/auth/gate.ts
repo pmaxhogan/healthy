@@ -69,10 +69,9 @@ export function safeNextPath(candidate: string | undefined | null): string | nul
 /** The path (with query) the login form should return to. */
 function currentPath(request: Request): string | undefined {
   const url = new URL(request.url);
-  // Query included deliberately: SameSite=Strict drops the session cookie on the
-  // cross-site top-level GET back from an OAuth provider, so the request that
-  // lands on the login page can be `/oauth/callback?code=...&state=...` and
-  // re-login has to resume the *whole* URL or the flow is lost.
+  // Query included deliberately: if the session has expired mid-flow, the
+  // request that lands on the login page can be `/oauth/callback?code=...&state=...`
+  // and re-login has to resume the *whole* URL or the flow is lost.
   return safeNextPath(url.pathname + url.search) ?? undefined;
 }
 

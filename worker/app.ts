@@ -11,7 +11,7 @@
 //   3. csrfGuard        -- /api/*, /auth/*, /authorize; mutating methods only.
 //   4. ownerGate        -- Access, then (login routes aside) the password session.
 //   5. /auth/login, /auth/logout
-//   6. /authorize       -- reserved for the MCP consent page (wave 2).
+//   6. /authorize       -- the MCP consent page.
 //   7. /api, /oauth     -- routers other changes fill in.
 //   8. SPA fallback     -- env.ASSETS, last, so no asset is ever served ungated.
 //
@@ -23,7 +23,7 @@ import { apiRouter } from "./api/index.ts";
 import { csrfGuard } from "./auth/csrf.ts";
 import { ownerGate, safeNextPath, type AppHonoEnv } from "./auth/gate.ts";
 import { loginPage } from "./auth/login-page.ts";
-import { verifyPassword } from "./auth/password.ts";
+import { MAX_PBKDF2_ITERATIONS, isCostUnsupported, verifyPassword } from "./auth/password.ts";
 import {
   d1LoginAttemptStore,
   forgetLoginAttempts,
@@ -33,6 +33,8 @@ import {
 import { securityHeaders } from "./auth/security-headers.ts";
 import { clearSessionCookie, issueSession } from "./auth/session.ts";
 import { isAppError } from "./lib/errors.ts";
+import { errorFields, logLine } from "./lib/log.ts";
+import { consentDecision, consentPage } from "./mcp/consent-page.ts";
 import { oauthRouter } from "./oauth/index.ts";
 import { publicRouter } from "./public/pages.ts";
 
@@ -93,10 +95,44 @@ app.post("/auth/login", async (c) => {
   }
   const password = form?.get("password");
   const stored = c.env.PASSWORD_HASH;
-  const ok =
-    typeof password === "string" &&
-    stored !== undefined &&
-    (await verifyPassword(password, stored));
+  if (stored !== undefined && isCostUnsupported(stored)) {
+    // Every attempt against this secret can only 500, and the owner's password is
+    // not the problem, so "Wrong password." would be a lie they could not act on.
+    // The count is not logged: it is in the secret, and the message says enough.
+    logLine("error", "login.hash_cost_unsupported", {
+      maxIterations: MAX_PBKDF2_ITERATIONS,
+    });
+    return loginPage({
+      nonce,
+      next,
+      error: "Sign-in is misconfigured: re-run `npm run set-password`.",
+      status: 500,
+    });
+  }
+  // Declared without an initializer: every path out of the try/catch below either
+  // assigns it or returns, and a dead `= false` is what `no-useless-assignment`
+  // objects to.
+  let ok: boolean;
+  try {
+    ok =
+      typeof password === "string" &&
+      stored !== undefined &&
+      (await verifyPassword(password, stored));
+  } catch (error) {
+    // `verifyPassword` returns false for every malformed *envelope*, but the
+    // runtime can still refuse a well-formed one: deployed workerd caps PBKDF2 at
+    // 100,000 iterations and throws above it, which is how the first real login
+    // 500'd. There is no SPA on this page, so an unhandled throw here reaches the
+    // owner as `{"error":"internal_error"}` in the viewport. An HTML page with the
+    // same 500 is the same signal, legibly.
+    logLine("error", "login.verify_failed", errorFields(error));
+    return loginPage({
+      nonce,
+      next,
+      error: "Something went wrong signing in. Check the Worker logs.",
+      status: 500,
+    });
+  }
 
   if (!ok) {
     // One message for every failure mode -- wrong password, missing field,
@@ -136,19 +172,24 @@ app.post("/auth/logout", () => {
   });
 });
 
-// --- 6. Reserved: the MCP consent page --------------------------------------
+// --- 6. The MCP consent page ------------------------------------------------
 
 /**
- * Registered now, ahead of its implementation, so the path cannot be claimed by
- * the SPA fallback and so its gating is settled and tested. Wave 2 replaces the
- * body with the consent page that calls `completeAuthorization`.
+ * Approving an MCP grant is the single most sensitive action in the app, and this
+ * screen is what stands between a registered client and the whole medical record.
+ * It is reached only after Cloudflare Access and the password session; its POST is
+ * additionally Origin-checked by the guard registered above. See
+ * `worker/mcp/consent-page.ts` for the rest of the reasoning.
  *
- * It must stay gated: approving an MCP grant is the single most sensitive action
- * in the app, and the consent screen is what stands between a registered client
- * and the whole medical record.
+ * `@cloudflare/workers-oauth-provider` does NOT serve `/authorize` itself -- it
+ * advertises the path in its metadata and forwards the request to this handler,
+ * which is why the consent page lives inside the gated app rather than beside the
+ * token endpoint.
  */
+app.get("/authorize", (c) => consentPage(c.req.raw, c.env, c.get("nonce")));
+app.post("/authorize", (c) => consentDecision(c.req.raw, c.env, c.get("nonce")));
 app.all("/authorize", (c) =>
-  c.json<ApiError>({ error: "not_implemented" }, 501, { "cache-control": "no-store" }),
+  c.json<ApiError>({ error: "method_not_allowed" }, 405, { "cache-control": "no-store" }),
 );
 
 // --- 7. The routers other changes fill in -----------------------------------
@@ -198,13 +239,16 @@ app.onError((error, c) => {
   // message can quote an upstream response, and an upstream response here can
   // carry patient detail, so it never reaches the client.
   if (isAppError(error)) {
-    console.warn("app_error", { code: error.code });
+    logLine("warn", "app_error", { code: error.code });
     return c.json<ApiError>({ error: error.code }, error.status as ContentfulStatusCode, {
       "cache-control": "no-store",
     });
   }
   // Deliberately opaque for the same reason. The structured logger is the only
   // thing that gets to see the cause.
-  console.error("unhandled", { message: error.message });
+  // Through the redactor, not `console.error` directly: a non-`AppError` message
+  // is upstream text -- a jose failure quoting the team domain, a RangeError
+  // naming the time zone -- and Workers Logs is not the place for it.
+  logLine("error", "unhandled", errorFields(error));
   return c.json<ApiError>({ error: "internal_error" }, 500, { "cache-control": "no-store" });
 });
