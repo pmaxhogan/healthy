@@ -196,6 +196,21 @@ Then, in the admin UI: add your health systems and connect each one
 ([docs/setup-google.md](docs/setup-google.md)), and wire up Trello alerts
 ([docs/setup-trello.md](docs/setup-trello.md)).
 
+### MyChart portal (optional)
+
+For a health system that also has a patient portal, the **Providers** page
+shows a **MyChart portal** card under that provider: a portal login URL
+(prefilled when one is already known), a username and a password. Save it,
+then **Sign in now** — the card polls while the sign-in is in progress and
+shows what it is waiting on.
+
+If the portal asks for an emailed verification code, that code has to reach
+this Worker, not just your inbox: set up the one-time Gmail forwarding filter
+on the **Mail** page first ([docs/mail.md](docs/mail.md)) so the code arrives
+and the sign-in can pick it up on its own. Once a session is established, the
+hourly sync picks up that provider's upcoming portal visits the same way it
+does FHIR encounters.
+
 ## Documentation
 
 - **[docs/setup-epic.md](docs/setup-epic.md)** — registering the app on

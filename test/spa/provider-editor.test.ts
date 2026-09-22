@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import ProviderEditor from "../../src/components/ProviderEditor.vue";
 
-import { fakeResponse, installFakeApi, provider, settings } from "./helpers.ts";
+import { fakeResponse, installFakeApi, portalAccount, provider, settings } from "./helpers.ts";
 
 import type { FakeFetch } from "./helpers.ts";
 import type { ProviderDto } from "@shared/types.ts";
@@ -36,7 +36,15 @@ describe("ProviderEditor", () => {
   let api: FakeFetch;
 
   beforeEach(() => {
-    api = installFakeApi({ "/api/providers*": () => fakeResponse({ body: provider() }) });
+    // ProviderEditor embeds PortalAccountCard, which loads
+    // `GET /api/providers/prov-1/portal` on mount. An exact key beats the
+    // wildcard below (installFakeApi checks it first), so that load gets a
+    // real `PortalAccountStatusDto` rather than a `ProviderDto` from the
+    // wildcard -- which would leave `.signIn` undefined and throw.
+    api = installFakeApi({
+      "/api/providers*": () => fakeResponse({ body: provider() }),
+      "/api/providers/prov-1/portal": () => fakeResponse({ body: portalAccount() }),
+    });
   });
 
   // A regression guard for a bug this exact shape would produce: if Connect or
@@ -114,7 +122,10 @@ describe("ProviderEditor", () => {
     const first = (lastMutation(api)?.body as { config: Record<string, unknown> }).config;
     expect(first.arrivalOffsetMin).toBe(30);
 
-    api = installFakeApi({ "/api/providers*": () => fakeResponse({ body: provider() }) });
+    api = installFakeApi({
+      "/api/providers*": () => fakeResponse({ body: provider() }),
+      "/api/providers/prov-1/portal": () => fakeResponse({ body: portalAccount() }),
+    });
     await save(mountEditor(provider({ config: { enabled: true } })));
     const second = (lastMutation(api)?.body as { config: Record<string, unknown> }).config;
     expect(second).not.toHaveProperty("arrivalOffsetMin");

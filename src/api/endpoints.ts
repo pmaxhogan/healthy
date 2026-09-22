@@ -27,7 +27,10 @@ import type {
   McpToolInfoDto,
   OverviewDto,
   PolicyRuleDto,
+  PortalAccountStatusDto,
+  PortalSignInPhase,
   ProviderDto,
+  PutPortalAccountRequest,
   RunDto,
   SettingsDto,
   SettingsPatch,
@@ -37,6 +40,17 @@ import type {
 /** The 202 body of every route whose work outlives the response. */
 export interface Accepted {
   accepted: boolean;
+}
+
+const IN_PROGRESS_SIGNIN_PHASES: ReadonlySet<PortalSignInPhase> = new Set([
+  "logging_in",
+  "awaiting_code",
+  "validating",
+]);
+
+/** Whether a sign-in is still working, and so still worth polling for. */
+export function isPortalSignInInProgress(phase: PortalSignInPhase): boolean {
+  return IN_PROGRESS_SIGNIN_PHASES.has(phase);
 }
 
 export const endpoints = {
@@ -68,6 +82,34 @@ export const endpoints = {
     api.post(`/api/providers/${encodeURIComponent(id)}/full-refresh`),
   deleteProvider: (id: string): Promise<void> =>
     api.delete(`/api/providers/${encodeURIComponent(id)}`),
+
+  /**
+   * Always answered, even for a provider that has never had a portal account --
+   * the Worker synthesizes a `state: "none"` default rather than 404ing, so the
+   * card can always render Save. See `PortalAccountStatusDto` in shared/types.ts.
+   */
+  portalAccount: (providerId: string, signal?: AbortSignal): Promise<PortalAccountStatusDto> =>
+    api.get(`/api/providers/${encodeURIComponent(providerId)}/portal`, signal),
+  /**
+   * PUT, not POST: this replaces the login wholesale. `username` and
+   * `password` are both required on every call, never a partial update.
+   */
+  savePortalAccount: (
+    providerId: string,
+    body: PutPortalAccountRequest,
+  ): Promise<PortalAccountStatusDto> =>
+    api.put(`/api/providers/${encodeURIComponent(providerId)}/portal`, body),
+  /** 202 `{ accepted, started }`: the sign-in outlives the response -- poll `portalAccount` for it. */
+  startPortalSignIn: (providerId: string): Promise<Accepted & { started: boolean }> =>
+    api.post(`/api/providers/${encodeURIComponent(providerId)}/portal/sign-in`),
+  /** Drops the stored cookie jar without touching the saved credentials. */
+  forgetPortalSession: (providerId: string): Promise<void> =>
+    api.delete(`/api/providers/${encodeURIComponent(providerId)}/portal/session`),
+  /** Removes the credentials and the session both. */
+  removePortalAccount: (providerId: string): Promise<void> =>
+    api.delete(`/api/providers/${encodeURIComponent(providerId)}/portal`),
+  syncPortalNow: (providerId: string): Promise<Accepted> =>
+    api.post(`/api/providers/${encodeURIComponent(providerId)}/portal/sync`),
 
   google: (signal?: AbortSignal): Promise<GoogleAccountDto> => api.get("/api/google", signal),
   googleCalendars: (signal?: AbortSignal): Promise<CalendarOptionDto[]> =>

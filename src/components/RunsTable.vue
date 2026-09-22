@@ -47,6 +47,8 @@ function counts(run: RunDto): string {
     s.eventsGhosted > 0 ? `†${String(s.eventsGhosted)}` : "",
     s.eventsRestored > 0 ? `↺${String(s.eventsRestored)}` : "",
     s.resourcesCached > 0 ? `${String(s.resourcesCached)} cached` : "",
+    s.portalVisits > 0 ? `${String(s.portalVisits)} portal` : "",
+    s.portalSkipped > 0 ? `${String(s.portalSkipped)} portal skipped` : "",
   ].filter(Boolean);
   return parts.length > 0 ? parts.join(" ") : "no changes";
 }
@@ -59,9 +61,10 @@ function counts(run: RunDto): string {
  * way to see which codes came back without reading the raw dump line by line.
  */
 function codesLine(summary: RunSummaryDto): string | null {
+  const errors = [...summary.errors, ...summary.portalErrors];
   const parts = [
     summary.warningCodes.length > 0 ? `Warnings: ${summary.warningCodes.join(", ")}` : "",
-    summary.errors.length > 0 ? `Errors: ${summary.errors.join(", ")}` : "",
+    errors.length > 0 ? `Errors: ${errors.join(", ")}` : "",
   ].filter(Boolean);
   return parts.length > 0 ? parts.join(" · ") : null;
 }

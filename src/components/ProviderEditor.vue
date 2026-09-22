@@ -17,6 +17,7 @@ import { useAction } from "../lib/use-load.ts";
 import ArrivalOffsetsField from "./ArrivalOffsetsField.vue";
 import ColorSwatches from "./ColorSwatches.vue";
 import ConfirmDialog from "./ConfirmDialog.vue";
+import PortalAccountCard from "./PortalAccountCard.vue";
 import StatusPill from "./StatusPill.vue";
 import TitleTemplateField from "./TitleTemplateField.vue";
 
@@ -249,6 +250,8 @@ async function onRemove(): Promise<void> {
         Store
       </button>
     </div>
+
+    <PortalAccountCard :provider-id="provider.id" :portal-url="provider.portalUrl" />
 
     <ConfirmDialog
       v-if="confirming"

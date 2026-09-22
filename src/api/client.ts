@@ -182,7 +182,35 @@ const CODE_MESSAGES: Record<string, string> = {
   policy_denied: "That is blocked by the current MCP policy rules.",
   crypto: "A security operation failed. If this keeps happening, check the DATA_KEY secret.",
   internal: "Something went wrong on our side. Try again in a moment.",
+  // Patient-portal scrape (worker/providers/mychart/**, wave B2). Fine-grained
+  // for the same reason worker/lib/errors.ts's ErrorCode is: the admin UI's
+  // portal card wants a different sentence for "try again", "wait for the
+  // code" and "stop trying", not one generic upstream-failure message.
+  portal_login_failed: "The portal rejected that username or password.",
+  portal_2fa_required: "The portal is waiting for the emailed verification code.",
+  portal_2fa_rejected: "That verification code was wrong, expired, or already used.",
+  portal_locked:
+    "The portal has locked or disabled this account. Sign in on the portal's own site to clear it, then try again here.",
+  portal_bot_blocked: "The portal blocked this as automated traffic. Try again later.",
+  portal_session_expired: "The portal signed this session out. Sign in again.",
+  portal_parse_failed:
+    "The portal's response was not in a shape this could read -- it may have changed its pages.",
+  portal_unreachable:
+    "The portal could not be reached. This usually clears up on its own -- try again shortly.",
+  portal_attempts_exhausted:
+    "Too many sign-in attempts today. Try again tomorrow, or sign in on the portal's own site.",
+  portal_discovery_failed: "Could not find MyChart at that address. Check the URL and try again.",
 };
+
+/**
+ * Human copy for a bare stable code that did not arrive wrapped in an
+ * `ApiRequestError` -- `PortalSignInState.code`, say, which the portal account
+ * card shows next to a failed sign-in. Same table and same fallback
+ * `errorMessage` itself uses for a 5xx with no server-supplied message.
+ */
+export function codeMessage(code: string): string {
+  return CODE_MESSAGES[code] ?? code.replaceAll("_", " ");
+}
 
 /**
  * Turns anything thrown by the client into one line for a toast.
@@ -198,9 +226,7 @@ export function errorMessage(error: unknown): string {
     // but the bare code -- every 5xx, by `worker/api/http.ts`'s design -- does
     // this reach for a mapped sentence, falling back to the code itself,
     // space-separated, for one this list does not know about.
-    return error.message === error.code
-      ? (CODE_MESSAGES[error.code] ?? error.code.replaceAll("_", " "))
-      : error.message;
+    return error.message === error.code ? codeMessage(error.code) : error.message;
   }
   // Not `error instanceof Error`: an aborted fetch rejects with a DOMException,
   // which does not inherit from Error in a browser, so the instanceof check would

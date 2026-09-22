@@ -16,6 +16,7 @@ import type {
   MailInboxEntryDto,
   MailSettingsDto,
   OverviewDto,
+  PortalAccountStatusDto,
   ProviderDto,
   RunDto,
   SettingsDto,
@@ -175,6 +176,7 @@ export function settings(overrides: Partial<SettingsDto> = {}): SettingsDto {
     windowPastDays: 90,
     syncBackoffUntil: null,
     mcpEnabled: true,
+    portalLoginAttemptLimit: 3,
     ...overrides,
   };
 }
@@ -196,6 +198,9 @@ function run(overrides: Partial<RunDto> = {}): RunDto {
       resourcesCached: 9,
       warnings: 0,
       warningCodes: [],
+      portalVisits: 0,
+      portalSkipped: 0,
+      portalErrors: [],
       filteredView: false,
       backedOff: false,
       errors: [],
@@ -236,6 +241,28 @@ export function mailInboxEntry(overrides: Partial<MailInboxEntryDto> = {}): Mail
 export function mailSettings(overrides: Partial<MailSettingsDto> = {}): MailSettingsDto {
   return {
     allowlist: ["mychart.", "google.com"],
+    ...overrides,
+  };
+}
+
+export function portalAccount(
+  overrides: Partial<PortalAccountStatusDto> = {},
+): PortalAccountStatusDto {
+  return {
+    providerId: "prov-1",
+    baseUrl: "https://portal.example.test",
+    mountPath: "/MyChart",
+    hasCredentials: true,
+    hasSession: true,
+    state: "active",
+    lastLoginAt: "2026-09-21T06:00:00.000Z",
+    lastOkAt: "2026-09-21T11:07:00.000Z",
+    lastErrorCode: null,
+    needsReauthSince: null,
+    loginAttemptsToday: 0,
+    updatedAt: "2026-09-21T11:07:00.000Z",
+    signIn: { phase: "idle", code: null, startedAt: null, updatedAt: null },
+    lastVisitCount: 2,
     ...overrides,
   };
 }
