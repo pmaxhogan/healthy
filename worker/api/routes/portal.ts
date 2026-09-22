@@ -128,6 +128,30 @@ function originOf(url: string): string {
 }
 
 /**
+ * A mount hint from the path the owner's pasted URL carried, when they did not
+ * name one with `mountHint` directly.
+ *
+ * The owner sometimes pastes the login page itself -- `<origin>/<org>/
+ * Authentication/Login` -- rather than the bare host, and that first path
+ * segment is exactly the vanity mount discovery's generic candidates
+ * (`/MyChart/`, `/`, `/prd/`) cannot guess. `originOf` above keeps only the
+ * origin for `base_url`; this is what stops the rest of the path from being
+ * silently dropped on the way to `discover()`. Undefined for a bare origin
+ * (no path to derive from) or an unparseable URL, in which case discovery
+ * falls back to its own generic candidates exactly as it always did.
+ */
+function mountHintFromPath(url: string): string | undefined {
+  let pathname: string;
+  try {
+    pathname = new URL(url).pathname;
+  } catch {
+    return undefined;
+  }
+  const first = pathname.split("/").find((segment) => segment !== "");
+  return first === undefined ? undefined : `/${first}/`;
+}
+
+/**
  * Probe for the portal and store what was found.
  *
  * Every failure is reported as one code -- `portal_discovery_failed`, 400 -- with
@@ -194,9 +218,13 @@ portalRouter.put("/:id/portal", async (c) => {
   const wanted = body.baseUrl === undefined ? known : originOf(body.baseUrl);
   const unchanged = wanted === known && stored?.endpoint_json !== null;
   if (!unchanged && wanted !== null) {
+    // The owner's own `mountHint` wins when given; otherwise the pasted URL's
+    // path is the only other place a vanity mount could be named.
+    const mountHint =
+      body.mountHint ?? (body.baseUrl === undefined ? undefined : mountHintFromPath(body.baseUrl));
     await discover(api, row.id, {
       baseUrl: wanted,
-      ...(body.mountHint !== undefined && { mountHint: body.mountHint }),
+      ...(mountHint !== undefined && { mountHint }),
     });
   }
 

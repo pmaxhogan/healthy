@@ -167,6 +167,26 @@ describe("discoverPortal", () => {
     await expect(discoverPortal(HOST, deps(stub))).resolves.toMatchObject({ mountPath: "/prd/" });
   });
 
+  it("treats a 301 that lands on a 404 as 'not here' and moves to the next candidate", async () => {
+    // A vanity mount that exists but answers with a trailing-slash redirect to a
+    // path that turns out not to be the login page after all -- the redirect is
+    // followed (by `portalFetch`), and the resulting 404 is just another reason
+    // to try the next candidate, not a discovery failure.
+    const stub = routed({
+      "GET /MyChart/Authentication/Login": () =>
+        redirect(`${HOST}/MyChart/Authentication/Login/`, [], 301),
+      "GET /MyChart/Authentication/Login/": () => new Response("not found", { status: 404 }),
+      "GET /Authentication/Login": () => html(loginPageNew()),
+    });
+
+    await expect(discoverPortal(HOST, deps(stub))).resolves.toMatchObject({ mountPath: "/" });
+    expect(stub.calls.map((call) => new URL(call.url).pathname)).toStrictEqual([
+      "/MyChart/Authentication/Login",
+      "/MyChart/Authentication/Login/",
+      "/Authentication/Login",
+    ]);
+  });
+
   it("is not fooled by a login page that merely carries a reCAPTCHA tag", async () => {
     // The commonest false positive there is: plenty of login pages load the
     // script and never show a challenge. Reading that as a bot block would
@@ -290,6 +310,26 @@ describe("discoverPortal: the custom OpenID flavour", () => {
       flavor: "custom_oidc",
       authBaseUrl: HOST,
     });
+  });
+
+  it("finds the OpenID handoff at the owner's hint, without ever probing the generic mounts", async () => {
+    // An org-specific mount that only the owner could have named: none of the
+    // generic candidates answer anything but 404 there, so a hint that is
+    // probed first (and returns immediately on a match) is the only way this
+    // deployment is ever found.
+    const stub = routed({
+      "GET /orgseg/Authentication/Login": () => redirect(`${HOST}/orgseg/OpenId?op=synthetic-op`),
+      "GET /orgseg/OpenId": () => html(OPENID_STUB_PAGE),
+    });
+
+    await expect(discoverPortal(HOST, deps(stub, "orgseg"))).resolves.toMatchObject({
+      mountPath: "/orgseg/",
+      flavor: "custom_oidc",
+    });
+    expect(stub.calls.map((call) => new URL(call.url).pathname)).toStrictEqual([
+      "/orgseg/Authentication/Login",
+      "/orgseg/OpenId",
+    ]);
   });
 
   it("takes the mount from the OpenID URL, where the login path no longer is", async () => {

@@ -74,6 +74,26 @@ function htmlStub(body: string): ReturnType<typeof stubFetch> {
 }
 
 /**
+ * A portal whose login page answers only under an org-specific first path
+ * segment -- none of the generic candidates (`/MyChart/`, `/`, `/prd/`) have
+ * anything there. What the owner pastes is the login page itself, path and all,
+ * so the mount hint has to come from that path or discovery never finds it.
+ */
+function orgMountStub(mount: string): ReturnType<typeof stubFetch> {
+  return stubFetch([
+    {
+      match: /.*/,
+      respond: (request) => {
+        const { pathname } = new URL(request.url);
+        return pathname === `/${mount}/Authentication/Login`
+          ? new Response(LOGIN_PAGE, { headers: { "content-type": "text/html; charset=utf-8" } })
+          : new Response("not found", { status: 404 });
+      },
+    },
+  ]);
+}
+
+/**
  * A `portal` port that runs the real sign-in when the test says to.
  *
  * `startSignIn` does what the Durable Object's first storage write does -- record
@@ -301,6 +321,27 @@ describe("PUT /api/providers/:id/portal", () => {
     const endpoint = await testRepos().portalAccounts.getEndpoint(providerId);
     expect(endpoint?.baseUrl).toBe(PORTAL_ORIGIN);
     expect(endpoint?.mountPath).toBe(PORTAL_MOUNT);
+  });
+
+  it("derives a mount hint from the pasted URL's path when none is given, and stores it", async () => {
+    const stub = orgMountStub("orgseg");
+    usePorts({ ...idlePorts(), fetch: stub.fetchImpl });
+    const providerId = await seedProvider();
+
+    // The owner pasted the login page itself, not the bare host -- and a
+    // deeper path than the mount, to prove only the first segment is taken.
+    const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
+      baseUrl: `${PORTAL_ORIGIN}/orgseg/Authentication/Login`,
+      username: PORTAL_USERNAME,
+      password: PORTAL_PASSWORD,
+    });
+
+    expect(response.status).toBe(200);
+    const dto = await json<PortalAccountStatusDto>(response);
+    expect(dto.baseUrl).toBe(PORTAL_ORIGIN);
+    expect(dto.mountPath).toBe("/orgseg/");
+    const endpoint = await testRepos().portalAccounts.getEndpoint(providerId);
+    expect(endpoint?.mountPath).toBe("/orgseg/");
   });
 
   it("skips discovery when the endpoint is already known and the origin is unchanged", async () => {
