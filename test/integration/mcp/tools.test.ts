@@ -298,26 +298,42 @@ describe("policy rows in D1", () => {
           category: [{ coding: [{ code: "vital-signs" }] }],
           code: { text: "Blood Pressure" },
           component: [
-            { code: { text: "Systolic" }, valueQuantity: { value: 120, unit: "mmHg" } },
-            { code: { text: "Diastolic" }, valueQuantity: { value: 80, unit: "mmHg" } },
+            { code: { text: "Systolic" }, valueQuantity: { value: 8_675_309.5, unit: "mmHg" } },
+            { code: { text: "Diastolic" }, valueQuantity: { value: 4_241_100.25, unit: "mmHg" } },
           ],
         },
       ],
       8 * day,
     );
 
+    // Sentinel values, not "120"/"80": a short digit run occasionally turns up
+    // inside a randomly generated provider id too, and this test used to assert
+    // it absent from the *whole* serialised text, which is exactly where a
+    // provider id also lives. These have a decimal point, which Crockford
+    // base32 (what a ULID is made of) can never contain, so no id can ever
+    // collide with one.
     const before = await call(world.client, "get_vitals", { raw: true });
-    expect(before.text).toContain("120");
-    expect(before.text).toContain("80");
+    expect(before.text).toContain("8675309.5");
+    expect(before.text).toContain("4241100.25");
 
     await repos().mcpPolicy.add("field", "Observation.component[].valueQuantity.value");
     const after = await call(world.client, "get_vitals", { raw: true });
 
-    expect(after.text).not.toContain("120");
-    expect(after.text).not.toContain("80");
+    expect(after.text).not.toContain("8675309.5");
+    expect(after.text).not.toContain("4241100.25");
     // The rule names the value, not the component: the labels survive.
     expect(after.text).toContain("Systolic");
     expect(after.text).toContain("Diastolic");
+
+    // Belt and braces: the field is structurally gone, not merely reformatted
+    // to something that happens not to match the substring above.
+    const parsedAfter = JSON.parse(after.text) as {
+      raw: { resource: { component?: { valueQuantity?: Record<string, unknown> }[] } }[];
+    };
+    const components = parsedAfter.raw[0]?.resource.component ?? [];
+    for (const component of components) {
+      expect(component.valueQuantity).not.toHaveProperty("value");
+    }
   });
 
   it("removes a denied resource type", async () => {
