@@ -15,9 +15,12 @@
  *
  *   - **Only the right sender's code may be claimed.** An eligible row is one
  *     from the provider's own expected sender where it has one, and otherwise
- *     from a domain on the sender allowlist. Without that a stranger who can
- *     reach the inbound address could have a code of their own choosing
- *     submitted to the owner's real portal.
+ *     one that is both on the sender allowlist and on the same site
+ *     (registrable domain) as this portal's own base URL. Without either half,
+ *     a stranger who can reach the inbound address -- or, before any sender is
+ *     learned, a second configured portal's own allowlisted sender arriving in
+ *     the same window -- could have a code of their own choosing submitted to
+ *     the owner's real portal.
  *   - **A code can never be claimed twice.** The claim is an
  *     `UPDATE ... WHERE consumed_at IS NULL RETURNING`, one row at a time, so
  *     two concurrent sign-in attempts (or a retry racing the original) cannot
@@ -37,6 +40,12 @@
 
 import { newId } from "../../lib/ids.ts";
 import { domainAllowed, domainOf } from "../../mail/classify.ts";
+// A repo reaching into `worker/providers/mychart/**` is otherwise unheard of --
+// see the "opaque" comments in `rows.ts`/`schemas.ts` -- but `registrableDomain`
+// is a pure, dependency-free string function (see its own module comment) and
+// this is the one place outside that directory that needs the same "same site"
+// question `sameRegistrableSite` answers for redirects and cookies.
+import { registrableDomain } from "../../providers/mychart/site.ts";
 import { all, one, run } from "../client.ts";
 import { aadFor, open, openOrNull, seal } from "../crypto.ts";
 
@@ -115,12 +124,26 @@ export interface OtpClaimFilter {
    * The domain this provider's codes come from, when it is known.
    *
    * Non-null narrows eligibility to that domain (or a subdomain of it) and
-   * nothing else. Null falls back to the sender allowlist, which is what makes
-   * the very first sign-in -- the one that *learns* the sender -- possible.
+   * nothing else. Null falls back to the sender allowlist -- narrowed by
+   * `portalHost`, below -- which is what makes the very first sign-in -- the
+   * one that *learns* the sender -- possible.
    */
   expectedSender: string | null;
   /** The `mail_sender_allowlist` setting, parsed. Used only when there is no expected sender. */
   allowlist: readonly string[];
+  /**
+   * This account's own portal, as a hostname (from `portal_accounts.base_url`).
+   *
+   * Used only when there is no expected sender yet: a candidate then also has to
+   * share a registrable domain with this host, not merely be on the (global,
+   * shared-across-every-configured-portal) allowlist. Without this, a second
+   * configured portal's own allowlisted sender is eligible for this one too,
+   * which is exactly the cross-portal claim this field exists to rule out. Null
+   * fails closed -- nothing is eligible via the allowlist path at all -- which
+   * in production never happens: `openPortalSession` refuses to run without a
+   * `base_url`, so a call this far into a sign-in always has one.
+   */
+  portalHost: string | null;
 }
 
 /**
@@ -333,12 +356,21 @@ export function makeMailInboxRepo(ctx: Ctx) {
  * Whether a row from `senderDomain` may be claimed under `filter`.
  *
  * An expected sender narrows eligibility to that domain (or a subdomain of it)
- * and nothing else. Without one the sender allowlist stands in, which is what
- * makes the very first sign-in -- the one that learns the sender -- possible.
+ * and nothing else -- the strongest rule, and once a provider has one it wins
+ * outright, even for a sender on a different site than the portal itself (a
+ * vendor-hosted deployment can legitimately email from a different domain than
+ * it serves the portal from). Without one, two things both have to hold: the
+ * sender is on the general allowlist, same as before, and it shares a
+ * registrable domain with this portal's own host -- which is what makes the
+ * very first sign-in -- the one that learns the sender -- possible without also
+ * admitting a second configured portal's own allowlisted sender.
  */
 function eligible(senderDomain: string, filter: OtpClaimFilter): boolean {
-  const entries = filter.expectedSender === null ? filter.allowlist : [filter.expectedSender];
-  return domainAllowed(senderDomain, entries);
+  return filter.expectedSender === null
+    ? domainAllowed(senderDomain, filter.allowlist) &&
+        filter.portalHost !== null &&
+        registrableDomain(senderDomain) === registrableDomain(filter.portalHost)
+    : domainAllowed(senderDomain, [filter.expectedSender]);
 }
 
 /** A stored string that may be the empty placeholder 0005 writes. */

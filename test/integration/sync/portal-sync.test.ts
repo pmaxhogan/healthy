@@ -328,6 +328,9 @@ describe("portal sessions", () => {
       now: T0,
       expectedSender: OTP_SENDER_DOMAIN,
       allowlist: [],
+      // Irrelevant once there's an expected sender -- see `eligible` in
+      // `mail-inbox.ts` -- included only because the field is required.
+      portalHost: null,
     });
     expect(again).toBeNull();
   });

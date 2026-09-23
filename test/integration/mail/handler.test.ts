@@ -117,6 +117,7 @@ describe("handleInboundEmail: accepted mail", () => {
       now: entries[0]?.receivedAt ?? 0,
       expectedSender: null,
       allowlist: [TENANT_DOMAIN, "google.com"],
+      portalHost: TENANT_DOMAIN,
     });
     expect(claimed?.code).toBe("482913");
   });
@@ -140,6 +141,7 @@ describe("handleInboundEmail: accepted mail", () => {
       now: entries[0]?.receivedAt ?? 0,
       expectedSender: null,
       allowlist: [TENANT_DOMAIN, "google.com"],
+      portalHost: TENANT_DOMAIN,
     });
     expect(claimed?.code).toBe("507218");
   });

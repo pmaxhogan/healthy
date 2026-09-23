@@ -47,10 +47,13 @@
  *
  * **A claim is bound to the provider that asked for the code.** `claimCode`
  * passes the account's expected sender domain, and only that sender's rows are
- * eligible; where there is none yet, the sender allowlist stands in and the
+ * eligible; where there is none yet, the sender allowlist stands in, narrowed to
+ * a sender on the same site as this account's own `base_url` -- so a second
+ * configured portal's own allowlisted sender is not eligible here -- and the
  * sender of the code the portal accepts is stored as the expected one. Without
- * that, anyone who can reach the inbound mail address could have a code of
- * their own choosing POSTed to the owner's real health-system account.
+ * that, anyone who can reach the inbound mail address, or another configured
+ * portal's own sender arriving in the same window, could have a code of their
+ * own choosing POSTed to the owner's real health-system account.
  *
  * Log lines carry the provider id, the phase, stable codes and counts. Never a
  * username, never the code, never a byte of portal markup.
@@ -351,8 +354,12 @@ export async function startSignIn(
  *     success learned it): only that domain's rows are eligible, so nobody
  *     else's message can be submitted to this portal, whatever they send or how
  *     often.
- *   - It has none yet: the sender allowlist is the gate, which is exactly the
- *     first-sign-in case the learning step in `completeSignIn` exists to end.
+ *   - It has none yet: the sender allowlist is the gate, narrowed to a sender on
+ *     the same site (registrable domain) as this account's own `base_url` -- so
+ *     with two portals configured, the *other* one's own allowlisted sender is
+ *     not eligible here even though it is on the shared allowlist too. This is
+ *     exactly the first-sign-in case the learning step in `completeSignIn`
+ *     exists to end.
  *
  * Scoped to a provider, not global, so two configured portals cannot claim each
  * other's code either.
@@ -365,12 +372,29 @@ export async function claimCode(
   const repos = makeRepos(ctx);
   const expectedSender = await repos.portalAccounts.getOtpSender(providerId);
   const allowlist = parseAllowlistCsv(await getSetting(ctx, "mail_sender_allowlist"));
+  // Only consulted by `takeFreshOtp` when there is no expected sender yet.
+  // `openPortalSession` refuses to run at all without a `base_url`, so by the
+  // time a sign-in is far enough along to be polling for a code this account
+  // always has one; null here only for a call outside that guard (a test).
+  const account = await repos.portalAccounts.get(providerId);
+  const portalHost = hostOf(account?.base_url ?? null);
   return repos.mailInbox.takeFreshOtp({
     since: sendCodeAt,
     now: ctx.now(),
     expectedSender,
     allowlist,
+    portalHost,
   });
+}
+
+/** The hostname of an origin string, or null when there isn't one to parse. */
+function hostOf(baseUrl: string | null): string | null {
+  if (baseUrl === null) return null;
+  try {
+    return new URL(baseUrl).hostname;
+  } catch {
+    return null;
+  }
 }
 
 /**

@@ -8,8 +8,10 @@
 //
 // **A claim is bound to a sender.** `takeFreshOtp` takes the expected sender for
 // the provider that asked for the code, and only that sender's rows are
-// eligible; without one, the sender allowlist stands in. Oldest eligible row
-// first, so a flood of later messages cannot outrun the portal's own.
+// eligible; without one, the sender allowlist stands in, narrowed to a sender on
+// the same site as the portal's own host -- so a second configured portal's own
+// allowlisted sender is not eligible either. Oldest eligible row first, so a
+// flood of later messages cannot outrun the portal's own.
 //
 // **A code can never be claimed twice**, including by two concurrent callers.
 //
@@ -29,15 +31,21 @@ const SEVEN_DAYS = 7 * 24 * 60 * 60;
 /** The sender every OTP fixture below comes from, and the allowlist that admits it. */
 const PORTAL_SENDER = "noreply@portal.example.org";
 const ALLOWLIST = ["portal.example.org", "google.com"];
+/** This suite's one portal's own host, sharing a registrable domain with `PORTAL_SENDER`. */
+const PORTAL_HOST = "portal.example.org";
 
-/** The filter a first-ever sign-in passes: no expected sender yet, allowlist only. */
-function unbound(since: number, now: number) {
-  return { since, now, expectedSender: null, allowlist: ALLOWLIST };
+/**
+ * The filter a first-ever sign-in passes: no expected sender yet, the allowlist
+ * plus this portal's own host. `portalHost` defaults to `PORTAL_HOST` -- the
+ * multi-portal tests below pass their own.
+ */
+function unbound(since: number, now: number, portalHost: string | null = PORTAL_HOST) {
+  return { since, now, expectedSender: null, allowlist: ALLOWLIST, portalHost };
 }
 
-/** The filter a provider that already knows its sender passes. */
+/** The filter a provider that already knows its sender passes. `portalHost` is unused here. */
 function boundTo(expectedSender: string, since: number, now: number) {
-  return { since, now, expectedSender, allowlist: ALLOWLIST };
+  return { since, now, expectedSender, allowlist: ALLOWLIST, portalHost: null };
 }
 
 /**
@@ -279,6 +287,66 @@ describe("mailInbox.takeFreshOtp", () => {
     const claimed = await repos.mailInbox.takeFreshOtp(unbound(500, 1200));
 
     expect(claimed?.id).toBe(allowed.id);
+  });
+
+  // The live bug: two portals sharing one mail_sender_allowlist, neither with a
+  // learned sender yet. Before this, "on the allowlist" was the whole rule, so
+  // whichever portal's code arrived first -- not whichever portal asked for
+  // it -- got claimed. `portal-a.example` and `portal-b.example` are distinct
+  // registrable domains, exactly like two real health systems' own domains.
+  it("does not claim a code from a second configured portal's own domain until this one's sender is learned", async () => {
+    const repos = testRepos();
+    const allowlist = ["portal-a.example", "portal-b.example"];
+    const otherPortalsCode = await seedOtp("999999", 1000, "noreply@portal-b.example");
+    const ownCode = await seedOtp("111111", 1100, "noreply@portal-a.example");
+
+    const claimed = await repos.mailInbox.takeFreshOtp({
+      since: 500,
+      now: 1200,
+      expectedSender: null,
+      allowlist,
+      portalHost: "portal-a.example",
+    });
+
+    // The older, allowlisted-but-wrong-portal row is skipped entirely, not
+    // merely deprioritised behind the right one.
+    expect(claimed?.id).toBe(ownCode.id);
+    expect(claimed?.code).toBe("111111");
+    expect(await rawColumn("mail_inbox", "consumed_at", "id = ?", otherPortalsCode.id)).toBeNull();
+  });
+
+  it("matches a sender on a subdomain of the portal's own registrable domain", async () => {
+    const repos = testRepos();
+    const claimed = await seedOtp("222222", 1000, "noreply@mail.portal-a.example");
+
+    const result = await repos.mailInbox.takeFreshOtp({
+      since: 500,
+      now: 1100,
+      expectedSender: null,
+      allowlist: ["portal-a.example"],
+      portalHost: "portal-a.example",
+    });
+
+    expect(result?.id).toBe(claimed.id);
+  });
+
+  it("still claims by the learned sender even when it is not on the portal's own site", async () => {
+    // The learned-sender binding is the stronger rule: a vendor-hosted portal can
+    // legitimately email from a different domain than it serves the login page
+    // from, and once that sender is learned it must keep working even though it
+    // would fail the same-site check the unlearned path applies.
+    const repos = testRepos();
+    const mine = await seedOtp("333333", 1000, "noreply@vendor-mail.example");
+
+    const result = await repos.mailInbox.takeFreshOtp({
+      since: 500,
+      now: 1100,
+      expectedSender: "vendor-mail.example",
+      allowlist: [],
+      portalHost: "portal-a.example",
+    });
+
+    expect(result?.id).toBe(mine.id);
   });
 });
 
