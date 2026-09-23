@@ -95,7 +95,11 @@ export interface PortalDeps {
 /** The deps a portal call needs, resolved from `SyncDeps`. */
 export function portalDeps(deps: SyncDeps = {}): PortalDeps {
   return {
-    fetchImpl: deps.fetchImpl ?? fetch,
+    // Bound, not passed by reference: an unbound `fetch` loses its `this` in
+    // workerd, which throws "Illegal invocation" the moment anything calls it
+    // as `x.fetchImpl(...)` -- as `worker/providers/mychart/http.ts` does. See
+    // `worker/api/ports.ts`'s `defaults()`, which has the same fix already.
+    fetchImpl: deps.fetchImpl ?? ((input, init) => fetch(input, init)),
     sleep: deps.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms))),
     deps,
   };

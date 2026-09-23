@@ -53,6 +53,14 @@ function realSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Bound, not passed by reference: an unbound `fetch` loses its `this` in
+ * workerd, which throws "Illegal invocation" the moment anything calls it as
+ * `x.fetchImpl(...)` -- as `worker/providers/mychart/http.ts` does. See
+ * `worker/api/ports.ts`'s `defaults()`, which has the same fix already.
+ */
+const boundFetch: typeof fetch = (input, init) => fetch(input, init);
+
 /** Every dep resolved to a value, so call sites take one object. */
 export interface ResolvedDeps {
   fetchImpl: typeof fetch;
@@ -68,8 +76,8 @@ export const DEFAULT_PUBLIC_ORIGIN = "https://healthy.maxhogan.dev";
 
 export function resolveDeps(deps: SyncDeps = {}): ResolvedDeps {
   return {
-    fetchImpl: deps.fetchImpl ?? fetch,
-    trelloFetch: deps.trelloFetch ?? deps.fetchImpl ?? fetch,
+    fetchImpl: deps.fetchImpl ?? boundFetch,
+    trelloFetch: deps.trelloFetch ?? deps.fetchImpl ?? boundFetch,
     retry: deps.retry ?? {},
     sleep: deps.sleep ?? realSleep,
     nowMs: deps.nowMs ?? ((): number => Date.now()),

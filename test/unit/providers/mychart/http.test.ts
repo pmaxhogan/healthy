@@ -9,7 +9,7 @@
 //
 // Every host is invented and under a reserved TLD.
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { noopLogger } from "../../../../worker/lib/log.ts";
 import { portalFetch } from "../../../../worker/providers/mychart/http.ts";
@@ -229,5 +229,51 @@ describe("portalFetch: caller headers on a hop that changed origin", () => {
     expect(stub.calls[1]?.headers["x-antiforgery"]).toBeUndefined();
     // The browser-shaped headers still go, so the hop still looks like a browser.
     expect(stub.calls[1]?.headers.accept).toBeDefined();
+  });
+});
+
+describe("portalFetch: calls fetchImpl unbound", () => {
+  it("never invokes it as a property access on deps", async () => {
+    // Stands in for workerd's native `fetch`, which throws "Illegal invocation"
+    // for any `this` other than itself or `undefined`. A property-access call
+    // -- `deps.fetchImpl(...)` -- sets `this` to `deps`, which this would catch;
+    // a real portal account's sign-in broke exactly this way in production,
+    // because the default `fetchImpl` (`resolveDeps`/`portalDeps`) is the raw
+    // global reference and `portalFetch` used to call it as `deps.fetchImpl(...)`.
+    function strictFetch(this: unknown): Promise<Response> {
+      if (this !== undefined && this !== globalThis) {
+        throw new TypeError("Illegal invocation");
+      }
+      return Promise.resolve(new Response("ok"));
+    }
+
+    const response = await portalFetch(
+      { fetchImpl: strictFetch, logger: noopLogger, jar: undefined },
+      { url: `${SITE}/Home`, endpoint: "Home" },
+    );
+
+    expect(response.status).toBe(200);
+  });
+});
+
+describe("portalFetch: an upstream 5xx", () => {
+  it("logs portal.upstream_error and still reports portal_unreachable", async () => {
+    const warn = vi.fn();
+    const logger = { ...noopLogger, warn };
+    const stub = stubPortal(() => new Response("boom", { status: 502 }));
+
+    const error = await errorOf(
+      portalFetch(
+        { fetchImpl: stub.fetchImpl, logger, jar: undefined },
+        { url: `${SITE}/Home`, endpoint: "Home" },
+      ),
+    );
+
+    expect(error.code).toBe("portal_unreachable");
+    expect(warn).toHaveBeenCalledWith("portal.upstream_error", {
+      endpoint: "Home",
+      status: 502,
+      hops: 0,
+    });
   });
 });

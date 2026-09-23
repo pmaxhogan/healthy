@@ -71,6 +71,17 @@ import type { CookieJar } from "./cookie-jar.ts";
 import type { Logger } from "../../lib/log.ts";
 
 export interface PortalHttpDeps {
+  /**
+   * Whatever this holds, `portalFetch` calls it unbound (never as
+   * `deps.fetchImpl(...)`): workerd's native `fetch` throws "Illegal
+   * invocation" for any `this` that is not itself or `undefined`, and a
+   * property-access call sets `this` to `deps`. `portalDeps`
+   * (`worker/sync/portal-signin.ts`) and `resolveDeps`
+   * (`worker/sync/deps.ts`) also wrap their own default rather than handing
+   * out the raw global reference, the same fix `worker/api/ports.ts`'s
+   * `defaults()` already has -- this field's own call site is the second,
+   * independent guard against the same mistake reappearing.
+   */
   fetchImpl: typeof fetch;
   logger: Logger;
   /**
@@ -297,7 +308,13 @@ function retryAfterMs(response: Response): number | undefined {
  * `portal_unreachable`. Everything else -- including a 404 on a wrong mount --
  * is handed back for the caller to interpret.
  */
-function rejectIfBlocked(response: Response, body: string, endpoint: string): void {
+function rejectIfBlocked(
+  response: Response,
+  body: string,
+  endpoint: string,
+  logger: Logger,
+  hops: number,
+): void {
   const details = { endpoint, status: response.status };
   if (response.status === 403 || response.status === 429) {
     const retryAfter = retryAfterMs(response);
@@ -308,6 +325,11 @@ function rejectIfBlocked(response: Response, body: string, endpoint: string): vo
     });
   }
   if (response.status >= 500) {
+    // Visible in the tail without turning on debug logging: a 5xx here means
+    // the portal itself is unhealthy, which otherwise looks exactly like every
+    // other `portal_unreachable` (a transport failure, a bad `this`) once it
+    // reaches the caller.
+    logger.warn("portal.upstream_error", { endpoint, status: response.status, hops });
     throw new AppError("portal_unreachable", "the portal returned a server error", details);
   }
   if (bodyMentions(body, MARKERS.challenge)) {
@@ -340,7 +362,9 @@ export async function portalFetch(
     };
     let response: Response;
     try {
-      response = await deps.fetchImpl(hop.url, init);
+      // Unbound on purpose: see `PortalHttpDeps.fetchImpl`'s comment.
+      const doFetch = deps.fetchImpl;
+      response = await doFetch(hop.url, init);
     } catch (error) {
       deps.logger.warn("portal.request_failed", { endpoint: request.endpoint, hops });
       throw new AppError(
@@ -361,7 +385,7 @@ export async function portalFetch(
     }
 
     const body = await response.text();
-    rejectIfBlocked(response, body, request.endpoint);
+    rejectIfBlocked(response, body, request.endpoint, deps.logger, hops);
     const recognized = request.recognizeLanding?.({ url: hop.url, body }) === true;
     const inBody = !recognized && request.followBodyRedirects === true ? bodyHop(body, hop) : null;
     if (inBody !== null && response.status === 200) {
