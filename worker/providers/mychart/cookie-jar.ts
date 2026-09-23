@@ -281,6 +281,16 @@ export class CookieJar {
     return this.matching(url).some((cookie) => cookie.name === name);
   }
 
+  /**
+   * The value of the cookie of this name that would be sent to `url`, or null.
+   *
+   * For a cookie a portal's *script* reads back -- the trust-this-device token
+   * is one -- where the request has to carry the value in its body as well.
+   */
+  valueOf(url: string, name: string): string | null {
+    return this.matching(url).find((cookie) => cookie.name === name)?.value ?? null;
+  }
+
   clear(): void {
     this.cookies.clear();
     this.extras.clear();

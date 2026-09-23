@@ -30,6 +30,7 @@ import { portalFetch } from "../http.ts";
 
 import {
   API_PATHS,
+  AUTH_CODE_KEY,
   CHANNEL_KEYS,
   CODE_SOURCE,
   CONTACT_KEYS,
@@ -38,6 +39,7 @@ import {
   LOGIN_FIELDS,
   LOGIN_RESPONSE_KEYS,
   SAVE_TRUST_TOKEN_FIELDS,
+  SSO_TOKEN_KEY,
   VALIDATE_FIELDS,
 } from "./wire-custom.ts";
 
@@ -56,12 +58,14 @@ export interface LoginOutcome {
   /** True when the shell wants a verification code before it will sign in. */
   mfaRequired: boolean;
   /**
-   * True when the response said outright that the password signed us in.
+   * True when the response said outright that the password signed us in: an
+   * explicit "signed in" flag, or -- the captured shape -- both MFA flags
+   * present and saying no code is needed.
    *
    * False covers both "said no" (which never gets this far -- it is a refusal)
-   * and "said nothing either way", which is the case that matters: the shell's
-   * response shape is `[assumption]`, and a response that names neither flag is
-   * not evidence that no code is needed. See the custom client's `login`.
+   * and "said nothing either way", which is the case that matters: a response
+   * that names none of these is not evidence that no code is needed. See the
+   * custom client's `login`.
    */
   signedInStated: boolean;
   /** The id every later MFA call is keyed on, lower-cased. Null when unreadable. */
@@ -163,11 +167,8 @@ function refused(response: PortalResponse): boolean {
  * POST the credentials.
  *
  * Form-urlencoded, and lower-case field names: the one route on this API that is
- * not JSON. The trust-this-device cookie, if the jar still holds one, rides along
- * as a cookie -- which is [assumption] how a remembered device skips the code.
- * The bundle also supports posting the trust token as the body's only field, and
- * this deliberately does not do that: the cookie path needs no extra state, and
- * if the assumption is wrong the only cost is one more emailed code.
+ * not JSON. A remembered device does not skip the code here: that is a separate
+ * call the caller makes afterwards, `postValidateTrustToken`.
  */
 export async function postLogin(
   api: ShellApi,
@@ -186,9 +187,14 @@ export async function postLogin(
   if (refused(response)) throw refusal(response, "ShellLogin", "login");
 
   const fields = jsonFields(response);
-  // A response that matches none of the candidates reads as "no code needed",
-  // which the bridge then either confirms or fails on. See `wire-custom.ts`.
-  const mfaRequired = yes(fields, LOGIN_RESPONSE_KEYS.mfaRequired);
+  // [confirmed from capture] both flags, ANDed, exactly as the shell's own login
+  // screen decides. The fallback candidates only matter for a response that
+  // does not look like the captured one; one that matches nothing reads as "no
+  // code needed", which the bridge then either confirms or fails on.
+  const mfaRequired =
+    (yes(fields, [LOGIN_RESPONSE_KEYS.mfaEnabled]) &&
+      yes(fields, [LOGIN_RESPONSE_KEYS.portalMfaEnabled])) ||
+    yes(fields, LOGIN_RESPONSE_KEYS.mfaRequiredFallback);
   // A 200 that says outright it did not sign anyone in, and does not want a code
   // either. The shell answers most refusals with a 4xx, but not reliably enough to
   // skip this: without it a rejected password would go on to the bridge and be
@@ -199,7 +205,13 @@ export async function postLogin(
   const userId = str(fields, LOGIN_RESPONSE_KEYS.userId);
   return {
     mfaRequired,
-    signedInStated: yes(fields, LOGIN_RESPONSE_KEYS.signedIn),
+    // Either an explicit "signed in", or the two confirmed MFA flags present
+    // and saying no code is needed -- the captured response's way of saying it.
+    signedInStated:
+      yes(fields, LOGIN_RESPONSE_KEYS.signedIn) ||
+      (!mfaRequired &&
+        typeof fields.get(LOGIN_RESPONSE_KEYS.mfaEnabled) === "boolean" &&
+        typeof fields.get(LOGIN_RESPONSE_KEYS.portalMfaEnabled) === "boolean"),
     userId: userId === null ? null : userId.toLowerCase(),
     contact: str(fields, LOGIN_RESPONSE_KEYS.contact),
   };
@@ -280,6 +292,104 @@ export async function saveTrustToken(
     },
   });
   return response.status < 400;
+}
+
+/**
+ * What the trusted-device check said.
+ *
+ * `trusted`: the shell accepted the token and needs no code. `forgotten`: a
+ * 410, which the shell's own login screen answers by deleting the cookie and
+ * asking for a code. `refused`: anything else -- also "ask for a code", but
+ * the token is kept, because nothing said it stopped being good.
+ */
+export type TrustCheck = "trusted" | "forgotten" | "refused";
+
+/**
+ * [confirmed from capture] Ask the shell to honour a device it trusted before.
+ *
+ * The shell's own login screen makes exactly this call when the login response
+ * wants a code and the trust cookie exists: `{ userId, rememberMeToken }`, the
+ * token read back out of that cookie. Never a throw: every outcome here has a
+ * fallback, which is the emailed code.
+ */
+export async function postValidateTrustToken(
+  api: ShellApi,
+  input: { userId: string; rememberMeToken: string },
+): Promise<TrustCheck> {
+  const response = await portalFetch(api.http, {
+    url: apiUrl(api, API_PATHS.validateTrustToken),
+    method: "POST",
+    endpoint: "ValidateTrustToken",
+    accept: "json",
+    jsonBody: {
+      [GENERATE_FIELDS.userId]: input.userId,
+      [SAVE_TRUST_TOKEN_FIELDS.rememberMeToken]: input.rememberMeToken,
+    },
+  });
+  if (response.status === 410) return "forgotten";
+  return response.status < 400 ? "trusted" : "refused";
+}
+
+/** A bridge-step failure, with the stable reason the admin UI and logs key on. */
+export class HandoffStepError extends Error {
+  constructor(
+    readonly reason: string,
+    readonly status: number,
+  ) {
+    super(reason);
+    this.name = "HandoffStepError";
+  }
+}
+
+/**
+ * [confirmed from capture] The first step of the hand-off: mint the SSO token.
+ *
+ * The body is the literal string `{}` as `text/plain`, because that is what the
+ * shell's HTTP library sends for it. Returns the `yum` value, which the caller
+ * writes into the jar as a cookie -- the shell's own script does the same, and
+ * no `Set-Cookie` does it for us.
+ */
+export async function postSsoToken(api: ShellApi): Promise<string> {
+  const response = await portalFetch(api.http, {
+    url: apiUrl(api, API_PATHS.ssoToken),
+    method: "POST",
+    endpoint: "SsoToken",
+    accept: "json",
+    textBody: "{}",
+  });
+  if (response.status >= 400) throw new HandoffStepError("sso_token_refused", response.status);
+  const yum = str(jsonFields(response), [SSO_TOKEN_KEY]);
+  if (yum === null) throw new HandoffStepError("sso_token_unreadable", response.status);
+  return yum;
+}
+
+/**
+ * [confirmed from capture] What the shell's authorize page does with the
+ * authorization request: trade it for a code. Every field comes off the
+ * authorization URL the stub carried; see `AUTH_CODE_FIELDS`.
+ */
+export async function postGetAuthCode(
+  api: ShellApi,
+  input: { clientId: string; scope: string; responseType: string; guid: string; nonce: string },
+): Promise<string> {
+  const response = await portalFetch(api.http, {
+    url: apiUrl(api, API_PATHS.getAuthCode),
+    method: "POST",
+    endpoint: "GetAuthCode",
+    accept: "json",
+    // Key order as the shell's own client builds the object.
+    jsonBody: {
+      clientId: input.clientId,
+      scope: input.scope,
+      responseType: input.responseType,
+      guid: input.guid,
+      nonce: input.nonce,
+    },
+  });
+  if (response.status >= 400) throw new HandoffStepError("auth_code_refused", response.status);
+  const code = str(jsonFields(response), [AUTH_CODE_KEY]);
+  if (code === null) throw new HandoffStepError("auth_code_unreadable", response.status);
+  return code;
 }
 
 /**

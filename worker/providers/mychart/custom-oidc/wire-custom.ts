@@ -13,6 +13,11 @@
  * Strings only, no logic.
  *
  * CONFIDENCE KEY
+ *   [confirmed from capture]
+ *                observed in the owner's own browser capture of a *successful*
+ *                sign-in, request by request, and cross-checked against the
+ *                public scripts that made each request. The strongest level
+ *                here: both what is sent and where every value comes from.
  *   [confirmed]  read out of the deployment's own public bundle: this is the
  *                route path, field name or cookie name the shell actually uses
  *   [assumption] the request or response *shape* around a confirmed route, which
@@ -52,22 +57,117 @@ export const API_PATHS = {
    * `portal_login_failed` with `reason: "mfa_contact_unknown"`.
    */
   mfaContact: "api/mfa/contact/plain",
+  /**
+   * [confirmed from capture] Asks a device that was trusted before to skip the
+   * code: a JSON POST of `{ userId, rememberMeToken }` -- the token read back
+   * out of the trust cookie the browser minted when it was saved. The shell's
+   * login screen makes this call itself whenever the login response wants a
+   * code and the cookie exists; the server does not act on the cookie alone.
+   * [confirmed] from the bundle, not observed: a 410 means the token is no
+   * longer trusted, and the screen then forgets it and asks for a code.
+   */
+  validateTrustToken: "api/mfa/validateTrustThisDeviceToken",
+  /**
+   * [confirmed from capture] The first step of the hand-off, made once the
+   * shell considers the owner signed in (after the password, the code or the
+   * trusted device). A POST whose body is the literal string `{}`, sent as
+   * `text/plain`. Answers `{ yum, ... }`; see `SSO_TOKEN_COOKIE`.
+   */
+  ssoToken: "sso/token",
+  /**
+   * [confirmed from capture] What the shell's own authorize page does instead
+   * of being an authorization server: a JSON POST (`AUTH_CODE_FIELDS`) that
+   * answers `{ authCode }`. The browser then navigates to the stub's
+   * `redirect_uri` with that code and the stub's `state`.
+   */
+  getAuthCode: "api/mychartAuth/getAuthCode",
 } as const;
 
 /**
- * There is deliberately no `authCode` path here any more.
+ * [confirmed from capture] The name of the cookie the shell's script writes
+ * with the SSO token's `yum` value, at path `/`, on its own host.
  *
- * An earlier version of this file guessed that the handoff stub, when it
- * rendered no form to submit, meant the bridge should ask the shell's API for
- * the next URL -- `api/mychartAuth/getAuthCode` and friends, names mined out of
- * the shell's own bundle. A later live capture of the *call sites* around those
- * same names (not just their existence) found they belong to an unrelated
- * feature -- the mobile app's deep-link / "back to referrer" handoff -- and are
- * never invoked from the OpenID stub at all. The real "no form" case turned out
- * to need no shell call whatsoever: the stub's controller script carries the
- * already-minted authorization URL as one of its own constructor arguments, so
- * the bridge reads it straight off the page. See `parseOpenIdRequest` in
- * `../html.ts` and `bridge.ts`'s `nextRequest`.
+ * No `Set-Cookie` ever carries it -- the script sets it -- which is why the
+ * bridge has to put it in the jar by hand. Every classic-page request from the
+ * hand-off onwards carried it in the capture, beginning with
+ * `Authentication/Login` itself.
+ */
+export const SSO_TOKEN_COOKIE = "yum";
+
+/** [confirmed from capture] The SSO token response's key for that value. */
+export const SSO_TOKEN_KEY = "yum";
+
+/**
+ * [confirmed from capture] The get-auth-code body, and where each field comes
+ * from: the authorization URL the stub's controller call carries, read the way
+ * the shell's authorize page reads its own query string. `guid` is not a fresh
+ * id: it is the PKCE `code_challenge`, verbatim.
+ */
+export const AUTH_CODE_FIELDS = {
+  clientId: "client_id",
+  scope: "scope",
+  responseType: "response_type",
+  guid: "code_challenge",
+  nonce: "nonce",
+} as const;
+
+/** [confirmed from capture] The get-auth-code response's one key. */
+export const AUTH_CODE_KEY = "authCode";
+
+/**
+ * [confirmed from capture] The authorization URL's other two parameters the
+ * browser uses: where to go with the code, and the `state` to go with it.
+ */
+export const AUTHORIZE_PARAMS = { redirectUri: "redirect_uri", state: "state" } as const;
+
+/** [confirmed from capture] The query the browser sends the code back with. */
+export const AUTHORIZE_RESULT_PARAMS = { code: "code", state: "state" } as const;
+
+/**
+ * [confirmed from capture] The classic side's finalize call, mount-relative. A
+ * form-urlencoded XHR POST with a `noCache` query parameter and the
+ * `AuthorizeResult` page's own antiforgery token as a header. It answers
+ * `{ redirectUri }` and sets the classic session cookies.
+ */
+export const FINALIZE_PATH = "OpenId/FinalizeAuthResponse";
+
+/**
+ * [confirmed from capture] The finalize form, verbatim from the classic side's
+ * response-controller script, which builds it from two places:
+ *
+ *  - the `AuthorizeResult` page's controller call, `(code, state, error,
+ *    responseMode, issuer)` -- `AuthCode`, `StateFromOP`, `Error`,
+ *    `ResponseMode`, `Issuer`, in that order;
+ *  - the stub's controller call, `(nonce, state, codeVerifier, ...)`, which the
+ *    request-controller script parked in `sessionStorage` -- `EncryptedNonce`,
+ *    `EncryptedState`, `EncryptedCodeVerifier`.
+ *
+ * `Error` and `Issuer` were empty strings in the capture and are sent as such.
+ */
+export const FINALIZE_FIELDS = {
+  authCode: "AuthCode",
+  stateFromOp: "StateFromOP",
+  encryptedNonce: "EncryptedNonce",
+  encryptedState: "EncryptedState",
+  encryptedCodeVerifier: "EncryptedCodeVerifier",
+  error: "Error",
+  responseMode: "ResponseMode",
+  issuer: "Issuer",
+} as const;
+
+/** [confirmed from capture] The finalize response's one key. */
+export const FINALIZE_REDIRECT_KEY = "redirectUri";
+
+/**
+ * A correction, recorded so it is not made a third time. An earlier version of
+ * this file concluded that `api/mychartAuth/getAuthCode` belonged to an
+ * unrelated mobile-app feature, and that navigating to the stub's own
+ * authorization URL was the whole hand-off. The owner's capture of a successful
+ * sign-in shows otherwise: that URL is the *shell's* authorize route, a page of
+ * its single-page app rather than an authorization server, and loading it only
+ * returns the app, whose component for that route calls `getAuthCode` and then
+ * navigates to the `redirect_uri`. The bridge now makes that call itself; see
+ * `bridge.ts`.
  */
 
 /** [confirmed] The credential POST's fields. Lower-case, unlike the classic form. */
@@ -100,34 +200,31 @@ export const VALIDATE_FIELDS = { token: "token", clientId: "clientId" } as const
  * [confirmed] The trust-this-device token is a **cookie**, named for the user.
  *
  * `<user id, lower-cased>` followed by this suffix. Written by the shell's own
- * script rather than by a `Set-Cookie`, which is why validating a code is not
- * enough on its own: the token has to be fetched and put in the jar by hand.
+ * script rather than by a `Set-Cookie`, so this client mints the token, saves it
+ * with the shell, and puts it in the jar by hand. On the next sign-in it is
+ * read back out of the jar and posted to `API_PATHS.validateTrustToken`.
  */
 export const REMEMBER_ME_COOKIE_SUFFIX = "-rememberMeToken";
 
 /**
- * [assumption] Keys the login response may carry, tried in order.
+ * Keys the login response carries.
  *
- * The capture read the *request* shapes out of the shell's bundle but not the
- * responses, so this whole map is a guess. It is written to degrade rather than
- * throw: a login whose response matches none of `mfaRequired` is treated as
- * "signed in", which is the safe direction -- the OIDC bridge that runs next
- * fails loudly if that was wrong, where guessing "awaiting code" would leave the
+ * [confirmed from capture] `userId`, `isMfaEnabled` and `isPortalMfaEnabled`
+ * are in the response, and the shell's login screen wants a code exactly when
+ * **both** flags are true -- `mfaEnabled` and `portalMfaEnabled` below, ANDed,
+ * as the bundle's own login component does. The response volunteers no contact.
+ *
+ * [assumption] everything else: `mfaRequiredFallback`, `signedIn` and
+ * `contact` are older guesses, kept only so that a response which differs from
+ * the captured one still degrades rather than throws. A login whose response
+ * matches nothing is treated as "signed in" -- the bridge that runs next fails
+ * loudly if that was wrong, where guessing "awaiting code" would leave the
  * owner waiting for an email nobody sent.
- *
- * If `userId` matches nothing, the emailed-code path cannot run at all and
- * surfaces as `portal_login_failed` with `reason: "user_id_unknown"`. That is the
- * single most likely thing in this file to be wrong.
  */
 export const LOGIN_RESPONSE_KEYS = {
-  mfaRequired: [
-    "mfaRequired",
-    "requiresMfa",
-    "requireMfa",
-    "twoFactorRequired",
-    "needsMfa",
-    "mfaEnabled",
-  ],
+  mfaEnabled: "isMfaEnabled",
+  portalMfaEnabled: "isPortalMfaEnabled",
+  mfaRequiredFallback: ["mfaRequired", "requiresMfa", "requireMfa", "twoFactorRequired"],
   signedIn: ["authenticated", "isAuthenticated", "success", "loggedIn"],
   userId: ["userId", "userID", "userid", "loginId", "id"],
   /** Where the code can be sent, when the response volunteers it. */
@@ -142,29 +239,6 @@ export const SAVE_TRUST_TOKEN_FIELDS = { rememberMeToken: "rememberMeToken" } as
 
 /** [assumption] Keys the contact lookup may answer with. */
 export const CONTACT_KEYS: readonly string[] = ["email", "emailAddress", "contact", "value"];
-
-/**
- * [confirmed] The id of the form the handoff stub's script auto-submits.
- *
- * That form *is* the authorization request: the server minted the nonce, the
- * state and the PKCE code challenge and embedded them as hidden fields, so the
- * bridge submits the form rather than generating a verifier of its own.
- * [assumption] that the challenge really is server-minted every time -- a
- * deployment that expected the client to mint one would answer the authorize hop
- * with an invalid-request page, and the bridge would report
- * `portal_handoff_failed`.
- */
-export const OIDC_FORM_IDS: readonly string[] = ["OIDCForm"];
-
-/**
- * [assumption] Lower-cased markers saying a bridge hop landed on the shell's own
- * login screen, which means the app-level session was not accepted after all.
- *
- * Path fragments rather than words: the shell is a single-page app, so its login
- * screen is a route, and matching a phrase like "sign in" would fire on every
- * page it serves.
- */
-export const SHELL_LOGIN_MARKERS: readonly string[] = ["/login", "/signin", "/sign-in"];
 
 /**
  * [confirmed] Refusal wording, as the shortest fragment that still distinguishes.
@@ -196,12 +270,3 @@ export const JAR_EXTRAS = {
   clientId: "oidc.clientId",
   contact: "oidc.contact",
 } as const;
-
-/**
- * How many hops the OIDC bridge follows before giving up.
- *
- * A real chain is three or four -- the stub, the authorize hop, the callback, the
- * mount's return path -- and each of those may redirect once or twice more inside
- * `portalFetch`. Eight is generous and still bounded.
- */
-export const BRIDGE_MAX_HOPS = 8;

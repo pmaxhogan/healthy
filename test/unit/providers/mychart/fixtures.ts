@@ -563,62 +563,45 @@ export const OPENID_STUB_PAGE = `<!doctype html><html><head>
   <input type="hidden" name="__RequestVerificationToken" value="${TOKEN}" />
 </body></html>`;
 
-/**
- * The same stub, with the hidden form the controller script auto-submits.
- *
- * This is the shape the bridge has to drive: a form the browser posts for you,
- * carrying the authorization request the server already minted (nonce, state and
- * the PKCE challenge among it).
- */
-export const OPENID_FORM_PAGE = `<!doctype html><html><body>
-  <form id="OIDCForm" method="post" action="/shell/api/oauth2/authorize">
-    <input type="hidden" name="client_id" value="synthetic-client" />
-    <input type="hidden" name="state" value="synthetic-state" />
-    <input type="hidden" name="code_challenge" value="synthetic-challenge" />
-    <input type="hidden" name="code_challenge_method" value="S256" />
-  </form>
-  <script>document.getElementById("OIDCForm").submit();</script>
-</body></html>`;
+/** The `AuthorizeResult` page's antiforgery token, distinct from the stub's. */
+export const RESULT_TOKEN = "synthetic-antiforgery-token-0003";
 
 /**
- * The stub's other real shape: no `<form>` at all, just its controller call
- * with the authorization URL as one of its own arguments.
+ * The hand-off stub as a `custom_oidc` deployment serves it.
  *
- * This is the shape a live, unauthenticated fetch of a real `custom_oidc`
- * deployment's stub actually carried: the page renders nothing but an
- * antiforgery input and a script instantiating the controller with six
- * literal arguments -- nonce, state, PKCE verifier, the URL, a workflow label,
- * and a boolean saying whether to submit `#OIDCForm` (`true`) or navigate to
- * the URL (`false`, the default here). Every value but `url` is a placeholder;
- * only the shape -- and the class name, which is generic MyChart framework
- * code, not this deployment's own -- matters to the parser under test.
+ * Mirrors the *structure* of the owner's capture of a successful sign-in and
+ * nothing else: one hidden antiforgery input, and the request controller
+ * instantiated inside the UI framework's load callback with six literal
+ * arguments -- encrypted nonce, encrypted state, encrypted code verifier, the
+ * authorization URL (every `&` written as `&`, as a JS string literal in
+ * the real page carries it), a workflow label, and the submit-a-form flag.
+ * Every value is invented. The class name is generic MyChart framework code.
  */
-export function openIdRedirectPage(url: string, submitForm = false): string {
+export function openIdRequestPage(authorizeUrl: string, submitForm = false): string {
+  const literal = authorizeUrl.replaceAll("&", "&");
   return `<!doctype html><html><body>
-  <input type="hidden" name="__RequestVerificationToken" value="${TOKEN}" />
+  <input name="__RequestVerificationToken" type="hidden" value="${TOKEN}" />
   <script>
-  new $$WP.Authentication.OpenId.Controllers.OpenIdRequestController("synthetic-nonce", "synthetic-state", "synthetic-verifier", "${url}", "0", ${String(submitForm)});
+  $$WP.Utilities.UI.OnUIFrameworkLoaded(function () {
+    new $$WP.Authentication.OpenId.Controllers.OpenIdRequestController("synthetic-enc-nonce", "synthetic-enc-state","synthetic-enc-verifier", "${literal}", "1", ${String(submitForm)});
+  });
   </script>
 </body></html>`;
 }
 
 /**
- * `OPENID_FORM_PAGE`, plus the `<noscript>` fallback a real deployment ships
- * alongside it for a browser that will not run its scripts.
- *
- * This is the shape the bridge has to see through: the form it must submit,
- * and -- same as the bare stub -- a no-JS refresh it must not follow instead.
+ * The `AuthorizeResult` page, same rules: its own antiforgery input and the
+ * response controller with `(code, state, error, responseMode, issuer)`, where
+ * the capture had `error` and `issuer` empty.
  */
-export function openIdFormPageWithNoscriptFallback(nojsTarget: string): string {
+export function openIdResponsePage(code: string, state: string, responseMode = "query"): string {
   return `<!doctype html><html><body>
-  <noscript><meta http-equiv="refresh" content="0;url=${nojsTarget}" /></noscript>
-  <form id="OIDCForm" method="post" action="/shell/api/oauth2/authorize">
-    <input type="hidden" name="client_id" value="synthetic-client" />
-    <input type="hidden" name="state" value="synthetic-state" />
-    <input type="hidden" name="code_challenge" value="synthetic-challenge" />
-    <input type="hidden" name="code_challenge_method" value="S256" />
-  </form>
-  <script>document.getElementById("OIDCForm").submit();</script>
+  <input name="__RequestVerificationToken" type="hidden" value="${RESULT_TOKEN}" />
+  <script>
+  $$WP.Utilities.UI.OnUIFrameworkLoaded(function () {
+    new $$WP.Authentication.OpenId.Controllers.OpenIdResponseController("${code}", "${state}", "", "${responseMode}", "");
+  });
+  </script>
 </body></html>`;
 }
 

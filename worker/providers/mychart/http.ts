@@ -110,6 +110,15 @@ export interface PortalRequest {
    * means the same thing absent `form` means: no body, and no `Content-Type`.
    */
   jsonBody?: unknown;
+  /**
+   * A literal body to send as `text/plain` instead. Mutually exclusive with the
+   * other two.
+   *
+   * Exists for exactly one call: the `custom_oidc` shell posts the *string*
+   * `"{}"` to its SSO-token route, which its HTTP library sends as `text/plain`
+   * rather than as JSON. Mirrored as captured rather than "corrected".
+   */
+  textBody?: string | undefined;
   headers?: Record<string, string> | undefined;
   accept?: "html" | "json" | undefined;
   /** A stable label, e.g. "DoLogin". Goes in logs; never a URL. */
@@ -179,6 +188,9 @@ function firstBody(request: PortalRequest): {
       body: encodeForm(request.form),
       bodyContentType: "application/x-www-form-urlencoded",
     };
+  }
+  if (request.textBody !== undefined) {
+    return { body: request.textBody, bodyContentType: "text/plain" };
   }
   return request.jsonBody === undefined
     ? { body: undefined, bodyContentType: undefined }

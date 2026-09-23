@@ -23,11 +23,12 @@ import {
   HOST,
   html,
   json,
-  openIdFormPageWithNoscriptFallback,
-  openIdRedirectPage,
-  OPENID_FORM_PAGE,
+  openIdRequestPage,
+  openIdResponsePage,
   redirect,
+  RESULT_TOKEN,
   routed,
+  stubPortal,
 } from "./fixtures.ts";
 
 import type { PortalCall, PortalFetchStub } from "./fixtures.ts";
@@ -102,6 +103,15 @@ async function reasonOf(promise: Promise<unknown>): Promise<unknown> {
   throw new Error("expected the promise to reject");
 }
 
+async function failureOf(promise: Promise<unknown>): Promise<AppError> {
+  try {
+    await promise;
+  } catch (error) {
+    return error as AppError;
+  }
+  throw new Error("expected the promise to reject");
+}
+
 function find(stub: PortalFetchStub, method: string, suffix: string): PortalCall | undefined {
   return stub.calls.find(
     (call) => call.method === method && new URL(call.url).pathname.endsWith(suffix),
@@ -112,36 +122,123 @@ function paths(stub: PortalFetchStub): string[] {
   return stub.calls.map((call) => `${call.method} ${new URL(call.url).pathname}`);
 }
 
-/** The hops that carry a shell session across to the classic pages. */
-const BRIDGE_ROUTES: Record<string, () => Response> = {
-  "GET /prd/Authentication/Login": () => redirect(`${HOST}/prd/OpenId?op=synthetic-op`),
-  "GET /prd/OpenId": () => html(OPENID_FORM_PAGE),
-  "POST /shell/api/oauth2/authorize": () =>
-    redirect(`${HOST}/prd/OpenId/Callback?code=synthetic-code`),
-  "GET /prd/OpenId/Callback": () =>
-    redirect(`${HOST}/prd/Home`, ["EpicSession=synthetic-session; Path=/prd/; Secure"]),
-  "GET /prd/Home": () => html(HOME_PAGE),
-};
+/** The session cookie the synthetic classic side sets on finalize. */
+const SESSION_COOKIE = "SyntheticChartSession";
+/** The synthetic SSO token the shell answers with. */
+const YUM = "synthetic-yum";
+const AUTH_CODE = "synthetic-auth-code";
+const STATE = "synthetic-state";
+const RESULT_PATH = "/prd/OpenId/AuthorizeResult";
+
+/**
+ * A synthetic authorization URL with the captured structure: the shell's own
+ * authorize route, and the ten query parameters the capture's had, in order.
+ */
+function authorizeUrl(overrides: Record<string, string | null> = {}): string {
+  const params: Record<string, string | null> = {
+    response_type: "code",
+    client_id: "synthetic-client",
+    redirect_uri: `${HOST}${RESULT_PATH}`,
+    state: STATE,
+    scope: "openid",
+    code_challenge: "synthetic-challenge",
+    code_challenge_method: "S256",
+    response_mode: "query",
+    nonce: "synthetic-nonce",
+    ui_locales: "en-US",
+    ...overrides,
+  };
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) if (value !== null) query.set(key, value);
+  return `${HOST}/app/oauth2/authorize?${query.toString()}`;
+}
+
+type Route = (call: PortalCall) => Response;
+
+/**
+ * The whole captured hand-off, route by route, with enough state to fail the
+ * way a real portal would if a step were skipped: the stub only renders once
+ * the `yum` cookie is present, and `Home` is only signed in once finalize's
+ * session cookie comes back.
+ */
+function handoffRoutes(): Record<string, Route> {
+  return {
+    "POST /shellwebapi/sso/token": () => json({ yum: YUM, mychartRegionUrl: "/prd/" }),
+    "GET /prd/Authentication/Login": (call) =>
+      (call.headers.cookie ?? "").includes(`yum=${YUM}`)
+        ? redirect(`${HOST}/prd/OpenId?forceAuthn=true&op=synthetic-op`)
+        : html("<!doctype html><html><body>no sso token</body></html>"),
+    "GET /prd/OpenId": () => html(openIdRequestPage(authorizeUrl())),
+    "POST /shellwebapi/api/mychartAuth/getAuthCode": () => json({ authCode: AUTH_CODE }),
+    "GET /prd/OpenId/AuthorizeResult": () => html(openIdResponsePage(AUTH_CODE, STATE)),
+    "POST /prd/OpenId/FinalizeAuthResponse": () => {
+      const headers = new Headers();
+      headers.append("set-cookie", `${SESSION_COOKIE}=synthetic-session; Path=/prd/; Secure`);
+      return json({ redirectUri: "/prd/Home" }, { headers });
+    },
+    "GET /prd/Home": (call) =>
+      (call.headers.cookie ?? "").includes(`${SESSION_COOKIE}=`)
+        ? html(HOME_PAGE)
+        : redirect(`${HOST}/prd/Authentication/Login`),
+  };
+}
+
+/** Answer a route table whose handlers can see the request. */
+function portal(routes: Record<string, Route>): PortalFetchStub {
+  return stubPortal((call) => {
+    const route = routes[`${call.method} ${new URL(call.url).pathname}`];
+    return route === undefined ? new Response("not found", { status: 404 }) : route(call);
+  });
+}
+
+/** The captured login response's shape, with invented values. */
+function loginResponse(mfa: boolean, extra: Record<string, unknown> = {}): Response {
+  return json({
+    isMfaReminderOff: false,
+    isSkipChallengeQuestions: true,
+    isAccountMerged: false,
+    encryptedUserId: "synthetic-encrypted-user",
+    userId: "OWNER-LOGIN",
+    externalSsoMyChartQuery: "",
+    isMfaEnabled: mfa,
+    isTemporaryPassword: false,
+    isPortalMfaEnabled: mfa,
+    ...extra,
+  });
+}
 
 /** A deployment whose password alone is enough: no code, straight to the bridge. */
-function noCodePortal(): PortalFetchStub {
-  return routed({
-    ...BRIDGE_ROUTES,
-    "POST /shellwebapi/login": () => json({ authenticated: true, userId: "OWNER-LOGIN" }),
+function noCodePortal(overrides: Record<string, Route> = {}): PortalFetchStub {
+  return portal({
+    ...handoffRoutes(),
+    "POST /shellwebapi/login": () => loginResponse(false),
+    ...overrides,
   });
 }
 
 /** A deployment that wants an emailed code, and answers every MFA call. */
 function twoStepPortal(login: Record<string, unknown> = {}): PortalFetchStub {
-  return routed({
-    ...BRIDGE_ROUTES,
-    "POST /shellwebapi/login": () =>
-      json({ mfaRequired: true, userId: "OWNER-LOGIN", email: CONTACT, ...login }),
+  return portal({
+    ...handoffRoutes(),
+    "POST /shellwebapi/login": () => loginResponse(true, { email: CONTACT, ...login }),
     "POST /shellwebapi/verification/code/generate": () => json({ success: true }),
     "POST /shellwebapi/verification/code/validate": () => json({ success: true }),
     "POST /shellwebapi/api/mfa/saveTrustThisDeviceToken": () => json({ success: true }),
+    "POST /shellwebapi/api/mfa/validateTrustThisDeviceToken": () =>
+      json({ temporaryPassword: false }),
   });
 }
+
+/** Every request the full hand-off makes, in the captured order. */
+const HANDOFF_SEQUENCE = [
+  "POST /shellwebapi/sso/token",
+  "GET /prd/Authentication/Login",
+  "GET /prd/OpenId",
+  "POST /shellwebapi/api/mychartAuth/getAuthCode",
+  "GET /prd/OpenId/AuthorizeResult",
+  "POST /prd/OpenId/FinalizeAuthResponse",
+  "GET /prd/Home",
+];
 
 describe("login", () => {
   it("posts lower-case username and password, form-urlencoded", async () => {
@@ -172,14 +269,7 @@ describe("login", () => {
 
     await expect(client(stub).login(CREDENTIALS)).resolves.toBe("signed_in");
 
-    expect(paths(stub)).toStrictEqual([
-      "POST /shellwebapi/login",
-      "GET /prd/Authentication/Login",
-      "GET /prd/OpenId",
-      "POST /shell/api/oauth2/authorize",
-      "GET /prd/OpenId/Callback",
-      "GET /prd/Home",
-    ]);
+    expect(paths(stub)).toStrictEqual(["POST /shellwebapi/login", ...HANDOFF_SEQUENCE]);
   });
 
   it("remembers the user id the shell answered with, lower-cased", async () => {
@@ -424,172 +514,294 @@ describe("secondaryValidation.validate", () => {
   });
 });
 
-describe("the OpenID bridge", () => {
-  it("submits the stub's hidden authorization form rather than stopping there", async () => {
+describe("the OpenID hand-off", () => {
+  it("makes the captured sequence of requests and ends signed in on Home", async () => {
     const stub = noCodePortal();
-
-    await client(stub).login(CREDENTIALS);
-
-    const authorize = find(stub, "POST", "/api/oauth2/authorize");
-    const form = new URLSearchParams(authorize?.body ?? "");
-    // The server minted these; the bridge echoes them and mints no PKCE of its own.
-    expect(form.get("code_challenge")).toBe("synthetic-challenge");
-    expect(form.get("code_challenge_method")).toBe("S256");
-    expect(form.get("state")).toBe("synthetic-state");
-  });
-
-  it("carries the session cookie planted on an intermediate hop", async () => {
-    const stub = noCodePortal();
-
-    await client(stub).login(CREDENTIALS);
-
-    expect(find(stub, "GET", "/prd/Home")?.headers.cookie).toContain("EpicSession=");
-  });
-
-  it("reports portal_handoff_failed when a hop lands on the shell's own login screen", async () => {
-    const stub = routed({
-      "GET /prd/Authentication/Login": () => redirect(`${HOST}/prd/OpenId?op=synthetic-op`),
-      "GET /prd/OpenId": () => redirect(`${HOST}/app/login`),
-      "GET /app/login": () => html("<!doctype html><html><body>Sign in</body></html>"),
-      "POST /shellwebapi/login": () => json({ authenticated: true, userId: "OWNER-LOGIN" }),
-    });
-
-    await expect(codeOf(client(stub).login(CREDENTIALS))).resolves.toBe("portal_handoff_failed");
-    await expect(reasonOf(client(stub).login(CREDENTIALS))).resolves.toBe("shell_login");
-  });
-
-  it("reports no_further_hop when the chain stops somewhere that is not signed in", async () => {
-    const stub = routed({
-      "GET /prd/Authentication/Login": () => redirect(`${HOST}/prd/OpenId?op=synthetic-op`),
-      // A stub with neither a form to submit nor an auth-code route to ask.
-      "GET /prd/OpenId": () => html("<!doctype html><html><body>oidcnonce</body></html>"),
-      "POST /shellwebapi/login": () => json({ authenticated: true, userId: "OWNER-LOGIN" }),
-    });
-
-    await expect(reasonOf(client(stub).login(CREDENTIALS))).resolves.toBe("no_further_hop");
-  });
-
-  it("navigates to the stub's own literal authorization URL when it carries no form", async () => {
-    // The shape a live, unauthenticated capture of a real deployment's stub
-    // actually carried: no `<form>` anywhere on the page, just the controller
-    // call with the URL as one of its own arguments and its flag set to
-    // navigate rather than submit.
-    const stub = routed({
-      "GET /prd/Authentication/Login": () => redirect(`${HOST}/prd/OpenId?op=synthetic-op`),
-      "GET /prd/OpenId": () =>
-        html(openIdRedirectPage(`${HOST}/prd/OpenId/AuthorizeResult?code=synthetic-code`)),
-      "GET /prd/OpenId/AuthorizeResult": () =>
-        redirect(`${HOST}/prd/Home`, ["EpicSession=synthetic-session; Path=/prd/; Secure"]),
-      "GET /prd/Home": () => html(HOME_PAGE),
-      "POST /shellwebapi/login": () => json({ authenticated: true, userId: "OWNER-LOGIN" }),
-    });
 
     await expect(client(stub).login(CREDENTIALS)).resolves.toBe("signed_in");
-    expect(paths(stub)).toStrictEqual([
-      "POST /shellwebapi/login",
-      "GET /prd/Authentication/Login",
-      "GET /prd/OpenId",
-      "GET /prd/OpenId/AuthorizeResult",
-      "GET /prd/Home",
+
+    expect(paths(stub)).toStrictEqual(["POST /shellwebapi/login", ...HANDOFF_SEQUENCE]);
+    // Never the shell's authorize page itself: it is an app, not an endpoint.
+    expect(paths(stub)).not.toContain("GET /app/oauth2/authorize");
+  });
+
+  it("1. posts the literal string {} as text/plain for the SSO token", async () => {
+    const stub = noCodePortal();
+
+    await client(stub).login(CREDENTIALS);
+
+    const post = find(stub, "POST", "/shellwebapi/sso/token");
+    expect(post?.body).toBe("{}");
+    expect(post?.headers["content-type"]).toBe("text/plain");
+  });
+
+  it("1. writes the SSO token as the yum cookie every classic hop then carries", async () => {
+    const stub = noCodePortal();
+
+    await client(stub).login(CREDENTIALS);
+
+    for (const step of HANDOFF_SEQUENCE.slice(1)) {
+      const [method = "", path = ""] = step.split(" ", 2);
+      expect(find(stub, method, path)?.headers.cookie, step).toContain(`yum=${YUM}`);
+    }
+  });
+
+  it("2. reaches the stub through the login path, and loads nothing from the shell's authorize route", async () => {
+    const stub = noCodePortal();
+
+    await client(stub).login(CREDENTIALS);
+
+    const start = stub.calls.findIndex((call) => call.url.endsWith("/prd/Authentication/Login"));
+    expect(stub.calls[start + 1]?.url).toBe(`${HOST}/prd/OpenId?forceAuthn=true&op=synthetic-op`);
+  });
+
+  it("3. trades the authorization request for a code with fields read off the stub's URL", async () => {
+    const stub = noCodePortal();
+
+    await client(stub).login(CREDENTIALS);
+
+    const post = find(stub, "POST", "/api/mychartAuth/getAuthCode");
+    expect(post?.headers["content-type"]).toBe("application/json");
+    expect(JSON.parse(post?.body ?? "{}")).toStrictEqual({
+      clientId: "synthetic-client",
+      scope: "openid",
+      responseType: "code",
+      // Not a fresh id: the PKCE challenge, verbatim.
+      guid: "synthetic-challenge",
+      nonce: "synthetic-nonce",
+    });
+  });
+
+  it("4. goes to the stub's redirect_uri with the code and the stub's state", async () => {
+    const stub = noCodePortal();
+
+    await client(stub).login(CREDENTIALS);
+
+    const result = new URL(find(stub, "GET", RESULT_PATH)?.url ?? "");
+    expect(`${result.origin}${result.pathname}`).toBe(`${HOST}${RESULT_PATH}`);
+    expect(Object.fromEntries(result.searchParams)).toStrictEqual({
+      code: AUTH_CODE,
+      state: STATE,
+    });
+  });
+
+  it("5. finalizes with the echoed values, the stub's encrypted ones and the result page's token", async () => {
+    const stub = noCodePortal();
+
+    await client(stub).login(CREDENTIALS);
+
+    const post = find(stub, "POST", "/prd/OpenId/FinalizeAuthResponse");
+    expect(post?.headers["content-type"]).toBe("application/x-www-form-urlencoded");
+    expect(post?.headers["x-requested-with"]).toBe("XMLHttpRequest");
+    // The AuthorizeResult page's token, not the stub's.
+    expect(post?.headers.__requestverificationtoken).toBe(RESULT_TOKEN);
+    expect(new URL(post?.url ?? "").searchParams.get("noCache")).toBe("0.5");
+    expect([...new URLSearchParams(post?.body ?? "")]).toStrictEqual([
+      ["AuthCode", AUTH_CODE],
+      ["StateFromOP", STATE],
+      ["EncryptedNonce", "synthetic-enc-nonce"],
+      ["EncryptedState", "synthetic-enc-state"],
+      ["EncryptedCodeVerifier", "synthetic-enc-verifier"],
+      ["Error", ""],
+      ["ResponseMode", "query"],
+      ["Issuer", ""],
     ]);
   });
 
-  it("does not navigate when the stub's own flag says it means to submit a form instead", async () => {
-    // The controller call is present, but says `submitForm: true` -- and no
-    // form exists on the page for the bridge to have found above. Following
-    // the URL anyway would not be what the real script does.
-    const stub = routed({
-      "GET /prd/Authentication/Login": () => redirect(`${HOST}/prd/OpenId?op=synthetic-op`),
-      "GET /prd/OpenId": () =>
-        html(openIdRedirectPage(`${HOST}/prd/OpenId/AuthorizeResult?code=synthetic-code`, true)),
-      "POST /shellwebapi/login": () => json({ authenticated: true, userId: "OWNER-LOGIN" }),
-    });
+  it("6. follows finalize's redirectUri to Home carrying the session it set", async () => {
+    const stub = noCodePortal();
 
-    await expect(reasonOf(client(stub).login(CREDENTIALS))).resolves.toBe("no_further_hop");
+    await client(stub).login(CREDENTIALS);
+
+    expect(find(stub, "GET", "/prd/Home")?.headers.cookie).toContain(`${SESSION_COOKIE}=`);
   });
 
-  it("gives up with a hop count when the handoff loops for ever", async () => {
-    const stub = routed({
-      "GET /prd/Authentication/Login": () => redirect(`${HOST}/prd/OpenId?op=synthetic-op`),
-      "GET /prd/OpenId": () => html(OPENID_FORM_PAGE),
-      // Straight back to the stub: authorised nothing, changed nothing.
-      "POST /shell/api/oauth2/authorize": () => redirect(`${HOST}/prd/OpenId?op=synthetic-op`),
-      "POST /shellwebapi/login": () => json({ authenticated: true, userId: "OWNER-LOGIN" }),
-    });
-
-    await expect(reasonOf(client(stub).login(CREDENTIALS))).resolves.toBe("hop_budget");
-  });
-
-  it("does not hop into a noscript fallback the handoff stub carries for browsers without JS", async () => {
-    // The same noscript trap discovery has to avoid: the stub's own page can
-    // carry a no-JS fallback, and the bridge goes through the same
-    // `followBodyRedirects` helper discovery does. If it followed that hop it
-    // would land on a page with no form to submit and no session to speak of.
-    const withNoscriptFallback = openIdFormPageWithNoscriptFallback(`${HOST}/prd/nojs.asp`);
-    const stub = routed({
-      ...BRIDGE_ROUTES,
-      "GET /prd/OpenId": () => html(withNoscriptFallback),
-      "GET /prd/nojs.asp": () => html("<!doctype html><html><body>no javascript</body></html>"),
-      "POST /shellwebapi/login": () => json({ authenticated: true, userId: "OWNER-LOGIN" }),
+  it("does not follow an off-site redirectUri, and asks Home instead", async () => {
+    const stub = noCodePortal({
+      "POST /prd/OpenId/FinalizeAuthResponse": () => {
+        const headers = new Headers();
+        headers.append("set-cookie", `${SESSION_COOKIE}=synthetic-session; Path=/prd/; Secure`);
+        return json({ redirectUri: "https://elsewhere.example/prd/Home" }, { headers });
+      },
     });
 
     await expect(client(stub).login(CREDENTIALS)).resolves.toBe("signed_in");
-    expect(paths(stub)).not.toContain("GET /prd/nojs.asp");
+    expect(stub.calls.some((call) => call.url.startsWith("https://elsewhere.example"))).toBe(false);
   });
 
-  it("accepts a landing it does not recognise once Home itself answers", async () => {
-    const stub = routed({
-      "GET /prd/Authentication/Login": () => redirect(`${HOST}/prd/OpenId?op=synthetic-op`),
-      "GET /prd/OpenId": () => redirect(`${HOST}/prd/Dashboard`),
-      "GET /prd/Dashboard": () => html(HOME_PAGE),
-      "GET /prd/Home": () => html(HOME_PAGE),
-      "POST /shellwebapi/login": () => json({ authenticated: true, userId: "OWNER-LOGIN" }),
+  const failures: [string, Record<string, Route>][] = [
+    ["sso_token_refused", { "POST /shellwebapi/sso/token": () => json({}, { status: 401 }) }],
+    ["sso_token_unreadable", { "POST /shellwebapi/sso/token": () => json({ other: "x" }) }],
+    [
+      "stub_unrecognized",
+      { "GET /prd/OpenId": () => html("<!doctype html><html><body>oidcnonce</body></html>") },
+    ],
+    [
+      "stub_submits_form",
+      { "GET /prd/OpenId": () => html(openIdRequestPage(authorizeUrl(), true)) },
+    ],
+    [
+      "authorize_url_unreadable",
+      {
+        "GET /prd/OpenId": () => html(openIdRequestPage(authorizeUrl({ code_challenge: null }))),
+      },
+    ],
+    [
+      "redirect_uri_offsite",
+      {
+        "GET /prd/OpenId": () =>
+          html(
+            openIdRequestPage(
+              authorizeUrl({ redirect_uri: `https://elsewhere.example${RESULT_PATH}` }),
+            ),
+          ),
+      },
+    ],
+    [
+      "auth_code_refused",
+      {
+        "POST /shellwebapi/api/mychartAuth/getAuthCode": () =>
+          json({ message: "invalid" }, { status: 400 }),
+      },
+    ],
+    ["auth_code_unreadable", { "POST /shellwebapi/api/mychartAuth/getAuthCode": () => json({}) }],
+    [
+      "authorize_result_unrecognized",
+      {
+        "GET /prd/OpenId/AuthorizeResult": () =>
+          html(`<input name="__RequestVerificationToken" type="hidden" value="${RESULT_TOKEN}" />`),
+      },
+    ],
+    [
+      "authorize_result_no_token",
+      {
+        "GET /prd/OpenId/AuthorizeResult": () =>
+          html(openIdResponsePage(AUTH_CODE, STATE).replace(/<input[^>]*>/u, "")),
+      },
+    ],
+    [
+      "finalize_refused",
+      { "POST /prd/OpenId/FinalizeAuthResponse": () => json({}, { status: 400 }) },
+    ],
+    ["finalize_unreadable", { "POST /prd/OpenId/FinalizeAuthResponse": () => json({}) }],
+    [
+      "not_signed_in",
+      // Finalize answers, but sets no session: Home bounces to the login path.
+      {
+        "POST /prd/OpenId/FinalizeAuthResponse": () => json({ redirectUri: "/prd/Home" }),
+      },
+    ],
+  ];
+
+  it.each(failures)(
+    "reports portal_handoff_failed with reason %s when that step fails",
+    async (reason, overrides) => {
+      const error = await failureOf(client(noCodePortal(overrides)).login(CREDENTIALS));
+
+      expect(error.code).toBe("portal_handoff_failed");
+      expect(error.details?.reason).toBe(reason);
+    },
+  );
+
+  it("stops at the first failing step without making the later ones", async () => {
+    const stub = noCodePortal({
+      "POST /shellwebapi/api/mychartAuth/getAuthCode": () => json({}, { status: 400 }),
+    });
+
+    await codeOf(client(stub).login(CREDENTIALS));
+
+    expect(find(stub, "GET", RESULT_PATH)).toBeUndefined();
+    expect(find(stub, "POST", "/prd/OpenId/FinalizeAuthResponse")).toBeUndefined();
+  });
+
+  it("runs the same hand-off after an accepted emailed code", async () => {
+    const stub = twoStepPortal();
+    const portal = await awaitingCode(stub);
+
+    await portal.secondaryValidation.validate("123456");
+
+    const after = paths(stub).slice(
+      paths(stub).indexOf("POST /shellwebapi/verification/code/validate"),
+    );
+    expect(after.filter((step) => HANDOFF_SEQUENCE.includes(step))).toStrictEqual(HANDOFF_SEQUENCE);
+  });
+});
+
+/** A jar that already holds the trust cookie a previous sign-in minted. */
+function trustedJar(): CookieJar {
+  const jar = new CookieJar({ now: () => T0 });
+  jar.setCookie(HOST, `${USER_ID}-rememberMeToken=synthetic-trust-token; Path=/; Secure`);
+  return jar;
+}
+
+describe("a device the shell trusted before", () => {
+  it("posts the trust token back and signs in without a code", async () => {
+    const stub = twoStepPortal();
+
+    await expect(client(stub, trustedJar()).login(CREDENTIALS)).resolves.toBe("signed_in");
+
+    const check = find(stub, "POST", "/api/mfa/validateTrustThisDeviceToken");
+    expect(check?.headers["content-type"]).toBe("application/json");
+    expect(JSON.parse(check?.body ?? "{}")).toStrictEqual({
+      userId: USER_ID,
+      rememberMeToken: "synthetic-trust-token",
+    });
+    expect(paths(stub)).toStrictEqual([
+      "POST /shellwebapi/login",
+      "POST /shellwebapi/api/mfa/validateTrustThisDeviceToken",
+      ...HANDOFF_SEQUENCE,
+    ]);
+    expect(find(stub, "POST", "/verification/code/generate")).toBeUndefined();
+  });
+
+  it("forgets the token and asks for a code when the shell answers 410", async () => {
+    const stub = portal({
+      ...handoffRoutes(),
+      "POST /shellwebapi/login": () => loginResponse(true),
+      "POST /shellwebapi/api/mfa/validateTrustThisDeviceToken": () => json({}, { status: 410 }),
+    });
+    const jar = trustedJar();
+
+    await expect(client(stub, jar).login(CREDENTIALS)).resolves.toBe("awaiting_code");
+    expect(jar.has(HOST, `${USER_ID}-rememberMeToken`)).toBe(false);
+    expect(find(stub, "POST", "/shellwebapi/sso/token")).toBeUndefined();
+  });
+
+  it("keeps the token but asks for a code on any other refusal", async () => {
+    const stub = portal({
+      ...handoffRoutes(),
+      "POST /shellwebapi/login": () => loginResponse(true),
+      "POST /shellwebapi/api/mfa/validateTrustThisDeviceToken": () => json({}, { status: 400 }),
+    });
+    const jar = trustedJar();
+
+    await expect(client(stub, jar).login(CREDENTIALS)).resolves.toBe("awaiting_code");
+    expect(jar.has(HOST, `${USER_ID}-rememberMeToken`)).toBe(true);
+  });
+
+  it("asks for a code without calling the check when there is no trust cookie", async () => {
+    const stub = twoStepPortal();
+
+    await expect(client(stub).login(CREDENTIALS)).resolves.toBe("awaiting_code");
+    expect(find(stub, "POST", "/api/mfa/validateTrustThisDeviceToken")).toBeUndefined();
+  });
+
+  it("wants a code only when both of the login response's MFA flags are set", async () => {
+    const stub = noCodePortal({
+      "POST /shellwebapi/login": () =>
+        loginResponse(false, { isMfaEnabled: true, isPortalMfaEnabled: false }),
     });
 
     await expect(client(stub).login(CREDENTIALS)).resolves.toBe("signed_in");
-    expect(find(stub, "GET", "/prd/Home")).toBeDefined();
-  });
-
-  it("does not take a keepalive's word for it when Home says the session is anonymous", async () => {
-    // The regression: the chain stops short of the classic session, the keepalive
-    // answers the anonymous session the stub handed out, and the bridge used to
-    // report signed_in -- leaving the next sync to bounce off VisitsList.
-    const stub = routed({
-      "GET /prd/Authentication/Login": () => redirect(`${HOST}/prd/OpenId?op=synthetic-op`),
-      "GET /prd/OpenId": () => html(OPENID_FORM_PAGE),
-      "POST /shell/api/oauth2/authorize": () => redirect(`${HOST}/app/verify`),
-      "GET /app/verify": () =>
-        html("<!doctype html><html><body><app-root></app-root></body></html>"),
-      "GET /prd/Home/KeepAlive": () => json(1),
-      "GET /prd/Home": () => redirect(`${HOST}/prd/Authentication/Login`),
-      "POST /shellwebapi/login": () => json({ authenticated: true, userId: "OWNER-LOGIN" }),
-    });
-
-    await expect(reasonOf(client(stub).login(CREDENTIALS))).resolves.toBe("no_further_hop");
-    expect(find(stub, "GET", "/prd/Home/KeepAlive")).toBeUndefined();
-  });
-
-  it("does not count a Home that still carries the handoff stub as arrived", async () => {
-    const stub = routed({
-      "GET /prd/Authentication/Login": () => redirect(`${HOST}/prd/Home`),
-      "GET /prd/Home": () => html("<!doctype html><html><body>oidcnonce</body></html>"),
-      "POST /shellwebapi/login": () => json({ authenticated: true, userId: "OWNER-LOGIN" }),
-    });
-
-    await expect(codeOf(client(stub).login(CREDENTIALS))).resolves.toBe("portal_handoff_failed");
   });
 });
 
 /** A shell that wants a code but whose login answer never says so. */
 function silentMfaPortal(): PortalFetchStub {
-  return routed({
-    "GET /prd/Authentication/Login": () => redirect(`${HOST}/prd/OpenId?op=synthetic-op`),
-    "GET /prd/OpenId": () => html(OPENID_FORM_PAGE),
-    // Still waiting for its code, so the shell sends the authorize hop back to
-    // one of its own pages instead of answering it.
-    "POST /shell/api/oauth2/authorize": () => redirect(`${HOST}/app/verify`),
-    "GET /app/verify": () => html("<!doctype html><html><body><app-root></app-root></body></html>"),
-    "GET /prd/Home": () => redirect(`${HOST}/prd/Authentication/Login`),
+  return portal({
+    ...handoffRoutes(),
+    // Still waiting for its code, so the shell will not mint an SSO token.
+    "POST /shellwebapi/sso/token": () => json({}, { status: 401 }),
     "POST /shellwebapi/login": () => json({ userId: "OWNER-LOGIN" }),
     "POST /shellwebapi/verification/code/generate": () => json({ success: true }),
   });
@@ -609,12 +821,9 @@ describe("a login response that says nothing about a code", () => {
   });
 
   it("still fails outright when the shell said the password signed us in", async () => {
-    const stub = routed({
-      "GET /prd/Authentication/Login": () => redirect(`${HOST}/prd/OpenId?op=synthetic-op`),
-      "GET /prd/OpenId": () => html(OPENID_FORM_PAGE),
-      "POST /shell/api/oauth2/authorize": () => redirect(`${HOST}/app/verify`),
-      "GET /app/verify": () => html("<!doctype html><html><body></body></html>"),
-      "GET /prd/Home": () => redirect(`${HOST}/prd/Authentication/Login`),
+    const stub = portal({
+      ...handoffRoutes(),
+      "POST /shellwebapi/sso/token": () => json({}, { status: 401 }),
       "POST /shellwebapi/login": () => json({ authenticated: true, userId: "OWNER-LOGIN" }),
     });
 

@@ -160,70 +160,40 @@ export function findAntiforgeryField(
 }
 
 /**
- * A form this page expects a script to submit for it, by the form's `id`.
+ * [confirmed from capture] The hand-off stub's controller call:
+ * `OpenIdRequestController(nonce, state, codeVerifier, url, workflow,
+ * submitForm)`, all six arguments filled in server-side.
  *
- * The OpenID handoff stub is a page with no visible content: a hidden form whose
- * fields are the authorization request, and a script whose only job is to submit
- * it. A client that follows redirects but not that submit stops one hop short of
- * the sign-in, so the bridge has to do the submit itself.
- *
- * The fields are every named `<input>` on the page rather than only the ones
- * inside this form: the stub carries nothing else, `inputFields` is already the
- * bounded scanner this module is built on, and pairing tags with their closing
- * `</form>` would mean actually parsing. If a future stub grows a second form
- * this will send too much, which the authorization endpoint ignores.
- *
- * `ids` is matched case-insensitively and in order, and the action is returned
- * exactly as written -- relative, which the caller resolves against the page.
- */
-export function autoSubmitForm(
-  html: string,
-  ids: readonly string[],
-): { action: string; fields: Map<string, string> } | null {
-  const wanted = new Set(ids.map((id) => id.toLowerCase()));
-  for (const [tag] of html.matchAll(FORM_TAG)) {
-    const id = attribute(tag, ID_ATTRIBUTE);
-    if (id === null || !wanted.has(id.toLowerCase())) continue;
-    const action = attribute(tag, ACTION_ATTRIBUTE);
-    if (action === null || action === "") continue;
-    return { action, fields: inputFields(html) };
-  }
-  return null;
-}
-
-/**
- * [confirmed] The handoff stub's own controller call, when it carries the
- * authorization URL as a literal argument rather than rendering a form at all.
- *
- * A live, unauthenticated fetch of a real `custom_oidc` deployment's stub
- * confirmed the shape: `new ....OpenIdRequestController(nonce, state,
- * codeVerifier, url, workflow, submitForm)`, all six arguments already filled
- * in server-side. The controller's own script -- the one `MARKERS.openIdHandoff`
- * already matches by name -- does exactly one of two things with them: when
- * `submitForm` is `true` it submits `#OIDCForm` (`autoSubmitForm` above, tried
- * first because a form only exists on the page at all in that case); when it is
- * `false` it does `window.location = url` *from inside that external, cached
- * script*, which this module has no way to run. Reading `url` off of this
- * constructor call, rather than trying to find a `location` assignment inline,
- * is the only way to follow that hop -- there is no assignment in the fetched
- * page to find.
+ * The controller's own script parks the first three and the workflow in
+ * `sessionStorage` -- the response controller later posts them back to the
+ * classic side as `EncryptedNonce`, `EncryptedState` and
+ * `EncryptedCodeVerifier` -- and then either submits a form (`submitForm`
+ * true, never observed) or navigates to `url` (false, as captured). Those
+ * values are only ever in the page as literal arguments, so this is the one
+ * place they can be read from.
  */
 const OIDC_REQUEST_CALL = /OpenIdRequestController\(([^()]*)\)/iu;
 
 /**
- * One argument of that call: a double-quoted string, or a bare boolean.
- * Applied to the short, already-isolated argument list `OIDC_REQUEST_CALL`
- * captured -- never the whole page -- so a comma inside a quoted value (the
- * URL argument routinely has several, none of them raw commas, but nothing
- * here assumes that) never gets mistaken for an argument separator: this
- * tokenises quoted spans instead of splitting on `,`.
+ * [confirmed from capture] The `AuthorizeResult` page's controller call:
+ * `OpenIdResponseController(code, state, error, responseMode, issuer)`.
+ */
+const OIDC_RESPONSE_CALL = /OpenIdResponseController\(([^()]*)\)/iu;
+
+/**
+ * One argument of either call: a double-quoted string, or a bare boolean.
+ * Applied to the short, already-isolated argument list the call pattern
+ * captured -- never the whole page -- so a comma inside a quoted value never
+ * gets mistaken for an argument separator: this tokenises quoted spans
+ * instead of splitting on `,`.
  */
 const OIDC_ARG = /"([^"]*)"|(true|false)/giu;
 
 /**
  * A `\uXXXX` escape, exactly as a JS string literal inside a `<script>` tag
- * carries one -- distinct from `decodeEntities`'s HTML character references,
- * which this text never goes through at all (it is JS source, not markup).
+ * carries one -- the captured stub's URL argument writes every `&` as
+ * `&`. Distinct from `decodeEntities`'s HTML character references, which
+ * this text never goes through at all (it is JS source, not markup).
  */
 const JS_UNICODE_ESCAPE = /\\u([0-9a-f]{4})/giu;
 
@@ -233,33 +203,71 @@ function decodeJsUnicodeEscapes(value: string): string {
   );
 }
 
+/** Every argument of the first `call` on the page, decoded, or null. */
+function controllerArgs(html: string, call: RegExp): string[] | null {
+  const match = call.exec(html);
+  if (match === null) return null;
+  const list = match[1] ?? "";
+  return Array.from(list.matchAll(OIDC_ARG), (arg) =>
+    decodeJsUnicodeEscapes(arg[1] ?? arg[2] ?? ""),
+  );
+}
+
 export interface OpenIdRequest {
+  /** Server-encrypted, opaque; echoed back to the classic side verbatim. */
+  encryptedNonce: string;
+  encryptedState: string;
+  encryptedCodeVerifier: string;
   /** The already-minted authorization URL, decoded, exactly as the page carries it. */
   url: string;
-  /** True when the page means to submit a form instead of navigating here. */
+  /** True when the page means to submit a form instead of navigating to `url`. */
   submitForm: boolean;
 }
 
 /**
- * The handoff stub's controller call, parsed. Null when the page carries none
- * -- a stub that renders `#OIDCForm` and nothing else matches `autoSubmitForm`
- * and never needs this, and a page that is not this stub at all naturally has
- * neither.
- *
- * The constructor's six arguments are nonce, state, PKCE verifier, the URL,
- * a workflow label, and the submit-a-form boolean, in that fixed order -- so
- * the fourth and sixth positions of whatever `OIDC_ARG` finds, in order, are
- * `url` and `submitForm`.
+ * The hand-off stub's controller call, parsed. Null when the page carries none,
+ * or when any of the four strings the hand-off needs is missing or empty --
+ * an incomplete call is as useless as an absent one.
  */
 export function parseOpenIdRequest(html: string): OpenIdRequest | null {
-  const call = OIDC_REQUEST_CALL.exec(html);
-  if (call === null) return null;
-  const list = call[1] ?? "";
-  const args = Array.from(list.matchAll(OIDC_ARG), (arg) => arg[1] ?? arg[2] ?? "");
-  const url = args[3];
-  return url === undefined || url === ""
-    ? null
-    : { url: decodeJsUnicodeEscapes(url), submitForm: args[5] === "true" };
+  const args = controllerArgs(html, OIDC_REQUEST_CALL);
+  if (args === null) return null;
+  const [encryptedNonce, encryptedState, encryptedCodeVerifier, url] = args;
+  const complete = [encryptedNonce, encryptedState, encryptedCodeVerifier, url].every(
+    (value) => value !== undefined && value !== "",
+  );
+  if (!complete) return null;
+  return {
+    encryptedNonce: encryptedNonce ?? "",
+    encryptedState: encryptedState ?? "",
+    encryptedCodeVerifier: encryptedCodeVerifier ?? "",
+    url: url ?? "",
+    submitForm: args[5] === "true",
+  };
+}
+
+export interface OpenIdResponse {
+  /** The authorization code, as the classic side echoed it into the page. */
+  code: string;
+  /** The `state` the code came back with -- the finalize call's `StateFromOP`. */
+  state: string;
+  /** Empty on success. */
+  error: string;
+  responseMode: string;
+  /** Empty in the capture. */
+  issuer: string;
+}
+
+/**
+ * The `AuthorizeResult` page's controller call, parsed. Null when the page
+ * carries none, or when it carries no code -- a page that echoes no code has
+ * nothing to finalize.
+ */
+export function parseOpenIdResponse(html: string): OpenIdResponse | null {
+  const args = controllerArgs(html, OIDC_RESPONSE_CALL);
+  if (args === null) return null;
+  const [code = "", state = "", error = "", responseMode = "", issuer = ""] = args;
+  return code === "" ? null : { code, state, error, responseMode, issuer };
 }
 
 /**
@@ -272,9 +280,7 @@ export function parseOpenIdRequest(html: string): OpenIdRequest | null {
  * nest in HTML, so that is exact rather than a heuristic, bounded and linear
  * the same way every other scan in this module is.
  *
- * This is what `autoSubmitForm` above deliberately does not do: that one reads
- * every input on the *page*, because the OpenID stub carries nothing else. A
- * classic login page is the opposite case -- it can render a second,
+ * The scoping matters: a classic login page can render a second,
  * never-submitted form next to the one a script actually posts (see
  * `client.ts`'s "envelope" handling), and echoing that other form's fields
  * back on a POST is a field a real browser never would have sent.

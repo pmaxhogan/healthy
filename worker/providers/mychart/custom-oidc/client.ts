@@ -9,8 +9,11 @@
  *
  * The shape of it:
  *
- *  - `login` POSTs the credentials at the shell's API. If the shell wants a code,
- *    that is `awaiting_code` and nothing else happens. If it does not, the OIDC
+ *  - `login` POSTs the credentials at the shell's API. If the shell wants a code
+ *    and the jar holds a trust-this-device cookie from an earlier sign-in, the
+ *    cookie's token is posted back first, exactly as the shell's own login
+ *    screen does; if the shell accepts it, the bridge runs and no code is sent.
+ *    Otherwise that is `awaiting_code` and nothing else happens. If it does not, the OIDC
  *    bridge runs immediately, because "signed in" has to mean the classic session
  *    exists -- the caller marks the account active on the strength of it.
  *  - `sendCode` needs three values the classic flow never had: the user id the
@@ -41,6 +44,7 @@ import {
   postGenerateCode,
   postLogin,
   postValidateCode,
+  postValidateTrustToken,
   saveTrustToken,
 } from "./api.ts";
 import { bridgeToClassicSession } from "./bridge.ts";
@@ -102,6 +106,7 @@ export function createCustomOidcClient(deps: CustomOidcClientDeps): PortalClient
     apiBasePath: requireApiBase(deps),
   });
 
+  const random = deps.random ?? Math.random;
   const bridge = async (): Promise<void> => {
     const api = shell();
     await bridgeToClassicSession({
@@ -109,8 +114,31 @@ export function createCustomOidcClient(deps: CustomOidcClientDeps): PortalClient
       logger,
       baseUrl: endpoint.baseUrl,
       mountPath: endpoint.mountPath,
+      antiforgeryFieldName: endpoint.antiforgeryFieldName,
+      // The classic side's own scripts send a bare `Math.random()` here.
+      noCache: () => String(random()),
       isSessionAlive: () => classic.isSessionAlive(),
     });
+  };
+
+  /**
+   * [confirmed from capture] Skip the code on a device the shell trusted before.
+   *
+   * What the shell's own login screen does when the login response wants a code
+   * and the trust cookie exists: post the cookie's value back. True only when
+   * the shell accepted it. A 410 means the shell stopped trusting it, so the
+   * cookie is dropped, as the screen does; anything else keeps it. Every "no"
+   * falls back to the emailed code.
+   */
+  const trustedDevice = async (userId: string): Promise<boolean> => {
+    const api = shell();
+    const name = `${userId}${REMEMBER_ME_COOKIE_SUFFIX}`;
+    const token = jar.valueOf(api.authBaseUrl, name);
+    if (token === null || token === "") return false;
+    const check = await postValidateTrustToken(api, { userId, rememberMeToken: token });
+    logger.info("portal.trust_token_checked", { outcome: check, flavor: endpoint.flavor });
+    if (check === "forgotten") jar.setCookie(api.authBaseUrl, `${name}=; Path=/; Max-Age=0`);
+    return check === "trusted";
   };
 
   /** The user id every MFA call is keyed on, from this attempt or the last one. */
@@ -133,8 +161,20 @@ export function createCustomOidcClient(deps: CustomOidcClientDeps): PortalClient
     if (outcome.contact !== null) jar.setExtra(JAR_EXTRAS.contact, outcome.contact);
 
     if (outcome.mfaRequired) {
-      logger.info("portal.login", { signInStatus: "awaiting_code", flavor: endpoint.flavor });
-      return "awaiting_code";
+      const trusted = outcome.userId !== null && (await trustedDevice(outcome.userId));
+      if (!trusted) {
+        logger.info("portal.login", { signInStatus: "awaiting_code", flavor: endpoint.flavor });
+        return "awaiting_code";
+      }
+      // A trusted device is signed in as far as the shell is concerned, so the
+      // hand-off runs now, and a failure in it is a real hand-off failure.
+      await bridge();
+      logger.info("portal.login", {
+        signInStatus: "signed_in",
+        flavor: endpoint.flavor,
+        trustedDevice: true,
+      });
+      return "signed_in";
     }
     // "Signed in" has to mean the classic session exists, because that is what
     // the caller marks the account active on.
