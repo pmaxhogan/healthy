@@ -18,7 +18,16 @@ import { noopLogger } from "../../../../worker/lib/log.ts";
 import { CookieJar } from "../../../../worker/providers/mychart/cookie-jar.ts";
 import { createCustomOidcClient } from "../../../../worker/providers/mychart/custom-oidc/client.ts";
 
-import { HOME_PAGE, HOST, html, json, OPENID_FORM_PAGE, redirect, routed } from "./fixtures.ts";
+import {
+  HOME_PAGE,
+  HOST,
+  html,
+  json,
+  openIdFormPageWithNoscriptFallback,
+  OPENID_FORM_PAGE,
+  redirect,
+  routed,
+} from "./fixtures.ts";
 
 import type { PortalCall, PortalFetchStub } from "./fixtures.ts";
 import type { AppError } from "../../../../worker/lib/errors.ts";
@@ -477,6 +486,23 @@ describe("the OpenID bridge", () => {
     });
 
     await expect(reasonOf(client(stub).login(CREDENTIALS))).resolves.toBe("hop_budget");
+  });
+
+  it("does not hop into a noscript fallback the handoff stub carries for browsers without JS", async () => {
+    // The same noscript trap discovery has to avoid: the stub's own page can
+    // carry a no-JS fallback, and the bridge goes through the same
+    // `followBodyRedirects` helper discovery does. If it followed that hop it
+    // would land on a page with no form to submit and no session to speak of.
+    const withNoscriptFallback = openIdFormPageWithNoscriptFallback(`${HOST}/prd/nojs.asp`);
+    const stub = routed({
+      ...BRIDGE_ROUTES,
+      "GET /prd/OpenId": () => html(withNoscriptFallback),
+      "GET /prd/nojs.asp": () => html("<!doctype html><html><body>no javascript</body></html>"),
+      "POST /shellwebapi/login": () => json({ authenticated: true, userId: "OWNER-LOGIN" }),
+    });
+
+    await expect(client(stub).login(CREDENTIALS)).resolves.toBe("signed_in");
+    expect(paths(stub)).not.toContain("GET /prd/nojs.asp");
   });
 
   it("accepts a landing it does not recognise when the session is demonstrably alive", async () => {

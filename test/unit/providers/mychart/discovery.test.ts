@@ -22,6 +22,8 @@ import {
   loginPageOld,
   metaRedirectPage,
   NOT_A_LOGIN_PAGE,
+  openIdStubWithBodyRedirect,
+  openIdStubWithNoscriptFallback,
   OPENID_STUB_PAGE,
   redirect,
   routed,
@@ -448,5 +450,49 @@ describe("discoverPortal: the custom OpenID flavour", () => {
     const stub = routed({ "GET /MyChart/Authentication/Login": () => html(loginPageNew()) });
 
     await expect(discoverPortal(HOST, deps(stub))).resolves.toMatchObject({ flavor: "classic" });
+  });
+
+  it("recognises the stub even though it carries a noscript fallback for browsers without JS", async () => {
+    // The chain a live custom_oidc deployment was found to answer with:
+    // Login -> 302 -> OpenId, whose 200 body is the handoff stub *and* a
+    // <noscript><meta refresh> to a no-JS page. A browser with JavaScript
+    // enabled -- which this client impersonates -- never follows that refresh,
+    // so neither may this scrape.
+    const stub = routed({
+      "GET /prd/Authentication/Login": () =>
+        redirect(`${HOST}/prd/OpenId?op=synthetic-op&forceAuthn=False`),
+      "GET /prd/OpenId": () => html(openIdStubWithNoscriptFallback(`${HOST}/prd/nojs.asp`)),
+      "GET /prd/nojs.asp": () => html(NOT_A_LOGIN_PAGE),
+    });
+
+    await expect(discoverPortal(HOST, deps(stub, "prd"))).resolves.toMatchObject({
+      flavor: "custom_oidc",
+      mountPath: "/prd/",
+    });
+    // The no-JS fallback is never reached.
+    expect(stub.calls.map((call) => new URL(call.url).pathname)).toStrictEqual([
+      "/prd/Authentication/Login",
+      "/prd/OpenId",
+    ]);
+  });
+
+  it("recognises the stub before following a body redirect that is not inside noscript at all", async () => {
+    // Belt and braces beyond the noscript fix: the stub's own markers are
+    // checked before any body-level hop is considered, so an unrelated body
+    // redirect elsewhere on the stub page cannot walk discovery past it either.
+    const stub = routed({
+      "GET /prd/Authentication/Login": () => redirect(`${HOST}/prd/OpenId?op=synthetic-op`),
+      "GET /prd/OpenId": () => html(openIdStubWithBodyRedirect(`${HOST}/prd/somewhere-else`)),
+      "GET /prd/somewhere-else": () => html(NOT_A_LOGIN_PAGE),
+    });
+
+    await expect(discoverPortal(HOST, deps(stub, "prd"))).resolves.toMatchObject({
+      flavor: "custom_oidc",
+      mountPath: "/prd/",
+    });
+    expect(stub.calls.map((call) => new URL(call.url).pathname)).toStrictEqual([
+      "/prd/Authentication/Login",
+      "/prd/OpenId",
+    ]);
   });
 });

@@ -105,6 +105,18 @@ export interface PortalRequest {
   endpoint: string;
   /** Also follow a `<meta refresh>` / `window.location` redirect in a 200 body. */
   followBodyRedirects?: boolean | undefined;
+  /**
+   * Recognise the landed hop before deciding whether to follow a body redirect.
+   *
+   * Checked on every hop `followBodyRedirects` would otherwise act on, and it
+   * takes priority: a hop this returns `true` for is the final answer even when
+   * its body also carries a redirect. Discovery uses this to recognise the
+   * OpenID handoff stub before any further body-level hop is considered -- the
+   * stub can carry a redirect of its own (a no-JS fallback, or something
+   * unrelated) and following it blind would walk straight past the one page
+   * that answers the question discovery is asking.
+   */
+  recognizeLanding?: ((landed: { url: string; body: string }) => boolean) | undefined;
 }
 
 export interface PortalResponse {
@@ -346,7 +358,8 @@ export async function portalFetch(
 
     const body = await response.text();
     rejectIfBlocked(response, body, request.endpoint);
-    const inBody = request.followBodyRedirects === true ? bodyHop(body, hop) : null;
+    const recognized = request.recognizeLanding?.({ url: hop.url, body }) === true;
+    const inBody = !recognized && request.followBodyRedirects === true ? bodyHop(body, hop) : null;
     if (inBody !== null && response.status === 200) {
       hop = inBody;
       continue;
@@ -416,8 +429,11 @@ export function pathOf(url: string): string {
  * Used in two places for two different conclusions: discovery reads it as "this
  * is the custom flavour", and the authenticated client reads it as "the session
  * is gone". It is the same observation either way.
+ *
+ * Takes only the two fields it reads, not a full `PortalResponse`, so discovery
+ * can also pass it as a `PortalRequest.recognizeLanding` hook.
  */
-export function isOpenIdHandoff(response: PortalResponse): boolean {
+export function isOpenIdHandoff(response: Pick<PortalResponse, "url" | "body">): boolean {
   return (
     pathOf(response.url).includes(`/${PATHS.openId.toLowerCase()}`) ||
     bodyMentions(response.body, MARKERS.openIdHandoff)

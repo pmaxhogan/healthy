@@ -14,7 +14,13 @@ import { describe, expect, it } from "vitest";
 import { noopLogger } from "../../../../worker/lib/log.ts";
 import { portalFetch } from "../../../../worker/providers/mychart/http.ts";
 
-import { html, redirect, stubPortal } from "./fixtures.ts";
+import {
+  html,
+  metaRedirectPageWithNoscriptDecoy,
+  noscriptOnlyScriptRedirectPage,
+  redirect,
+  stubPortal,
+} from "./fixtures.ts";
 
 import type { PortalFetchStub } from "./fixtures.ts";
 import type { AppError } from "../../../../worker/lib/errors.ts";
@@ -110,6 +116,38 @@ describe("portalFetch: where a redirect may go", () => {
     // as-is instead, so a caller that was looking for a login form simply does
     // not find one.
     const body = `<meta http-equiv="refresh" content="0;url=${SIBLING}/Landing" />`;
+    const stub = stubPortal(() => html(body));
+
+    const response = await portalFetch(deps(stub), {
+      url: `${SITE}/Home`,
+      endpoint: "Home",
+      followBodyRedirects: true,
+    });
+
+    expect(response.url).toBe(`${SITE}/Home`);
+    expect(response.body).toBe(body);
+    expect(stub.calls).toHaveLength(1);
+  });
+
+  it("follows a same-origin meta refresh outside noscript, ignoring a noscript decoy", async () => {
+    // A real browser with JavaScript enabled never renders a `<noscript>`
+    // element's content, so a redirect hidden inside one must not be preferred
+    // over -- or confused with -- a real one that sits outside it.
+    const body = metaRedirectPageWithNoscriptDecoy(`${SITE}/Landing`, `${SITE}/nojs.asp`);
+    const stub = stubPortal((call) => html(call.url.endsWith("/Home") ? body : "<p>ok</p>"));
+
+    const response = await portalFetch(deps(stub), {
+      url: `${SITE}/Home`,
+      endpoint: "Home",
+      followBodyRedirects: true,
+    });
+
+    expect(response.url).toBe(`${SITE}/Landing`);
+    expect(stub.calls.map((call) => call.url)).not.toContain(`${SITE}/nojs.asp`);
+  });
+
+  it("ignores a window.location redirect that sits inside noscript", async () => {
+    const body = noscriptOnlyScriptRedirectPage(`${SITE}/nojs.asp`);
     const stub = stubPortal(() => html(body));
 
     const response = await portalFetch(deps(stub), {

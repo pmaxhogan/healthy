@@ -170,6 +170,11 @@ async function probe(mount: string, baseUrl: string, deps: DiscoveryDeps): Promi
     endpoint: "Login",
     accept: "html",
     followBodyRedirects: true,
+    // Recognise the OpenID handoff stub before any further body-level hop is
+    // considered: the stub itself can carry a body redirect (a no-JS fallback,
+    // or something unrelated), and following it blind would land past the one
+    // page whose markers say which flavour this deployment is.
+    recognizeLanding: isOpenIdHandoff,
   });
   if (response.status !== 200) return { endpoint: null, reason: "http_error" };
   // Belt and braces over `portalFetch`'s own per-hop rule: the value below is

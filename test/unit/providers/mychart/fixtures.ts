@@ -486,3 +486,83 @@ export const OPENID_FORM_PAGE = `<!doctype html><html><body>
   </form>
   <script>document.getElementById("OIDCForm").submit();</script>
 </body></html>`;
+
+/**
+ * `OPENID_FORM_PAGE`, plus the `<noscript>` fallback a real deployment ships
+ * alongside it for a browser that will not run its scripts.
+ *
+ * This is the shape the bridge has to see through: the form it must submit,
+ * and -- same as the bare stub -- a no-JS refresh it must not follow instead.
+ */
+export function openIdFormPageWithNoscriptFallback(nojsTarget: string): string {
+  return `<!doctype html><html><body>
+  <noscript><meta http-equiv="refresh" content="0;url=${nojsTarget}" /></noscript>
+  <form id="OIDCForm" method="post" action="/shell/api/oauth2/authorize">
+    <input type="hidden" name="client_id" value="synthetic-client" />
+    <input type="hidden" name="state" value="synthetic-state" />
+    <input type="hidden" name="code_challenge" value="synthetic-challenge" />
+    <input type="hidden" name="code_challenge_method" value="S256" />
+  </form>
+  <script>document.getElementById("OIDCForm").submit();</script>
+</body></html>`;
+}
+
+/**
+ * The OpenID handoff stub, plus the `<noscript>` fallback a real deployment
+ * ships alongside it for a browser that will not run its scripts.
+ *
+ * `nojsTarget` is the no-JS landing page. A browser with JavaScript enabled --
+ * which this client impersonates -- never renders a `<noscript>` element's
+ * content, let alone follows a refresh inside it, so a scraper that does is one
+ * hop behind a real browser and lands somewhere with none of this stub's
+ * markers.
+ */
+export function openIdStubWithNoscriptFallback(nojsTarget: string): string {
+  return `<!doctype html><html><head>
+  <script src="/areas/authentication/scripts/controllers/openidrequestcontroller.min.js"></script>
+  <noscript><meta http-equiv="refresh" content="0;url=${nojsTarget}" /></noscript>
+</head><body>
+  <input type="hidden" name="__RequestVerificationToken" value="${TOKEN}" />
+</body></html>`;
+}
+
+/**
+ * The stub again, this time with an unrelated same-origin body redirect that
+ * sits *outside* any `<noscript>` element.
+ *
+ * Proves the stub is recognised on its own markers before a body redirect is
+ * even considered, not merely because `<noscript>` stripping happened to
+ * remove the only one present: this redirect is real, and blindly following it
+ * would still walk past the stub if nothing recognised the stub first.
+ */
+export function openIdStubWithBodyRedirect(target: string): string {
+  return `<!doctype html><html><head>
+  <script src="/areas/authentication/scripts/controllers/openidrequestcontroller.min.js"></script>
+  <script>window.location.href = "${target}";</script>
+</head><body>
+  <input type="hidden" name="__RequestVerificationToken" value="${TOKEN}" />
+</body></html>`;
+}
+
+/**
+ * A `<meta refresh>` outside `<noscript>`, plus a decoy inside one that points
+ * somewhere else. The real target must still be the one used: `<noscript>`
+ * stripping must remove only the decoy, not the redirect a real browser acts on.
+ */
+export function metaRedirectPageWithNoscriptDecoy(target: string, decoyTarget: string): string {
+  return `<!doctype html><html><head>
+  <meta http-equiv="refresh" content="0;url=${target}" />
+  <noscript><meta http-equiv="refresh" content="0;url=${decoyTarget}" /></noscript>
+</head><body>Redirecting</body></html>`;
+}
+
+/**
+ * A page whose only redirect is a `window.location` assignment inside
+ * `<noscript>`. A browser with JavaScript enabled never executes it, so the
+ * page is not a redirect at all as far as this client is concerned.
+ */
+export function noscriptOnlyScriptRedirectPage(target: string): string {
+  return `<!doctype html><html><head>
+  <noscript><script>window.location.href = "${target}";</script></noscript>
+</head><body>ok</body></html>`;
+}

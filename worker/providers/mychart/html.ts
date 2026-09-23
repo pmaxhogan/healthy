@@ -22,6 +22,13 @@ const VALUE_ATTRIBUTE = /\bvalue\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/iu;
 const FORM_TAG = /<form\b[^>]*>/giu;
 const ID_ATTRIBUTE = /\bid\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/iu;
 const ACTION_ATTRIBUTE = /\baction\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/iu;
+/**
+ * A whole `<noscript>...</noscript>` element, including its content.
+ *
+ * A lazy `[\s\S]*?` bounded by a literal closing tag: one scan for the nearest
+ * `</noscript>`, not a pattern that can backtrack across the page.
+ */
+const NOSCRIPT_ELEMENT = /<noscript\b[^>]*>[\s\S]*?<\/noscript\s*>/giu;
 /** `<meta http-equiv="refresh" content="0;url=...">`, in either attribute order. */
 const META_REFRESH = /<meta\b[^>]*http-equiv\s*=\s*["']?refresh["']?[^>]*>/iu;
 const CONTENT_ATTRIBUTE = /\bcontent\s*=\s*(?:"([^"]*)"|'([^']*)')/iu;
@@ -172,15 +179,23 @@ export function autoSubmitForm(
  * `window.location` assignment. A client that only follows `Location` headers
  * sees a successful page with no login form on it and concludes the mount is
  * wrong, so discovery has to read both.
+ *
+ * A `<noscript>` element's content is stripped before either pattern is tried.
+ * It exists for a browser that will not run the page's scripts, so its own
+ * `<meta refresh>` or inline script is exactly the fallback a browser *with*
+ * JavaScript -- which this client impersonates -- never reaches. Reading it
+ * anyway walks the scrape one hop past every page that has both a real handoff
+ * and a no-JS fallback, onto a page with none of the markers that identify it.
  */
 export function bodyRedirectTarget(html: string): string | null {
-  const meta = META_REFRESH.exec(html);
+  const scripted = html.replaceAll(NOSCRIPT_ELEMENT, "");
+  const meta = META_REFRESH.exec(scripted);
   if (meta !== null) {
     const content = attribute(meta[0], CONTENT_ATTRIBUTE);
     const url = content === null ? null : REFRESH_URL.exec(content);
     if (url?.[1] !== undefined && url[1] !== "") return decodeEntities(url[1]);
   }
-  const script = SCRIPT_ASSIGN.exec(html) ?? SCRIPT_REPLACE.exec(html);
+  const script = SCRIPT_ASSIGN.exec(scripted) ?? SCRIPT_REPLACE.exec(scripted);
   const target = script?.[1];
   // A fragment-only or empty assignment is not a redirect anywhere.
   return target === undefined || target === "" || target.startsWith("#")
