@@ -2,17 +2,17 @@
  * The HTML the OAuth routes render when a flow cannot continue.
  *
  * These are not API responses. Every route under `/oauth` is reached by a
- * top-level browser navigation -- the owner clicking "connect", or a provider
+ * top-level browser navigation -- the owner clicking "connect", or an authorization server
  * redirecting back -- so the only useful answer to a failure is a page that says
  * what happened and offers a link that fixes it. A JSON body here would be a raw
  * `{"error":...}` rendered as text in the address bar.
  *
  * Two rules the copy follows:
  *
- *  - **Never name the organisation.** `provider.display_name` is user data and the
- *    logs must not carry it; a page that a provider's error redirect can cause is
+ *  - **Never name the organisation.** A health system's display name is user data and the
+ *    logs must not carry it; a page that an authorization server's error redirect can cause is
  *    not a place to start making exceptions. The pages say "this connection".
- *  - **Never quote the provider's own error text.** `error_description` comes from
+ *  - **Never quote the authorization server's own error text.** `error_description` comes from
  *    a third party and lands in a document; it is reported as a stable code and
  *    nothing else.
  */
@@ -72,7 +72,7 @@ export function invalidStatePage(nonce: string): Response {
   });
 }
 
-/** The page for an `error=` parameter on the way back from a provider. */
+/** The page for an `error=` parameter on the way back from an authorization server. */
 export function authorizationRefusedPage(nonce: string, code: string, retryPath: string): Response {
   return oauthPage({
     nonce,
