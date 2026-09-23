@@ -39,7 +39,7 @@ describe("sealProviderSecret", () => {
 
     const sealed = await sealProviderSecret(dataKey, PROVIDER_ID, "a-confidential-client-secret");
 
-    expect(sealed.startsWith("v1:")).toBe(true);
+    expect(sealed.startsWith("v2:")).toBe(true);
     expect(sealed).not.toContain("confidential");
     await expect(open(dataKey, sealed, providerSecretAad(PROVIDER_ID))).resolves.toBe(
       "a-confidential-client-secret",

@@ -624,6 +624,25 @@ describe("get_document_text", () => {
     expect(row?.payload_enc).not.toContain("Reviewed");
   });
 
+  it("takes the real id and answers with it, while the cache stores only a blind of it", async () => {
+    // Id in: the tool is called with the DocumentReference's real id. Id out: the
+    // answer names the same id. In between, D1 never holds it as a key.
+    const answer = await call(world.client, "get_document_text", {
+      provider: world.seeded.providerA,
+      id: "doc-inline",
+    });
+
+    expect(answer.items[0]?.id).toBe("doc-inline");
+    const keys = await env.DB.prepare("SELECT resource_id FROM fhir_cache").all<{
+      resource_id: string;
+    }>();
+    expect(keys.results.length).toBeGreaterThan(0);
+    for (const { resource_id: stored } of keys.results) {
+      expect(stored).toMatch(/^~[\w-]{22}$/u);
+      expect(stored).not.toContain("doc-inline");
+    }
+  });
+
   it("answers not_found for a document that is not in the cache", async () => {
     const answer = await call(world.client, "get_document_text", {
       provider: world.seeded.providerA,

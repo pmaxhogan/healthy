@@ -7,36 +7,83 @@
  * The portal pass writes every visit `LoadUpcoming` returned, every run; the MCP
  * (`worker/mcp/appointment-items.ts`) reads them back.
  *
- * `payload_enc` is sealed against `portal_visits.payload_enc.<providerId>:<csn>`
- * -- the composite row id, because the primary key is composite -- so a payload
- * copied onto another visit's row, or another provider's, fails to open.
+ * Nothing about the visit is stored in the clear:
  *
- * `content_hash` is the sha256 of the plaintext, for the same reason
- * `fhir_cache` keeps one: sealing is randomised, so it is the only way to tell an
- * unchanged visit from an updated one without re-sealing every row every hour.
+ *   - `csn` is `blindCsn(...)`, a keyed HMAC of the health system and the
+ *     portal's visit number (`worker/db/blind.ts`). Still the primary key and
+ *     still an exact match, but a snapshot no longer carries the portal's own
+ *     identifiers, and the same visit listed by two organisations' portals
+ *     blinds to two unrelated values.
+ *   - `payload_enc` is the whole parsed visit, sealed against
+ *     `portal_visits.payload_enc.<providerId>:<csn>` with the stored (blinded)
+ *     `csn` -- the composite row id, because the primary key is composite. The
+ *     real visit number and start time are only in here.
+ *   - `content_hash` is a keyed digest of the plaintext, for the same reason
+ *     `fhir_cache` keeps one: sealing is randomised, so it is the only way to tell
+ *     an unchanged visit from an updated one without re-sealing every row every
+ *     hour. Keyed, because a plain sha256 of a guessable visit is a confirmation
+ *     oracle.
+ *   - `start_at` is written as 0. The visit's start is in the payload, and every
+ *     reader here already opens the payload; the column survives only until the
+ *     migration that drops it (SQLite cannot drop a NOT NULL column with an index
+ *     on it in place, and the rename migration rebuilds the table anyway).
+ *   - `expires_at` is coarsened to a `EXPIRY_BUCKET_SECONDS` boundary. It is a
+ *     year after the visit, so to the second it *was* the visit's start time;
+ *     rounded up to a 30-day boundary it only drives the purge, which does not
+ *     mind running a few weeks late.
  *
  * The "missing" rule is the calendar's ghost rule, restated for a table: a visit
  * the portal stops returning while it is still ahead is marked `missing` (as far
  * as anyone can tell, it was cancelled); one that stops being returned after its
- * start time is simply over and is left exactly as it was.
+ * start time is simply over and is left exactly as it was. Deciding that needs the
+ * start of each visit that was *not* returned, so exactly those rows are opened.
  */
 
-import { BATCH_CHUNK, all, batch, chunk, run, sha256Hex } from "../client.ts";
+import { blindCsn, blinderFor, isBlinded } from "../blind.ts";
+import { BATCH_CHUNK, all, batch, chunk, run } from "../client.ts";
 import { aadFor, open, seal } from "../crypto.ts";
 
 import type { PortalVisit } from "../../providers/mychart/index.ts";
+import type { Blinder } from "../blind.ts";
 import type { Ctx } from "../client.ts";
 import type { PortalVisitRow, PortalVisitState } from "../rows.ts";
 
 /** How long a visit is kept after it happens (or after it was last seen, if later). */
 const PORTAL_VISIT_RETENTION_SECONDS = 365 * 24 * 3600;
 
-const aad = (providerId: string, csn: string): string =>
-  aadFor("portal_visits", "payload_enc", `${providerId}:${csn}`);
+/**
+ * The granularity `expires_at` is rounded up to. Thirty days: coarse enough that
+ * the column no longer dates the visit, fine enough that the purge still runs
+ * within a month of when it would have.
+ */
+export const EXPIRY_BUCKET_SECONDS = 30 * 24 * 3600;
+
+/** `start_at`'s placeholder: the real start is in the payload only. See the module comment. */
+const SEALED_START_AT = 0;
+
+/** The AAD for one stored visit, by the id the row is stored under. */
+export const portalVisitAad = (providerId: string, storedCsn: string): string =>
+  aadFor("portal_visits", "payload_enc", `${providerId}:${storedCsn}`);
+
+/** The stored digest of one plaintext payload. */
+export function portalVisitDigest(
+  blinder: Blinder,
+  providerId: string,
+  plaintext: string,
+): Promise<string> {
+  return blinder.digest("portal_visits.content_hash", `${providerId}\u{0}${plaintext}`);
+}
+
+/** `expires_at` for a visit starting at `start`, seen at `now`. */
+function portalVisitExpiry(start: number, now: number): number {
+  const exact = Math.max(start, now) + PORTAL_VISIT_RETENTION_SECONDS;
+  return Math.ceil(exact / EXPIRY_BUCKET_SECONDS) * EXPIRY_BUCKET_SECONDS;
+}
 
 /** A stored visit, opened. */
 export interface StoredPortalVisit {
   providerId: string;
+  /** The portal's real visit number, from the payload. */
   csn: string;
   visit: PortalVisit;
   state: PortalVisitState;
@@ -67,17 +114,52 @@ function startSeconds(visit: PortalVisit): number | null {
   return Number.isNaN(ms) ? null : Math.floor(ms / 1000);
 }
 
+/** Earliest first, then by visit number: what `ORDER BY start_at, csn` used to say. */
+function byStart(a: StoredPortalVisit, b: StoredPortalVisit): number {
+  const apart = (startSeconds(a.visit) ?? 0) - (startSeconds(b.visit) ?? 0);
+  if (apart !== 0) return apart;
+  if (a.providerId !== b.providerId) return a.providerId < b.providerId ? -1 : 1;
+  if (a.csn === b.csn) return 0;
+  return a.csn < b.csn ? -1 : 1;
+}
+
 export function makePortalVisitsRepo(ctx: Ctx) {
-  const decode = async (row: PortalVisitRow): Promise<StoredPortalVisit> => ({
-    providerId: row.provider_id,
-    csn: row.csn,
-    visit: JSON.parse(
-      await open(ctx.env, row.payload_enc, aad(row.provider_id, row.csn)),
-    ) as PortalVisit,
-    state: row.state,
-    missingSince: row.missing_since,
-    fetchedAt: row.fetched_at,
-  });
+  const blinder = blinderFor(ctx.env);
+
+  const openPayload = async (row: Pick<PortalVisitRow, "provider_id" | "csn" | "payload_enc">) =>
+    JSON.parse(
+      await open(ctx.env, row.payload_enc, portalVisitAad(row.provider_id, row.csn)),
+    ) as PortalVisit;
+
+  const decode = async (row: PortalVisitRow): Promise<StoredPortalVisit> => {
+    const visit = await openPayload(row);
+    return {
+      providerId: row.provider_id,
+      // A row the backfill has not reached still stores the real number.
+      csn: isBlinded(row.csn) ? visit.csn : row.csn,
+      visit,
+      state: row.state,
+      missingSince: row.missing_since,
+      fetchedAt: row.fetched_at,
+    };
+  };
+
+  /**
+   * The stored numbers of the rows whose visit is still ahead. Only the rows that
+   * went quiet are opened: their start decides between "cancelled" and "over",
+   * and it is nowhere but in the payload.
+   */
+  const stillAhead = async (
+    rows: readonly Pick<PortalVisitRow, "provider_id" | "csn" | "payload_enc">[],
+    now: number,
+  ): Promise<string[]> => {
+    const ahead: string[] = [];
+    for (const row of rows) {
+      const start = startSeconds(await openPayload(row));
+      if (start !== null && start > now) ahead.push(row.csn);
+    }
+    return ahead;
+  };
 
   return {
     /**
@@ -94,10 +176,13 @@ export function makePortalVisitsRepo(ctx: Ctx) {
     ): Promise<RecordVisitsReport> {
       const now = ctx.now();
       const report: RecordVisitsReport = { written: 0, unchanged: 0, missing: 0 };
-      const known = await all<Pick<PortalVisitRow, "csn" | "content_hash" | "state" | "start_at">>(
+      const known = await all<
+        Pick<PortalVisitRow, "provider_id" | "csn" | "content_hash" | "state" | "payload_enc">
+      >(
         ctx.db
           .prepare(
-            "SELECT csn, content_hash, state, start_at FROM portal_visits WHERE provider_id = ?",
+            `SELECT provider_id, csn, content_hash, state, payload_enc FROM portal_visits
+              WHERE provider_id = ?`,
           )
           .bind(providerId),
       );
@@ -105,18 +190,18 @@ export function makePortalVisitsRepo(ctx: Ctx) {
 
       // One row per CSN, the last sighting winning: a visit can in principle sit in
       // two buckets of the same payload, and two upserts of one key in a batch
-      // would only make the report lie.
+      // would only make the report lie. Keyed by the stored (blinded) number.
       const byCsn = new Map<string, PortalVisit>();
-      for (const visit of visits) byCsn.set(visit.csn, visit);
+      for (const visit of visits) byCsn.set(await blindCsn(blinder, providerId, visit.csn), visit);
 
       const statements: D1PreparedStatement[] = [];
-      for (const [csn, visit] of byCsn) {
+      for (const [storedCsn, visit] of byCsn) {
         const start = startSeconds(visit);
         if (start === null) continue;
-        const expiresAt = Math.max(start, now) + PORTAL_VISIT_RETENTION_SECONDS;
+        const expiresAt = portalVisitExpiry(start, now);
         const plaintext = JSON.stringify(visit);
-        const hash = await sha256Hex(plaintext);
-        const prior = existing.get(csn);
+        const hash = await portalVisitDigest(blinder, providerId, plaintext);
+        const prior = existing.get(storedCsn);
 
         if (prior?.content_hash === hash && prior.state === "active") {
           report.unchanged += 1;
@@ -126,13 +211,13 @@ export function makePortalVisitsRepo(ctx: Ctx) {
                 `UPDATE portal_visits SET fetched_at = ?, expires_at = ?
                   WHERE provider_id = ? AND csn = ?`,
               )
-              .bind(now, expiresAt, providerId, csn),
+              .bind(now, expiresAt, providerId, storedCsn),
           );
           continue;
         }
 
         report.written += 1;
-        const payloadEnc = await seal(ctx.env, plaintext, aad(providerId, csn));
+        const payloadEnc = await seal(ctx.env, plaintext, portalVisitAad(providerId, storedCsn));
         statements.push(
           ctx.db
             .prepare(
@@ -150,21 +235,33 @@ export function makePortalVisitsRepo(ctx: Ctx) {
                  fetched_at = excluded.fetched_at,
                  expires_at = excluded.expires_at`,
             )
-            .bind(providerId, csn, payloadEnc, hash, start, visit.status, now, expiresAt),
+            .bind(
+              providerId,
+              storedCsn,
+              payloadEnc,
+              hash,
+              SEALED_START_AT,
+              visit.status,
+              now,
+              expiresAt,
+            ),
         );
       }
 
       if (options.complete) {
-        for (const row of known) {
-          if (byCsn.has(row.csn) || row.state !== "active" || row.start_at <= now) continue;
-          report.missing += 1;
+        const gone = await stillAhead(
+          known.filter((row) => !byCsn.has(row.csn) && row.state === "active"),
+          now,
+        );
+        report.missing += gone.length;
+        for (const storedCsn of gone) {
           statements.push(
             ctx.db
               .prepare(
                 `UPDATE portal_visits SET state = 'missing', missing_since = ?
                   WHERE provider_id = ? AND csn = ?`,
               )
-              .bind(now, providerId, row.csn),
+              .bind(now, providerId, storedCsn),
           );
         }
       }
@@ -178,13 +275,14 @@ export function makePortalVisitsRepo(ctx: Ctx) {
     async list(providerId: string): Promise<StoredPortalVisit[]> {
       const rows = await all<PortalVisitRow>(
         ctx.db
-          .prepare(
-            `SELECT * FROM portal_visits WHERE provider_id = ? AND expires_at > ?
-              ORDER BY start_at, csn`,
-          )
+          .prepare(`SELECT * FROM portal_visits WHERE provider_id = ? AND expires_at > ?`)
           .bind(providerId, ctx.now()),
       );
-      return Promise.all(rows.map((row) => decode(row)));
+      const decoded = await Promise.all(rows.map((row) => decode(row)));
+      // Sorted in place: `decoded` is this call's own array. The start is sealed, so
+      // the order `ORDER BY start_at` used to give is applied here.
+      decoded.sort(byStart);
+      return decoded;
     },
 
     /**
@@ -195,13 +293,14 @@ export function makePortalVisitsRepo(ctx: Ctx) {
     async listExcept(providerId: string): Promise<StoredPortalVisit[]> {
       const rows = await all<PortalVisitRow>(
         ctx.db
-          .prepare(
-            `SELECT * FROM portal_visits WHERE provider_id <> ? AND expires_at > ?
-              ORDER BY start_at, provider_id, csn`,
-          )
+          .prepare(`SELECT * FROM portal_visits WHERE provider_id <> ? AND expires_at > ?`)
           .bind(providerId, ctx.now()),
       );
-      return Promise.all(rows.map((row) => decode(row)));
+      const decoded = await Promise.all(rows.map((row) => decode(row)));
+      // Sorted in place: `decoded` is this call's own array. The start is sealed, so
+      // the order `ORDER BY start_at` used to give is applied here.
+      decoded.sort(byStart);
+      return decoded;
     },
 
     /** Drop everything past its expiry. Called from the scheduled handler. */

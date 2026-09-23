@@ -1,6 +1,20 @@
+import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { T0, clock, column, recordingLog, resetDb, seedProvider, testRepos } from "./helpers.ts";
+import { blindCalendarId, blindCsn, blindResourceId } from "../../../worker/db/blind.ts";
+
+import {
+  T0,
+  blindKey,
+  clock,
+  column,
+  rawColumn,
+  recordingLog,
+  resetDb,
+  seedProvider,
+  testBlinder,
+  testRepos,
+} from "./helpers.ts";
 
 import type { Repos } from "../../../worker/db/index.ts";
 
@@ -20,7 +34,7 @@ async function seedEvent(
 ) {
   const encounterId = overrides.encounterId ?? "enc-1";
   return repos.calendarEvents.upsert({
-    eventKey: `${providerId}:${encounterId}`,
+    eventKey: await blindKey(`${providerId}:${encounterId}`),
     providerId,
     encounterId,
     calendarId: "primary",
@@ -68,7 +82,7 @@ describe("calendar_events.upsert", () => {
 
     await expect(
       repos.calendarEvents.upsert({
-        eventKey: `${providerId}:enc-2`,
+        eventKey: await blindKey(`${providerId}:enc-2`),
         providerId,
         encounterId: "enc-2",
         calendarId: "primary",
@@ -256,17 +270,17 @@ describe("calendar_events.list and touch", () => {
     await seedEvent(repos, second, { encounterId: "other", startAt: START });
 
     expect(
-      await column(repos.calendarEvents.list({ providerId: first }), "encounter_id"),
-    ).toStrictEqual(["early", "gone", "late"]);
+      await column(repos.calendarEvents.list({ providerId: first }), "google_event_id"),
+    ).toStrictEqual(["google-early", "google-gone", "google-late"]);
     expect(
       await column(
         repos.calendarEvents.list({ providerId: first, state: "active" }),
-        "encounter_id",
+        "google_event_id",
       ),
-    ).toStrictEqual(["early", "late"]);
+    ).toStrictEqual(["google-early", "google-late"]);
     expect(
-      await column(repos.calendarEvents.list({ startsAfter: START + 3600 }), "encounter_id"),
-    ).toStrictEqual(["gone", "late"]);
+      await column(repos.calendarEvents.list({ startsAfter: START + 3600 }), "google_event_id"),
+    ).toStrictEqual(["google-gone", "google-late"]);
     expect(await repos.calendarEvents.list({ limit: 1 })).toHaveLength(1);
   });
 
@@ -275,7 +289,7 @@ describe("calendar_events.list and touch", () => {
     const providerId = await seedProvider(repos);
 
     await repos.calendarEvents.upsert({
-      eventKey: `${providerId}:undated`,
+      eventKey: await blindKey(`${providerId}:undated`),
       providerId,
       encounterId: "undated",
       calendarId: "primary",
@@ -284,9 +298,9 @@ describe("calendar_events.list and touch", () => {
     });
     await seedEvent(repos, providerId, { encounterId: "dated" });
 
-    expect(await column(repos.calendarEvents.list(), "encounter_id")).toStrictEqual([
-      "dated",
-      "undated",
+    expect(await column(repos.calendarEvents.list(), "google_event_id")).toStrictEqual([
+      "google-dated",
+      "google-undated",
     ]);
   });
 
@@ -304,5 +318,124 @@ describe("calendar_events.list and touch", () => {
       last_seen_at: T0 + 600,
     });
     expect(await repos.calendarEvents.touch([])).toBe(0);
+  });
+});
+
+describe("what calendar_events stores", () => {
+  it("blinds the key, the encounter, the calendar and the CSN, and seals the start", async () => {
+    const repos = testRepos();
+    const providerId = await seedProvider(repos);
+    const blinder = testBlinder();
+    const eventKey = await blindKey(`${providerId}:csn:csn-secret`);
+
+    const row = await repos.calendarEvents.upsert({
+      eventKey,
+      providerId,
+      encounterId: "csn:csn-secret",
+      calendarId: "owner@example.test",
+      googleEventId: "google-1",
+      fingerprint: "~fp",
+      startAt: START,
+      source: "portal",
+      portalCsn: "csn-secret",
+    });
+
+    // What the sync reads: the real start and calendar, opened.
+    expect(row.start_at).toBe(START);
+    expect(row.calendar_id).toBe("owner@example.test");
+    expect(row.portal_csn).toBe(await blindCsn(blinder, providerId, "csn-secret"));
+    expect(row.encounter_id).toBe(await blindCsn(blinder, providerId, "csn-secret"));
+
+    // What a D1 snapshot holds.
+    const raw = await env.DB.prepare("SELECT * FROM calendar_events WHERE event_key = ?")
+      .bind(eventKey)
+      .first();
+    const dump = JSON.stringify(raw);
+    expect(dump).not.toContain("csn-secret");
+    expect(dump).not.toContain("owner@example.test");
+    expect(dump).not.toContain(String(START));
+    expect(raw?.start_at).toBeNull();
+    expect(raw?.calendar_id).toBe(await blindCalendarId(blinder, "owner@example.test"));
+    expect(String(raw?.detail_enc).startsWith("v2:")).toBe(true);
+  });
+
+  it("stores a FHIR row's encounter as the same blind the cache keys the Encounter by", async () => {
+    const repos = testRepos();
+    const providerId = await seedProvider(repos);
+
+    const row = await seedEvent(repos, providerId, { encounterId: "enc-9" });
+
+    expect(row.encounter_id).toBe(
+      await blindResourceId(testBlinder(), providerId, "Encounter", "enc-9"),
+    );
+  });
+
+  it("refuses a key that still carries the upstream id", async () => {
+    const repos = testRepos();
+    const providerId = await seedProvider(repos);
+
+    await expect(
+      repos.calendarEvents.upsert({
+        eventKey: `${providerId}:enc-1`,
+        providerId,
+        encounterId: "enc-1",
+        calendarId: "primary",
+        googleEventId: "google-1",
+        fingerprint: "f",
+      }),
+    ).rejects.toMatchObject({ code: "internal" });
+  });
+
+  it("keeps the sealed detail readable across a rekey and re-seals it on a calendar move", async () => {
+    const repos = testRepos();
+    const providerId = await seedProvider(repos);
+    const row = await seedEvent(repos, providerId, { encounterId: "csn:c-1" });
+    const toKey = await blindKey(`${providerId}:enc-7`);
+
+    expect(
+      await repos.calendarEvents.rekey(row.event_key, toKey, {
+        encounterId: "enc-7",
+        source: "fhir",
+      }),
+    ).toBe(true);
+    await expect(repos.calendarEvents.getByKey(toKey)).resolves.toMatchObject({
+      start_at: START,
+      calendar_id: "primary",
+      source: "fhir",
+    });
+
+    await repos.calendarEvents.moveCalendar(toKey, "other@example.test");
+
+    await expect(repos.calendarEvents.getByKey(toKey)).resolves.toMatchObject({
+      start_at: START,
+      calendar_id: "other@example.test",
+    });
+    expect(await rawColumn("calendar_events", "calendar_id", "event_key = ?", toKey)).toBe(
+      await blindCalendarId(testBlinder(), "other@example.test"),
+    );
+  });
+
+  it("filters by provider and state through the index, not a table walk", async () => {
+    const plan = await env.DB.prepare(
+      `EXPLAIN QUERY PLAN SELECT * FROM calendar_events WHERE provider_id = ? AND state = ?`,
+    )
+      .bind("p", "active")
+      .all<{ detail: string }>();
+    const details = plan.results.map((step) => step.detail).join("\n");
+
+    expect(details).toMatch(/USING INDEX calendar_events_provider/u);
+    expect(details).not.toMatch(/^SCAN calendar_events$/mu);
+  });
+
+  it("finds a row by its key through the primary key", async () => {
+    const plan = await env.DB.prepare(
+      `EXPLAIN QUERY PLAN SELECT * FROM calendar_events WHERE event_key = ?`,
+    )
+      .bind("k")
+      .all<{ detail: string }>();
+
+    expect(plan.results.map((step) => step.detail).join("\n")).toMatch(
+      /USING INDEX sqlite_autoindex_calendar_events_1/u,
+    );
   });
 });

@@ -66,6 +66,8 @@
  * `worker/db/repos/calendar-events.ts`'s `logSafeKey`).
  */
 
+import { blindCsn } from "../db/blind.ts";
+import { encounterRef } from "../db/repos/calendar-events.ts";
 import { buildEventBody } from "../google/calendar.ts";
 import { isAppError } from "../lib/errors.ts";
 import { errorFields } from "../lib/log.ts";
@@ -98,6 +100,7 @@ import type { PlanCandidate, PlanEntry } from "./plan.ts";
 import type { Sighting } from "./portal-dedupe.ts";
 import type { PortalSession } from "./portal-signin.ts";
 import type { RunState } from "./run.ts";
+import type { Blinder } from "../db/blind.ts";
 import type { Ctx } from "../db/client.ts";
 import type { Repos } from "../db/index.ts";
 import type { CalendarEventRow, ProviderRow } from "../db/rows.ts";
@@ -141,6 +144,8 @@ export interface PortalPassInput {
   settings: MappingSettings;
   state: RunState;
   deps: SyncDeps;
+  /** Blinds event keys and keys fingerprints; see `worker/db/blind.ts`. */
+  blinder: Blinder;
   /** What the FHIR pass mapped this run, per provider id. */
   fhirSeen: ReadonlyMap<string, FhirSighting>;
   /** Narrow the pass to these providers. The manual button's argument. */
@@ -421,6 +426,7 @@ async function buildPortalCandidates(
       },
       settings: input.settings,
       nowIso: input.nowIso,
+      blinder: input.blinder,
     });
     const start = fromIso(mapping.model.start);
     const mine = portalSighting(provider.id, visit, now, now);
@@ -619,6 +625,7 @@ async function portalCandidate(
     const ghostedAt = args.row?.ghosted_at ?? input.ctx.now();
     const ghost = await ghostModel(args.mapping.model, {
       ghostColorId: input.settings.ghostColorId,
+      blinder: input.blinder,
       timezone: input.timezone,
       ghostedAtIso: toIso(ghostedAt),
     });
@@ -732,17 +739,16 @@ async function persistPortalRow(
   model: CalendarEventModel,
   restore = false,
 ): Promise<void> {
-  const encounterId = key.slice(providerId.length + 1);
   await input.repos.calendarEvents.upsert({
     eventKey: key,
     providerId,
-    encounterId,
+    encounterId: model.encounterId,
     calendarId: input.calendarId,
     googleEventId,
     fingerprint: model.fingerprint,
     startAt: fromIso(model.start),
     source: "portal",
-    portalCsn: csnOfEncounterId(encounterId),
+    portalCsn: csnOfEncounterId(model.encounterId),
     restore,
   });
 }
@@ -756,6 +762,8 @@ export interface AdoptPortalInput {
   mappings: ReadonlyMap<string, CalendarMapping>;
   rows: readonly CalendarEventRow[];
   events: readonly EventRecord[];
+  /** What a row's stored `portal_csn` is compared against: the mapping's CSN, blinded. */
+  blinder: Blinder;
 }
 
 /**
@@ -785,18 +793,7 @@ export async function adoptPortalRows(input: AdoptPortalInput): Promise<{
     return { rows: [...input.rows], events: [...input.events], adopted: 0 };
   }
 
-  const renames = new Map<string, { toKey: string; encounterId: string }>();
-  const claimed = new Set<string>();
-  for (const [key, mapping] of input.mappings) {
-    if (input.rows.some((row) => row.event_key === key)) continue;
-    const match = portalRows.find((row) => !claimed.has(row.event_key) && sameVisit(row, mapping));
-    if (match === undefined) continue;
-    claimed.add(match.event_key);
-    renames.set(match.event_key, {
-      toKey: key,
-      encounterId: key.slice(input.providerId.length + 1),
-    });
-  }
+  const renames = await planRenames(input, portalRows);
   if (renames.size === 0) {
     return { rows: [...input.rows], events: [...input.events], adopted: 0 };
   }
@@ -820,6 +817,10 @@ export async function adoptPortalRows(input: AdoptPortalInput): Promise<{
   }
   input.ctx.log.info("portal.adopted", { providerId: input.providerId, adopted });
 
+  const refs = new Map<string, string>();
+  for (const [fromKey, rename] of renames) {
+    refs.set(fromKey, await encounterRef(input.blinder, input.providerId, rename.encounterId));
+  }
   return {
     rows: input.rows.map((row) => {
       const rename = renames.get(row.event_key);
@@ -828,7 +829,7 @@ export async function adoptPortalRows(input: AdoptPortalInput): Promise<{
         : {
             ...row,
             event_key: rename.toKey,
-            encounter_id: rename.encounterId,
+            encounter_id: refs.get(row.event_key) ?? "",
             source: "fhir" as const,
             portal_csn: null,
             // Cleared by `rekey` too: what is on the calendar came from the
@@ -845,11 +846,42 @@ export async function adoptPortalRows(input: AdoptPortalInput): Promise<{
   };
 }
 
-/** True when a portal row and a FHIR mapping are two sightings of one visit. */
-function sameVisit(row: CalendarEventRow, mapping: CalendarMapping): boolean {
+/** Which portal row each unmatched FHIR mapping takes over, by the row's key. */
+async function planRenames(
+  input: AdoptPortalInput,
+  portalRows: readonly CalendarEventRow[],
+): Promise<Map<string, { toKey: string; encounterId: string }>> {
+  const renames = new Map<string, { toKey: string; encounterId: string }>();
+  const claimed = new Set<string>();
+  for (const [key, mapping] of input.mappings) {
+    if (input.rows.some((row) => row.event_key === key)) continue;
+    // The row stores the CSN blinded, so the mapping's is blinded to compare.
+    const csn =
+      mapping.csn === undefined
+        ? undefined
+        : await blindCsn(input.blinder, input.providerId, mapping.csn);
+    const match = portalRows.find(
+      (row) => !claimed.has(row.event_key) && sameVisit(row, mapping, csn),
+    );
+    if (match === undefined) continue;
+    claimed.add(match.event_key);
+    renames.set(match.event_key, { toKey: key, encounterId: mapping.model.encounterId });
+  }
+  return renames;
+}
+
+/**
+ * True when a portal row and a FHIR mapping are two sightings of one visit.
+ * `blindedCsn` is the mapping's CSN in the form the row stores it.
+ */
+function sameVisit(
+  row: CalendarEventRow,
+  mapping: CalendarMapping,
+  blindedCsn: string | undefined,
+): boolean {
   // The CSN first: it is the portal's own identifier for the visit, and Epic
   // publishes the same number on the Encounter, so a match is not a guess.
-  if (row.portal_csn !== null && mapping.csn !== undefined) return row.portal_csn === mapping.csn;
+  if (blindedCsn !== undefined && row.portal_csn !== null) return row.portal_csn === blindedCsn;
   if (row.start_at === null) return false;
   const apart = Math.abs(row.start_at - fromIso(mapping.model.start));
   return apart <= DEDUPE_WINDOW_SECONDS;

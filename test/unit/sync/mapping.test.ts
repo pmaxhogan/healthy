@@ -9,6 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 
+import { blindEventKey, blinderFor } from "../../../worker/db/blind.ts";
 import { providerConfigSchema } from "../../../worker/db/schemas.ts";
 import { AppError } from "../../../worker/lib/errors.ts";
 import { formatInZone } from "../../../worker/lib/time.ts";
@@ -30,6 +31,13 @@ const PROVIDER_ID = "prov-1";
 const START = "2026-10-01T15:30:00Z";
 const NOW = "2026-09-30T12:00:00Z";
 const PORTAL = "https://portal.example.test/mychart";
+
+/** A fresh random key per run: the blinds only have to be consistent within one. */
+function randomKey(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return btoa(String.fromCodePoint(...bytes));
+}
+const BLINDER = blinderFor(randomKey());
 
 const SETTINGS: MappingSettings = {
   timezone: "UTC",
@@ -59,6 +67,7 @@ function input(
     },
     settings: { ...SETTINGS, ...overrides.settings },
     nowIso: NOW,
+    blinder: BLINDER,
   };
 }
 
@@ -203,7 +212,8 @@ describe("buildCalendarModel", () => {
     const { model, status, offSchedule, reportedStart, arrivalOffsetMin } =
       await buildCalendarModel(view(), input());
 
-    expect(model.key).toBe("prov-1:enc-1");
+    expect(model.key).toBe(await blindEventKey(BLINDER, "prov-1:enc-1"));
+    expect(model.encounterId).toBe("enc-1");
     expect(model.provider).toBe(PROVIDER_ID);
     expect(model.title).toBe("Office Visit · Casey Example");
     expect(model.start).toBe(START);
@@ -424,6 +434,7 @@ describe("ghostModel", () => {
 
     const ghost = await ghostModel(model, {
       ghostColorId: "8",
+      blinder: BLINDER,
       timezone: "UTC",
       ghostedAtIso: GHOSTED_AT,
     });
@@ -444,12 +455,14 @@ describe("ghostModel", () => {
     const { model } = await buildCalendarModel(view(), input());
     const once = await ghostModel(model, {
       ghostColorId: "8",
+      blinder: BLINDER,
       timezone: "UTC",
       ghostedAtIso: GHOSTED_AT,
     });
 
     const twice = await ghostModel(once, {
       ghostColorId: "8",
+      blinder: BLINDER,
       timezone: "UTC",
       ghostedAtIso: GHOSTED_AT,
     });
@@ -461,7 +474,12 @@ describe("ghostModel", () => {
     // What stops every hourly run re-patching every ghost.
     const early = await buildCalendarModel(view(), input());
     const late = await buildCalendarModel(view(), { ...input(), nowIso: "2026-10-05T04:00:00Z" });
-    const options = { ghostColorId: "8", timezone: "UTC", ghostedAtIso: GHOSTED_AT };
+    const options = {
+      ghostColorId: "8",
+      blinder: BLINDER,
+      timezone: "UTC",
+      ghostedAtIso: GHOSTED_AT,
+    };
 
     const first = await ghostModel(early.model, options);
     const second = await ghostModel(late.model, options);
@@ -471,7 +489,7 @@ describe("ghostModel", () => {
 
   it("moves the fingerprint when the disappearance time moves", async () => {
     const { model } = await buildCalendarModel(view(), input());
-    const base = { ghostColorId: "8", timezone: "UTC" };
+    const base = { ghostColorId: "8", blinder: BLINDER, timezone: "UTC" };
 
     const first = await ghostModel(model, { ...base, ghostedAtIso: GHOSTED_AT });
     const later = await ghostModel(model, { ...base, ghostedAtIso: "2026-10-03T09:00:00Z" });
@@ -483,7 +501,12 @@ describe("ghostModel", () => {
     // Restore is not a third variant: the sync simply writes the active model
     // again, so its fingerprint has to match what it was before the ghosting.
     const { model } = await buildCalendarModel(view(), input());
-    await ghostModel(model, { ghostColorId: "8", timezone: "UTC", ghostedAtIso: GHOSTED_AT });
+    await ghostModel(model, {
+      ghostColorId: "8",
+      blinder: BLINDER,
+      timezone: "UTC",
+      ghostedAtIso: GHOSTED_AT,
+    });
 
     const rebuilt = await buildCalendarModel(view(), input());
 
@@ -495,5 +518,33 @@ describe("formatApptTime", () => {
   it("formats an hour and minute with no date", () => {
     expect(formatApptTime(START, "UTC")).toBe("3:30 PM");
     expect(formatApptTime(START, "Etc/GMT-2")).toBe("5:30 PM");
+  });
+});
+
+describe("keyed key and fingerprint", () => {
+  it("blinds the event key: the provider prefix stays, the upstream id does not", async () => {
+    const { model } = await buildCalendarModel(view(), input());
+
+    expect(model.key.startsWith(`${PROVIDER_ID}:~`)).toBe(true);
+    expect(model.key).not.toContain("enc-1");
+  });
+
+  it("keys the fingerprint: another key gives another fingerprint and another event key", async () => {
+    const mine = await buildCalendarModel(view(), input());
+    const theirs = await buildCalendarModel(view(), {
+      ...input(),
+      blinder: blinderFor(randomKey()),
+    });
+
+    expect(theirs.model.fingerprint).not.toBe(mine.model.fingerprint);
+    expect(theirs.model.key).not.toBe(mine.model.key);
+    expect(theirs.model.title).toBe(mine.model.title);
+  });
+
+  it("is not a plain sha256 of anything a snapshot reader could rebuild", async () => {
+    const { model } = await buildCalendarModel(view(), input());
+
+    expect(model.fingerprint).not.toMatch(/^[0-9a-f]{64}$/u);
+    expect(model.fingerprint.startsWith("~")).toBe(true);
   });
 });

@@ -47,7 +47,7 @@ import { domainAllowed, domainOf } from "../../mail/classify.ts";
 // question `sameRegistrableSite` answers for redirects and cookies.
 import { registrableDomain } from "../../providers/mychart/site.ts";
 import { all, one, run } from "../client.ts";
-import { aadFor, open, openOrNull, seal } from "../crypto.ts";
+import { aadFor, open, openOrNull, sealShort } from "../crypto.ts";
 
 import type { Ctx } from "../client.ts";
 import type { MailInboxRow, MailKind } from "../rows.ts";
@@ -233,10 +233,10 @@ export function makeMailInboxRepo(ctx: Ctx) {
     async insert(input: MailInboxInsert): Promise<MailInboxEntry> {
       const id = newId();
       const plaintext = payloadFor(input);
-      const codeEnc = plaintext === null ? null : await seal(ctx.env, plaintext, codeAad(id));
-      const fromEnc = await seal(ctx.env, input.fromAddr, fromAad(id));
+      const codeEnc = plaintext === null ? null : await sealShort(ctx.env, plaintext, codeAad(id));
+      const fromEnc = await sealShort(ctx.env, input.fromAddr, fromAad(id));
       const subjectEnc =
-        input.subject === null ? null : await seal(ctx.env, input.subject, subjectAad(id));
+        input.subject === null ? null : await sealShort(ctx.env, input.subject, subjectAad(id));
       await run(
         ctx.db
           .prepare(

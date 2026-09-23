@@ -1,4 +1,8 @@
+import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+
+import { blindResourceId } from "../../../worker/db/blind.ts";
+import { aadFor, seal } from "../../../worker/db/crypto.ts";
 
 import {
   OTHER_DATA_KEY,
@@ -8,10 +12,21 @@ import {
   rawColumn,
   resetDb,
   seedProvider,
+  testBlinder,
   testRepos,
 } from "./helpers.ts";
 
 import type { CacheableResource } from "../../../worker/db/repos/fhir-cache.ts";
+
+/** The id an Encounter is stored under: its blind, never the upstream id. */
+function stored(providerId: string, id = "e1", type = "Encounter"): Promise<string> {
+  return blindResourceId(testBlinder(), providerId, type, id);
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 beforeEach(resetDb);
 
@@ -53,10 +68,10 @@ describe("fhir_cache.upsertMany", () => {
       "provider_id = ? AND resource_type = ? AND resource_id = ?",
       providerId,
       "Encounter",
-      "e1",
+      await stored(providerId),
     );
 
-    expect(raw?.startsWith("v1:")).toBe(true);
+    expect(raw ?? "").toMatch(/^v1:/u);
     expect(raw).not.toContain("distinctivevisittype");
     expect(raw).not.toContain("Encounter");
   });
@@ -99,7 +114,7 @@ describe("fhir_cache.upsertMany", () => {
       "payload_enc",
       "provider_id = ? AND resource_id = ?",
       providerId,
-      "e1",
+      await stored(providerId),
     );
 
     time.advance(3600);
@@ -112,7 +127,7 @@ describe("fhir_cache.upsertMany", () => {
         "payload_enc",
         "provider_id = ? AND resource_id = ?",
         providerId,
-        "e1",
+        await stored(providerId),
       ),
     ).toBe(before);
     await expect(repos.fhirCache.get(providerId, "Encounter", "e1")).resolves.toMatchObject({
@@ -172,11 +187,11 @@ describe("fhir_cache.upsertMany", () => {
       "payload_enc",
       "provider_id = ? AND resource_id = ?",
       first,
-      "e1",
+      await stored(first),
     );
     await repos.ctx.db
       .prepare("UPDATE fhir_cache SET payload_enc = ? WHERE provider_id = ? AND resource_id = ?")
-      .bind(stolen, second, "e1")
+      .bind(stolen, second, await stored(second))
       .run();
 
     await expect(repos.fhirCache.get(second, "Encounter", "e1")).rejects.toMatchObject({
@@ -184,14 +199,18 @@ describe("fhir_cache.upsertMany", () => {
     });
   });
 
-  it("cannot open a payload with the wrong key", async () => {
+  it("cannot open a payload with the wrong key, or even find it by id", async () => {
     const repos = testRepos();
     const providerId = await seedProvider(repos);
     await repos.fhirCache.upsertMany(providerId, [encounter("e1")], DAY_MS);
+    const stranger = testRepos({ dataKey: OTHER_DATA_KEY });
 
-    await expect(
-      testRepos({ dataKey: OTHER_DATA_KEY }).fhirCache.get(providerId, "Encounter", "e1"),
-    ).rejects.toMatchObject({ code: "crypto" });
+    // Another key blinds the id to another value, so the lookup misses...
+    expect(await stranger.fhirCache.get(providerId, "Encounter", "e1")).toBeNull();
+    // ...and reading the row anyway cannot open it.
+    await expect(stranger.fhirCache.listByType(providerId, "Encounter")).rejects.toMatchObject({
+      code: "crypto",
+    });
   });
 });
 
@@ -361,5 +380,94 @@ describe("fhir_sync_state", () => {
     await repos.fhirSyncState.record(providerId, "Encounter", { ok: true });
 
     expect(await repos.fhirSyncState.list()).toHaveLength(1);
+  });
+});
+
+describe("what fhir_cache stores", () => {
+  it("keys a row by a blind of the id, and reports the real id on the way out", async () => {
+    const repos = testRepos();
+    const providerId = await seedProvider(repos);
+    const patient: CacheableResource = { resourceType: "Patient", id: "patient-secret-id" };
+
+    await repos.fhirCache.upsertMany(providerId, [patient], DAY_MS);
+
+    const raw = await env.DB.prepare("SELECT * FROM fhir_cache WHERE provider_id = ?")
+      .bind(providerId)
+      .first();
+    expect(JSON.stringify(raw)).not.toContain("patient-secret-id");
+    expect(raw?.resource_id).toBe(await stored(providerId, "patient-secret-id", "Patient"));
+
+    // Id in, id out: the caller names the real id and gets the real id back.
+    const cached = await repos.fhirCache.get(providerId, "Patient", "patient-secret-id");
+    expect(cached?.resourceId).toBe("patient-secret-id");
+    const listed = await repos.fhirCache.listByType(providerId, "Patient");
+    expect(listed.map((row) => row.resourceId)).toStrictEqual(["patient-secret-id"]);
+  });
+
+  it("blinds the same id under two health systems to two unrelated values", async () => {
+    const repos = testRepos();
+    const first = await seedProvider(repos, { displayName: "A Example Health" });
+    const second = await seedProvider(repos, { displayName: "B Example Health" });
+
+    expect(await stored(first)).not.toBe(await stored(second));
+  });
+
+  it("stores a keyed content digest, not the plain sha256 of the payload", async () => {
+    const repos = testRepos();
+    const providerId = await seedProvider(repos);
+    await repos.fhirCache.upsertMany(providerId, [encounter("e1")], DAY_MS);
+
+    const hash = await rawColumn(
+      "fhir_cache",
+      "content_hash",
+      "provider_id = ? AND resource_id = ?",
+      providerId,
+      await stored(providerId),
+    );
+
+    const plain = await sha256Hex(JSON.stringify(encounter("e1")));
+    expect(hash).not.toBe(plain);
+    expect(hash ?? "").toMatch(/^~[\w-]{43}$/u);
+  });
+
+  it("looks a row up through the primary key", async () => {
+    const plan = await env.DB.prepare(
+      `EXPLAIN QUERY PLAN SELECT * FROM fhir_cache
+        WHERE provider_id = ? AND resource_type = ? AND resource_id IN (?, ?) AND expires_at > ?`,
+    )
+      .bind("p", "Encounter", "a", "b", 0)
+      .all<{ detail: string }>();
+
+    expect(plan.results.map((step) => step.detail).join("\n")).toMatch(
+      /USING INDEX sqlite_autoindex_fhir_cache_1/u,
+    );
+  });
+
+  it("still reads a row written before 0007, under its old id and AAD", async () => {
+    const repos = testRepos();
+    const providerId = await seedProvider(repos);
+    const legacy = JSON.stringify(encounter("legacy-1"));
+    await env.DB.prepare(
+      `INSERT INTO fhir_cache
+         (provider_id, resource_type, resource_id, payload_enc, content_hash,
+          last_updated, fetched_at, expires_at)
+       VALUES (?, 'Encounter', 'legacy-1', ?, ?, NULL, ?, ?)`,
+    )
+      .bind(
+        providerId,
+        await seal(
+          repos.ctx.env,
+          legacy,
+          aadFor("fhir_cache", "payload", `${providerId}:Encounter:legacy-1`),
+        ),
+        await sha256Hex(legacy),
+        T0,
+        T0 + 86_400,
+      )
+      .run();
+
+    await expect(repos.fhirCache.get(providerId, "Encounter", "legacy-1")).resolves.toMatchObject({
+      resourceId: "legacy-1",
+    });
   });
 });

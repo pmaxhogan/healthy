@@ -24,6 +24,7 @@ import { beforeEach } from "vitest";
 import { setPorts } from "../../../worker/api/ports.ts";
 import { app } from "../../../worker/app.ts";
 import { MIN_PBKDF2_ITERATIONS, hashPassword } from "../../../worker/auth/password.ts";
+import { blindEventKey, blinderFor } from "../../../worker/db/blind.ts";
 import { makeCtx } from "../../../worker/db/client.ts";
 import { makeRepos } from "../../../worker/db/index.ts";
 
@@ -219,6 +220,7 @@ export function freshOwner(): () => Session {
 
 // Every table, child before parent so the deletes never trip a foreign key.
 const TABLES = [
+  "data_migrations",
   "login_attempts",
   "mail_inbox",
   "portal_visits",
@@ -235,6 +237,11 @@ const TABLES = [
   "providers",
   "settings",
 ];
+
+/** The stored form of a logical event key, under this suite's DATA_KEY. */
+export function blindKey(logicalKey: string): Promise<string> {
+  return blindEventKey(blinderFor(TEST_ENV), logicalKey);
+}
 
 /**
  * Empty every table and put `google_account` back to its seeded state.

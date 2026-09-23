@@ -1,12 +1,10 @@
 /**
  * Rate limiting for the admin password gate.
  *
- * Keyed by a hash of the client IP -- `sha256`, not salted or keyed, so an
- * attacker with a copy of this table can confirm a guessed address. The rows are
- * counters inside a 15-minute window and nothing joins to them, so what leaks is
- * "somebody at this address tried to log in recently"; `hashClientIp` in
- * `worker/auth/ratelimit.ts` is the one place to change if that stops being
- * acceptable. The caller hashes, so this table never sees an address. A fixed window rather than a sliding one -- one row, one
+ * Keyed by a keyed HMAC of the client IP (`hashClientIp` in
+ * `worker/auth/ratelimit.ts`, over the blinding key in `worker/db/blind.ts`), so
+ * a copy of this table cannot confirm a guessed address without `DATA_KEY`. The
+ * caller hashes, so this table never sees an address. A fixed window rather than a sliding one -- one row, one
  * counter, and a lockout that is easy to explain and easy to wait out.
  *
  * `increment` is a single statement so two simultaneous guesses cannot both read

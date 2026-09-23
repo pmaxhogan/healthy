@@ -27,6 +27,7 @@ function client(fetchImpl: typeof fetch, getAccessToken = fixedToken): CalendarC
 
 const MODEL: CalendarEventModel = {
   key: "prov-1:enc-1",
+  encounterId: "enc-1",
   provider: "prov-1",
   title: "Follow-up",
   description: "Synced by Healthy",

@@ -2,19 +2,36 @@
  * The read cache of FHIR resources that the MCP serves from.
  *
  * This is the PHI-bearing table, so `payload_enc` is sealed against
- * `fhir_cache.payload.<providerId>:<type>:<id>` -- the composite row id, because
- * the primary key is composite. A payload lifted from one patient's row to
- * another's fails to open.
+ * `fhir_cache.payload.<providerId>:<type>:<resource_id>` -- the composite row id,
+ * because the primary key is composite. A payload lifted from one patient's row
+ * to another's fails to open.
  *
- * `content_hash` is the sha256 of the *plaintext*. Sealing is randomised, so two
- * seals of an unchanged resource differ byte for byte and cannot be compared;
- * hashing the plaintext is what lets a daily refresh tell "unchanged" from
- * "updated" and report a meaningful count.
+ * `resource_id` is not the upstream id. It is `blindResourceId(...)`, a keyed
+ * HMAC of the health system, the type and the Epic id (`worker/db/blind.ts`), so
+ * the cache is still keyed and indexed by it but a D1 snapshot no longer carries
+ * the patient's own FHIR id (the Patient row) or the id-prefix structure of
+ * everything else. Every lookup blinds the id it is given, which is what lets an
+ * MCP tool take a real id as its argument; the real id is only inside the sealed
+ * payload, and that is what `CachedResource.resourceId` reports.
+ *
+ * `content_hash` is a keyed digest of the *plaintext*. Sealing is randomised, so
+ * two seals of an unchanged resource differ byte for byte and cannot be
+ * compared; a digest of the plaintext is what lets a daily refresh tell
+ * "unchanged" from "updated" and report a meaningful count. Keyed rather than a
+ * plain sha256, which would be a confirmation oracle for anyone who can guess a
+ * resource, and bound to the health system, so the same document under two
+ * organisations does not link them.
+ *
+ * A row written before 0007 still has the upstream id and a hex sha256 here; the
+ * backfill (`worker/sync/backfill.ts`) rewrites it. Until then `decode` opens it
+ * under its old AAD and `get` finds it by its old id.
  */
 
-import { BATCH_CHUNK, all, batch, chunk, one, run, sha256Hex, ttlSeconds } from "../client.ts";
+import { blindResourceId, blinderFor, isBlinded } from "../blind.ts";
+import { BATCH_CHUNK, all, batch, chunk, run, ttlSeconds } from "../client.ts";
 import { aadFor, open, seal } from "../crypto.ts";
 
+import type { Blinder } from "../blind.ts";
 import type { Ctx } from "../client.ts";
 import type { FhirCacheRow } from "../rows.ts";
 
@@ -46,8 +63,24 @@ export interface CachedResource {
  * would make every row already in the cache fail to open. If it is ever worth
  * fixing it has to be a migration that re-seals, not an edit here.
  */
-const aad = (providerId: string, resourceType: string, resourceId: string): string =>
-  aadFor("fhir_cache", "payload", `${providerId}:${resourceType}:${resourceId}`);
+export const fhirCacheAad = (providerId: string, resourceType: string, storedId: string): string =>
+  aadFor("fhir_cache", "payload", `${providerId}:${resourceType}:${storedId}`);
+
+/** The stored digest of one plaintext payload. */
+export function fhirCacheDigest(
+  blinder: Blinder,
+  providerId: string,
+  plaintext: string,
+): Promise<string> {
+  return blinder.digest("fhir_cache.content_hash", `${providerId}\u{0}${plaintext}`);
+}
+
+/** The payload's own `id`, which is the real upstream id. */
+function payloadId(resource: unknown): string | null {
+  if (typeof resource !== "object" || resource === null || !("id" in resource)) return null;
+  const id = (resource as { id?: unknown }).id;
+  return typeof id === "string" && id !== "" ? id : null;
+}
 
 export interface UpsertReport {
   written: number;
@@ -55,20 +88,50 @@ export interface UpsertReport {
 }
 
 export function makeFhirCacheRepo(ctx: Ctx) {
-  const decode = async (row: FhirCacheRow): Promise<CachedResource> => ({
-    providerId: row.provider_id,
-    resourceType: row.resource_type,
-    resourceId: row.resource_id,
-    lastUpdated: row.last_updated,
-    fetchedAt: row.fetched_at,
-    resource: JSON.parse(
+  const blinder = blinderFor(ctx.env);
+  const blindId = (providerId: string, resourceType: string, resourceId: string) =>
+    blindResourceId(blinder, providerId, resourceType, resourceId);
+
+  const decode = async (row: FhirCacheRow): Promise<CachedResource> => {
+    // Both shapes open under the id the row is stored by: the blind for a row
+    // written since 0007, the upstream id for one the backfill has not reached.
+    const resource: unknown = JSON.parse(
       await open(
         ctx.env,
         row.payload_enc,
-        aad(row.provider_id, row.resource_type, row.resource_id),
+        fhirCacheAad(row.provider_id, row.resource_type, row.resource_id),
       ),
-    ),
-  });
+    );
+    const realId = payloadId(resource) ?? (isBlinded(row.resource_id) ? "" : row.resource_id);
+    return {
+      providerId: row.provider_id,
+      resourceType: row.resource_type,
+      resourceId: realId,
+      lastUpdated: row.last_updated,
+      fetchedAt: row.fetched_at,
+      resource,
+    };
+  };
+
+  const getStored = async (
+    providerId: string,
+    resourceType: string,
+    storedIds: readonly string[],
+  ): Promise<CachedResource | null> => {
+    const placeholders = storedIds.map(() => "?").join(", ");
+    const rows = await all<FhirCacheRow>(
+      ctx.db
+        .prepare(
+          `SELECT * FROM fhir_cache
+            WHERE provider_id = ? AND resource_type = ? AND resource_id IN (${placeholders})
+              AND expires_at > ?`,
+        )
+        .bind(providerId, resourceType, ...storedIds, ctx.now()),
+    );
+    // The blinded row wins while the backfill has not yet removed a legacy twin.
+    const row = rows.find((candidate) => isBlinded(candidate.resource_id)) ?? rows[0];
+    return row === undefined ? null : decode(row);
+  };
 
   return {
     /**
@@ -103,12 +166,13 @@ export function makeFhirCacheRepo(ctx: Ctx) {
       const statements: D1PreparedStatement[] = [];
       for (const resource of resources) {
         const plaintext = JSON.stringify(resource);
-        const hash = await sha256Hex(plaintext);
+        const hash = await fhirCacheDigest(blinder, providerId, plaintext);
+        const storedId = await blindId(providerId, resource.resourceType, resource.id);
         const lastUpdated = parseLastUpdated(resource.meta?.lastUpdated);
 
         // security/detect-possible-timing-attacks warns because the variable is
         // called `hash`: it is a content digest for change detection, not a secret.
-        if (existing.get(`${resource.resourceType}:${resource.id}`) === hash) {
+        if (existing.get(`${resource.resourceType}:${storedId}`) === hash) {
           report.unchanged += 1;
           statements.push(
             ctx.db
@@ -116,7 +180,7 @@ export function makeFhirCacheRepo(ctx: Ctx) {
                 `UPDATE fhir_cache SET fetched_at = ?, expires_at = ?
                   WHERE provider_id = ? AND resource_type = ? AND resource_id = ?`,
               )
-              .bind(fetchedAt, expiresAt, providerId, resource.resourceType, resource.id),
+              .bind(fetchedAt, expiresAt, providerId, resource.resourceType, storedId),
           );
           continue;
         }
@@ -125,7 +189,7 @@ export function makeFhirCacheRepo(ctx: Ctx) {
         const payloadEnc = await seal(
           ctx.env,
           plaintext,
-          aad(providerId, resource.resourceType, resource.id),
+          fhirCacheAad(providerId, resource.resourceType, storedId),
         );
         statements.push(
           ctx.db
@@ -144,7 +208,7 @@ export function makeFhirCacheRepo(ctx: Ctx) {
             .bind(
               providerId,
               resource.resourceType,
-              resource.id,
+              storedId,
               payloadEnc,
               hash,
               lastUpdated,
@@ -159,21 +223,32 @@ export function makeFhirCacheRepo(ctx: Ctx) {
       return report;
     },
 
-    /** One resource, or null when it is absent or past its expiry. */
+    /**
+     * One resource by its upstream id, or null when it is absent or past its
+     * expiry. The id is blinded here, on the way in -- which is how an MCP tool
+     * that takes an id finds it -- and the caller never sees the stored form.
+     * The upstream id is looked up as well, for a row the 0007 backfill has not
+     * rewritten yet: a query parameter, never stored.
+     */
     async get(
       providerId: string,
       resourceType: string,
       resourceId: string,
     ): Promise<CachedResource | null> {
-      const row = await one<FhirCacheRow>(
-        ctx.db
-          .prepare(
-            `SELECT * FROM fhir_cache
-              WHERE provider_id = ? AND resource_type = ? AND resource_id = ? AND expires_at > ?`,
-          )
-          .bind(providerId, resourceType, resourceId, ctx.now()),
-      );
-      return row === null ? null : decode(row);
+      const storedId = await blindId(providerId, resourceType, resourceId);
+      return getStored(providerId, resourceType, [storedId, resourceId]);
+    },
+
+    /**
+     * One resource by its *stored* id: what `calendar_events.encounter_id` holds,
+     * which is the same blind this table keys the Encounter by.
+     */
+    async getByStoredId(
+      providerId: string,
+      resourceType: string,
+      storedId: string,
+    ): Promise<CachedResource | null> {
+      return getStored(providerId, resourceType, [storedId]);
     },
 
     /**

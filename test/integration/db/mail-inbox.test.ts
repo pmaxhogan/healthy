@@ -102,7 +102,7 @@ describe("mailInbox.insert", () => {
     // meaningful response -- but listRecent must never do the same for 'otp'.
     const raw = await rawColumn("mail_inbox", "code_enc", "id = ?", entry.id);
     expect(raw).not.toBeNull();
-    expect(raw?.startsWith("v1:")).toBe(true);
+    expect(raw ?? "").toMatch(/^v2:/u);
     expect(raw).not.toContain("482913");
   });
 
@@ -122,9 +122,9 @@ describe("mailInbox.insert", () => {
 
     const sealedFrom = await rawColumn("mail_inbox", "from_addr_enc", "id = ?", entry.id);
     const sealedSubject = await rawColumn("mail_inbox", "subject_enc", "id = ?", entry.id);
-    expect(sealedFrom?.startsWith("v1:")).toBe(true);
+    expect(sealedFrom ?? "").toMatch(/^v2:/u);
     expect(sealedFrom).not.toContain("portal.example.org");
-    expect(sealedSubject?.startsWith("v1:")).toBe(true);
+    expect(sealedSubject ?? "").toMatch(/^v2:/u);
     expect(sealedSubject).not.toContain("security code");
 
     // 0005 keeps the two old columns (from_addr is NOT NULL) and writes them

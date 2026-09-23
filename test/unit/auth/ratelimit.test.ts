@@ -38,13 +38,26 @@ function memoryStore(): LoginAttemptStore & { rows: Map<string, LoginAttemptWind
   };
 }
 
-function hashOf(ip: string): Promise<string> {
+/** A fresh random key per run: the digests only have to be consistent within one. */
+function randomKey(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return btoa(String.fromCodePoint(...bytes));
+}
+const KEY = randomKey();
+
+function hashOf(ip: string, key = KEY): Promise<string> {
   return hashClientIp(
     new Request("https://healthy.example/auth/login", {
       method: "POST",
       headers: { "cf-connecting-ip": ip },
     }),
+    key,
   );
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 const IP_HASH = "0".repeat(64);
@@ -158,16 +171,23 @@ describe("forgetLoginAttempts", () => {
 });
 
 describe("hashClientIp", () => {
-  it("returns a SHA-256 hex digest, not the address", async () => {
-    const request = new Request("https://healthy.example/auth/login", {
-      method: "POST",
-      headers: { "cf-connecting-ip": "203.0.113.7" },
-    });
+  it("returns a keyed digest, not the address and not its plain sha256", async () => {
+    const hash = await hashOf("203.0.113.7");
 
-    const hash = await hashClientIp(request);
-
-    expect(hash).toMatch(/^[0-9a-f]{64}$/u);
+    expect(hash).toMatch(/^~[\w-]{43}$/u);
     expect(hash).not.toContain("203");
+    // The point of keying it: every IPv4 address's plain sha256 is a lookup away.
+    expect(hash).not.toBe(await sha256Hex("203.0.113.7"));
+    expect(hash).not.toContain(await sha256Hex("203.0.113.7"));
+  });
+
+  it("depends on the key: another DATA_KEY gives another digest", async () => {
+    const [mine, theirs] = await Promise.all([
+      hashOf("203.0.113.7"),
+      hashOf("203.0.113.7", randomKey()),
+    ]);
+
+    expect(theirs).not.toBe(mine);
   });
 
   it("is stable for one address and different across addresses", async () => {
@@ -184,6 +204,6 @@ describe("hashClientIp", () => {
   it("buckets a request with no client IP under a single key rather than skipping the limit", async () => {
     const request = new Request("https://healthy.example/auth/login", { method: "POST" });
 
-    await expect(hashClientIp(request)).resolves.toMatch(/^[0-9a-f]{64}$/u);
+    await expect(hashClientIp(request, KEY)).resolves.toMatch(/^~[\w-]{43}$/u);
   });
 });

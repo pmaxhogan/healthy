@@ -1,9 +1,32 @@
 /**
  * The sync's own record of what it has written to the calendar.
  *
- * Nothing in this table is clinical: a key, the Google event id, and a
- * fingerprint of the mapped fields. That is deliberate -- the calendar itself
- * holds the content, and this table only has to be able to find it again.
+ * Nothing in this table is readable without `DATA_KEY`: a blinded key, the Google
+ * event id, a keyed fingerprint of the mapped fields, and one sealed column. That
+ * is deliberate -- the calendar itself holds the content, and this table only has
+ * to be able to find it again.
+ *
+ * ### What is stored how (0007)
+ *
+ *   - `event_key` is `blindEventKey(...)`: `<providerId>:<blind>` or
+ *     `<providerId>:csn:<blind>`. The same string is the Google event's
+ *     `extendedProperties.private.key`, so pairing a row with its event is still
+ *     an exact match, and the `<providerId>:` / `:csn:` structure the sync
+ *     partitions on is kept. The upstream id it was built from is not in it.
+ *   - `encounter_id` is the blinded upstream id -- for a FHIR row the very value
+ *     `fhir_cache.resource_id` keys the Encounter by, which is how a vanished
+ *     appointment is rebuilt from the cache without the real id being stored
+ *     here. `portal_csn` is `blindCsn(...)`.
+ *   - `calendar_id` is `blindCalendarId(...)`. The unique index on
+ *     `(calendar_id, google_event_id)` works unchanged, and "this row's event is
+ *     on a calendar other than the current target" is a comparison of blinds.
+ *   - `fingerprint` is a keyed digest (`worker/sync/mapping.ts`).
+ *   - `detail_enc` holds what the sync has to *read*: the real calendar id (to
+ *     move or delete an event on the calendar it was created on) and the start
+ *     (the window filter, the "is it over yet" rule, the start-time dedupe). One
+ *     seal per row, opened once per row per `list`; the AAD is bound to
+ *     `google_event_id`, which `rekey` leaves alone and every write that changes
+ *     it re-seals in the same statement. `start_at` is written NULL.
  *
  * Ghosting is the reason `state` and `ghosted_at` exist, and the migration's
  * CHECK ties them together: `state = 'ghost'` exactly when `ghosted_at` is set.
@@ -19,26 +42,37 @@
  * appointment and inserting another.
  */
 
+import { AppError } from "../../lib/errors.ts";
+import {
+  blindCalendarId,
+  blindCsn,
+  blindResourceId,
+  blinderFor,
+  isBlindedEventKey,
+} from "../blind.ts";
 import { all, one, run, sha256Hex } from "../client.ts";
+import { aadFor, open, sealShort } from "../crypto.ts";
 
+import type { Blinder } from "../blind.ts";
 import type { Ctx } from "../client.ts";
-import type { CalendarEventRow, CalendarEventSource, CalendarEventState } from "../rows.ts";
+import type {
+  CalendarEventDbRow,
+  CalendarEventRow,
+  CalendarEventSource,
+  CalendarEventState,
+} from "../rows.ts";
 
-/** Hex characters of `eventKey`'s digest kept in a log line. Short on purpose:
- * long enough to correlate two lines about the same row, short enough that it
- * never brushes the redactor's 32-character opaque-string threshold. */
+/** Hex characters of `eventKey`'s digest kept in a log line. */
 const LOG_HASH_CHARS = 12;
 
+/** The infix of a portal visit's logical encounter id. Mirrors `portal-mapping.ts`. */
+const CSN_PREFIX = "csn:";
+
 /**
- * `providerId` plus a short digest of the full key, for the two log lines below.
+ * `providerId` plus a short digest of the full key, for the log lines below.
  *
- * `eventKey` is `<providerId>:<encounterId>` -- the encounter half is Epic's own
- * resource id. `worker/lib/log.ts`'s redactor cannot catch it there: the `:`
- * ends an opaque run, so neither half reaches the 32-character threshold, and
- * the key name matches neither `SENSITIVE_KEY` nor `IDENTIFIER_KEY`. Logging
- * `providerId` (our own row id) plus a digest of the whole key keeps these
- * lines correlatable without ever putting the upstream id in Workers Logs. See
- * SECURITY.md, "No PHI in logs".
+ * The key is blinded, so it no longer carries an upstream id; the digest is kept
+ * so that a log line never carries a value that is also a lookup key in D1.
  */
 async function logSafeKey(eventKey: string): Promise<{ providerId: string; eventKeyHash: string }> {
   const separator = eventKey.indexOf(":");
@@ -47,20 +81,52 @@ async function logSafeKey(eventKey: string): Promise<{ providerId: string; event
   return { providerId, eventKeyHash: digest.slice(0, LOG_HASH_CHARS) };
 }
 
+/** What `detail_enc` holds. */
+interface EventDetail {
+  calendarId: string;
+  startAt: number | null;
+}
+
+export const calendarDetailAad = (googleEventId: string): string =>
+  aadFor("calendar_events", "detail_enc", googleEventId);
+
+/**
+ * The stored `encounter_id` for a logical upstream id: an Epic Encounter id, or
+ * `csn:<csn>` for a portal visit.
+ */
+export function encounterRef(
+  blinder: Blinder,
+  providerId: string,
+  encounterId: string,
+): Promise<string> {
+  return encounterId.startsWith(CSN_PREFIX)
+    ? blindCsn(blinder, providerId, encounterId.slice(CSN_PREFIX.length))
+    : blindResourceId(blinder, providerId, "Encounter", encounterId);
+}
+
+/** Refuse a key that still carries an upstream id. */
+function requireBlindedKey(eventKey: string): void {
+  if (!isBlindedEventKey(eventKey)) {
+    throw new AppError("internal", "calendar_events keys must be blinded");
+  }
+}
+
 interface UpsertEvent {
-  /** '<providerId>:<encounterId>', mirrored into extendedProperties.private.key. */
+  /** `blindEventKey(...)`; mirrored into extendedProperties.private.key. */
   eventKey: string;
   providerId: string;
+  /** The *logical* upstream id: an Encounter id, or `csn:<csn>`. Blinded here. */
   encounterId: string;
+  /** The real target calendar. Blinded into the column, sealed into the detail. */
   calendarId: string;
   googleEventId: string;
-  /** sha256 of the mapped fields; a change is what triggers a patch. */
+  /** Keyed digest of the mapped fields; a change is what triggers a patch. */
   fingerprint: string;
-  /** Unix second the appointment starts, for window queries. */
+  /** Unix second the appointment starts. Sealed. */
   startAt?: number | null;
   /** Which pass wrote this row. Defaults to 'fhir', which is what every row was. */
   source?: CalendarEventSource;
-  /** The portal's contact-serial number. Only ever set on a 'portal' row. */
+  /** The portal's real contact-serial number. Blinded here. Only on a 'portal' row. */
   portalCsn?: string | null;
   /**
    * True when this write is a ghost coming back to life.
@@ -76,9 +142,42 @@ interface UpsertEvent {
 
 const SELECT = "SELECT * FROM calendar_events";
 
+/** Earliest first, rows with no start last, then by key: the old `ORDER BY`. */
+function byStart(a: CalendarEventRow, b: CalendarEventRow): number {
+  if (a.start_at === null || b.start_at === null) {
+    if (a.start_at !== b.start_at) return a.start_at === null ? 1 : -1;
+  } else if (a.start_at !== b.start_at) {
+    return a.start_at - b.start_at;
+  }
+  if (a.event_key === b.event_key) return 0;
+  return a.event_key < b.event_key ? -1 : 1;
+}
+
 export function makeCalendarEventsRepo(ctx: Ctx) {
-  const byKey = async (eventKey: string): Promise<CalendarEventRow | null> =>
-    one<CalendarEventRow>(ctx.db.prepare(`${SELECT} WHERE event_key = ?`).bind(eventKey));
+  const blinder = blinderFor(ctx.env);
+
+  const sealDetail = (googleEventId: string, detail: EventDetail): Promise<string> =>
+    sealShort(ctx.env, JSON.stringify(detail), calendarDetailAad(googleEventId));
+
+  const decode = async (row: CalendarEventDbRow): Promise<CalendarEventRow> => {
+    const { detail_enc: detailEnc, ...rest } = row;
+    if (detailEnc === null) {
+      // Written before 0007 and not yet reached by the backfill: the plaintext
+      // columns are still the truth.
+      return rest;
+    }
+    const detail = JSON.parse(
+      await open(ctx.env, detailEnc, calendarDetailAad(row.google_event_id)),
+    ) as EventDetail;
+    return { ...rest, calendar_id: detail.calendarId, start_at: detail.startAt };
+  };
+
+  const byKey = async (eventKey: string): Promise<CalendarEventRow | null> => {
+    const row = await one<CalendarEventDbRow>(
+      ctx.db.prepare(`${SELECT} WHERE event_key = ?`).bind(eventKey),
+    );
+    return row === null ? null : decode(row);
+  };
 
   return {
     /**
@@ -92,22 +191,32 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
      * when `ghosted_at` is set.
      */
     async upsert(input: UpsertEvent): Promise<CalendarEventRow> {
+      requireBlindedKey(input.eventKey);
       const at = ctx.now();
       const restoring = input.restore === true ? 1 : 0;
+      const detailEnc = await sealDetail(input.googleEventId, {
+        calendarId: input.calendarId,
+        startAt: input.startAt ?? null,
+      });
+      const portalCsn =
+        input.portalCsn === undefined || input.portalCsn === null
+          ? null
+          : await blindCsn(blinder, input.providerId, input.portalCsn);
       await run(
         ctx.db
           .prepare(
             `INSERT INTO calendar_events
                (event_key, provider_id, encounter_id, calendar_id, google_event_id, fingerprint,
                 state, start_at, first_seen_at, last_seen_at, ghosted_at, updated_at,
-                source, portal_csn)
-             VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, NULL, ?, ?, ?)
+                source, portal_csn, detail_enc)
+             VALUES (?, ?, ?, ?, ?, ?, 'active', NULL, ?, ?, NULL, ?, ?, ?, ?)
              ON CONFLICT (event_key) DO UPDATE SET
+               encounter_id = excluded.encounter_id,
                calendar_id = excluded.calendar_id,
                google_event_id = excluded.google_event_id,
                fingerprint = excluded.fingerprint,
                state = CASE WHEN ? THEN 'active' ELSE calendar_events.state END,
-               start_at = excluded.start_at,
+               start_at = NULL,
                last_seen_at = excluded.last_seen_at,
                ghosted_at = CASE WHEN ? THEN NULL ELSE calendar_events.ghosted_at END,
                updated_at = excluded.updated_at,
@@ -115,21 +224,24 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
                -- portal-sync.ts handed to the FHIR pass is written again as
                -- 'fhir' and must not still read 'portal' afterwards.
                source = excluded.source,
-               portal_csn = excluded.portal_csn`,
+               portal_csn = excluded.portal_csn,
+               -- Sealed against the google_event_id written beside it, so the two
+               -- always move together.
+               detail_enc = excluded.detail_enc`,
           )
           .bind(
             input.eventKey,
             input.providerId,
-            input.encounterId,
-            input.calendarId,
+            await encounterRef(blinder, input.providerId, input.encounterId),
+            await blindCalendarId(blinder, input.calendarId),
             input.googleEventId,
             input.fingerprint,
-            input.startAt ?? null,
             at,
             at,
             at,
             input.source ?? "fhir",
-            input.portalCsn ?? null,
+            portalCsn,
+            detailEnc,
             restoring,
             restoring,
           ),
@@ -141,6 +253,12 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
 
     getByKey: byKey,
 
+    /**
+     * Rows, earliest first. Every filter that narrows in SQL is on a plaintext
+     * column (`provider_id`, `source`, `state`), so it uses the index; the start
+     * is sealed, so `startsAfter` and the ordering are applied after the rows are
+     * opened. That costs nothing extra: every caller opens every row it reads.
+     */
     async list(
       options: {
         providerId?: string;
@@ -164,20 +282,20 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
         clauses.push("state = ?");
         values.push(options.state);
       }
-      if (options.startsAfter !== undefined) {
-        clauses.push("start_at >= ?");
-        values.push(options.startsAfter);
-      }
       const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
-      // No `LIMIT` clause at all unless a caller actually wants one: the owner's
-      // whole calendar-events table is what "list" means when nothing narrows it.
-      const limitClause = options.limit === undefined ? "" : " LIMIT ?";
-      const bound = options.limit === undefined ? values : [...values, options.limit];
-      return all<CalendarEventRow>(
-        ctx.db
-          .prepare(`${SELECT}${where} ORDER BY start_at IS NULL, start_at, event_key${limitClause}`)
-          .bind(...bound),
+      const rows = await all<CalendarEventDbRow>(
+        ctx.db.prepare(`${SELECT}${where}`).bind(...values),
       );
+      const decoded = await Promise.all(rows.map((row) => decode(row)));
+      const after = options.startsAfter;
+      const windowed =
+        after === undefined
+          ? decoded
+          : decoded.filter((row) => row.start_at !== null && row.start_at >= after);
+      windowed.sort(byStart);
+      // No limit at all unless a caller actually wants one: the owner's whole
+      // calendar-events table is what "list" means when nothing narrows it.
+      return options.limit === undefined ? windowed : windowed.slice(0, options.limit);
     },
 
     /**
@@ -244,15 +362,16 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
      * Hand one row to a different event key, keeping its Google event.
      *
      * The one caller is the FHIR pass meeting an appointment the portal has
-     * already calendared: one visit under two ids (`<providerId>:csn:<csn>` and
-     * `<providerId>:<encounterId>`). Ghosting the portal row and inserting a FHIR
-     * one would leave the owner looking at a grey "Cancelled:" event beside a live
-     * duplicate of the same appointment, so the row is renamed in place and the
-     * patch that follows rewrites the event's own key marker.
+     * already calendared: one visit under two keys (the portal's and the
+     * Encounter's). Ghosting the portal row and inserting a FHIR one would leave
+     * the owner looking at a grey "Cancelled:" event beside a live duplicate of
+     * the same appointment, so the row is renamed in place and the patch that
+     * follows rewrites the event's own key marker.
      *
      * The fingerprint is cleared on purpose: what is on the calendar was rendered
      * from the portal's fields, so the FHIR fingerprint cannot describe it and the
-     * diff has to see a change.
+     * diff has to see a change. `detail_enc` is untouched: it is bound to the
+     * Google event id, which does not move.
      *
      * False when the target key already exists -- both sightings have been written
      * already and there is nothing to move.
@@ -262,8 +381,13 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
       toKey: string,
       input: { encounterId: string; source: CalendarEventSource },
     ): Promise<boolean> {
-      const existing = await byKey(toKey);
+      requireBlindedKey(toKey);
+      const existing = await one<{ event_key: string }>(
+        ctx.db.prepare("SELECT event_key FROM calendar_events WHERE event_key = ?").bind(toKey),
+      );
       if (existing !== null) return false;
+      const separator = toKey.indexOf(":");
+      const providerId = toKey.slice(0, separator);
       const { changes } = await run(
         ctx.db
           .prepare(
@@ -272,7 +396,14 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
                     fingerprint = '', last_seen_at = ?, updated_at = ?
               WHERE event_key = ?`,
           )
-          .bind(toKey, input.encounterId, input.source, ctx.now(), ctx.now(), fromKey),
+          .bind(
+            toKey,
+            await encounterRef(blinder, providerId, input.encounterId),
+            input.source,
+            ctx.now(),
+            ctx.now(),
+            fromKey,
+          ),
       );
       if (changes > 0) ctx.log.info("calendar_events.rekeyed", await logSafeKey(toKey));
       return changes > 0;
@@ -317,13 +448,25 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
      * The owner changed the sync target and the row's event has followed it
      * there. Only the tracked calendar moves -- the fingerprint, state and
      * timestamps describe the appointment, not where it lives, and the caller
-     * has already made the Google-side move before calling this.
+     * has already made the Google-side move before calling this. The detail is
+     * re-sealed with the new calendar and the start it already had.
      */
     async moveCalendar(eventKey: string, calendarId: string): Promise<void> {
+      const row = await byKey(eventKey);
+      if (row === null) return;
       await run(
         ctx.db
-          .prepare(`UPDATE calendar_events SET calendar_id = ?, updated_at = ? WHERE event_key = ?`)
-          .bind(calendarId, ctx.now(), eventKey),
+          .prepare(
+            `UPDATE calendar_events SET calendar_id = ?, detail_enc = ?, start_at = NULL,
+                    updated_at = ?
+              WHERE event_key = ?`,
+          )
+          .bind(
+            await blindCalendarId(blinder, calendarId),
+            await sealDetail(row.google_event_id, { calendarId, startAt: row.start_at }),
+            ctx.now(),
+            eventKey,
+          ),
       );
     },
 

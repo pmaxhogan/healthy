@@ -15,10 +15,12 @@
 
 import { env } from "cloudflare:test";
 
+import { blindEventKey, blinderFor } from "../../../worker/db/blind.ts";
 import { makeCtx } from "../../../worker/db/client.ts";
 import { makeRepos } from "../../../worker/db/index.ts";
 import { setSettings } from "../../../worker/db/settings.ts";
 
+import type { Blinder } from "../../../worker/db/blind.ts";
 import type { Ctx } from "../../../worker/db/client.ts";
 import type { Repos } from "../../../worker/db/index.ts";
 import type { Env } from "../../../worker/env.ts";
@@ -778,8 +780,22 @@ function capabilityStatement(
   };
 }
 
+/**
+ * The stored form of a logical event key (`<providerId>:<encounterId>` or
+ * `<providerId>:csn:<csn>`): what the rows and the Google markers carry.
+ */
+export function sk(logicalKey: string): Promise<string> {
+  return blindEventKey(blinderFor(DATA_KEY), logicalKey);
+}
+
+/** The blinder every sync test's repos use. */
+export function syncBlinder(): Blinder {
+  return blinderFor(DATA_KEY);
+}
+
 /** Every table, child before parent so the deletes never trip a foreign key. */
 const TABLES = [
+  "data_migrations",
   "login_attempts",
   "mail_inbox",
   "portal_visits",

@@ -14,6 +14,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { blindCsn } from "../../../worker/db/blind.ts";
 import { setSetting } from "../../../worker/db/settings.ts";
 import { AppError } from "../../../worker/lib/errors.ts";
 import { runCalendarSync } from "../../../worker/sync/calendar-sync.ts";
@@ -40,6 +41,8 @@ import {
   seedConnectedProvider,
   seedGoogle,
   seedSettings,
+  sk,
+  syncBlinder,
   stubUpstreams,
   syncCtx,
   syncRepos,
@@ -112,9 +115,9 @@ function withEncounters(fix: Fixture, encounters: readonly fhir4.Encounter[]): v
   fix.server.resources.set("Organization/org-1", organization("org-1", "Example Health"));
 }
 
-/** The `<providerId>:csn:<csn>` key a portal visit is calendared under. */
-function portalKey(provider: SeededProvider, csn: string): string {
-  return `${provider.providerId}:csn:${csn}`;
+/** The key a portal visit is calendared under: `<providerId>:csn:<blind>`. */
+function portalKey(provider: SeededProvider, csn: string): Promise<string> {
+  return sk(`${provider.providerId}:csn:${csn}`);
 }
 
 describe("portal visits on the calendar", () => {
@@ -126,14 +129,14 @@ describe("portal visits on the calendar", () => {
     expect(summary.portalVisits).toBe(1);
     expect(summary.eventsInserted).toBe(1);
     expect(summary.portalErrors).toStrictEqual([]);
-    const key = portalKey(fix.provider, "csn-1");
+    const key = await portalKey(fix.provider, "csn-1");
     const event = fix.upstreams.calendar.byKey().get(key);
     expect(event?.summary).toBe("Follow-up · A. Example, MD");
     expect(event?.visibility).toBe("private");
 
     const row = await syncRepos(fix.ctx).calendarEvents.getByKey(key);
     expect(row?.source).toBe("portal");
-    expect(row?.portal_csn).toBe("csn-1");
+    expect(row?.portal_csn).toBe(await blindCsn(syncBlinder(), fix.provider.providerId, "csn-1"));
     expect(row?.state).toBe("active");
   });
 
@@ -150,9 +153,9 @@ describe("portal visits on the calendar", () => {
     const changed = await portalRun(fix);
     expect(changed.eventsPatched).toBe(1);
     expect(fix.upstreams.calendar.inserts).toBe(1);
-    expect(fix.upstreams.calendar.byKey().get(portalKey(fix.provider, "csn-1"))?.summary).toBe(
-      "Annual physical · A. Example, MD",
-    );
+    expect(
+      fix.upstreams.calendar.byKey().get(await portalKey(fix.provider, "csn-1"))?.summary,
+    ).toBe("Annual physical · A. Example, MD");
   });
 
   it("ghosts a visit the portal reports as canceled, with its own details", async () => {
@@ -163,10 +166,12 @@ describe("portal visits on the calendar", () => {
     const summary = await portalRun(fix);
 
     expect(summary.eventsGhosted).toBe(1);
-    const event = fix.upstreams.calendar.byKey().get(portalKey(fix.provider, "csn-1"));
+    const event = fix.upstreams.calendar.byKey().get(await portalKey(fix.provider, "csn-1"));
     expect(event?.summary).toBe("Cancelled: Follow-up · A. Example, MD");
     expect(event?.transparency).toBe("transparent");
-    const row = await syncRepos(fix.ctx).calendarEvents.getByKey(portalKey(fix.provider, "csn-1"));
+    const row = await syncRepos(fix.ctx).calendarEvents.getByKey(
+      await portalKey(fix.provider, "csn-1"),
+    );
     expect(row?.state).toBe("ghost");
     // A cancellation keeps its event: only a duplicate is ever deleted.
     expect(fix.upstreams.calendar.events()).toHaveLength(1);
@@ -195,11 +200,13 @@ describe("portal visits on the calendar", () => {
     const summary = await portalRun(fix);
 
     expect(summary.eventsRestored).toBe(1);
-    const row = await syncRepos(fix.ctx).calendarEvents.getByKey(portalKey(fix.provider, "csn-1"));
-    expect(row?.state).toBe("active");
-    expect(fix.upstreams.calendar.byKey().get(portalKey(fix.provider, "csn-1"))?.summary).toBe(
-      "Follow-up · A. Example, MD",
+    const row = await syncRepos(fix.ctx).calendarEvents.getByKey(
+      await portalKey(fix.provider, "csn-1"),
     );
+    expect(row?.state).toBe("active");
+    expect(
+      fix.upstreams.calendar.byKey().get(await portalKey(fix.provider, "csn-1"))?.summary,
+    ).toBe("Follow-up · A. Example, MD");
   });
 
   it("ghosts the row, but not the calendar entry, when a future visit vanishes", async () => {
@@ -211,14 +218,16 @@ describe("portal visits on the calendar", () => {
     const summary = await portalRun(fix);
 
     expect(summary.eventsGhosted).toBe(1);
-    const row = await syncRepos(fix.ctx).calendarEvents.getByKey(portalKey(fix.provider, "csn-1"));
+    const row = await syncRepos(fix.ctx).calendarEvents.getByKey(
+      await portalKey(fix.provider, "csn-1"),
+    );
     expect(row?.state).toBe("ghost");
     // The calendar is not re-rendered from a copy it did not just read: the row is
     // marked and the entry the owner is looking at is left alone.
     expect(fix.upstreams.calendar.patches).toBe(patchesBefore);
-    expect(fix.upstreams.calendar.byKey().get(portalKey(fix.provider, "csn-1"))?.summary).toBe(
-      "Follow-up · A. Example, MD",
-    );
+    expect(
+      fix.upstreams.calendar.byKey().get(await portalKey(fix.provider, "csn-1"))?.summary,
+    ).toBe("Follow-up · A. Example, MD");
   });
 
   it("leaves a visit alone once it is in the past and drops out of the list", async () => {
@@ -232,7 +241,9 @@ describe("portal visits on the calendar", () => {
     const summary = await portalRun(fix);
 
     expect(summary.eventsGhosted).toBe(0);
-    const row = await syncRepos(fix.ctx).calendarEvents.getByKey(portalKey(fix.provider, "csn-1"));
+    const row = await syncRepos(fix.ctx).calendarEvents.getByKey(
+      await portalKey(fix.provider, "csn-1"),
+    );
     expect(row?.state).toBe("active");
   });
 });
@@ -246,9 +257,9 @@ describe("portal visits that FHIR also knows about", () => {
 
     expect(summary.portalVisits).toBe(1);
     expect(summary.portalSkipped).toBe(1);
-    expect(calendarKeys(fix)).toStrictEqual([`${fix.provider.providerId}:enc-1`]);
+    expect(calendarKeys(fix)).toStrictEqual([await sk(`${fix.provider.providerId}:enc-1`)]);
     const stray = await syncRepos(fix.ctx).calendarEvents.getByKey(
-      portalKey(fix.provider, "csn-1"),
+      await portalKey(fix.provider, "csn-1"),
     );
     expect(stray).toBeNull();
   });
@@ -273,7 +284,9 @@ describe("portal visits that FHIR also knows about", () => {
       expect(summary.eventsPatched).toBe(0);
     }
     expect(fix.upstreams.calendar.patches).toBe(patchesBefore);
-    const row = await syncRepos(fix.ctx).calendarEvents.getByKey(portalKey(fix.provider, "csn-1"));
+    const row = await syncRepos(fix.ctx).calendarEvents.getByKey(
+      await portalKey(fix.provider, "csn-1"),
+    );
     expect(row?.state).toBe("active");
   });
 
@@ -290,12 +303,12 @@ describe("portal visits that FHIR also knows about", () => {
     // One event, still the one the portal created.
     expect(fix.upstreams.calendar.inserts).toBe(1);
     expect(summary.eventsPatched).toBe(1);
-    expect(calendarKeys(fix)).toStrictEqual([`${fix.provider.providerId}:enc-1`]);
+    expect(calendarKeys(fix)).toStrictEqual([await sk(`${fix.provider.providerId}:enc-1`)]);
 
     const repos = syncRepos(fix.ctx);
-    const stray = await repos.calendarEvents.getByKey(portalKey(fix.provider, "csn-1"));
+    const stray = await repos.calendarEvents.getByKey(await portalKey(fix.provider, "csn-1"));
     expect(stray).toBeNull();
-    const row = await repos.calendarEvents.getByKey(`${fix.provider.providerId}:enc-1`);
+    const row = await repos.calendarEvents.getByKey(await sk(`${fix.provider.providerId}:enc-1`));
     expect(row?.source).toBe("fhir");
     expect(row?.portal_csn).toBeNull();
     expect(row?.state).toBe("active");
@@ -380,8 +393,8 @@ async function secondOrganisation(fix: Fixture, visits: PortalVisit[]): Promise<
  * have written it. Provider B has no portal account in these tests, so nothing
  * touches it -- which is what lets a test prove the delete aimed at A's copy only.
  */
-function ownersEvent(fix: Fixture, owner: SeededProvider, csn: string): string {
-  const key = `${owner.providerId}:csn:${csn}`;
+async function ownersEvent(fix: Fixture, owner: SeededProvider, csn: string): Promise<string> {
+  const key = await sk(`${owner.providerId}:csn:${csn}`);
   fix.upstreams.calendar.plant({
     summary: "Follow-up · A. Example, MD",
     start: { dateTime: SOON },
@@ -395,7 +408,7 @@ function ownersEvent(fix: Fixture, owner: SeededProvider, csn: string): string {
 async function calendaredSecondHand(fix: Fixture): Promise<string> {
   const summary = await portalRun(fix);
   expect(summary.eventsInserted).toBe(1);
-  return portalKey(fix.provider, "csn-a-view");
+  return await portalKey(fix.provider, "csn-a-view");
 }
 
 const shared = (overrides: Partial<PortalVisit> = {}): PortalVisit =>
@@ -425,7 +438,7 @@ describe("one visit, one event, across organisations", () => {
     const summary = await portalRun(fix);
 
     expect(summary.eventsInserted).toBe(1);
-    expect(calendarKeys(fix)).toStrictEqual([portalKey(fix.provider, "csn-a-view")]);
+    expect(calendarKeys(fix)).toStrictEqual([await portalKey(fix.provider, "csn-a-view")]);
   });
 
   it("deletes, rather than ghosts, a second-hand event once the owner's copy turns up", async () => {
@@ -435,7 +448,7 @@ describe("one visit, one event, across organisations", () => {
     const fix = await fixture({ portal: { visits: [shared()] } });
     const mine = await calendaredSecondHand(fix);
     const owner = await secondOrganisation(fix, [portalVisit({ csn: "csn-b-own", start: SOON })]);
-    const theirs = ownersEvent(fix, owner, "csn-b-own");
+    const theirs = await ownersEvent(fix, owner, "csn-b-own");
 
     const summary = await portalRun(fix);
 
@@ -455,7 +468,7 @@ describe("one visit, one event, across organisations", () => {
     expect(fix.upstreams.calendar.byKey().get(mine)?.summary).toMatch(/^Cancelled: /u);
     fix.portal.visits = [shared()];
     const owner = await secondOrganisation(fix, [portalVisit({ csn: "csn-b-own", start: SOON })]);
-    const theirs = ownersEvent(fix, owner, "csn-b-own");
+    const theirs = await ownersEvent(fix, owner, "csn-b-own");
 
     const summary = await portalRun(fix);
 
@@ -485,7 +498,7 @@ describe("one visit, one event, across organisations", () => {
     const fix = await fixture({ portal: { visits: [shared()] } });
     const mine = await calendaredSecondHand(fix);
     const owner = await secondOrganisation(fix, [portalVisit({ csn: "csn-b-own", start: SOON })]);
-    const theirs = ownersEvent(fix, owner, "csn-b-own");
+    const theirs = await ownersEvent(fix, owner, "csn-b-own");
     await portalRun(fix);
     const inserts = fix.upstreams.calendar.inserts;
     const patches = fix.upstreams.calendar.patches;
@@ -535,7 +548,7 @@ describe("one visit, one event, across organisations", () => {
     const summary = await portalRun(fix);
 
     expect(summary.eventsInserted).toBe(1);
-    expect(calendarKeys(fix)).toStrictEqual([portalKey(fix.provider, "csn-a-own")]);
+    expect(calendarKeys(fix)).toStrictEqual([await portalKey(fix.provider, "csn-a-own")]);
   });
 });
 

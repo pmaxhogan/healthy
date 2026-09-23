@@ -40,7 +40,7 @@ describe("the google_account row", () => {
     for (const column of ["email_enc", "access_token_enc", "refresh_token_enc"]) {
       const raw = await rawColumn("google_account", column, "id = 1");
 
-      expect(raw?.startsWith("v1:"), column).toBe(true);
+      expect(raw ?? "", column).toMatch(/^v[12]:/u);
       expect(raw, column).not.toContain("example.test");
       expect(raw, column).not.toContain("google-");
     }

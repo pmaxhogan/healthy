@@ -24,6 +24,7 @@ import {
   seedConnectedProvider,
   seedGoogle,
   seedSettings,
+  sk,
   stubUpstreams,
   syncCtx,
   syncRepos,
@@ -92,7 +93,10 @@ describe("the first run", () => {
     expect(h.upstreams.calendar.events()).toHaveLength(2);
 
     const rows = await syncRepos(h.ctx).calendarEvents.list({ providerId: h.providerId });
-    expect(rows.map((row) => row.encounter_id)).toStrictEqual(["enc-2", "enc-1"]);
+    expect(rows.map((row) => row.event_key)).toStrictEqual([
+      await sk(`${h.providerId}:enc-2`),
+      await sk(`${h.providerId}:enc-1`),
+    ]);
     expect(rows.every((row) => row.state === "active")).toBe(true);
   });
 
@@ -101,7 +105,7 @@ describe("the first run", () => {
 
     await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
 
-    const event = h.upstreams.calendar.byKey().get(`${h.providerId}:enc-1`);
+    const event = h.upstreams.calendar.byKey().get(await sk(`${h.providerId}:enc-1`));
     expect(event).toBeDefined();
     const properties = (event?.extendedProperties as { private: Record<string, string> }).private;
     expect(properties.healthy).toBe("1");
@@ -192,7 +196,7 @@ describe("the second run", () => {
     // No duplicates: the same two Google events, patched in place.
     expect(h.upstreams.calendar.events().map((event) => event.id)).toStrictEqual(firstIds);
 
-    const ghost = h.upstreams.calendar.byKey().get(`${h.providerId}:enc-2`);
+    const ghost = h.upstreams.calendar.byKey().get(await sk(`${h.providerId}:enc-2`));
     expect(ghost?.summary).toBe("Cancelled: Office Visit · Test Alpha");
   });
 
@@ -204,7 +208,7 @@ describe("the second run", () => {
     h.server.encounters = searchBundle([encounter({ id: "enc-1", start: UPCOMING })]);
     await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
 
-    const ghost = h.upstreams.calendar.byKey().get(`${h.providerId}:enc-2`);
+    const ghost = h.upstreams.calendar.byKey().get(await sk(`${h.providerId}:enc-2`));
     expect(String(ghost?.summary).startsWith("Cancelled: ")).toBe(true);
     expect(ghost?.transparency).toBe("transparent");
     expect(ghost?.colorId).toBe("8");
@@ -212,7 +216,7 @@ describe("the second run", () => {
     expect(String(ghost?.description)).toContain("Example Regional");
     expect(String(ghost?.description)).toContain("No longer on the provider's schedule as of");
 
-    const row = await syncRepos(h.ctx).calendarEvents.getByKey(`${h.providerId}:enc-2`);
+    const row = await syncRepos(h.ctx).calendarEvents.getByKey(await sk(`${h.providerId}:enc-2`));
     expect(row?.state).toBe("ghost");
     expect(row?.ghosted_at).toBe(T0 + 3600);
   });
@@ -254,7 +258,7 @@ describe("the second run", () => {
     // either half on its own and the third run sees a stale fingerprint, patches
     // the same event again, re-stamps `ghosted_at`, and so does every run after it.
     const h = await setup();
-    const key = `${h.providerId}:enc-2`;
+    const key = await sk(`${h.providerId}:enc-2`);
     const repos = syncRepos(h.ctx);
     await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
     const active = await repos.calendarEvents.getByKey(key);
@@ -301,12 +305,12 @@ describe("the third run", () => {
 
     expect(summary.eventsRestored).toBe(1);
     expect(summary.eventsGhosted).toBe(0);
-    const restored = h.upstreams.calendar.byKey().get(`${h.providerId}:enc-2`);
+    const restored = h.upstreams.calendar.byKey().get(await sk(`${h.providerId}:enc-2`));
     expect(String(restored?.summary).startsWith("Cancelled: ")).toBe(false);
     expect(restored?.transparency).toBe("opaque");
     expect(String(restored?.description)).not.toContain("No longer on the provider's schedule");
 
-    const row = await syncRepos(h.ctx).calendarEvents.getByKey(`${h.providerId}:enc-2`);
+    const row = await syncRepos(h.ctx).calendarEvents.getByKey(await sk(`${h.providerId}:enc-2`));
     expect(row?.state).toBe("active");
     expect(row?.ghosted_at).toBeNull();
   });
@@ -324,7 +328,7 @@ describe("cancellation and other statuses", () => {
     const summary = await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
 
     expect(summary.eventsGhosted).toBe(1);
-    const ghost = h.upstreams.calendar.byKey().get(`${h.providerId}:enc-1`);
+    const ghost = h.upstreams.calendar.byKey().get(await sk(`${h.providerId}:enc-1`));
     expect(ghost?.transparency).toBe("transparent");
   });
 
@@ -378,7 +382,7 @@ describe("an event the owner deleted by hand", () => {
 
     expect(summary.eventsInserted).toBe(1);
     expect(h.upstreams.calendar.events()).toHaveLength(1);
-    const row = await syncRepos(h.ctx).calendarEvents.getByKey(`${h.providerId}:enc-1`);
+    const row = await syncRepos(h.ctx).calendarEvents.getByKey(await sk(`${h.providerId}:enc-1`));
     expect(row?.google_event_id).not.toBe(first?.id);
   });
 
@@ -395,7 +399,7 @@ describe("an event the owner deleted by hand", () => {
     expect(summary.eventsGhosted).toBe(1);
     expect(h.upstreams.calendar.events()).toHaveLength(0);
     await expect(
-      syncRepos(h.ctx).calendarEvents.getByKey(`${h.providerId}:enc-1`),
+      syncRepos(h.ctx).calendarEvents.getByKey(await sk(`${h.providerId}:enc-1`)),
     ).resolves.toMatchObject({ state: "ghost" });
     expect(loggedEvent(h.lines, "sync.ghost.row_only")).toBe(true);
 
@@ -439,7 +443,11 @@ describe("the invariant", () => {
       start: { dateTime: UPCOMING, timeZone: "UTC" },
       end: { dateTime: "2026-06-29T17:00:00Z", timeZone: "UTC" },
       extendedProperties: {
-        private: { healthy: "1", key: `${h.providerId}:gone-forever`, provider: h.providerId },
+        private: {
+          healthy: "1",
+          key: await sk(`${h.providerId}:gone-forever`),
+          provider: h.providerId,
+        },
       },
     });
 
@@ -461,7 +469,7 @@ describe("the window", () => {
     await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
     const repos = syncRepos(h.ctx);
     await repos.calendarEvents.upsert({
-      eventKey: `${h.providerId}:ancient`,
+      eventKey: await sk(`${h.providerId}:ancient`),
       providerId: h.providerId,
       encounterId: "ancient",
       calendarId: "primary",
@@ -474,7 +482,9 @@ describe("the window", () => {
     const summary = await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
 
     expect(summary.eventsGhosted).toBe(0);
-    await expect(repos.calendarEvents.getByKey(`${h.providerId}:ancient`)).resolves.toMatchObject({
+    await expect(
+      repos.calendarEvents.getByKey(await sk(`${h.providerId}:ancient`)),
+    ).resolves.toMatchObject({
       state: "active",
     });
   });
@@ -515,7 +525,7 @@ describe("Epic 4119, the filtered patient view", () => {
     expect(summary.eventsInserted).toBe(1);
     expect(summary.eventsGhosted).toBe(0);
     await expect(
-      syncRepos(h.ctx).calendarEvents.getByKey(`${h.providerId}:enc-1`),
+      syncRepos(h.ctx).calendarEvents.getByKey(await sk(`${h.providerId}:enc-1`)),
     ).resolves.toMatchObject({ state: "active" });
   });
 });
@@ -572,7 +582,7 @@ describe("per-provider isolation", () => {
 
     // The other organisation's appointment is on the calendar regardless.
     expect(summary.eventsInserted).toBe(1);
-    expect(h.upstreams.calendar.byKey().has(`${h.b.providerId}:enc-b`)).toBe(true);
+    expect(h.upstreams.calendar.byKey().has(await sk(`${h.b.providerId}:enc-b`))).toBe(true);
   });
 
   it("opens a Trello card, once, when Trello is configured", async () => {
@@ -639,7 +649,7 @@ describe("per-provider isolation", () => {
     ]);
     // And the other organisation is unaffected.
     expect(summary.eventsInserted).toBe(1);
-    expect(h.upstreams.calendar.byKey().has(`${h.b.providerId}:enc-b`)).toBe(true);
+    expect(h.upstreams.calendar.byKey().has(await sk(`${h.b.providerId}:enc-b`))).toBe(true);
   });
 
   it("recovers on the next run once the token endpoint is back", async () => {
@@ -652,7 +662,7 @@ describe("per-provider isolation", () => {
     const summary = await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
 
     expect(summary.errors).toStrictEqual([]);
-    expect(h.upstreams.calendar.byKey().has(`${h.a.providerId}:enc-a`)).toBe(true);
+    expect(h.upstreams.calendar.byKey().has(await sk(`${h.a.providerId}:enc-a`))).toBe(true);
     await expect(syncRepos(h.ctx).connections.get(h.a.connectionId)).resolves.toMatchObject({
       status: "connected",
     });
@@ -825,7 +835,7 @@ describe("per-provider configuration", () => {
 
     await runCalendarSync(ctx, { deps: upstreams.deps });
 
-    const event = upstreams.calendar.byKey().get(`${seeded.providerId}:enc-1`);
+    const event = upstreams.calendar.byKey().get(await sk(`${seeded.providerId}:enc-1`));
     expect(event?.summary).toBe("AEH: Office Visit (appt 3:30 PM)");
     expect(event?.colorId).toBe("5");
     expect((event?.start as { dateTime: string }).dateTime).toBe("2026-06-29T15:05:00.000Z");
@@ -851,7 +861,7 @@ describe("changing the target calendar", () => {
   it("moves a tracked event instead of duplicating it", async () => {
     const h = await setup({ encounters: [{ id: "enc-1", start: UPCOMING }] });
     await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
-    const original = h.upstreams.calendar.byKeyOn("primary").get(`${h.providerId}:enc-1`);
+    const original = h.upstreams.calendar.byKeyOn("primary").get(await sk(`${h.providerId}:enc-1`));
     expect(original).toBeDefined();
 
     await setSetting(h.ctx, "calendar_id", "vacation");
@@ -864,11 +874,11 @@ describe("changing the target calendar", () => {
     // the new calendar -- not a second, duplicate insert.
     expect(h.upstreams.calendar.events()).toHaveLength(1);
     expect(h.upstreams.calendar.byKeyOn("primary").size).toBe(0);
-    const moved = h.upstreams.calendar.byKeyOn("vacation").get(`${h.providerId}:enc-1`);
+    const moved = h.upstreams.calendar.byKeyOn("vacation").get(await sk(`${h.providerId}:enc-1`));
     expect(moved?.id).toBe(original?.id);
     expect(h.upstreams.calendar.moves).toBe(1);
 
-    const row = await syncRepos(h.ctx).calendarEvents.getByKey(`${h.providerId}:enc-1`);
+    const row = await syncRepos(h.ctx).calendarEvents.getByKey(await sk(`${h.providerId}:enc-1`));
     expect(row?.calendar_id).toBe("vacation");
     expect(row?.google_event_id).toBe(original?.id);
   });
@@ -886,11 +896,11 @@ describe("changing the target calendar", () => {
     expect(summary.eventsGhosted).toBe(1);
     expect(summary.eventsInserted).toBe(0);
     expect(h.upstreams.calendar.byKeyOn("primary").size).toBe(0);
-    const ghost = h.upstreams.calendar.byKeyOn("vacation").get(`${h.providerId}:enc-1`);
+    const ghost = h.upstreams.calendar.byKeyOn("vacation").get(await sk(`${h.providerId}:enc-1`));
     expect(ghost).toBeDefined();
     expect(String(ghost?.summary).startsWith("Cancelled: ")).toBe(true);
 
-    const row = await syncRepos(h.ctx).calendarEvents.getByKey(`${h.providerId}:enc-1`);
+    const row = await syncRepos(h.ctx).calendarEvents.getByKey(await sk(`${h.providerId}:enc-1`));
     expect(row?.calendar_id).toBe("vacation");
     expect(row?.state).toBe("ghost");
   });

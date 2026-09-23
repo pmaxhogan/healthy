@@ -5,9 +5,12 @@
 // marked missing (and comes back), a past one is left alone, and old rows go on
 // the scheduled purge. Every visit is synthetic.
 
+import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { blindCsn } from "../../../worker/db/blind.ts";
 import { aadFor, open } from "../../../worker/db/crypto.ts";
+import { EXPIRY_BUCKET_SECONDS } from "../../../worker/db/repos/portal-visits.ts";
 
 import {
   OTHER_DATA_KEY,
@@ -16,6 +19,7 @@ import {
   rawColumn,
   resetDb,
   seedProvider,
+  testBlinder,
   testRepos,
 } from "./helpers.ts";
 
@@ -48,6 +52,11 @@ function visit(
 
 const COMPLETE = { complete: true };
 
+/** The number a visit is stored under: its blind, never the portal's own. */
+function storedCsn(providerId: string, csn: string): Promise<string> {
+  return blindCsn(testBlinder(), providerId, csn);
+}
+
 type Repos = ReturnType<typeof testRepos>;
 
 /** One stored visit by CSN, or undefined. */
@@ -79,15 +88,19 @@ describe("portal_visits.record", () => {
       "payload_enc",
       "provider_id = ? AND csn = ?",
       providerId,
-      "csn-1",
+      await storedCsn(providerId, "csn-1"),
     );
-    expect(sealed?.startsWith("v1:")).toBe(true);
+    expect(sealed ?? "").toMatch(/^v1:/u);
     expect(sealed).not.toContain("distinctivepractitioner");
-    // The AAD is `portal_visits.payload_enc.<providerId>:<csn>`.
+    // The AAD is `portal_visits.payload_enc.<providerId>:<stored csn>`.
     const opened = await open(
       repos.ctx.env,
       sealed ?? "",
-      aadFor("portal_visits", "payload_enc", `${providerId}:csn-1`),
+      aadFor(
+        "portal_visits",
+        "payload_enc",
+        `${providerId}:${await storedCsn(providerId, "csn-1")}`,
+      ),
     );
     expect(JSON.parse(opened)).toStrictEqual(visit("csn-1", DAY));
   });
@@ -108,17 +121,17 @@ describe("portal_visits.record", () => {
       "payload_enc",
       "provider_id = ? AND csn = ?",
       first,
-      "csn-1",
+      await storedCsn(first, "csn-1"),
     );
     await repos.ctx.db
       .prepare("UPDATE portal_visits SET payload_enc = ? WHERE provider_id = ? AND csn = ?")
-      .bind(stolen, second, "csn-1")
+      .bind(stolen, second, await storedCsn(second, "csn-1"))
       .run();
     await expect(repos.portalVisits.list(second)).rejects.toMatchObject({ code: "crypto" });
 
     await repos.ctx.db
       .prepare("UPDATE portal_visits SET payload_enc = ? WHERE provider_id = ? AND csn = ?")
-      .bind(stolen, first, "csn-2")
+      .bind(stolen, first, await storedCsn(first, "csn-2"))
       .run();
     await expect(repos.portalVisits.list(first)).rejects.toMatchObject({ code: "crypto" });
   });
@@ -138,7 +151,8 @@ describe("portal_visits.record", () => {
     const repos = testRepos({ now: time.now });
     const providerId = await seedProvider(repos);
     await repos.portalVisits.record(providerId, [visit("csn-1", 5 * DAY)], COMPLETE);
-    const before = await rawColumn("portal_visits", "payload_enc", "csn = ?", "csn-1");
+    const csn1 = await storedCsn(providerId, "csn-1");
+    const before = await rawColumn("portal_visits", "payload_enc", "csn = ?", csn1);
 
     time.advance(3600);
     const unchanged = await repos.portalVisits.record(
@@ -147,7 +161,7 @@ describe("portal_visits.record", () => {
       COMPLETE,
     );
     expect(unchanged).toStrictEqual({ written: 0, unchanged: 1, missing: 0 });
-    expect(await rawColumn("portal_visits", "payload_enc", "csn = ?", "csn-1")).toBe(before);
+    expect(await rawColumn("portal_visits", "payload_enc", "csn = ?", csn1)).toBe(before);
     const touched = await storedVisit(repos, providerId, "csn-1");
     expect(touched?.fetchedAt).toBe(T0 + 3600);
 
@@ -159,7 +173,9 @@ describe("portal_visits.record", () => {
     expect(changed.written).toBe(1);
     const [row] = await repos.portalVisits.list(providerId);
     expect(row?.visit.visitType).toBe("Annual physical");
-    expect(await rawColumn("portal_visits", "start_at", "csn = ?", "csn-1")).toBe(T0 + 6 * DAY);
+    // The start moved with it, but only inside the payload: the column says nothing.
+    expect(row?.visit.start).toBe(at(6 * DAY));
+    expect(await rawColumn("portal_visits", "start_at", "csn = ?", csn1)).toBe(0);
   });
 
   it("marks a future visit that stopped being returned as missing, and restores it", async () => {
@@ -236,7 +252,8 @@ describe("portal_visits retention", () => {
     expect(await repos.portalVisits.purgeExpired()).toBe(0);
     expect(await repos.portalVisits.list(providerId)).toHaveLength(1);
 
-    time.advance(70 * DAY);
+    // A year after the visit, rounded up to the next expiry bucket.
+    time.advance(100 * DAY);
     expect(await repos.portalVisits.list(providerId)).toStrictEqual([]);
     expect(await repos.portalVisits.purgeExpired()).toBe(1);
   });
@@ -251,5 +268,55 @@ describe("portal_visits retention", () => {
     expect(await repos.portalVisits.clearProvider(first)).toBe(1);
     expect(await repos.portalVisits.list(first)).toStrictEqual([]);
     expect(await repos.portalVisits.list(second)).toHaveLength(1);
+  });
+});
+
+describe("what portal_visits stores", () => {
+  it("keeps the visit number and the start out of every plaintext column", async () => {
+    const repos = testRepos();
+    const providerId = await seedProvider(repos);
+    await repos.portalVisits.record(providerId, [visit("csn-secret", DAY + 1234)], COMPLETE);
+
+    const raw = await env.DB.prepare("SELECT * FROM portal_visits WHERE provider_id = ?")
+      .bind(providerId)
+      .first();
+    const dump = JSON.stringify(raw);
+
+    expect(dump).not.toContain("csn-secret");
+    expect(raw?.csn).toBe(await storedCsn(providerId, "csn-secret"));
+    expect(raw?.start_at).toBe(0);
+    // The expiry is a bucket boundary, so it no longer dates the visit to the second.
+    expect(Number(raw?.expires_at) % EXPIRY_BUCKET_SECONDS).toBe(0);
+    expect(dump).not.toContain(String(T0 + DAY + 1234));
+  });
+
+  it("gives the same visit number under two health systems two unrelated stored values", async () => {
+    const repos = testRepos();
+    const first = await seedProvider(repos, { displayName: "A Example Health" });
+    const second = await seedProvider(repos, { displayName: "B Example Health" });
+    await repos.portalVisits.record(first, [visit("csn-1", DAY)], COMPLETE);
+    await repos.portalVisits.record(second, [visit("csn-1", DAY)], COMPLETE);
+
+    const rows = await env.DB.prepare("SELECT csn, content_hash FROM portal_visits").all<{
+      csn: string;
+      content_hash: string;
+    }>();
+
+    expect(new Set(rows.results.map((row) => row.csn)).size).toBe(2);
+    expect(new Set(rows.results.map((row) => row.content_hash)).size).toBe(2);
+  });
+
+  it("still lists visits earliest first, from the sealed start", async () => {
+    const repos = testRepos();
+    const providerId = await seedProvider(repos);
+    await repos.portalVisits.record(
+      providerId,
+      [visit("csn-late", 3 * DAY), visit("csn-early", DAY), visit("csn-mid", 2 * DAY)],
+      COMPLETE,
+    );
+
+    const listed = await repos.portalVisits.list(providerId);
+
+    expect(listed.map((row) => row.csn)).toStrictEqual(["csn-early", "csn-mid", "csn-late"]);
   });
 });

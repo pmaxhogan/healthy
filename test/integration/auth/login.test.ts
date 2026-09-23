@@ -95,6 +95,7 @@ function currentIpHash(): Promise<string> {
       method: "POST",
       headers: { "cf-connecting-ip": client.ip },
     }),
+    TEST_ENV,
   );
 }
 
@@ -245,7 +246,8 @@ describe("POST /auth/login", () => {
       .first<{ ip_hash: string; count: number }>();
 
     expect(row?.count).toBe(1);
-    expect(row?.ip_hash).toMatch(/^[0-9a-f]{64}$/u);
+    // Keyed: a plain sha256 of an IPv4 address is one lookup table away from it.
+    expect(row?.ip_hash).toMatch(/^~[\w-]{43}$/u);
     // The address itself is personal data; the table is a lasting record of who
     // tried to log in, so it must hold only the digest.
     const anyAddress = await env.DB.prepare(

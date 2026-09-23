@@ -6,9 +6,11 @@
 
 import { env } from "cloudflare:test";
 
+import { blindEventKey, blinderFor } from "../../../worker/db/blind.ts";
 import { makeCtx } from "../../../worker/db/client.ts";
 import { makeRepos } from "../../../worker/db/index.ts";
 
+import type { Blinder } from "../../../worker/db/blind.ts";
 import type { Ctx } from "../../../worker/db/client.ts";
 import type { Repos } from "../../../worker/db/index.ts";
 import type { Env } from "../../../worker/env.ts";
@@ -30,6 +32,16 @@ const TEST_DATA_KEY = randomDataKey();
 
 /** A second, unrelated key, for proving that the wrong key cannot open a column. */
 export const OTHER_DATA_KEY = randomDataKey();
+
+/** The blinder the repos built by `testRepos()` use (or one over another key). */
+export function testBlinder(dataKey = TEST_DATA_KEY): Blinder {
+  return blinderFor(dataKey);
+}
+
+/** The stored form of a logical event key (`<providerId>:<encounterId>`). */
+export function blindKey(logicalKey: string, dataKey = TEST_DATA_KEY): Promise<string> {
+  return blindEventKey(testBlinder(dataKey), logicalKey);
+}
 
 /** An arbitrary fixed instant: 2026-01-01T00:00:00Z, in unix seconds. */
 export const T0 = 1_767_225_600;
@@ -125,6 +137,7 @@ export async function seedProvider(
 
 // Every table, child before parent so the deletes never trip a foreign key.
 const TABLES = [
+  "data_migrations",
   "login_attempts",
   "mail_inbox",
   "portal_visits",

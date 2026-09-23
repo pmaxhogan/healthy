@@ -126,14 +126,33 @@ export interface FhirSyncStateRow {
   warnings_json: string;
 }
 
+/**
+ * A `calendar_events` row as the repo hands it out: the stored row with
+ * `detail_enc` opened.
+ *
+ * The one row type in this file that is *not* the raw shape, because the sync
+ * reads a row's start and calendar on every run and the raw columns no longer
+ * hold them (0007). `start_at` and `calendar_id` here are the opened values;
+ * `event_key`, `encounter_id` and `portal_csn` are the stored, blinded ones --
+ * the sync only ever compares those, and blinds its own side to match. See
+ * `worker/db/repos/calendar-events.ts`.
+ */
 export interface CalendarEventRow {
+  /** `<providerId>:<blind>` or `<providerId>:csn:<blind>`. See `blindEventKey`. */
   event_key: string;
   provider_id: string;
+  /**
+   * The blinded upstream id: `blindResourceId(provider, "Encounter", id)` for a
+   * FHIR row -- the same value `fhir_cache.resource_id` keys the Encounter by --
+   * or `blindCsn(provider, csn)` for a portal row.
+   */
   encounter_id: string;
+  /** The real calendar id, opened from `detail_enc`. */
   calendar_id: string;
   google_event_id: string;
   fingerprint: string;
   state: CalendarEventState;
+  /** The real start, opened from `detail_enc`. */
   start_at: number | null;
   first_seen_at: number;
   last_seen_at: number;
@@ -141,8 +160,22 @@ export interface CalendarEventRow {
   updated_at: number;
   /** Added by 0002_portal.sql; every pre-existing row reads 'fhir'. */
   source: CalendarEventSource;
-  /** The portal's contact-serial number, set only when `source` is 'portal'. */
+  /** `blindCsn(provider, csn)`, set only when `source` is 'portal'. */
   portal_csn: string | null;
+}
+
+/**
+ * The raw `calendar_events` row.
+ *
+ * Since 0007: `calendar_id` is `blindCalendarId(...)`, `start_at` is NULL, and
+ * the real calendar id and start live in `detail_enc`, sealed against
+ * `calendar_events.detail_enc.<google_event_id>`. A row written before 0007 has
+ * the plaintext columns and no `detail_enc` until the backfill reaches it.
+ */
+export interface CalendarEventDbRow extends Omit<CalendarEventRow, "calendar_id" | "start_at"> {
+  calendar_id: string;
+  start_at: number | null;
+  detail_enc: string | null;
 }
 
 export interface AlertRow {

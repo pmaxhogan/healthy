@@ -18,7 +18,7 @@
 
 import { AppError } from "../../lib/errors.ts";
 import { one, run, ttlSeconds } from "../client.ts";
-import { aadFor, openOrNull, seal } from "../crypto.ts";
+import { aadFor, openOrNull, seal, sealShort } from "../crypto.ts";
 
 import type { Ctx } from "../client.ts";
 import type { ConnectionStatus, GoogleAccountRow } from "../rows.ts";
@@ -67,7 +67,7 @@ export function makeGoogleAccountRepo(ctx: Ctx) {
     };
 
     if (patch.email !== undefined) {
-      put("email_enc", await seal(ctx.env, patch.email, aad("email_enc")));
+      put("email_enc", await sealShort(ctx.env, patch.email, aad("email_enc")));
     }
     if (patch.accessToken !== undefined) {
       put("access_token_enc", await seal(ctx.env, patch.accessToken, aad("access_token_enc")));

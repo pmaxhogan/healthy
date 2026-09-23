@@ -74,7 +74,7 @@ app.post("/auth/login", async (c) => {
   const nonce = c.get("nonce");
   const next = safeNextPath(c.req.query("next")) ?? undefined;
 
-  const ipHash = await hashClientIp(c.req.raw);
+  const ipHash = await hashClientIp(c.req.raw, c.env);
   const store = d1LoginAttemptStore(c.env.DB);
   const decision = await recordLoginAttempt(store, ipHash, Math.floor(Date.now() / 1000));
   if (!decision.allowed) {

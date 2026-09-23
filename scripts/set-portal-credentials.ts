@@ -41,7 +41,7 @@ import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
-import { aadFor, seal } from "../worker/db/crypto.ts";
+import { aadFor, sealShort } from "../worker/db/crypto.ts";
 import { isRecord } from "../worker/fhir/bundle.ts";
 import { ID_PATTERN } from "../worker/lib/ids.ts";
 import { nowSeconds } from "../worker/lib/time.ts";
@@ -51,11 +51,11 @@ import { parseDotEnv } from "./set-provider-secret.ts";
 // Matches wrangler.jsonc's `d1_databases[0].database_name`.
 const DB_NAME = "healthy";
 
-// Defence in depth: `seal()` always returns this shape, but both values are
+// Defence in depth: `sealShort()` always returns this shape, but both values are
 // about to be interpolated into a SQL string (there are no bind parameters in
 // `wrangler d1 execute --command`), so the shape is re-checked right before that
 // happens rather than trusted.
-const SEALED_ENVELOPE_PATTERN = /^v1:[A-Za-z0-9_-]+$/u;
+const SEALED_ENVELOPE_PATTERN = /^v2:[A-Za-z0-9_-]+$/u;
 
 type Target = "--remote" | "--local";
 
@@ -305,7 +305,7 @@ function checkEnvelope(sealed: string): string {
   if (!SEALED_ENVELOPE_PATTERN.test(sealed)) {
     // Unreachable in practice, but this value is about to be interpolated into
     // SQL text, so it is re-checked here rather than trusted from a caller away.
-    throw new Error("seal() produced an unexpected envelope shape");
+    throw new Error("sealShort() produced an unexpected envelope shape");
   }
   return sealed;
 }
@@ -318,10 +318,10 @@ export async function sealPortalCredentials(
 ): Promise<{ username: string; password: string }> {
   return {
     username: checkEnvelope(
-      await seal(dataKey, credentials.username, portalUsernameAad(providerId)),
+      await sealShort(dataKey, credentials.username, portalUsernameAad(providerId)),
     ),
     password: checkEnvelope(
-      await seal(dataKey, credentials.password, portalPasswordAad(providerId)),
+      await sealShort(dataKey, credentials.password, portalPasswordAad(providerId)),
     ),
   };
 }
@@ -424,7 +424,7 @@ async function main(): Promise<void> {
     const contact = process.env.PORTAL_MFA_CONTACT ?? "";
     if (contact === "") throw new Error("--mfa-contact requires PORTAL_MFA_CONTACT to be set");
     sealedMfaContact = checkEnvelope(
-      await seal(dataKey, contact, portalMfaContactAad(args.providerId)),
+      await sealShort(dataKey, contact, portalMfaContactAad(args.providerId)),
     );
   }
 
@@ -435,7 +435,7 @@ async function main(): Promise<void> {
     const sender = (process.env.PORTAL_OTP_SENDER ?? "").trim().toLowerCase();
     if (sender === "") throw new Error("--otp-sender requires PORTAL_OTP_SENDER to be set");
     sealedOtpSender = checkEnvelope(
-      await seal(dataKey, sender, portalOtpSenderAad(args.providerId)),
+      await sealShort(dataKey, sender, portalOtpSenderAad(args.providerId)),
     );
   }
 

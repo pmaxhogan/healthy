@@ -58,7 +58,10 @@ describe("settings", () => {
       .prepare("SELECT value_json, updated_at FROM settings WHERE key = 'calendar_id'")
       .first<{ value_json: string; updated_at: number }>();
 
-    expect(row?.value_json).toBe('"second@group.calendar.example.test"');
+    // Sealed, because a calendar id is usually the owner's email address.
+    expect(row?.value_json).toMatch(/^v2:/u);
+    expect(row?.value_json).not.toContain("second@");
+    expect(await getSetting(ctx, "calendar_id")).toBe("second@group.calendar.example.test");
     expect(row?.updated_at).toBe(T0 + 60);
     expect(
       await ctx.db.prepare("SELECT COUNT(*) AS n FROM settings").first<{ n: number }>(),
@@ -195,3 +198,75 @@ describe("the sync backoff", () => {
     expect(await getSetting(ctx, "sync_backoff_until")).toBeNull();
   });
 });
+
+describe("sealed settings", () => {
+  it("seals the four keys that name the owner or their care, and leaves the rest as JSON", async () => {
+    const ctx = testCtx();
+    await setSettings(ctx, {
+      calendar_id: "owner@example.test",
+      timezone: "Etc/GMT-2",
+      mail_sender_allowlist: "mail.example.test",
+      portal_api_base_path: "/examplepath",
+      window_past_days: 45,
+    });
+
+    const rows = await ctx.db
+      .prepare("SELECT key, value_json FROM settings")
+      .all<{ key: string; value_json: string }>();
+    const stored = new Map(rows.results.map((row) => [row.key, row.value_json]));
+
+    for (const key of [
+      "calendar_id",
+      "timezone",
+      "mail_sender_allowlist",
+      "portal_api_base_path",
+    ]) {
+      expect(stored.get(key), key).toMatch(/^v2:/u);
+    }
+    expect(stored.get("window_past_days")).toBe("45");
+    // Iterator#toArray needs the esnext.iterator lib; the test tsconfig is ES2022 only.
+    // eslint-disable-next-line unicorn/prefer-iterator-to-array
+    const dump = JSON.stringify([...stored.values()]);
+    expect(dump).not.toContain("owner@");
+    expect(dump).not.toContain("GMT");
+    expect(dump).not.toContain("mail.example");
+    expect(dump).not.toContain("examplepath");
+
+    const all = await getAllSettings(ctx);
+    expect(all).toMatchObject({
+      calendar_id: "owner@example.test",
+      timezone: "Etc/GMT-2",
+      mail_sender_allowlist: "mail.example.test",
+      portal_api_base_path: "/examplepath",
+      window_past_days: 45,
+    });
+  });
+
+  it("pads the sealed value, so its length does not give the plaintext's away", async () => {
+    const ctx = testCtx();
+    await setSetting(ctx, "calendar_id", "a@example.test");
+    const short = await rawSetting(ctx, "calendar_id");
+    await setSetting(ctx, "calendar_id", "a-much-longer-address@example.test");
+    const longer = await rawSetting(ctx, "calendar_id");
+
+    expect(short).toHaveLength(longer.length);
+  });
+
+  it("still reads a value stored as plain JSON before 0007", async () => {
+    const ctx = testCtx();
+    await ctx.db
+      .prepare("INSERT INTO settings (key, value_json, updated_at) VALUES ('timezone', ?, 0)")
+      .bind(JSON.stringify("Etc/GMT-2"))
+      .run();
+
+    expect(await getSetting(ctx, "timezone")).toBe("Etc/GMT-2");
+  });
+});
+
+async function rawSetting(ctx: ReturnType<typeof testCtx>, key: string): Promise<string> {
+  const row = await ctx.db
+    .prepare("SELECT value_json FROM settings WHERE key = ?")
+    .bind(key)
+    .first<{ value_json: string }>();
+  return row?.value_json ?? "";
+}

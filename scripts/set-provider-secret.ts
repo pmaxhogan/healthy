@@ -26,7 +26,7 @@ import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
-import { aadFor, seal } from "../worker/db/crypto.ts";
+import { aadFor, sealShort } from "../worker/db/crypto.ts";
 import { isRecord } from "../worker/fhir/bundle.ts";
 import { ID_PATTERN } from "../worker/lib/ids.ts";
 import { nowSeconds } from "../worker/lib/time.ts";
@@ -35,10 +35,10 @@ import { nowSeconds } from "../worker/lib/time.ts";
 // `migrate:local` / `migrate:remote` pass to `wrangler d1 migrations apply`.
 const DB_NAME = "healthy";
 
-// Defence in depth: `seal()` always returns this shape, but the value is
+// Defence in depth: `sealShort()` always returns this shape, but the value is
 // about to be interpolated into a SQL string (see `updateProvider` below),
 // so it is checked again right before that happens rather than trusted.
-const SEALED_ENVELOPE_PATTERN = /^v1:[A-Za-z0-9_-]+$/u;
+const SEALED_ENVELOPE_PATTERN = /^v2:[A-Za-z0-9_-]+$/u;
 
 type Target = "--remote" | "--local";
 
@@ -314,13 +314,13 @@ export async function sealProviderSecret(
   providerId: string,
   secret: string,
 ): Promise<string> {
-  const sealed = await seal(dataKey, secret, providerSecretAad(providerId));
+  const sealed = await sealShort(dataKey, secret, providerSecretAad(providerId));
   if (!SEALED_ENVELOPE_PATTERN.test(sealed)) {
-    // Unreachable in practice -- seal() always returns this shape -- but this
+    // Unreachable in practice -- sealShort() always returns this shape -- but this
     // value is about to be interpolated into SQL text (see
     // `updateProviderSecret`), so it is re-checked right here rather than
     // trusted from a caller away.
-    throw new Error("seal() produced an unexpected envelope shape");
+    throw new Error("sealShort() produced an unexpected envelope shape");
   }
   return sealed;
 }

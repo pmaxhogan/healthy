@@ -31,7 +31,7 @@
 import { AppError } from "../../lib/errors.ts";
 import { newId } from "../../lib/ids.ts";
 import { all, one, run, ttlSeconds } from "../client.ts";
-import { aadFor, openOrNull, seal } from "../crypto.ts";
+import { aadFor, openOrNull, seal, sealShort } from "../crypto.ts";
 
 import type { Ctx } from "../client.ts";
 import type { ConnectionRow, ConnectionStatus } from "../rows.ts";
@@ -121,7 +121,7 @@ export function makeConnectionsRepo(ctx: Ctx) {
     if (patch.patientFhirId !== undefined) {
       put(
         "patient_fhir_id_enc",
-        await seal(ctx.env, patch.patientFhirId, aad("patient_fhir_id_enc", row.id)),
+        await sealShort(ctx.env, patch.patientFhirId, aad("patient_fhir_id_enc", row.id)),
       );
     }
     if (patch.accessToken !== undefined) {

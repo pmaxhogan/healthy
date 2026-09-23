@@ -39,7 +39,7 @@ describe("connections.upsertTokens", () => {
     for (const column of ["patient_fhir_id_enc", "access_token_enc", "refresh_token_enc"]) {
       const raw = await rawColumn("connections", column, "id = ?", connection.id);
 
-      expect(raw?.startsWith("v1:"), column).toBe(true);
+      expect(raw ?? "", column).toMatch(/^v[12]:/u);
       expect(raw, column).not.toContain("token-one");
       expect(raw, column).not.toContain("patient-identifier");
     }

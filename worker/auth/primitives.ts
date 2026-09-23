@@ -81,12 +81,6 @@ export async function hmacSha256(secret: string, message: string): Promise<Bytes
   return new Uint8Array(await crypto.subtle.sign("HMAC", key, utf8(message)));
 }
 
-/** Lowercase hex SHA-256 of `value`. Used to key rate-limit rows by client IP. */
-export async function sha256Hex(value: string): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", utf8(value)));
-  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
 /**
  * One cookie out of a request's `Cookie` header, or null.
  *

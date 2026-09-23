@@ -57,7 +57,7 @@ describe("portalAccounts.setCredentials", () => {
     for (const column of ["username_enc", "password_enc"]) {
       const raw = await rawColumn("portal_accounts", column, "provider_id = ?", providerId);
 
-      expect(raw?.startsWith("v1:"), column).toBe(true);
+      expect(raw ?? "", column).toMatch(/^v2:/u);
       expect(raw, column).not.toContain("portal-");
     }
   });
@@ -126,7 +126,7 @@ describe("portalAccounts.setCredentials", () => {
       "provider_id = ?",
       providerId,
     );
-    expect(raw?.startsWith("v1:")).toBe(true);
+    expect(raw ?? "").toMatch(/^v2:/u);
     expect(raw).not.toContain("owner");
 
     // A later credential change with no `mfaContact` leaves the stored value be --
@@ -402,7 +402,7 @@ describe("portalAccounts.dto", () => {
       hasOtpSender: true,
     });
     const raw = await rawColumn("portal_accounts", "otp_sender_enc", "provider_id = ?", providerId);
-    expect(raw?.startsWith("v1:")).toBe(true);
+    expect(raw ?? "").toMatch(/^v2:/u);
     // A sending domain names the health system, so it is sealed like the rest.
     expect(raw).not.toContain("portal.example.org");
     // Never in the DTO: the UI learns that the binding exists, not what it is.
@@ -459,5 +459,32 @@ describe("portalAccounts.dto", () => {
     const providerId = await seedProvider(repos);
 
     await expect(repos.portalAccounts.dto(providerId)).resolves.toBeNull();
+  });
+});
+
+describe("where the portal is, sealed", () => {
+  it("seals the base URL, the mount path and the endpoint, and opens them on read", async () => {
+    const repos = testRepos();
+    const providerId = await seedProvider(repos);
+    await repos.portalAccounts.setEndpoint(providerId, {
+      baseUrl: "https://portal.distinctive.example.test",
+      mountPath: "/DistinctivePortal/",
+      endpoint: { flavour: "classic", baseUrl: "https://portal.distinctive.example.test" },
+    });
+
+    const raw = await env.DB.prepare("SELECT * FROM portal_accounts WHERE provider_id = ?")
+      .bind(providerId)
+      .first();
+    expect(JSON.stringify(raw).toLowerCase()).not.toContain("distinctive");
+    for (const column of ["base_url", "mount_path", "endpoint_json"]) {
+      expect(String(raw?.[column]), column).toMatch(/^v2:/u);
+    }
+
+    await expect(repos.portalAccounts.get(providerId)).resolves.toMatchObject({
+      base_url: "https://portal.distinctive.example.test",
+      mount_path: "/DistinctivePortal/",
+    });
+    const dto = await repos.portalAccounts.dto(providerId);
+    expect(dto?.baseUrl).toBe("https://portal.distinctive.example.test");
   });
 });

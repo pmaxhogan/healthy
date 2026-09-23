@@ -12,15 +12,16 @@ import { AppError } from "../../../worker/lib/errors.ts";
 import smartConfiguration from "../../fixtures/epic/smart-configuration.json";
 
 import {
-  CSRF,
-  ORIGIN,
-  TEST_FHIR_BASE,
+  blindKey,
   call,
+  CSRF,
   freshOwner,
   json,
+  ORIGIN,
   resetPorts,
   seedProvider,
   stubFetch,
+  TEST_FHIR_BASE,
   testRepos,
   usePorts,
 } from "./helpers.ts";
@@ -301,7 +302,7 @@ describe("DELETE /api/providers/:id", () => {
       status: "connected",
     });
     await repos.calendarEvents.upsert({
-      eventKey: `${id}:enc-1`,
+      eventKey: await blindKey(`${id}:enc-1`),
       providerId: id,
       encounterId: "enc-1",
       calendarId: "primary",
@@ -322,7 +323,7 @@ describe("DELETE /api/providers/:id", () => {
     expect(after?.refresh_token_enc).toBeNull();
     // ...and the appointment history untouched, which is the whole point of a soft
     // delete: those events are in the owner's calendar either way.
-    expect(await repos.calendarEvents.getByKey(`${id}:enc-1`)).not.toBeNull();
+    expect(await repos.calendarEvents.getByKey(await blindKey(`${id}:enc-1`))).not.toBeNull();
   });
 
   it("404s the second time", async () => {

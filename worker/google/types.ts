@@ -110,8 +110,17 @@ export interface EventRecord {
  * the Google wire format.
  */
 export interface CalendarEventModel {
-  /** `providerId:encounterId`. Stable for the life of the appointment. */
+  /**
+   * The blinded event key (`blindEventKey`). Stable for the life of the
+   * appointment; the row's primary key and the Google marker alike.
+   */
   key: string;
+  /**
+   * The logical upstream id the key was blinded from: an Encounter id, or
+   * `csn:<csn>` for a portal visit. Never sent to Google -- `buildEventBody` picks
+   * its fields explicitly -- and only read by the row writer, which blinds it.
+   */
+  encounterId: string;
   /** Provider id, for per-provider diffing and cleanup. */
   provider: string;
   title: string;

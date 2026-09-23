@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from "vitest";
 
+import { blindEventKey, blinderFor } from "../../../worker/db/blind.ts";
 import { providerConfigSchema } from "../../../worker/db/schemas.ts";
 import { buildCalendarModel } from "../../../worker/sync/mapping.ts";
 import {
@@ -43,6 +44,10 @@ const SETTINGS: MappingSettings = {
   defaultArrivalOffsetMin: 0,
 };
 
+/** A fresh random key per run: the blinds only have to be consistent within one. */
+const KEY_BYTES = crypto.getRandomValues(new Uint8Array(32));
+const BLINDER = blinderFor(btoa(String.fromCodePoint(...KEY_BYTES)));
+
 function input(
   overrides: { settings?: Partial<MappingSettings>; config?: Record<string, unknown> } = {},
 ): MappingInput {
@@ -55,6 +60,7 @@ function input(
     },
     settings: { ...SETTINGS, ...overrides.settings },
     nowIso: NOW,
+    blinder: BLINDER,
   };
 }
 
@@ -94,9 +100,12 @@ async function map(
 }
 
 describe("the portal event key", () => {
-  it("is the provider, the csn: marker and the contact-serial number", async () => {
+  it("is the provider, the csn: marker and a blind of the contact-serial number", async () => {
     const mapping = await map({ csn: "1234567" });
-    expect(mapping.model.key).toBe("prov-1:csn:1234567");
+    expect(mapping.model.key).toBe(await blindEventKey(BLINDER, "prov-1:csn:1234567"));
+    expect(mapping.model.key.startsWith("prov-1:csn:~")).toBe(true);
+    expect(mapping.model.key).not.toContain("1234567");
+    expect(mapping.model.encounterId).toBe("csn:1234567");
   });
 
   it("round-trips through the encounter-id half", () => {

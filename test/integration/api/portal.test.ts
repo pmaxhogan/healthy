@@ -31,6 +31,7 @@ import {
 } from "../portal/helpers.ts";
 
 import {
+  blindKey,
   freshOwner,
   json,
   resetPorts,
@@ -214,7 +215,7 @@ describe("GET /api/providers/:id/portal", () => {
     const ctx = testCtx();
     await seedPortalAccount(ctx, providerId);
     await testRepos().calendarEvents.upsert({
-      eventKey: `${providerId}:csn:csn-1`,
+      eventKey: await blindKey(`${providerId}:csn:csn-1`),
       providerId,
       encounterId: "csn:csn-1",
       calendarId: "primary",
@@ -772,7 +773,7 @@ describe("DELETE /api/providers/:id/portal", () => {
     const ctx = testCtx();
     await seedPortalAccount(ctx, providerId);
     await testRepos().calendarEvents.upsert({
-      eventKey: `${providerId}:csn:csn-1`,
+      eventKey: await blindKey(`${providerId}:csn:csn-1`),
       providerId,
       encounterId: "csn:csn-1",
       calendarId: "primary",
@@ -789,7 +790,9 @@ describe("DELETE /api/providers/:id/portal", () => {
     expect(await testRepos().portalAccounts.get(providerId)).toBeNull();
     // The owner's appointments are theirs; removing an account is not a reason to
     // rewrite their week.
-    const kept = await testRepos().calendarEvents.getByKey(`${providerId}:csn:csn-1`);
+    const kept = await testRepos().calendarEvents.getByKey(
+      await blindKey(`${providerId}:csn:csn-1`),
+    );
     expect(kept).not.toBeNull();
 
     const dto = await json<PortalAccountStatusDto>(

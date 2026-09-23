@@ -8,7 +8,15 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { freshOwner, json, resetPorts, seedProvider, testRepos, usePorts } from "./helpers.ts";
+import {
+  blindKey,
+  freshOwner,
+  json,
+  resetPorts,
+  seedProvider,
+  testRepos,
+  usePorts,
+} from "./helpers.ts";
 
 import type { GoogleAccountDto, OverviewDto } from "@shared/types.ts";
 
@@ -37,7 +45,7 @@ describe("GET /api/overview", () => {
     const repos = testRepos();
     for (const key of ["a", "b", "c"]) {
       await repos.calendarEvents.upsert({
-        eventKey: `${id}:${key}`,
+        eventKey: await blindKey(`${id}:${key}`),
         providerId: id,
         encounterId: key,
         calendarId: "primary",
@@ -45,7 +53,7 @@ describe("GET /api/overview", () => {
         fingerprint: `fp-${key}`,
       });
     }
-    await repos.calendarEvents.markGhost(`${id}:c`);
+    await repos.calendarEvents.markGhost(await blindKey(`${id}:c`));
 
     const dto = await json<OverviewDto>(await owner().get("/api/overview"));
 

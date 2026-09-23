@@ -9,9 +9,22 @@
  * do -- so the stored value is the only correct answer. When it is unset,
  * `getTimezone` returns "UTC" and warns once per isolate: the sync still runs, and
  * its local-day window is simply a UTC day until the owner sets the zone in the UI.
+ *
+ * ### Sealed keys
+ *
+ * Four keys name the owner or where they get care, so their `value_json` is
+ * sealed (padded, `v2:`) against `settings.value_json.<key>` rather than stored
+ * as JSON: `calendar_id` (usually the owner's email address), `timezone` (where
+ * they live), `mail_sender_allowlist` (the health systems' mail domains) and
+ * `portal_api_base_path` (a portal deployment's path, which names the
+ * organisation). No query filters or orders on a setting's value, so sealing
+ * costs one decrypt per sealed key per read -- `getAllSettings` is one query and
+ * at most four decrypts per run or request. A row written before 0007 is still
+ * plain JSON until the backfill seals it, and reads either way.
  */
 
 import { all, batch, one, run } from "./client.ts";
+import { aadFor, openLegacy, sealShort } from "./crypto.ts";
 import {
   SETTING_DEFAULTS,
   SETTING_KEYS,
@@ -38,13 +51,42 @@ export function resetTimezoneWarning(): void {
   warned.timezone = false;
 }
 
+/** The keys whose stored value is sealed. See the module comment. */
+export const SEALED_SETTING_KEYS: ReadonlySet<SettingKey> = new Set<SettingKey>([
+  "calendar_id",
+  "timezone",
+  "mail_sender_allowlist",
+  "portal_api_base_path",
+]);
+
+export const settingAad = (key: string): string => aadFor("settings", "value_json", key);
+
+/** `value_json` as stored: sealed for a sealed key, plain JSON otherwise. */
+async function storedSettingValue<K extends SettingKey>(
+  ctx: Pick<Ctx, "env">,
+  key: K,
+  value: Settings[K],
+): Promise<string> {
+  const json = encodeSetting(key, value);
+  return SEALED_SETTING_KEYS.has(key) ? sealShort(ctx.env, json, settingAad(key)) : json;
+}
+
+/** The inverse: opens a sealed value (or passes a pre-0007 plain one) and parses it. */
+async function readStored<K extends SettingKey>(
+  ctx: Pick<Ctx, "env">,
+  key: K,
+  stored: string,
+): Promise<Settings[K]> {
+  return parseSetting(key, await openLegacy(ctx.env, stored, settingAad(key)));
+}
+
 export async function getSetting<K extends SettingKey>(ctx: Ctx, key: K): Promise<Settings[K]> {
   const row = await one<Pick<SettingRow, "value_json">>(
     ctx.db.prepare("SELECT value_json FROM settings WHERE key = ?").bind(key),
   );
   // `SETTING_DEFAULTS[key]`: `K extends SettingKey`, so the index is one of a
   // closed set of literals checked at compile time -- not a sink.
-  return row === null ? SETTING_DEFAULTS[key] : parseSetting(key, row.value_json);
+  return row === null ? SETTING_DEFAULTS[key] : readStored(ctx, key, row.value_json);
 }
 
 export async function setSetting<K extends SettingKey>(
@@ -58,7 +100,7 @@ export async function setSetting<K extends SettingKey>(
         `INSERT INTO settings (key, value_json, updated_at) VALUES (?, ?, ?)
          ON CONFLICT (key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
       )
-      .bind(key, encodeSetting(key, value), ctx.now()),
+      .bind(key, await storedSettingValue(ctx, key, value), ctx.now()),
   );
 }
 
@@ -73,7 +115,7 @@ export async function getAllSettings(ctx: Ctx): Promise<Settings> {
       ctx.log.warn("settings.unknown_key", { settingKey: row.key });
       continue;
     }
-    assign(settings, row.key, parseSetting(row.key, row.value_json));
+    assign(settings, row.key, await readStored(ctx, row.key, row.value_json));
   }
   return settings;
 }
@@ -98,7 +140,7 @@ export async function setSettings(ctx: Ctx, values: Partial<Settings>): Promise<
           `INSERT INTO settings (key, value_json, updated_at) VALUES (?, ?, ?)
            ON CONFLICT (key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
         )
-        .bind(key, encodeSetting(key, value), at),
+        .bind(key, await storedSettingValue(ctx, key, value), at),
     );
   }
   await batch(ctx.db, statements);

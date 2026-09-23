@@ -27,15 +27,22 @@
  * fingerprint plus the instant the appointment first vanished. That instant is
  * stable, so a ghost settles after one patch instead of churning.
  *
+ * **Keys and fingerprints are keyed.** The event key is blinded
+ * (`blindEventKey`), so neither the row nor the Google event's marker carries the
+ * upstream id, and the fingerprint is an HMAC rather than a sha256 -- the inputs
+ * are mostly a practitioner, a visit type and a public address, which a plain
+ * digest would let anyone with a snapshot confirm by guessing. Both come from a
+ * `Blinder` the caller passes in, which is what keeps this module free of `Env`.
+ *
  * Nothing here logs. Every string it produces (organisation name, practitioner,
  * address) is user data that belongs on the calendar and nowhere else.
  */
 
+import { blindEventKey } from "../db/blind.ts";
 import { AppError } from "../lib/errors.ts";
 import { addMinutes, formatInZone } from "../lib/time.ts";
 
-import { sha256Hex } from "./hash.ts";
-
+import type { Blinder } from "../db/blind.ts";
 import type { ProviderConfig } from "../db/schemas.ts";
 import type { NormalizedAddress, NormalizedAppointmentView } from "../fhir/normalize/types.ts";
 import type { CalendarEventModel } from "../google/types.ts";
@@ -118,7 +125,12 @@ export interface MappingInput {
   settings: MappingSettings;
   /** ISO instant the run started, rendered into the footer. */
   nowIso: string;
+  /** Blinds the event key and keys the fingerprint. `blinderFor(env)` in the Worker. */
+  blinder: Blinder;
 }
+
+/** The domain every calendar fingerprint is keyed in. */
+const FINGERPRINT_DOMAIN = "calendar_events.fingerprint";
 
 export interface CalendarMapping {
   model: CalendarEventModel;
@@ -144,6 +156,8 @@ export interface CalendarMapping {
 export interface GhostOptions {
   /** `settings.ghost_color_id`. Grey, in Google's palette. */
   ghostColorId: string;
+  /** Keys the ghost's fingerprint, like the active one's. */
+  blinder: Blinder;
   timezone: string;
   /**
    * ISO instant the appointment *first* disappeared upstream -- the
@@ -153,7 +167,10 @@ export interface GhostOptions {
   ghostedAtIso: string;
 }
 
-/** `<providerId>:<encounterId>`: the primary key and the Google marker alike. */
+/**
+ * `<providerId>:<encounterId>`: the *logical* key. What is stored and written to
+ * Google is `blindEventKey(blinder, eventKey(...))`.
+ */
 export function eventKey(providerId: string, encounterId: string): string {
   return `${providerId}:${encounterId}`;
 }
@@ -388,7 +405,8 @@ export async function buildCalendarModel(
   const body = descriptionBody(view, provider);
 
   const draft: Omit<CalendarEventModel, "fingerprint"> = {
-    key: eventKey(provider.id, view.encounterId),
+    key: await blindEventKey(input.blinder, eventKey(provider.id, view.encounterId)),
+    encounterId: view.encounterId,
     provider: provider.id,
     title,
     description: joinSections([body, footerLine(input.nowIso, timezone)]),
@@ -401,7 +419,10 @@ export async function buildCalendarModel(
   };
 
   return {
-    model: { ...draft, fingerprint: await sha256Hex(fingerprintPayload(draft, body)) },
+    model: {
+      ...draft,
+      fingerprint: await input.blinder.digest(FINGERPRINT_DOMAIN, fingerprintPayload(draft, body)),
+    },
     status: view.status,
     offSchedule: OFF_SCHEDULE_STATUSES.has(view.status),
     reportedStart,
@@ -447,6 +468,9 @@ export async function ghostModel(
     transparent: true,
     // Derived from the active fingerprint plus a stable instant, so a ghost
     // needs exactly one patch however many runs see it.
-    fingerprint: await sha256Hex(`ghost:${model.fingerprint}:${options.ghostedAtIso}`),
+    fingerprint: await options.blinder.digest(
+      FINGERPRINT_DOMAIN,
+      `ghost:${model.fingerprint}:${options.ghostedAtIso}`,
+    ),
   };
 }

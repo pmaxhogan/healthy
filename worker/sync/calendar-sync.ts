@@ -57,6 +57,8 @@
  * our own rows, counts, resource type names, HTTP statuses and Epic codes only.
  */
 
+import { runBlindBackfill } from "../db/backfill.ts";
+import { blinderFor } from "../db/blind.ts";
 import { makeRepos } from "../db/index.ts";
 import { clearSyncBackoff, getAllSettings, getTimezone, setSyncBackoff } from "../db/settings.ts";
 import {
@@ -92,6 +94,7 @@ import type { Sighting } from "./portal-dedupe.ts";
 import type { FhirSighting, PortalPassInput } from "./portal-sync.ts";
 import type { RunState } from "./run.ts";
 import type { SyncTarget } from "./targets.ts";
+import type { Blinder } from "../db/blind.ts";
 import type { Ctx } from "../db/client.ts";
 import type { Repos } from "../db/index.ts";
 import type { CalendarEventRow } from "../db/rows.ts";
@@ -176,6 +179,18 @@ export async function runCalendarSync(
   }
 
   const outcome = await record(ctx, options.trigger ?? "calendar", async (state) => {
+    // The 0007 backfill first, and nothing else until it has finished: a row or
+    // a Google event still carrying a pre-blinding key would not pair with the
+    // blinded key this run computes, and an unpaired upcoming visit is
+    // re-inserted -- a duplicate on the owner's calendar. See `db/backfill.ts`.
+    const backfill = await runBlindBackfill(ctx, {
+      calendar: () => getGoogleCalendarFor(ctx, deps),
+    });
+    if (!backfill.complete) {
+      state.summary.errors.push({ providerId: "backfill", code: backfill.errorCode ?? "busy" });
+      ctx.log.warn("sync.backfill_pending", { errorCode: backfill.errorCode ?? null });
+      return;
+    }
     await syncAllProviders(ctx, repos, settings, state, options, deps);
   });
   return outcome.summary;
@@ -197,6 +212,8 @@ interface RunContext {
   settings: MappingSettings;
   state: RunState;
   deps: SyncDeps;
+  /** Blinds event keys and keys fingerprints; see `worker/db/blind.ts`. */
+  blinder: Blinder;
   /**
    * What the FHIR pass mapped, per provider, for the portal pass to dedupe
    * against.
@@ -273,6 +290,7 @@ async function syncAllProviders(
     },
     state,
     deps,
+    blinder: blinderFor(ctx.env),
     fhirSeen: new Map(),
   };
 
@@ -321,6 +339,7 @@ function portalInput(run: RunContext, options: CalendarSyncOptions): PortalPassI
     settings: run.settings,
     state: run.state,
     deps: run.deps,
+    blinder: run.blinder,
     fhirSeen: run.fhirSeen,
     ...(options.providerIds !== undefined && { providerIds: options.providerIds }),
     ...(options.signInWaitSeconds !== undefined && {
@@ -391,6 +410,7 @@ async function syncProvider(run: RunContext, target: SyncTarget): Promise<void> 
     mappings,
     rows: windowed,
     events: listed,
+    blinder: run.blinder,
   });
   // Portal-sourced rows and events are the portal pass's to diff, and this pass
   // must not: it has no Encounter for one (that is the premise of the feature, not
@@ -511,6 +531,7 @@ function mappingInput(
     },
     settings: run.settings,
     nowIso: run.nowIso,
+    blinder: run.blinder,
   };
 }
 
@@ -638,8 +659,9 @@ async function buildCandidates(
   for (const row of rows) if (!mappings.has(row.event_key)) absent.add(row.event_key);
 
   for (const key of absent) {
-    const mapping = await mappingFromCache(run, target, key);
-    candidates.push(await candidateFor(run, key, mapping, rowByKey.get(key), true, models, ghosts));
+    const row = rowByKey.get(key);
+    const mapping = row === undefined ? null : await mappingFromCache(run, target, row);
+    candidates.push(await candidateFor(run, key, mapping, row, true, models, ghosts));
   }
   return { candidates, models, ghosts };
 }
@@ -674,6 +696,7 @@ async function candidateFor(
     const ghostedAt = row?.ghosted_at ?? run.ctx.now();
     const ghost = await ghostModel(mapping.model, {
       ghostColorId: run.settings.ghostColorId,
+      blinder: run.blinder,
       timezone: run.timezone,
       ghostedAtIso: toIso(ghostedAt),
     });
@@ -698,15 +721,22 @@ async function candidateFor(
  * returning the appointment, and the ghost still has to carry its original title
  * and address. References come from the cache too, with no upstream reads -- a
  * cancelled appointment is not worth spending the read budget on.
+ *
+ * The row's `encounter_id` is the blind the cache keys the Encounter by, so the
+ * lookup needs no upstream id; the references inside the opened Encounter are
+ * real ids, and `get` blinds them on the way in.
  */
 async function mappingFromCache(
   run: RunContext,
   target: SyncTarget,
-  key: string,
+  row: CalendarEventRow,
 ): Promise<CalendarMapping | null> {
-  const encounterId = key.slice(target.provider.id.length + 1);
-  if (encounterId === "") return null;
-  const cached = await run.repos.fhirCache.get(target.provider.id, "Encounter", encounterId);
+  if (row.encounter_id === "" || row.source !== "fhir") return null;
+  const cached = await run.repos.fhirCache.getByStoredId(
+    target.provider.id,
+    "Encounter",
+    row.encounter_id,
+  );
   if (cached === null) return null;
   const encounter = cached.resource as Encounter;
   if ((encounter.period?.start ?? "") === "") return null;
@@ -842,10 +872,9 @@ async function writeGhostRow(
   entry: PlanEntry,
   rows: readonly CalendarEventRow[],
 ): Promise<void> {
-  // `entry.key` is `<providerId>:<encounterId>` -- the encounter half is Epic's
-  // own resource id and must not reach Workers Logs (see `calendar-events.ts`'s
-  // `logSafeKey`, which this mirrors; SECURITY.md, "No PHI in logs"). `providerId`
-  // is already in scope here, so only the digest needs computing.
+  // `entry.key` is blinded, but a stored lookup key still has no business in
+  // Workers Logs: a short digest correlates lines without being one (see
+  // `calendar-events.ts`'s `logSafeKey`, which this mirrors).
   const keyDigest = await sha256Hex(entry.key);
   run.ctx.log.info("sync.ghost.row_only", {
     providerId,
@@ -876,7 +905,7 @@ async function persistRow(
   await run.repos.calendarEvents.upsert({
     eventKey: key,
     providerId,
-    encounterId: key.slice(providerId.length + 1),
+    encounterId: model.encounterId,
     calendarId: run.calendarId,
     googleEventId,
     fingerprint: model.fingerprint,

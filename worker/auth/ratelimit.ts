@@ -6,15 +6,19 @@
 // hitting the origin during a misconfiguration) could spend the Worker's CPU
 // budget guessing, and each guess costs the Worker far more than it costs them.
 //
-// The client key is a SHA-256 of `cf-connecting-ip`, never the address itself:
-// the table is a persistent record of who tried to log in, and an IP is personal
-// data. Hashing it keeps the counter working while making the row useless to
-// anyone reading the database.
+// The client key is a keyed HMAC of `cf-connecting-ip` (see
+// `worker/db/blind.ts`), never the address itself: the table is a persistent
+// record of who tried to log in, and an IP is personal data. A plain sha256 would
+// not do -- all 2^32 IPv4 addresses hash in seconds, so an unkeyed digest is the
+// address with extra steps. Keyed, the counter still works and the row is
+// useless to anyone reading the database without `DATA_KEY`.
 //
 // The counter is one atomic UPSERT ... RETURNING, so two concurrent attempts
 // cannot both read "9" and both be allowed.
 
-import { sha256Hex } from "./primitives.ts";
+import { blinderFor } from "../db/blind.ts";
+
+import type { KeySource } from "../db/crypto.ts";
 
 /** Attempts allowed inside one window before the limiter closes. */
 export const LOGIN_MAX_ATTEMPTS = 10;
@@ -90,11 +94,14 @@ export function d1LoginAttemptStore(db: LoginAttemptsDatabase): LoginAttemptStor
   };
 }
 
-/** Stable, non-reversible key for one client. */
-export async function hashClientIp(request: Request): Promise<string> {
+/** Stable, keyed, non-reversible key for one client. */
+export async function hashClientIp(request: Request, keySource: KeySource): Promise<string> {
   // A request that reaches the Worker without the header is either a test or a
   // direct origin hit; bucketing them all together is the conservative choice.
-  return sha256Hex(request.headers.get("cf-connecting-ip") ?? "unknown");
+  return blinderFor(keySource).digest(
+    "login_attempts.ip_hash",
+    request.headers.get("cf-connecting-ip") ?? "unknown",
+  );
 }
 
 export interface RateLimitDecision {

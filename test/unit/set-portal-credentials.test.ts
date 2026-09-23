@@ -59,8 +59,8 @@ describe("sealPortalCredentials", () => {
 
     const sealed = await sealPortalCredentials(dataKey, PROVIDER_ID, CREDENTIALS);
 
-    expect(sealed.username.startsWith("v1:")).toBe(true);
-    expect(sealed.password.startsWith("v1:")).toBe(true);
+    expect(sealed.username.startsWith("v2:")).toBe(true);
+    expect(sealed.password.startsWith("v2:")).toBe(true);
     expect(`${sealed.username}${sealed.password}`).not.toContain("portal-");
     await expect(open(dataKey, sealed.username, portalUsernameAad(PROVIDER_ID))).resolves.toBe(
       CREDENTIALS.username,

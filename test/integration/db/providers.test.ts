@@ -1,3 +1,4 @@
+import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { AppError } from "../../../worker/lib/errors.ts";
@@ -65,7 +66,7 @@ describe("the provider client secret", () => {
 
     expect(raw).not.toBeNull();
     expect(raw).not.toContain("distinctive");
-    expect(raw?.startsWith("v1:")).toBe(true);
+    expect(raw ?? "").toMatch(/^v2:/u);
   });
 
   it("is null until one is set, and settable afterwards", async () => {
@@ -217,5 +218,66 @@ describe("providers.softDelete and list", () => {
 
     expect(await repos.providers.softDelete(provider.id)).toBe(true);
     expect(await repos.providers.softDelete(provider.id)).toBe(false);
+  });
+});
+
+describe("what providers stores", () => {
+  it("seals every column that names the organisation, and reads them back opened", async () => {
+    const repos = testRepos();
+    const created = await repos.providers.create({
+      vendor: "epic",
+      displayName: "Distinctive Example Health",
+      fhirBaseUrl: "https://fhir.distinctive.example.test/R4",
+      brandKey: "brand-distinctive",
+      portalUrl: "https://portal.distinctive.example.test",
+    });
+
+    const raw = await env.DB.prepare("SELECT * FROM providers WHERE id = ?")
+      .bind(created.id)
+      .first();
+    expect(JSON.stringify(raw)).not.toContain("distinctive");
+    for (const column of ["display_name", "fhir_base_url", "brand_key", "portal_url"]) {
+      expect(String(raw?.[column]), column).toMatch(/^v2:/u);
+    }
+
+    await expect(repos.providers.get(created.id)).resolves.toMatchObject({
+      display_name: "Distinctive Example Health",
+      fhir_base_url: "https://fhir.distinctive.example.test/R4",
+      brand_key: "brand-distinctive",
+      portal_url: "https://portal.distinctive.example.test",
+    });
+  });
+
+  it("still sorts the list by name, now that the name is sealed", async () => {
+    const repos = testRepos();
+    for (const name of ["Charlie Health", "Alpha Health", "Bravo Health"]) {
+      await repos.providers.create({
+        vendor: "epic",
+        displayName: name,
+        fhirBaseUrl: "https://fhir.example.test/R4",
+      });
+    }
+
+    expect(await column(repos.providers.list(), "display_name")).toStrictEqual([
+      "Alpha Health",
+      "Bravo Health",
+      "Charlie Health",
+    ]);
+  });
+
+  it("reads an update made in the same second as a cached read", async () => {
+    const repos = testRepos();
+    const created = await repos.providers.create({
+      vendor: "epic",
+      displayName: "Before",
+      fhirBaseUrl: "https://fhir.example.test/R4",
+    });
+    await repos.providers.get(created.id);
+
+    await repos.providers.update(created.id, { displayName: "After" });
+
+    await expect(repos.providers.get(created.id)).resolves.toMatchObject({
+      display_name: "After",
+    });
   });
 });

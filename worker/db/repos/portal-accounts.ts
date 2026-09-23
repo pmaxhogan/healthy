@@ -24,12 +24,23 @@
  * cookie and the trust-this-device cookie, either of which is a sign-in. It is
  * sealed, it is never returned except through `getSecrets`, and `hasSession` on
  * the DTO is the whole of what the admin UI learns about it.
+ *
+ * **Where the portal is, is sealed too (0007).** `base_url`, `mount_path` and
+ * `endpoint_json` name the organisation -- its portal host, its app's mount
+ * point, its login application -- so they are sealed in place, padded, against
+ * `portal_accounts.<column>.<providerId>`. They are read once per sign-in or
+ * portal run (the row is opened when it is read, and the hops of a sign-in reuse
+ * the opened values), so this is a decrypt per run, not per request. The columns
+ * keep their names until the rename migration moves them to `_enc`; a row the
+ * backfill has not reached is still plaintext and reads either way. Every short
+ * credential column is sealed padded (`sealShort`), so a ciphertext no longer
+ * gives away a username's or a password's exact length.
  */
 
 import { AppError, isAppError } from "../../lib/errors.ts";
 import { DAY_SECONDS, toIso } from "../../lib/time.ts";
 import { all, one, run } from "../client.ts";
-import { aadFor, openOrNull, seal } from "../crypto.ts";
+import { aadFor, openLegacy, openOrNull, seal, sealShort } from "../crypto.ts";
 import { parseJsonColumn, portalEndpointSchema } from "../schemas.ts";
 
 import type { Ctx } from "../client.ts";
@@ -114,9 +125,31 @@ function toPortalAccountDto(row: PortalAccountRow, now: number): PortalAccountDt
   };
 }
 
+/** The columns sealed in place, rather than in an `_enc` column. */
+export const PORTAL_LOCATION_COLUMNS = ["base_url", "mount_path", "endpoint_json"] as const;
+
+export const portalAccountAad = aad;
+
 export function makePortalAccountsRepo(ctx: Ctx) {
-  const byProvider = async (providerId: string): Promise<PortalAccountRow | null> =>
-    one<PortalAccountRow>(ctx.db.prepare(`${SELECT} WHERE provider_id = ?`).bind(providerId));
+  const openColumn = (value: string | null, column: string, providerId: string) =>
+    value === null ? null : openLegacy(ctx.env, value, aad(column, providerId));
+  const sealColumn = (value: string | null, column: string, providerId: string) =>
+    value === null ? null : sealShort(ctx.env, value, aad(column, providerId));
+
+  /** The row with its location columns opened. Everything else passes through. */
+  const decode = async (row: PortalAccountRow): Promise<PortalAccountRow> => ({
+    ...row,
+    base_url: await openColumn(row.base_url, "base_url", row.provider_id),
+    mount_path: await openColumn(row.mount_path, "mount_path", row.provider_id),
+    endpoint_json: await openColumn(row.endpoint_json, "endpoint_json", row.provider_id),
+  });
+
+  const byProvider = async (providerId: string): Promise<PortalAccountRow | null> => {
+    const row = await one<PortalAccountRow>(
+      ctx.db.prepare(`${SELECT} WHERE provider_id = ?`).bind(providerId),
+    );
+    return row === null ? null : decode(row);
+  };
 
   /** The row, created in state 'none' if the provider has never had one. */
   const ensure = async (providerId: string): Promise<PortalAccountRow> => {
@@ -168,12 +201,13 @@ export function makePortalAccountsRepo(ctx: Ctx) {
     ensure,
 
     async list(): Promise<PortalAccountRow[]> {
-      return all<PortalAccountRow>(ctx.db.prepare(`${SELECT} ORDER BY provider_id`));
+      const rows = await all<PortalAccountRow>(ctx.db.prepare(`${SELECT} ORDER BY provider_id`));
+      return Promise.all(rows.map((row) => decode(row)));
     },
 
     /** Accounts the scheduled sync should try: active, on a live provider. */
     async listActive(): Promise<PortalAccountRow[]> {
-      return all<PortalAccountRow>(
+      const rows = await all<PortalAccountRow>(
         ctx.db.prepare(
           `SELECT a.* FROM portal_accounts a
              JOIN providers p ON p.id = a.provider_id
@@ -181,18 +215,23 @@ export function makePortalAccountsRepo(ctx: Ctx) {
             ORDER BY a.provider_id`,
         ),
       );
+      return Promise.all(rows.map((row) => decode(row)));
     },
 
     /** Record where discovery found the portal. Required before `markActive`. */
     async setEndpoint(providerId: string, endpoint: PortalEndpointPatch): Promise<void> {
       await ensure(providerId);
       await patch(providerId, {
-        base_url: endpoint.baseUrl,
-        mount_path: endpoint.mountPath,
+        base_url: await sealColumn(endpoint.baseUrl, "base_url", providerId),
+        mount_path: await sealColumn(endpoint.mountPath, "mount_path", providerId),
         // Null when the caller knew only the two columns: better an absent
         // endpoint the sign-in rebuilds than a stored one missing the half that
         // says how to sign in.
-        endpoint_json: endpoint.endpoint === undefined ? null : JSON.stringify(endpoint.endpoint),
+        endpoint_json: await sealColumn(
+          endpoint.endpoint === undefined ? null : JSON.stringify(endpoint.endpoint),
+          "endpoint_json",
+          providerId,
+        ),
       });
     },
 
@@ -241,19 +280,23 @@ export function makePortalAccountsRepo(ctx: Ctx) {
     ): Promise<PortalAccountRow> {
       await ensure(providerId);
       const columns: Record<string, unknown> = {
-        username_enc: await seal(ctx.env, input.username, aad("username_enc", providerId)),
-        password_enc: await seal(ctx.env, input.password, aad("password_enc", providerId)),
+        username_enc: await sealShort(ctx.env, input.username, aad("username_enc", providerId)),
+        password_enc: await sealShort(ctx.env, input.password, aad("password_enc", providerId)),
         cookie_jar_enc: null,
         session_state: "none" satisfies PortalSessionState,
         last_error_code: null,
         needs_reauth_since: null,
       };
-      if (input.baseUrl !== undefined) columns.base_url = input.baseUrl;
-      if (input.mountPath !== undefined) columns.mount_path = input.mountPath;
+      if (input.baseUrl !== undefined) {
+        columns.base_url = await sealColumn(input.baseUrl, "base_url", providerId);
+      }
+      if (input.mountPath !== undefined) {
+        columns.mount_path = await sealColumn(input.mountPath, "mount_path", providerId);
+      }
       // Undefined leaves whatever is already stored alone -- most callers never
       // pass this, and a credential change is not a reason to forget it.
       if (input.mfaContact !== undefined) {
-        columns.mfa_contact_enc = await seal(
+        columns.mfa_contact_enc = await sealShort(
           ctx.env,
           input.mfaContact,
           aad("mfa_contact_enc", providerId),
@@ -264,7 +307,7 @@ export function makePortalAccountsRepo(ctx: Ctx) {
       // `learnOtpSender` -- so overwriting it on every password change would
       // throw away the binding that makes an OTP claim safe.
       if (input.otpSenderDomain !== undefined) {
-        columns.otp_sender_enc = await seal(
+        columns.otp_sender_enc = await sealShort(
           ctx.env,
           normaliseDomain(input.otpSenderDomain),
           aad("otp_sender_enc", providerId),
@@ -320,7 +363,7 @@ export function makePortalAccountsRepo(ctx: Ctx) {
       // eslint-disable-next-line @typescript-eslint/prefer-optional-chain -- not equivalent: `row?.otp_sender_enc !== null` is `true` when `row` itself is null, which would report "already set" for an account that does not exist.
       if (row === null || row.otp_sender_enc !== null) return false;
       await patch(providerId, {
-        otp_sender_enc: await seal(ctx.env, domain, aad("otp_sender_enc", providerId)),
+        otp_sender_enc: await sealShort(ctx.env, domain, aad("otp_sender_enc", providerId)),
       });
       ctx.log.info("portal_accounts.otp_sender_learned", { providerId });
       return true;
