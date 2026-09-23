@@ -35,7 +35,6 @@ import type { ParsedMail } from "./parse.ts";
  * a message over it is refused before postal-mime ever reads it.
  */
 const MAX_RAW_SIZE_BYTES = 1_048_576;
-const MAX_SUBJECT_CHARS = 500;
 
 export async function handleInboundEmail(
   message: ForwardableEmailMessage,
@@ -80,7 +79,7 @@ export async function handleInboundEmail(
   }
 
   const classification = classify(parsed);
-  const subject = parsed.subject.slice(0, MAX_SUBJECT_CHARS);
+  const subject = parsed.subject;
 
   try {
     const entry = await repos.mailInbox.insert({
