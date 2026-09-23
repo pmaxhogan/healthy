@@ -192,7 +192,7 @@ const OIDC_ARG = /"([^"]*)"|(true|false)/giu;
 /**
  * A `\uXXXX` escape, exactly as a JS string literal inside a `<script>` tag
  * carries one -- the captured stub's URL argument writes every `&` as
- * `&`. Distinct from `decodeEntities`'s HTML character references, which
+ * `\u0026`. Distinct from `decodeEntities`'s HTML character references, which
  * this text never goes through at all (it is JS source, not markup).
  */
 const JS_UNICODE_ESCAPE = /\\u([0-9a-f]{4})/giu;

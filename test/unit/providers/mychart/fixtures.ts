@@ -590,12 +590,12 @@ export const RESULT_TOKEN = "synthetic-antiforgery-token-0003";
  * nothing else: one hidden antiforgery input, and the request controller
  * instantiated inside the UI framework's load callback with six literal
  * arguments -- encrypted nonce, encrypted state, encrypted code verifier, the
- * authorization URL (every `&` written as `&`, as a JS string literal in
+ * authorization URL (every `&` written as `\u0026`, as a JS string literal in
  * the real page carries it), a workflow label, and the submit-a-form flag.
  * Every value is invented. The class name is generic MyChart framework code.
  */
 export function openIdRequestPage(authorizeUrl: string, submitForm = false): string {
-  const literal = authorizeUrl.replaceAll("&", "&");
+  const literal = authorizeUrl.replaceAll("&", String.raw`\u0026`);
   return `<!doctype html><html><body>
   <input name="__RequestVerificationToken" type="hidden" value="${TOKEN}" />
   <script>
