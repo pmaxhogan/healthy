@@ -27,21 +27,29 @@
  *    log a provider id -- the caller's child logger carries it.
  *  - **Nothing from the portal is logged.** Not a URL, not a host, not a mount,
  *    not a body, not a name. Stable endpoint labels, HTTP statuses and counts.
+ *  - **The credential POST has two shapes.** Some deployments post the
+ *    username and password as sibling form fields; a live capture found
+ *    others post an "envelope" instead -- a form with no credential fields of
+ *    its own, carrying a single `LoginInfo` value that is base64'd JSON. See
+ *    `LOGIN_INFO` in `wire.ts` and `login()`'s own comments for the shape.
  */
 
 import { AppError } from "../../lib/errors.ts";
+import { base64Utf8 } from "../adapter.ts";
 
 import { isLoginPage } from "./discovery.ts";
-import { bodyMentions, findAntiforgeryField, inputFields } from "./html.ts";
+import { bodyMentions, findAntiforgeryField, formFields, inputFields } from "./html.ts";
 import { isOpenIdHandoff, mountedUrl, normaliseMount, pathOf, portalFetch } from "./http.ts";
 import { parsePast, parseUpcoming } from "./visits.ts";
 import {
   ANTIFORGERY_FIELD_NAMES,
   ANTIFORGERY_HEADER,
+  DEVICE_ID_EXTRA_KEY,
   FIELDS,
   JS_ENABLED_VALUE,
   LOAD_PAST_QUERY,
   LOAD_UPCOMING_QUERY,
+  LOGIN_INFO,
   MARKERS,
   NO_CACHE_PARAM,
   OLDEST_RENDERED_DATE_PARAM,
@@ -76,6 +84,12 @@ export interface PortalClientDeps {
   now: () => number;
   /** The cache-buster's randomness. Injected so a test can pin the URL. */
   random?: (() => number) | undefined;
+  /**
+   * Mints the envelope's `DeviceId` the first time this jar needs one.
+   * Injected so a test can pin the value; defaults to `crypto.randomUUID()`.
+   * See `DEVICE_ID_EXTRA_KEY` for where the result is persisted.
+   */
+  generateDeviceId?: (() => string) | undefined;
   maxRedirects?: number | undefined;
 }
 
@@ -128,9 +142,14 @@ type Landing = "signed_in" | "awaiting_code" | "login";
 
 function landingOf(response: Pick<PortalResponse, "url" | "body">): Landing {
   const path = pathOf(response.url);
+  // The delivery-method choice a correct password can land on before any code
+  // has been sent: not every deployment puts it under `secondaryValidation`'s
+  // own path, and its markup carries none of `MARKERS.secondaryValidation`
+  // either -- without its own check it would fall through to "signed in".
   const onValidation =
     path.includes(PATHS.secondaryValidation.toLowerCase()) ||
-    bodyMentions(response.body, MARKERS.secondaryValidation);
+    bodyMentions(response.body, MARKERS.secondaryValidation) ||
+    bodyMentions(response.body, MARKERS.deliveryMethodChoice);
   if (onValidation) return "awaiting_code";
   // `Authentication/Login` is a prefix of `Authentication/Login/DoLogin`, so the
   // POST's own URL has to be excluded or every DoLogin would read as a bounce.
@@ -213,13 +232,43 @@ function loginFailure(response: PortalResponse, endpoint: string): AppError {
  * values are strings, so a `__proto__` assignment is a silent no-op) but it is not
  * a property worth depending on.
  */
-function echoedFields(html: string, exclude: readonly string[]): Map<string, string> {
+function echoedFrom(
+  fields: ReadonlyMap<string, string>,
+  exclude: readonly string[],
+): Map<string, string> {
   const out = new Map<string, string>();
-  for (const [name, value] of inputFields(html)) {
+  for (const [name, value] of fields) {
     if (value === "" || exclude.includes(name)) continue;
     out.set(name, value);
   }
   return out;
+}
+
+function echoedFields(html: string, exclude: readonly string[]): Map<string, string> {
+  return echoedFrom(inputFields(html), exclude);
+}
+
+/**
+ * The envelope's persisted `DeviceId`: minted once per jar, reused after that.
+ *
+ * See `DEVICE_ID_EXTRA_KEY`'s own comment in `wire.ts` for why reuse is the
+ * right default rather than a fresh id per attempt.
+ */
+function deviceIdFor(jar: CookieJar, generate: () => string): string {
+  const existing = jar.getExtra(DEVICE_ID_EXTRA_KEY);
+  if (existing !== null) return existing;
+  const fresh = generate();
+  jar.setExtra(DEVICE_ID_EXTRA_KEY, fresh);
+  return fresh;
+}
+
+/** A query-string parameter off an absolute URL, or `""` when it is absent. */
+function queryParam(url: string, name: string): string {
+  try {
+    return new URL(url).searchParams.get(name) ?? "";
+  } catch {
+    return "";
+  }
 }
 
 /** The username field this page actually renders, or the discovered fallback. */
@@ -231,14 +280,6 @@ function usernameFieldOn(html: string, fallback: UsernameField): UsernameField {
   return fallback;
 }
 
-/**
- * True when a `SendCode` attempt looks like it worked.
- *
- * Deliberately generous: the parameter names are a guess, so "did this one work"
- * has to be decided from a response that might be JSON, might be a fragment of
- * HTML, and might be an empty 200. Anything that is not an explicit refusal
- * counts, and the caller only moves on to the next variant when it is.
- */
 /**
  * True when a body could plausibly be the JSON that was asked for.
  *
@@ -254,10 +295,25 @@ function looksLikeJson(response: PortalResponse): boolean {
   return trimmed.startsWith("{") || trimmed.startsWith("[");
 }
 
+/**
+ * True when a `SendCode` attempt looks like it worked.
+ *
+ * Generous about JSON, because the parameter names are a guess and the
+ * response shape for a *refusal* is not documented either: any object that
+ * does not explicitly say `success: false` counts, and the caller only moves
+ * on to the next variant when one does. **Not generous about HTML.** A 200
+ * carrying a page is exactly what re-rendering the delivery-method choice (a
+ * variant it did not recognise) or an unrelated shell page looks like, and
+ * either one means no code was actually sent -- so an HTML 200 counts as
+ * accepted only when the page it rendered is the code-entry page itself,
+ * i.e. it carries a `TwoFactorCode` input. Treating any old 200 as success
+ * here is the bug this guards: it would report `awaiting_code` for a run that
+ * never got a code sent and had nothing for the owner to wait for.
+ */
 function sendCodeAccepted(response: PortalResponse): boolean {
   if (response.status >= 400 || bodyMentions(response.body, MARKERS.badCredentials)) return false;
   const trimmed = response.body.trim();
-  if (!trimmed.startsWith("{")) return true;
+  if (!trimmed.startsWith("{")) return inputFields(response.body).has(FIELDS.twoFactorCode);
   let parsed: unknown;
   try {
     parsed = JSON.parse(trimmed);
@@ -280,6 +336,7 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
   // eslint-disable-next-line sonarjs/pseudo-random -- this randomness is a cache-buster in a query string, never a secret; the endpoints are documented as taking one.
   const random = deps.random ?? ((): number => Math.random());
   const noCache = (): string => String(Math.floor(random() * 1_000_000_000_000_000));
+  const generateDeviceId = deps.generateDeviceId ?? ((): string => crypto.randomUUID());
   const url = (path: string, query: Record<string, string> = {}): string =>
     mountedUrl(endpoint.baseUrl, endpoint.mountPath, path, query);
 
@@ -346,27 +403,76 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
     // would have.
     const hasJsEnabled = inputFields(page.response.body).has(FIELDS.jsEnabled);
 
-    const response = await portalFetch(http, {
-      url: url(PATHS.doLogin),
-      method: "POST",
-      endpoint: "DoLogin",
-      accept: "html",
-      followBodyRedirects: true,
-      // `Object.fromEntries` at the boundary, so the page's own attribute names
-      // only ever live in a Map -- see `echoedFields`. The caller's own fields are
-      // spread after, and so always win. `jsEnabled` is excluded from the echo
-      // and set explicitly below: the page's own default value for it is not
-      // what a JS-enabled browser would submit.
-      form: {
-        ...Object.fromEntries(
-          echoedFields(page.response.body, [usernameField, FIELDS.password, FIELDS.jsEnabled]),
-        ),
-        [page.name]: page.value,
-        [usernameField]: credentials.username,
-        [FIELDS.password]: credentials.password,
-        ...(hasJsEnabled && { [FIELDS.jsEnabled]: JS_ENABLED_VALUE }),
-      },
-    });
+    // The form the page's own script actually submits, scoped to that form
+    // alone -- never the whole page. A classic login page can render a second
+    // form (`#loginForm`, action `"#"`) that is never submitted; echoing its
+    // fields back would be a field a real browser never would have sent. `null`
+    // only for a page shaped unlike either known form, in which case the whole
+    // page is the fallback this client has always used.
+    const postedForm = formFields(page.response.body, { actionSuffix: PATHS.doLogin });
+    const postedFields = postedForm?.fields ?? inputFields(page.response.body);
+    // [confirmed] The "envelope" shape a live capture found: the posted form
+    // carries no username or password field of its own at all, because the
+    // script builds `LoginInfo` from the *other* form's fields instead of
+    // sending them as siblings. A deployment that still renders the
+    // credentials directly on the posted form is not this shape, and the flat
+    // POST below is used exactly as it always was. Bound to a narrowed
+    // constant, not a bare boolean, so the compiler (not just the runtime)
+    // knows `envelopeForm.action` is safe to read below.
+    const envelopeForm =
+      postedForm !== null &&
+      !postedFields.has(FIELDS.password) &&
+      USERNAME_FIELD_NAMES.every((name) => !postedFields.has(name))
+        ? postedForm
+        : null;
+
+    const response =
+      envelopeForm === null
+        ? await portalFetch(http, {
+            url: url(PATHS.doLogin),
+            method: "POST",
+            endpoint: "DoLogin",
+            accept: "html",
+            followBodyRedirects: true,
+            // `Object.fromEntries` at the boundary, so the page's own attribute names
+            // only ever live in a Map -- see `echoedFrom`. The caller's own fields are
+            // spread after, and so always win. `jsEnabled` is excluded from the echo
+            // and set explicitly below: the page's own default value for it is not
+            // what a JS-enabled browser would submit. The echo is scoped to the
+            // posted form's own fields (`postedFields`), never the whole page.
+            form: {
+              ...Object.fromEntries(
+                echoedFrom(postedFields, [usernameField, FIELDS.password, FIELDS.jsEnabled]),
+              ),
+              [page.name]: page.value,
+              [usernameField]: credentials.username,
+              [FIELDS.password]: credentials.password,
+              ...(hasJsEnabled && { [FIELDS.jsEnabled]: JS_ENABLED_VALUE }),
+            },
+          })
+        : await portalFetch(http, {
+            url: new URL(envelopeForm.action, page.response.url).href,
+            method: "POST",
+            endpoint: "DoLogin",
+            accept: "html",
+            followBodyRedirects: true,
+            // Exactly the envelope's fields and nothing else -- no whole-page
+            // echo, and deliberately no `jsenabled`: the script never puts it on
+            // this form. See `LOGIN_INFO` in `wire.ts` for the JSON shape.
+            form: {
+              [page.name]: page.value,
+              [FIELDS.deviceId]: deviceIdFor(jar, generateDeviceId),
+              [FIELDS.forMobile]: queryParam(page.response.url, FIELDS.forMobile),
+              [FIELDS.postLoginUrl]: queryParam(page.response.url, FIELDS.postLoginUrl),
+              [FIELDS.loginInfo]: JSON.stringify({
+                [LOGIN_INFO.typeKey]: LOGIN_INFO.type,
+                [LOGIN_INFO.credentialsKey]: {
+                  [LOGIN_INFO.identifierKey]: base64Utf8(credentials.username),
+                  [LOGIN_INFO.passwordKey]: base64Utf8(credentials.password),
+                },
+              }),
+            },
+          });
 
     const landing = landingOf(response);
     if (landing === "login") throw loginFailure(response, "DoLogin");

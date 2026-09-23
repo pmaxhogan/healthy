@@ -270,6 +270,64 @@ export const LOGIN_LOCKED_PAGE = `<!doctype html><html><body>
 </body></html>`;
 
 /**
+ * The classic login page's real, two-form shape: `#loginForm` (action `"#"`,
+ * never submitted) holds the fields a browser's script reads, and `#actualLogin`
+ * (the form actually posted) carries nothing but the antiforgery token -- the
+ * script builds `LoginInfo` and appends it, `DeviceId`, `forMobile` and
+ * `postLoginUrl` at submit time. See `LOGIN_INFO` in `wire.ts`.
+ */
+export function loginPageEnvelope(token = TOKEN): string {
+  return `<!doctype html><html><body>
+    <form id="loginForm" action="#">
+      <input type="hidden" name="jsenabled" value="0" />
+      <input type="text" name="LoginIdentifier" value="" />
+      <input type="password" name="Password" value="" />
+      <input type="submit" name="submit" value="Sign In" />
+    </form>
+    <form id="actualLogin" method="post" action="/MyChart/Authentication/Login/DoLogin">
+      <input type="hidden" name="__RequestVerificationToken" value="${token}" />
+    </form>
+  </body></html>`;
+}
+
+/**
+ * A login page carrying an unrelated second form -- a site-search box, say --
+ * next to the one that is actually posted. Proves the login POST's echo is
+ * scoped to the posted form's own fields: `q` belongs to the search form and
+ * must never reach `DoLogin`.
+ */
+export function loginPageWithUnrelatedForm(token = TOKEN): string {
+  return `<!doctype html><html><body>
+    <form id="siteSearch" action="/MyChart/Search" method="get">
+      <input type="text" name="q" value="preset-search-term" />
+    </form>
+    <form action="/MyChart/Authentication/Login/DoLogin" method="post">
+      <input type="hidden" name="__RequestVerificationToken" value="${token}" />
+      <input type="hidden" name="Redirect" value="/MyChart/Home" />
+      <input type="text" name="LoginIdentifier" value="" />
+      <input type="password" name="Password" value="" />
+    </form>
+  </body></html>`;
+}
+
+/**
+ * A page asking the owner to choose a delivery channel before any code has
+ * been sent -- not the code-entry page, and (on purpose) not served under a
+ * path containing `secondaryvalidation`, so a client that only checked the URL
+ * would misread it as "signed in".
+ */
+export const METHOD_CHOICE_PAGE = `<!doctype html><html><body>
+  <form action="/MyChart/Authentication/VerificationMethod/SendCode" method="post">
+    <input type="hidden" name="__RequestVerificationToken" value="${TOKEN_2}" />
+    <input type="radio" name="SelectedDeliveryMethod" value="Email" checked />
+    <label>Email me a code</label>
+    <input type="radio" name="SelectedDeliveryMethod" value="Phone" />
+    <label>Text me a code</label>
+    <button type="submit">Continue</button>
+  </form>
+</body></html>`;
+
+/**
  * A signed-in page.
  *
  * Carefully free of every marker the client looks for: no password input, no

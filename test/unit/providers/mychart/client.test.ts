@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 import { makeLogger, noopLogger } from "../../../../worker/lib/log.ts";
 import { createMyChartClient } from "../../../../worker/providers/mychart/client.ts";
 import { CookieJar } from "../../../../worker/providers/mychart/cookie-jar.ts";
+import { DEVICE_ID_EXTRA_KEY } from "../../../../worker/providers/mychart/wire.ts";
 
 import {
   CHALLENGE_PAGE,
@@ -28,9 +29,12 @@ import {
   LOGIN_PAGE_WITH_INNOCENT_MARKERS,
   LOGIN_REJECTED_PAGE,
   LOGIN_REJECTED_WITH_INNOCENT_MARKERS,
+  loginPageEnvelope,
   loginPageNew,
   loginPageOld,
   loginPageWithLoginField,
+  loginPageWithUnrelatedForm,
+  METHOD_CHOICE_PAGE,
   MOUNT,
   OPENID_STUB_PAGE,
   pastPayload,
@@ -103,6 +107,15 @@ function signedInPortal(payload: unknown = upcomingPayload()): PortalFetchStub {
   });
 }
 
+/** A portal serving the two-form envelope page and signing straight through. */
+function envelopePortal(): PortalFetchStub {
+  return routed({
+    "GET /MyChart/Authentication/Login": () => html(loginPageEnvelope()),
+    "POST /MyChart/Authentication/Login/DoLogin": () => redirect(`${HOST}/MyChart/Home/Index`),
+    "GET /MyChart/Home/Index": () => html(HOME_PAGE),
+  });
+}
+
 describe("login", () => {
   it("takes the token off the login page and posts it with the credentials", async () => {
     const stub = signedInPortal();
@@ -169,6 +182,22 @@ describe("login", () => {
     expect(bodyOf(find(stub, "POST", "/DoLogin")).get("jsenabled")).toBeNull();
   });
 
+  it("echoes only the posted form's own inputs, never a field from an unrelated form on the page", async () => {
+    const stub = routed({
+      "GET /MyChart/Authentication/Login": () => html(loginPageWithUnrelatedForm()),
+      "POST /MyChart/Authentication/Login/DoLogin": () => redirect(`${HOST}/MyChart/Home/Index`),
+      "GET /MyChart/Home/Index": () => html(HOME_PAGE),
+    });
+
+    await client(stub).login(CREDENTIALS);
+
+    const form = bodyOf(find(stub, "POST", "/DoLogin"));
+    // The posted form's own hidden field is still echoed, as a browser would.
+    expect(form.get("Redirect")).toBe("/MyChart/Home");
+    // The search form's field must never reach DoLogin.
+    expect(form.get("q")).toBeNull();
+  });
+
   it("reports portal_captcha_required, not portal_login_failed, when the portal asks for a captcha", async () => {
     const stub = routed({
       "GET /MyChart/Authentication/Login": () => html(loginPageWithLoginField()),
@@ -224,6 +253,21 @@ describe("login", () => {
       "POST /MyChart/Authentication/Login/DoLogin": () =>
         redirect(`${HOST}/MyChart/Authentication/SecondaryValidation`),
       "GET /MyChart/Authentication/SecondaryValidation": () => html(twoFactorPage()),
+    });
+
+    await expect(client(stub).login(CREDENTIALS)).resolves.toBe("awaiting_code");
+  });
+
+  it("reports awaiting_code when the portal lands on a delivery-method choice page, even off the SecondaryValidation path", async () => {
+    // Not every deployment shows the choice under a URL containing
+    // "secondaryvalidation", and its markup carries none of the code-entry
+    // page's own markers either -- without `MARKERS.deliveryMethodChoice` this
+    // would fall through and read as a completed sign-in.
+    const stub = routed({
+      "GET /MyChart/Authentication/Login": () => html(loginPageNew()),
+      "POST /MyChart/Authentication/Login/DoLogin": () =>
+        redirect(`${HOST}/MyChart/Authentication/VerificationMethod`),
+      "GET /MyChart/Authentication/VerificationMethod": () => html(METHOD_CHOICE_PAGE),
     });
 
     await expect(client(stub).login(CREDENTIALS)).resolves.toBe("awaiting_code");
@@ -318,6 +362,100 @@ describe("login", () => {
     expect(offsite).toHaveLength(1);
     expect(offsite[0]?.method).toBe("GET");
     expect(offsite[0]?.body).toBeUndefined();
+  });
+});
+
+describe("login envelope (the classic script's LoginInfo POST)", () => {
+  it("posts exactly the token, a generated DeviceId, empty forMobile/postLoginUrl and base64'd LoginInfo -- never jsenabled or the credentials as siblings", async () => {
+    const stub = envelopePortal();
+    const portal = createMyChartClient({
+      endpoint: ENDPOINT,
+      jar: new CookieJar({ now: () => T0 }),
+      fetchImpl: stub.fetchImpl,
+      logger: noopLogger,
+      now: () => T0,
+      random: () => 0.5,
+      generateDeviceId: () => "device-0001",
+    });
+
+    await expect(portal.login(CREDENTIALS)).resolves.toBe("signed_in");
+
+    const form = bodyOf(find(stub, "POST", "/DoLogin"));
+    expect(form.get("__RequestVerificationToken")).toBe(TOKEN);
+    expect(form.get("DeviceId")).toBe("device-0001");
+    // The page's own URL carried neither, so both are sent empty.
+    expect(form.get("forMobile")).toBe("");
+    expect(form.get("postLoginUrl")).toBe("");
+    // No sibling credential fields, and no jsenabled: the script never puts
+    // either on this form.
+    expect(form.get("jsenabled")).toBeNull();
+    expect(form.get("LoginIdentifier")).toBeNull();
+    expect(form.get("Password")).toBeNull();
+
+    const loginInfo: unknown = JSON.parse(form.get("LoginInfo") ?? "");
+    expect(loginInfo).toStrictEqual({
+      Type: "StandardLogin",
+      Credentials: {
+        LoginIdentifier: Buffer.from(CREDENTIALS.username, "utf8").toString("base64"),
+        Password: Buffer.from(CREDENTIALS.password, "utf8").toString("base64"),
+      },
+    });
+    // Decode both back, so the assertion above cannot pass by coincidence.
+    const credentials = (
+      loginInfo as { Credentials: { LoginIdentifier: string; Password: string } }
+    ).Credentials;
+    expect(Buffer.from(credentials.LoginIdentifier, "base64").toString("utf8")).toBe(
+      CREDENTIALS.username,
+    );
+    expect(Buffer.from(credentials.Password, "base64").toString("utf8")).toBe(CREDENTIALS.password);
+  });
+
+  it("echoes forMobile and postLoginUrl off the login page's own query string when it carries them", async () => {
+    const stub = stubPortal((call) => {
+      const { pathname, search } = new URL(call.url);
+      if (pathname === "/MyChart/Authentication/Login" && search === "") {
+        return redirect(
+          `${HOST}/MyChart/Authentication/Login?forMobile=true&postLoginUrl=%2FMyChart%2FHome`,
+        );
+      }
+      if (pathname === "/MyChart/Authentication/Login") return html(loginPageEnvelope());
+      return pathname === "/MyChart/Authentication/Login/DoLogin"
+        ? redirect(`${HOST}/MyChart/Home/Index`)
+        : html(HOME_PAGE);
+    });
+
+    await client(stub).login(CREDENTIALS);
+
+    const form = bodyOf(find(stub, "POST", "/DoLogin"));
+    expect(form.get("forMobile")).toBe("true");
+    expect(form.get("postLoginUrl")).toBe("/MyChart/Home");
+  });
+
+  it("persists the generated DeviceId in the jar and reuses it -- never regenerating -- on a later login", async () => {
+    const jar = new CookieJar({ now: () => T0 });
+    let calls = 0;
+    const generateDeviceId = (): string => {
+      calls++;
+      return `device-${String(calls)}`;
+    };
+    const deps = {
+      endpoint: ENDPOINT,
+      jar,
+      logger: noopLogger,
+      now: () => T0,
+      random: () => 0.5,
+      generateDeviceId,
+    };
+
+    const firstStub = envelopePortal();
+    await createMyChartClient({ ...deps, fetchImpl: firstStub.fetchImpl }).login(CREDENTIALS);
+    expect(jar.getExtra(DEVICE_ID_EXTRA_KEY)).toBe("device-1");
+
+    const secondStub = envelopePortal();
+    await createMyChartClient({ ...deps, fetchImpl: secondStub.fetchImpl }).login(CREDENTIALS);
+
+    expect(calls).toBe(1);
+    expect(bodyOf(find(secondStub, "POST", "/DoLogin")).get("DeviceId")).toBe("device-1");
   });
 });
 
@@ -423,6 +561,44 @@ describe("secondaryValidation.sendCode", () => {
     await expect(codeOf(client(stub).secondaryValidation.sendCode("email"))).resolves.toBe(
       "portal_login_failed",
     );
+  });
+});
+
+describe("secondaryValidation.sendCode on a delivery-method choice page", () => {
+  it("keeps trying variants and never accepts the re-rendered choice page, until it posts the email choice", async () => {
+    const stub = stubPortal((call) => {
+      const { pathname } = new URL(call.url);
+      if (pathname.endsWith("/SendCode")) {
+        const body = new URLSearchParams(call.body ?? "");
+        // Only the email delivery-choice variant is honoured; every earlier
+        // guess re-renders the same choice page, a 200 the fix must not treat
+        // as acceptance.
+        return body.get("SelectedDeliveryMethod") === "Email"
+          ? json({ success: true })
+          : html(METHOD_CHOICE_PAGE);
+      }
+      return html(METHOD_CHOICE_PAGE);
+    });
+
+    await client(stub).secondaryValidation.sendCode("email");
+
+    const posts = stub.calls.filter((call) => call.method === "POST");
+    expect(posts.length).toBeGreaterThan(1);
+    expect(bodyOf(posts.at(-1)).get("SelectedDeliveryMethod")).toBe("Email");
+  });
+
+  it("reports portal_login_failed for SendCode when every attempt only re-renders the choice page", async () => {
+    // No variant is ever honoured here: every SendCode POST gets the same 200
+    // HTML page back, which is not a code-sent confirmation.
+    const stub = routed({
+      "GET /MyChart/Authentication/SecondaryValidation": () => html(METHOD_CHOICE_PAGE),
+      "POST /MyChart/Authentication/SecondaryValidation/SendCode": () => html(METHOD_CHOICE_PAGE),
+    });
+
+    await expect(client(stub).secondaryValidation.sendCode("email")).rejects.toMatchObject({
+      code: "portal_login_failed",
+      details: { endpoint: "SendCode" },
+    });
   });
 });
 

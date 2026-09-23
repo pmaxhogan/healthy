@@ -192,6 +192,45 @@ export function autoSubmitForm(
 }
 
 /**
+ * The inputs of one `<form>`, scoped to that form alone -- never the whole
+ * page.
+ *
+ * Matched by `id`, by an `action` ending in `actionSuffix`, or both when both
+ * are given (a form must satisfy every criterion supplied). A form's own
+ * closing tag is the next literal `</form` after its opening tag: forms do not
+ * nest in HTML, so that is exact rather than a heuristic, bounded and linear
+ * the same way every other scan in this module is.
+ *
+ * This is what `autoSubmitForm` above deliberately does not do: that one reads
+ * every input on the *page*, because the OpenID stub carries nothing else. A
+ * classic login page is the opposite case -- it can render a second,
+ * never-submitted form next to the one a script actually posts (see
+ * `client.ts`'s "envelope" handling), and echoing that other form's fields
+ * back on a POST is a field a real browser never would have sent.
+ */
+export function formFields(
+  html: string,
+  match: { id?: string; actionSuffix?: string },
+): { action: string; fields: Map<string, string> } | null {
+  const wantedId = match.id?.toLowerCase();
+  const wantedSuffix = match.actionSuffix?.toLowerCase();
+  for (const formMatch of html.matchAll(FORM_TAG)) {
+    const tag = formMatch[0];
+    const action = attribute(tag, ACTION_ATTRIBUTE);
+    if (action === null || action === "") continue;
+    if (wantedId !== undefined && attribute(tag, ID_ATTRIBUTE)?.toLowerCase() !== wantedId) {
+      continue;
+    }
+    if (wantedSuffix !== undefined && !action.toLowerCase().endsWith(wantedSuffix)) continue;
+    const start = formMatch.index + tag.length;
+    const end = html.indexOf("</form", start);
+    const body = end === -1 ? html.slice(start) : html.slice(start, end);
+    return { action, fields: inputFields(body) };
+  }
+  return null;
+}
+
+/**
  * Where this page redirects to without an HTTP redirect, if anywhere.
  *
  * Vanity hostnames in the wild answer a login request with a 200 whose body is

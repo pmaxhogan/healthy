@@ -110,7 +110,62 @@ export const FIELDS = {
    * `JS_ENABLED_VALUE` for what it is set to.
    */
   jsEnabled: "jsenabled",
+  /**
+   * [confirmed] The envelope's persisted per-browser device id. See
+   * `DEVICE_ID_EXTRA_KEY` for where this client keeps its copy.
+   */
+  deviceId: "DeviceId",
+  /**
+   * [confirmed] Echoed from the login page's own query string. Sent as `""`
+   * when the page's URL carried none.
+   */
+  forMobile: "forMobile",
+  /** [confirmed] Same rule as `forMobile`. */
+  postLoginUrl: "postLoginUrl",
+  /** [confirmed] Carries the base64'd credentials; see `LOGIN_INFO`. */
+  loginInfo: "LoginInfo",
 } as const;
+
+/**
+ * [confirmed] Where a live capture of a classic deployment's loginpagecontroller
+ * script builds `LoginInfo` and appends it, plus `DeviceId` / `forMobile` /
+ * `postLoginUrl`, onto the *other* form on the page before submitting it.
+ *
+ * The login page renders two forms: `#loginForm` (action `"#"`, holding
+ * `jsenabled`, the username input and `Password`) is never submitted -- the
+ * script only reads its fields. What actually gets posted is `#actualLogin`
+ * (action ending in `DoLogin`), which in the captured markup carries nothing
+ * but the antiforgery token; the script appends everything else at submit
+ * time. `client.ts` calls this shape the "envelope": a `DoLogin`-actioned form
+ * with no username or password field of its own.
+ *
+ * `LoginInfo` is `JSON.stringify`'d and sent as a single form value:
+ * `{"Type":"StandardLogin","Credentials":{"LoginIdentifier":b64(username),
+ * "Password":b64(password)}}`, where `b64` is base64 of the UTF-8 bytes (not
+ * `btoa`, which mishandles anything outside Latin-1 -- see `base64Utf8` in
+ * `worker/providers/adapter.ts`). The two credential keys are fixed regardless
+ * of what the page's own (never-submitted) username field happens to be named.
+ */
+export const LOGIN_INFO = {
+  typeKey: "Type",
+  type: "StandardLogin",
+  credentialsKey: "Credentials",
+  identifierKey: "LoginIdentifier",
+  passwordKey: "Password",
+} as const;
+
+/**
+ * [assumption] Where this client persists the envelope's `DeviceId` between
+ * logins, in `CookieJar.extras`.
+ *
+ * The script itself reads its copy from `localStorage` -- once per browser,
+ * confirmed by a live capture -- which this jar has no equivalent of.
+ * `extras` is the nearest thing this client has, and reusing the same value on
+ * every login rather than minting a fresh one per attempt is the safer
+ * assumption: a device id that changes on every run looks less like a
+ * returning browser than one that never does.
+ */
+export const DEVICE_ID_EXTRA_KEY = "classic.deviceId";
 
 /** [documented] What `RememberMe` is set to, as an HTML checkbox would send it. */
 export const REMEMBER_ME_VALUE = "checked";
@@ -189,6 +244,12 @@ export const SEND_CODE_VARIANTS: readonly Record<string, string>[] = [
   { DeliveryMethod: "Email" },
   { Method: "Email" },
   { SendMode: "Email" },
+  // [guess] Some deployments show a page asking the owner to choose a delivery
+  // method (email or phone/text) before a code is sent at all, rather than
+  // sending straight to whichever contact method is on file -- see
+  // `MARKERS.deliveryMethodChoice`. This is the field name that choice is
+  // guessed to post under.
+  { SelectedDeliveryMethod: "Email" },
   {},
 ];
 
@@ -438,6 +499,26 @@ export const MARKERS = {
     "oidcnonce",
     'id="oidcform"',
     "id='oidcform'",
+  ],
+  /**
+   * The page asking the owner to choose a delivery channel (email or
+   * phone/text) before any code has been sent -- a landing `landingOf` has to
+   * recognise as `awaiting_code` exactly as it does the code-entry page,
+   * because it is not under `PATHS.secondaryValidation` on every deployment
+   * and carries none of `MARKERS.secondaryValidation`'s markers either.
+   *
+   * [guess] No captured markup for this page. Matched by the radio/select
+   * field names `SEND_CODE_VARIANTS` already guesses at, paired with the
+   * choice itself, plus a couple of plausible prompts. Live QA against a
+   * captured page should replace these with the exact shape.
+   */
+  deliveryMethodChoice: [
+    'name="deliverymethod"',
+    "name='deliverymethod'",
+    'name="selecteddeliverymethod"',
+    "name='selecteddeliverymethod'",
+    "how would you like to receive",
+    "choose how to receive your code",
   ],
   /**
    * The request was refused, used only to decide whether a `SendCode` variant
