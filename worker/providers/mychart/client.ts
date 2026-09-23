@@ -298,13 +298,14 @@ function looksLikeJson(response: PortalResponse): boolean {
 /**
  * True when a `SendCode` attempt looks like it worked.
  *
- * Generous about JSON, because the parameter names are a guess and the
- * response shape for a *refusal* is not documented either: any object that
- * does not explicitly say `success: false` counts, and the caller only moves
- * on to the next variant when one does. **Not generous about HTML.** A 200
- * carrying a page is exactly what re-rendering the delivery-method choice (a
- * variant it did not recognise) or an unrelated shell page looks like, and
- * either one means no code was actually sent -- so an HTML 200 counts as
+ * Generous about JSON and about an empty body, because the parameter names
+ * are a guess and the response shape for a *refusal* is not documented
+ * either: any object that does not explicitly say `success: false` counts,
+ * an empty 200 counts, and the caller only moves on to the next variant when
+ * one does not. **Not generous about a populated HTML body.** A 200 carrying
+ * a page is exactly what re-rendering the delivery-method choice (a variant
+ * it did not recognise) or an unrelated shell page looks like, and either one
+ * means no code was actually sent -- so a non-empty, non-JSON body counts as
  * accepted only when the page it rendered is the code-entry page itself,
  * i.e. it carries a `TwoFactorCode` input. Treating any old 200 as success
  * here is the bug this guards: it would report `awaiting_code` for a run that
@@ -313,6 +314,11 @@ function looksLikeJson(response: PortalResponse): boolean {
 function sendCodeAccepted(response: PortalResponse): boolean {
   if (response.status >= 400 || bodyMentions(response.body, MARKERS.badCredentials)) return false;
   const trimmed = response.body.trim();
+  // An empty 200 is still treated as generously as ever: some deployments
+  // answer this way and there is nothing about an empty body that looks like
+  // a refusal. Only a *populated* non-JSON body -- a page -- is held to the
+  // code-entry-page rule below.
+  if (trimmed === "") return true;
   if (!trimmed.startsWith("{")) return inputFields(response.body).has(FIELDS.twoFactorCode);
   let parsed: unknown;
   try {

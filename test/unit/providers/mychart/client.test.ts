@@ -562,6 +562,17 @@ describe("secondaryValidation.sendCode", () => {
       "portal_login_failed",
     );
   });
+
+  it("still accepts an empty 200 -- some deployments answer SendCode with no body at all", async () => {
+    const stub = routed({
+      "GET /MyChart/Authentication/SecondaryValidation": () => html(twoFactorPage()),
+      "POST /MyChart/Authentication/SecondaryValidation/SendCode": () => new Response(""),
+    });
+
+    await client(stub).secondaryValidation.sendCode("email");
+
+    expect(stub.calls.filter((call) => call.method === "POST")).toHaveLength(1);
+  });
 });
 
 describe("secondaryValidation.sendCode on a delivery-method choice page", () => {
