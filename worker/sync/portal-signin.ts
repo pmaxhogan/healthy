@@ -130,7 +130,8 @@ const OK: SignInOutcome = { phase: "signed_in", code: null };
  * A bot block or a locked account is not going to resolve itself, and the next
  * hourly run retrying it is how a temporary block becomes a permanent one. These
  * two open the Trello reconnect card; every other failure marks the account and
- * waits for the owner to look at the admin UI.
+ * waits for the owner to look at the admin UI -- except a *repeated* missing
+ * code, see `isRepeatedCodeMiss`.
  */
 const ALERTING_CODES: ReadonlySet<string> = new Set([
   "portal_bot_blocked",
@@ -143,6 +144,26 @@ const ALERTING_CODES: ReadonlySet<string> = new Set([
   // the counter rolls over, so nothing else would surface it before tomorrow.
   "portal_attempts_exhausted",
 ]);
+
+/** The emailed verification code never arrived. */
+const CODE_MISS = "portal_2fa_required";
+
+/**
+ * The emailed code never arrived, and it did not arrive last time either.
+ *
+ * One miss is not worth a card: a slow mail hop explains it, and the Providers
+ * page already shows it. Two in a row -- with no successful sign-in between,
+ * because `markActive` clears the stored code -- means the forwarding path is
+ * broken, and nothing else tells the owner that out of band. The card goes
+ * through `openReconnectAlert`, whose one-open-alert-per-subject rule keeps a
+ * third and fourth miss from opening more.
+ *
+ * The scheduled sync only signs in to `active` accounts, so after the first miss
+ * the second one normally comes from the owner's own "Sign in now".
+ */
+function isRepeatedCodeMiss(code: string, previous: string | null): boolean {
+  return code === CODE_MISS && previous === CODE_MISS;
+}
 
 /** A stable code for any thrown value. */
 function codeOf(error: unknown): string {
@@ -305,8 +326,8 @@ export async function failSignIn(
 ): Promise<SignInOutcome> {
   try {
     const repos = makeRepos(ctx);
-    await repos.portalAccounts.markNeedsReauth(providerId, code);
-    if (ALERTING_CODES.has(code)) {
+    const previous = await repos.portalAccounts.markNeedsReauth(providerId, code);
+    if (ALERTING_CODES.has(code) || isRepeatedCodeMiss(code, previous)) {
       await openReconnectAlert(ctx, { providerId, portal: true }, code, deps.deps);
     }
   } catch (error) {

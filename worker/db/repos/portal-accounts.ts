@@ -368,8 +368,13 @@ export function makePortalAccountsRepo(ctx: Ctx) {
      * `needs_reauth_since` is only set on the *first* failure, so the card's age
      * reflects how long the owner has been ignoring it rather than resetting on
      * every hourly retry.
+     *
+     * Resolves with the code the row carried *before* this failure, or null when
+     * it was not already failing, so a caller can tell a repeat of the same
+     * failure from a first one without a counter column: `markActive` is what
+     * clears it.
      */
-    async markNeedsReauth(providerId: string, errorCode: string): Promise<void> {
+    async markNeedsReauth(providerId: string, errorCode: string): Promise<string | null> {
       const row = await require_(providerId);
       await patch(providerId, {
         session_state: "needs_reauth" satisfies PortalSessionState,
@@ -377,6 +382,7 @@ export function makePortalAccountsRepo(ctx: Ctx) {
         needs_reauth_since: row.needs_reauth_since ?? ctx.now(),
       });
       ctx.log.warn("portal_accounts.needs_reauth", { providerId, errorCode });
+      return row.session_state === "needs_reauth" ? row.last_error_code : null;
     },
 
     /**
