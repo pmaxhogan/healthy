@@ -1,6 +1,6 @@
 // `resolveDeps`/`portalDeps` must never hand out the raw global `fetch`
 // reference as a default: a real portal sign-in broke in production because
-// `worker/providers/mychart/http.ts` calls its `fetchImpl` as `deps.fetchImpl(...)`
+// `worker/ehr/mychart/http.ts` calls its `fetchImpl` as `deps.fetchImpl(...)`
 // -- a property-access call, which sets `this` to the deps object -- and
 // workerd's native `fetch` throws "Illegal invocation" for any `this` other
 // than itself or `undefined`. The fix is the default itself: wrap it in a

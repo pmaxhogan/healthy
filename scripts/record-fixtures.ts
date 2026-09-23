@@ -16,8 +16,8 @@
  * (`scripts/lib/scrub-fixture.ts`) and written under `--out` as pretty JSON,
  * alongside a `manifest.json` describing what was recorded.
  *
- * It exercises the real `ProviderAdapter` and `FhirClient` implementations
- * under `worker/providers/epic/` -- not a reimplementation of them -- so a
+ * It exercises the real `EhrAdapter` and `FhirClient` implementations
+ * under `worker/ehr/epic/` -- not a reimplementation of them -- so a
  * recording run is also a smoke test of that code against a live server.
  *
  * Sign in with one of Epic's published sandbox test patients (e.g.
@@ -32,18 +32,18 @@ import { createServer } from "node:http";
 import path from "node:path";
 import process from "node:process";
 
+import { createFhirClient } from "../worker/ehr/epic/fhir-client.ts";
+import { createEpicAdapter, toTokenSet } from "../worker/ehr/epic/index.ts";
+import { createPkce, randomState } from "../worker/ehr/pkce.ts";
 import { isRecord } from "../worker/fhir/bundle.ts";
 import { SEARCH_REGISTRY } from "../worker/fhir/search-registry.ts";
 import { makeLogger } from "../worker/lib/log.ts";
-import { createFhirClient } from "../worker/providers/epic/fhir-client.ts";
-import { createEpicAdapter, toTokenSet } from "../worker/providers/epic/index.ts";
-import { createPkce, randomState } from "../worker/providers/pkce.ts";
 
 import { scrubFixture, truncateBundleEntries } from "./lib/scrub-fixture.ts";
 
+import type { EhrAdapter } from "../worker/ehr/adapter.ts";
+import type { FhirClient } from "../worker/ehr/epic/fhir-client.ts";
 import type { SmartConfig, TokenSet } from "../worker/fhir/types.ts";
-import type { ProviderAdapter } from "../worker/providers/adapter.ts";
-import type { FhirClient } from "../worker/providers/epic/fhir-client.ts";
 
 /** Epic's public sandbox R4 base. Safe to name -- see .local/quest-spec.md and CLAUDE.md. */
 const EPIC_SANDBOX_BASE = "https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4";
@@ -342,8 +342,8 @@ interface ExchangeArgs {
  * response either way, and writes `token-response.scrubbed.json` itself.
  *
  * With a client secret this simply calls the real adapter, which tries HTTP
- * Basic first per the module comment on `worker/providers/epic/index.ts`.
- * Without one, `ProviderAdapter.exchangeCode` has no "send no credentials at
+ * Basic first per the module comment on `worker/ehr/epic/index.ts`.
+ * Without one, `EhrAdapter.exchangeCode` has no "send no credentials at
  * all" mode to call into -- every path it has sends *something* -- so this
  * does the public-client token POST by hand: no Authorization header, no
  * `client_secret` field, relying on the PKCE verifier alone (RFC 7636). The
@@ -351,7 +351,7 @@ interface ExchangeArgs {
  * assumption this script cannot verify without a live client id.
  */
 async function exchangeCodeAndRecord(
-  adapter: ProviderAdapter,
+  adapter: EhrAdapter,
   config: SmartConfig,
   args: ExchangeArgs,
   recording: RecordingFetch,
@@ -580,7 +580,7 @@ async function recordReferenceReads(
 
 /** Discovery and CapabilityStatement, each recorded verbatim (scrubbed) as its own fixture. */
 async function recordDiscoveryDocs(
-  adapter: ProviderAdapter,
+  adapter: EhrAdapter,
   recording: RecordingFetch,
   outDir: string,
 ): Promise<SmartConfig> {
@@ -598,7 +598,7 @@ async function recordDiscoveryDocs(
 }
 
 async function recordMetadata(
-  adapter: ProviderAdapter,
+  adapter: EhrAdapter,
   accessToken: string,
   recording: RecordingFetch,
   outDir: string,

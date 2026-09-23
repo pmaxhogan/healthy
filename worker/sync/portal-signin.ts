@@ -66,7 +66,7 @@ import { getSetting } from "../db/settings.ts";
 import { AppError, isAppError } from "../lib/errors.ts";
 import { errorFields } from "../lib/log.ts";
 import { parseAllowlistCsv } from "../mail/classify.ts";
-import { CookieJar, createMyChartAdapter } from "../providers/mychart/index.ts";
+import { CookieJar, createMyChartAdapter } from "../ehr/mychart/index.ts";
 
 import { openReconnectAlert } from "./alerts.ts";
 
@@ -77,7 +77,7 @@ import type {
   PortalClient,
   PortalCustomSettings,
   PortalEndpoint,
-} from "../providers/mychart/index.ts";
+} from "../ehr/mychart/index.ts";
 import type { PortalSignInPhase } from "@shared/types.ts";
 
 /** How long to wait for the emailed code before giving up. */

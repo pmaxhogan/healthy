@@ -41,7 +41,7 @@ import { blindCsn, blinderFor } from "../blind.ts";
 import { BATCH_CHUNK, all, batch, chunk, run } from "../client.ts";
 import { aadFor, open, seal } from "../crypto.ts";
 
-import type { PortalVisit } from "../../providers/mychart/index.ts";
+import type { PortalVisit } from "../../ehr/mychart/index.ts";
 import type { Blinder } from "../blind.ts";
 import type { Ctx } from "../client.ts";
 import type { PortalVisitRow, PortalVisitState } from "../rows.ts";

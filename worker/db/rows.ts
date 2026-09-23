@@ -275,7 +275,7 @@ export interface PortalAccountRow {
   /**
    * The whole discovery result, as the portal adapter's own JSON (0003).
    *
-   * Opaque outside `worker/providers/mychart/**`: it carries `baseUrl` and
+   * Opaque outside `worker/ehr/mychart/**`: it carries `baseUrl` and
    * `mountPath`, which the db layer validates, plus whatever else the adapter
    * needs to drive that deployment's login -- which varies, and is why this is
    * one JSON column rather than a column per field. NULL on a row written before

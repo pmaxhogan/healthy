@@ -2,17 +2,17 @@
  * vendor -> adapter.
  *
  * The only place in the Worker that names a vendor. Adding Oracle Health means
- * one entry here and one implementation under `providers/`.
+ * one entry here and one implementation under `ehr/`.
  */
 
 import { AppError } from "../lib/errors.ts";
 
 import { createEpicAdapter } from "./epic/index.ts";
 
-import type { AdapterDeps, ProviderAdapter, ProviderAdapterFactory } from "./adapter.ts";
+import type { AdapterDeps, EhrAdapter, EhrAdapterFactory } from "./adapter.ts";
 import type { Vendor } from "../fhir/types.ts";
 
-export const ADAPTER_FACTORIES: Record<Vendor, ProviderAdapterFactory> = {
+export const ADAPTER_FACTORIES: Record<Vendor, EhrAdapterFactory> = {
   epic: createEpicAdapter,
 };
 
@@ -30,7 +30,7 @@ export function isVendor(value: string): value is Vendor {
  * are cheap, and giving each request its own keeps the request-scoped logger
  * attached to the right request.
  */
-export function adapterFor(vendor: string, deps: AdapterDeps): ProviderAdapter {
+export function adapterFor(vendor: string, deps: AdapterDeps): EhrAdapter {
   if (!isVendor(vendor)) {
     throw new AppError("bad_request", "unknown health system vendor", { vendor });
   }

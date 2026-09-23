@@ -32,8 +32,8 @@ import { errorFields } from "../lib/log.ts";
 import type { Ctx } from "../db/client.ts";
 import type { Repos } from "../db/index.ts";
 import type { HealthSystemRow } from "../db/rows.ts";
+import type { EhrAdapter } from "../ehr/adapter.ts";
 import type { CapabilityIndex, SmartConfig } from "../fhir/types.ts";
-import type { ProviderAdapter } from "../providers/adapter.ts";
 
 /** How long a cached discovery document is trusted. Seven days, in ms. */
 const DISCOVERY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -119,7 +119,7 @@ export async function getSmartConfig(
   ctx: Ctx,
   repos: Repos,
   healthSystem: HealthSystemRow,
-  adapter: ProviderAdapter,
+  adapter: EhrAdapter,
   options: { force?: boolean } = {},
 ): Promise<SmartConfig> {
   if (options.force !== true) {
@@ -144,7 +144,7 @@ export async function getCapabilityIndex(
   ctx: Ctx,
   repos: Repos,
   healthSystem: HealthSystemRow,
-  adapter: ProviderAdapter,
+  adapter: EhrAdapter,
   accessToken: string,
 ): Promise<CapabilityIndex | null> {
   const cached = await readCached(repos, healthSystem.id, CAPABILITY_CACHE_TYPE, isCapabilityIndex);

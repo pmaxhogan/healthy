@@ -24,7 +24,7 @@
  *    plausibly want keeps the fixture from ballooning for no reason.
  *  - Absolute URLs under the recorded sandbox base (`fullUrl`, pagination
  *    `link.url`, and similar) are rewritten onto the placeholder host the
- *    unit fixtures already use (see `test/unit/providers/fixtures.ts`,
+ *    unit fixtures already use (see `test/unit/ehr/fixtures.ts`,
  *    `TEST_FHIR_BASE`), so a fixture never encodes a live Epic sandbox URL
  *    that a future recording could resolve differently, and integration
  *    tests get the same synthetic host every other fixture in this repo uses.
@@ -38,7 +38,7 @@ import { isRecord } from "../../worker/fhir/bundle.ts";
 
 /**
  * The placeholder host every other fixture in this repo already uses (see
- * `test/unit/providers/fixtures.ts`'s `TEST_FHIR_BASE`). Not exported: nothing
+ * `test/unit/ehr/fixtures.ts`'s `TEST_FHIR_BASE`). Not exported: nothing
  * outside this file needs it, since `ScrubOptions.placeholderBase` is how a
  * caller would override it.
  */

@@ -28,8 +28,8 @@ import { convertDocument, decodeBase64Utf8, isConvertible } from "./document-tex
 import type { DocumentTextResult } from "./deps.ts";
 import type { Ctx } from "../db/client.ts";
 import type { Repos } from "../db/index.ts";
+import type { FhirClient } from "../ehr/epic/fhir-client.ts";
 import type { Logger } from "../lib/log.ts";
-import type { FhirClient } from "../providers/epic/fhir-client.ts";
 import type * as fhir4 from "fhir/r4";
 
 /** Epic's "daily document query cap reached" code. */

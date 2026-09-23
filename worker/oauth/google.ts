@@ -26,7 +26,7 @@ import { makeLogger } from "../lib/log.ts";
 
 import { STATE_TTL_MS } from "./epic.ts";
 import { googleOAuthFor } from "./google-client.ts";
-import { invalidStatePage, oauthPage, providerRefusedPage } from "./pages.ts";
+import { invalidStatePage, oauthPage, authorizationRefusedPage } from "./pages.ts";
 
 import type { AppHonoEnv } from "../auth/gate.ts";
 
@@ -54,7 +54,7 @@ googleOAuthRouter.get("/google/callback", async (c) => {
   const nonce = c.get("nonce");
   const error = c.req.query("error");
   if (error !== undefined && error !== "") {
-    return providerRefusedPage(nonce, error, "/oauth/google/start");
+    return authorizationRefusedPage(nonce, error, "/oauth/google/start");
   }
 
   const code = c.req.query("code") ?? "";

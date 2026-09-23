@@ -6,7 +6,11 @@
 
 import { describe, expect, it } from "vitest";
 
-import { invalidStatePage, oauthPage, providerRefusedPage } from "../../../worker/oauth/pages.ts";
+import {
+  invalidStatePage,
+  oauthPage,
+  authorizationRefusedPage,
+} from "../../../worker/oauth/pages.ts";
 
 const NONCE = "test-nonce";
 
@@ -76,9 +80,9 @@ describe("invalidStatePage", () => {
   });
 });
 
-describe("providerRefusedPage", () => {
+describe("authorizationRefusedPage", () => {
   it("reports the health system's error code and offers a retry", async () => {
-    const response = providerRefusedPage(
+    const response = authorizationRefusedPage(
       NONCE,
       "access_denied",
       "/oauth/epic/start?healthSystem=P1",
@@ -91,13 +95,13 @@ describe("providerRefusedPage", () => {
   });
 
   it("never names the organisation", async () => {
-    const html = await bodyOf(providerRefusedPage(NONCE, "access_denied", "/"));
+    const html = await bodyOf(authorizationRefusedPage(NONCE, "access_denied", "/"));
 
     expect(html).toContain("patient portal");
   });
 
   it("escapes a hostile error code", async () => {
-    const html = await bodyOf(providerRefusedPage(NONCE, "</code><script>x</script>", "/"));
+    const html = await bodyOf(authorizationRefusedPage(NONCE, "</code><script>x</script>", "/"));
 
     expect(html).not.toContain("<script>x");
   });

@@ -14,9 +14,9 @@
  * invalidate. A cold isolate simply fetches it again.
  */
 
+import { adapterFor } from "../ehr/registry.ts";
 import { AppError } from "../lib/errors.ts";
 import { makeLogger } from "../lib/log.ts";
-import { adapterFor } from "../providers/registry.ts";
 
 import type { SmartConfig } from "../fhir/types.ts";
 

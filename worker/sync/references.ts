@@ -38,8 +38,8 @@ import { errorFields } from "../lib/log.ts";
 
 import type { Ctx } from "../db/client.ts";
 import type { Repos } from "../db/index.ts";
+import type { FhirClient } from "../ehr/epic/fhir-client.ts";
 import type { Encounter, Resource } from "../fhir/types.ts";
-import type { FhirClient } from "../providers/epic/fhir-client.ts";
 import type * as fhir4 from "fhir/r4";
 
 /** How long a resolved reference stays usable. 30 days, in milliseconds. */

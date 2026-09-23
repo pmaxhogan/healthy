@@ -73,7 +73,7 @@ export function invalidStatePage(nonce: string): Response {
 }
 
 /** The page for an `error=` parameter on the way back from a provider. */
-export function providerRefusedPage(nonce: string, code: string, retryPath: string): Response {
+export function authorizationRefusedPage(nonce: string, code: string, retryPath: string): Response {
   return oauthPage({
     nonce,
     heading: "The connection was not completed",

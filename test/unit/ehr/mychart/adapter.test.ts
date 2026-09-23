@@ -1,4 +1,4 @@
-// The public surface of worker/providers/mychart/, exercised through the one
+// The public surface of worker/ehr/mychart/, exercised through the one
 // module a caller is meant to import.
 //
 // This file is also how the boundary is pinned: a later wave's sync code, and a
@@ -7,18 +7,17 @@
 
 import { describe, expect, it } from "vitest";
 
-import { noopLogger } from "../../../../worker/lib/log.ts";
 import {
   CookieJar,
   createMyChartAdapter,
   isPortalVendor,
   portalAdapterFor,
-} from "../../../../worker/providers/mychart/index.ts";
+} from "../../../../worker/ehr/mychart/index.ts";
+import { noopLogger } from "../../../../worker/lib/log.ts";
 
 import { HOME_PAGE, HOST, MOUNT, html, loginPageNew, redirect, routed } from "./fixtures.ts";
 
 import type { PortalFetchStub } from "./fixtures.ts";
-import type { AppError } from "../../../../worker/lib/errors.ts";
 import type {
   PortalAdapter,
   PortalAdapterDeps,
@@ -32,7 +31,8 @@ import type {
   PortalVisitStatus,
   SecondaryValidation,
   UsernameField,
-} from "../../../../worker/providers/mychart/index.ts";
+} from "../../../../worker/ehr/mychart/index.ts";
+import type { AppError } from "../../../../worker/lib/errors.ts";
 
 const T0 = 1_767_225_600;
 const CREDENTIALS: PortalCredentials = { username: "owner-login", password: "owner-password" };

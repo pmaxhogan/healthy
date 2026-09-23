@@ -25,7 +25,7 @@ import {
   portalVisitView,
 } from "../../../worker/sync/portal-mapping.ts";
 
-import type { PortalVisit } from "../../../worker/providers/mychart/index.ts";
+import type { PortalVisit } from "../../../worker/ehr/mychart/index.ts";
 import type {
   CalendarMapping,
   MappingInput,

@@ -38,14 +38,14 @@
  * not a secret and exists specifically so a human can read and use it.
  */
 
+import { registrableDomain } from "../../ehr/mychart/site.ts";
 import { newId } from "../../lib/ids.ts";
 import { domainAllowed, domainOf } from "../../mail/classify.ts";
-// A repo reaching into `worker/providers/mychart/**` is otherwise unheard of --
+// A repo reaching into `worker/ehr/mychart/**` is otherwise unheard of --
 // see the "opaque" comments in `rows.ts`/`schemas.ts` -- but `registrableDomain`
 // is a pure, dependency-free string function (see its own module comment) and
 // this is the one place outside that directory that needs the same "same site"
 // question `sameRegistrableSite` answers for redirects and cookies.
-import { registrableDomain } from "../../providers/mychart/site.ts";
 import { all, one, run } from "../client.ts";
 import { aadFor, open, openOrNull, sealShort } from "../crypto.ts";
 

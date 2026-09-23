@@ -14,7 +14,7 @@ import {
   parseIssues,
   toSearchWarnings,
 } from "../../../worker/fhir/operation-outcome.ts";
-import { loadFixture } from "../providers/fixtures.ts";
+import { loadFixture } from "../ehr/fixtures.ts";
 
 import type { OutcomeClass, ParsedIssue } from "../../../worker/fhir/operation-outcome.ts";
 import type { Bundle, OperationOutcome } from "../../../worker/fhir/types.ts";

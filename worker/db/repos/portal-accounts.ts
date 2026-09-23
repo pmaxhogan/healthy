@@ -70,7 +70,7 @@ export interface PortalEndpointPatch {
   /**
    * The adapter's whole discovery result, stored verbatim as JSON.
    *
-   * Opaque here on purpose: `worker/providers/mychart/**` owns the shape and it
+   * Opaque here on purpose: `worker/ehr/mychart/**` owns the shape and it
    * grows as deployments turn out to differ -- which login application to drive,
    * for one -- so a column (or a strict schema) per field would mean a migration
    * every time and a stored endpoint that quietly disagrees with the adapter that

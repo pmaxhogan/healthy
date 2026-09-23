@@ -15,9 +15,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { makeCtx } from "../../../worker/db/client.ts";
 import { makeRepos } from "../../../worker/db/index.ts";
 import { setSetting } from "../../../worker/db/settings.ts";
+import { parseUpcoming } from "../../../worker/ehr/mychart/visits.ts";
 import { makeToolDeps } from "../../../worker/mcp/deps-d1.ts";
 import { registerTools } from "../../../worker/mcp/tools/index.ts";
-import { parseUpcoming } from "../../../worker/providers/mychart/visits.ts";
 import { resetDb } from "../db/helpers.ts";
 
 import type { Repos } from "../../../worker/db/index.ts";

@@ -7,7 +7,7 @@ worker/                 The Cloudflare Worker (Hono app + MCP server + sync engi
   auth/                 Access JWT verification, password, session, CSRF, rate limiting
   api/                  Admin JSON API (/api/*)
   oauth/                Epic and Google OAuth flows, plus the reconnect redirect
-  providers/                 The ProviderAdapter interface; providers/epic is the only implementation
+  ehr/                       The EhrAdapter interface; ehr/epic is the only implementation
   fhir/                 FHIR types, the search registry, and per-resource normalizers
   google/               Google OAuth and Calendar API clients
   sync/                 The calendar-sync diff engine, full refresh, mapping, backoff
@@ -107,7 +107,7 @@ and a few `OperationOutcome` warning bodies. Some are hand-written to
 isolate one behaviour; others come from `scripts/record-fixtures.ts`, which
 drives a real sandbox OAuth flow against one of Epic's published synthetic
 test patients (e.g. `fhircamila`), runs every registered search against the
-real `ProviderAdapter`/`FhirClient` code, and writes the scrubbed responses
+real `EhrAdapter`/`FhirClient` code, and writes the scrubbed responses
 out as fixtures (`scripts/lib/scrub-fixture.ts` does the scrubbing) —
 recording is itself a smoke test of that code against a live server.
 **Never point it at a production app registration, and never a real patient

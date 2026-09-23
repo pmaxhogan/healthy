@@ -1,7 +1,7 @@
 /**
  * The portal boundary, and the one door into this directory.
  *
- * `worker/providers/adapter.ts` draws the same line for the FHIR side: the sync
+ * `worker/ehr/adapter.ts` draws the same line for the FHIR side: the sync
  * engine is written against an interface and knows nothing about a vendor.
  * `PortalAdapter` is that idea for the scrape, and it exists for the same reason
  * -- another vendor's patient portal is a different set of paths and a different

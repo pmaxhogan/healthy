@@ -182,7 +182,7 @@ const CODE_MESSAGES: Record<string, string> = {
   policy_denied: "That is blocked by the current MCP policy rules.",
   crypto: "A security operation failed. If this keeps happening, check the DATA_KEY secret.",
   internal: "Something went wrong on our side. Try again in a moment.",
-  // Patient-portal scrape (worker/providers/mychart/**, wave B2). Fine-grained
+  // Patient-portal scrape (worker/ehr/mychart/**, wave B2). Fine-grained
   // for the same reason worker/lib/errors.ts's ErrorCode is: the admin UI's
   // portal card wants a different sentence for "try again", "wait for the
   // code" and "stop trying", not one generic upstream-failure message.

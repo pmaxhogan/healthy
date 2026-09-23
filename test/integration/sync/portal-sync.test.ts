@@ -1,7 +1,7 @@
 // The patient-portal pass, against real D1 and the in-memory Google Calendar.
 //
 // The portal itself is a fake adapter (`test/integration/portal/helpers.ts`) --
-// what the real client does to real markup is `test/unit/providers/mychart/**`'s
+// what the real client does to real markup is `test/unit/ehr/mychart/**`'s
 // job. What matters here is everything the portal pass decides, and most of it is
 // about *not* writing something twice:
 //
@@ -56,7 +56,7 @@ import {
 import type { FhirServer, SeededHealthSystem, Upstreams } from "./helpers.ts";
 import type { Ctx } from "../../../worker/db/client.ts";
 import type { PortalAccountRow } from "../../../worker/db/rows.ts";
-import type { PortalVisit } from "../../../worker/providers/mychart/index.ts";
+import type { PortalVisit } from "../../../worker/ehr/mychart/index.ts";
 import type { FakePortal } from "../portal/helpers.ts";
 import type { RunSummary } from "@shared/types.ts";
 import type * as fhir4 from "fhir/r4";

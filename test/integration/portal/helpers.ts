@@ -3,7 +3,7 @@
 //
 // ### Why a fake adapter rather than stubbed HTTP
 //
-// The portal is a scrape, and `test/unit/providers/mychart/**` already drives the
+// The portal is a scrape, and `test/unit/ehr/mychart/**` already drives the
 // real client against synthetic HTML -- that is where "does the login POST echo the
 // antiforgery token" belongs. What these suites are about is everything *around*
 // it: the session state machine, the attempt budget, the emailed-code handoff
@@ -24,7 +24,7 @@ import type {
   PortalClient,
   PortalVisit,
   PortalVisitStatus,
-} from "../../../worker/providers/mychart/index.ts";
+} from "../../../worker/ehr/mychart/index.ts";
 
 /** An invented portal host. Never a real one. */
 export const PORTAL_ORIGIN = "https://portal.example.test";

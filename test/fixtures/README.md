@@ -27,7 +27,7 @@ in `.dev.vars`-adjacent local scratch space, not in `test/fixtures/`.
 ## Re-recording from the sandbox
 
 `scripts/record-fixtures.ts` drives a real Epic sandbox OAuth flow and FHIR
-session -- using the same `ProviderAdapter` and `FhirClient` code the Worker
+session -- using the same `EhrAdapter` and `FhirClient` code the Worker
 runs in production, not a reimplementation of it -- and writes what comes back
 as fixtures:
 

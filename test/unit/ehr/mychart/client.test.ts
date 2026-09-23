@@ -10,10 +10,10 @@
 
 import { describe, expect, it } from "vitest";
 
+import { createMyChartClient } from "../../../../worker/ehr/mychart/client.ts";
+import { CookieJar } from "../../../../worker/ehr/mychart/cookie-jar.ts";
+import { DEVICE_ID_EXTRA_KEY } from "../../../../worker/ehr/mychart/wire.ts";
 import { makeLogger, noopLogger } from "../../../../worker/lib/log.ts";
-import { createMyChartClient } from "../../../../worker/providers/mychart/client.ts";
-import { CookieJar } from "../../../../worker/providers/mychart/cookie-jar.ts";
-import { DEVICE_ID_EXTRA_KEY } from "../../../../worker/providers/mychart/wire.ts";
 
 import {
   CHALLENGE_PAGE,
@@ -50,9 +50,9 @@ import {
 } from "./fixtures.ts";
 
 import type { PortalCall, PortalFetchStub } from "./fixtures.ts";
+import type { PortalClient } from "../../../../worker/ehr/mychart/client.ts";
+import type { PortalEndpoint } from "../../../../worker/ehr/mychart/discovery.ts";
 import type { AppError } from "../../../../worker/lib/errors.ts";
-import type { PortalClient } from "../../../../worker/providers/mychart/client.ts";
-import type { PortalEndpoint } from "../../../../worker/providers/mychart/discovery.ts";
 
 const T0 = 1_767_225_600;
 const CREDENTIALS = { username: "owner-login", password: "owner-password" };

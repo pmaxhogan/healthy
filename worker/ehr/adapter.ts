@@ -2,7 +2,7 @@
  * The vendor boundary.
  *
  * Everything above this interface (OAuth routes, the sync engine, the MCP
- * server) is written against `ProviderAdapter` and knows nothing about Epic.
+ * server) is written against `EhrAdapter` and knows nothing about Epic.
  * Adding Oracle Health later means adding one implementation and one line in
  * `registry.ts`.
  *
@@ -74,7 +74,7 @@ export interface RefreshInput {
   tokenAuthMethods?: readonly string[] | undefined;
 }
 
-export interface ProviderAdapter {
+export interface EhrAdapter {
   readonly vendor: Vendor;
   /**
    * Parse `{base}/.well-known/smart-configuration`.
@@ -105,7 +105,7 @@ export interface ProviderAdapter {
   scopesFor(resourceTypes: readonly string[]): string[];
 }
 
-export type ProviderAdapterFactory = (deps: AdapterDeps) => ProviderAdapter;
+export type EhrAdapterFactory = (deps: AdapterDeps) => EhrAdapter;
 
 /** The SMART scopes every connection needs regardless of resource types. */
 export const SMART_BASE_SCOPES: readonly string[] = ["openid", "fhirUser", "offline_access"];

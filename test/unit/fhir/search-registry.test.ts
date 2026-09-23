@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { indexCapabilities } from "../../../worker/ehr/epic/index.ts";
 import {
   appointmentEncounterSearch,
   CALENDAR_ENCOUNTER_STATUSES,
@@ -10,8 +11,7 @@ import {
   supportsInteraction,
   supportsSearchParam,
 } from "../../../worker/fhir/search-registry.ts";
-import { indexCapabilities } from "../../../worker/providers/epic/index.ts";
-import { loadFixture } from "../providers/fixtures.ts";
+import { loadFixture } from "../ehr/fixtures.ts";
 
 import type {
   EncounterStatusFilter,

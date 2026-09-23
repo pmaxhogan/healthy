@@ -83,9 +83,9 @@ describe("GET /api/overview", () => {
   });
 
   it("leaves the sync engine's own bookkeeping rows out of the record counts", async () => {
-    // `fhir_cache` also holds one `_smart` and one `_capability` row per provider --
+    // `fhir_cache` also holds one `_smart` and one `_capability` row per health system --
     // a discovery document and an indexed CapabilityStatement. Counting those would
-    // report two cached "records" for a provider that has never been synced.
+    // report two cached "records" for a health system that has never been synced.
     const id = await seedHealthSystem();
     await testRepos().fhirCache.upsertMany(
       id,

@@ -12,7 +12,7 @@ import {
   parseUpcoming,
   parseWcfDate,
   statusOf,
-} from "../../../../worker/providers/mychart/visits.ts";
+} from "../../../../worker/ehr/mychart/visits.ts";
 
 import {
   CLINIC_ZONE,
@@ -23,8 +23,8 @@ import {
   VISIT_INSTANT_MS,
 } from "./fixtures.ts";
 
+import type { PortalVisit } from "../../../../worker/ehr/mychart/visits.ts";
 import type { AppError } from "../../../../worker/lib/errors.ts";
-import type { PortalVisit } from "../../../../worker/providers/mychart/visits.ts";
 
 const OWNER_ZONE = "UTC";
 

@@ -1,17 +1,12 @@
 import { describe, expect, it } from "vitest";
 
+import { ADAPTER_FACTORIES, adapterFor, isVendor, VENDORS } from "../../../worker/ehr/registry.ts";
 import { AppError } from "../../../worker/lib/errors.ts";
 import { noopLogger } from "../../../worker/lib/log.ts";
-import {
-  ADAPTER_FACTORIES,
-  adapterFor,
-  isVendor,
-  VENDORS,
-} from "../../../worker/providers/registry.ts";
 
 import { stubFetch } from "./fixtures.ts";
 
-import type { AdapterDeps } from "../../../worker/providers/adapter.ts";
+import type { AdapterDeps } from "../../../worker/ehr/adapter.ts";
 
 const deps: AdapterDeps = {
   fetchImpl: stubFetch(() => new Response()).fetchImpl,

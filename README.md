@@ -91,7 +91,7 @@ The MCP server itself lives in a SQLite-backed Durable Object.
   identifiers and every cached clinical payload are AES-GCM-256 encrypted by
   the application before they reach D1, with the AAD bound to the table,
   column and row. See [SECURITY.md](SECURITY.md).
-- **Vendor abstraction.** Health systems sit behind a `ProviderAdapter`
+- **Vendor abstraction.** Health systems sit behind a `EhrAdapter`
   interface. Epic is the only implementation today.
 
 ## Quick start

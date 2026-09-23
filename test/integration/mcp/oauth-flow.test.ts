@@ -285,15 +285,15 @@ const INITIALIZE = {
 };
 
 /**
- * One synthetic provider, so a tool call has something to return.
+ * One synthetic health system, so a tool call has something to return.
  *
  * Deliberately NOT a cached FHIR resource. The tool call below runs inside the
- * Durable Object, which sees the deployment's own `env` -- and `DATA_KEY` is a
- * secret that a clean CI checkout does not have, so anything sealed would be
- * unreadable there. `providers.display_name` is plaintext by design (it is not
- * personal data on its own), so `list_providers` is the tool that exercises the
- * whole path without depending on a key this test cannot inject. The encrypted
- * read path is covered in `tools.test.ts`, which builds its own env and its own key.
+ * Durable Object, which sees the deployment's own `env`. The health system's name
+ * is sealed (0007), so this works because the suite binds a generated `DATA_KEY`
+ * into that env (see vitest.config.ts) and the seeding below goes through the
+ * same env; `list_health_systems` is still the cheapest tool that exercises the
+ * whole path. The cached-resource read path is covered in `tools.test.ts`, which
+ * builds its own env and its own key.
  */
 beforeAll(async () => {
   await repos().healthSystems.create({

@@ -14,9 +14,9 @@
 
 import { describe, expect, it } from "vitest";
 
+import { CookieJar } from "../../../../worker/ehr/mychart/cookie-jar.ts";
+import { createCustomOidcClient } from "../../../../worker/ehr/mychart/custom-oidc/client.ts";
 import { noopLogger } from "../../../../worker/lib/log.ts";
-import { CookieJar } from "../../../../worker/providers/mychart/cookie-jar.ts";
-import { createCustomOidcClient } from "../../../../worker/providers/mychart/custom-oidc/client.ts";
 
 import {
   HOME_PAGE,
@@ -32,10 +32,10 @@ import {
 } from "./fixtures.ts";
 
 import type { PortalCall, PortalFetchStub } from "./fixtures.ts";
+import type { PortalClient } from "../../../../worker/ehr/mychart/client.ts";
+import type { PortalCustomSettings } from "../../../../worker/ehr/mychart/custom-oidc/client.ts";
+import type { PortalEndpoint } from "../../../../worker/ehr/mychart/discovery.ts";
 import type { AppError } from "../../../../worker/lib/errors.ts";
-import type { PortalClient } from "../../../../worker/providers/mychart/client.ts";
-import type { PortalCustomSettings } from "../../../../worker/providers/mychart/custom-oidc/client.ts";
-import type { PortalEndpoint } from "../../../../worker/providers/mychart/discovery.ts";
 
 const T0 = 1_767_225_600;
 /** The correlation id `sendCode` mints from the injected clock. */

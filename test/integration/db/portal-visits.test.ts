@@ -23,7 +23,7 @@ import {
   testRepos,
 } from "./helpers.ts";
 
-import type { PortalVisit } from "../../../worker/providers/mychart/index.ts";
+import type { PortalVisit } from "../../../worker/ehr/mychart/index.ts";
 
 beforeEach(resetDb);
 

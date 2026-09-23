@@ -29,7 +29,7 @@ Consequences for how code is written:
 - Cron comments do not translate schedules into local time — that would leak the
   timezone. Schedules are UTC and described as UTC.
 - Logs carry an explicit field allowlist. Never a token, a bearer header, an
-  email, clinical content, or a provider name.
+  email, clinical content, or a health system name.
 
 ## Develop and validate locally before pushing — always
 
@@ -68,7 +68,10 @@ so. Honest and noisy beats quietly incomplete.
 In a medical app "provider" naturally means a clinician (doctor, nurse, NP).
 Do not use it for a connected organisation. Call that a **health system**
 (`healthSystem`, `health_system_id`, …) in new code, docs and UI text; a
-clinician is a **practitioner**. Existing `provider` names are being migrated.
+clinician is a **practitioner**. The codebase was migrated in migration 0009; the
+only `provider`s left are the OAuth sense (`@cloudflare/workers-oauth-provider`),
+FHIR's `serviceProvider`, the frozen `providers.*` AAD strings, and a patient
+portal's own JSON field names for the clinician.
 
 ## Where secrets live
 

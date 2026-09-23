@@ -49,7 +49,7 @@ export const USERNAME_FIELD_NAMES: readonly UsernameField[] = [
  * `custom_oidc` is a deployment whose `Authentication/Login` is a redirect stub
  * into an OpenID Connect handoff: the credentials go to a separate single-page
  * shell's JSON API and the classic session arrives by way of the OIDC bridge.
- * `worker/providers/mychart/custom-oidc/**` is that second strategy; everything
+ * `worker/ehr/mychart/custom-oidc/**` is that second strategy; everything
  * past sign-in (the visits endpoints) is identical, which is the whole reason the
  * flavour is a field rather than a second adapter.
  */
@@ -164,7 +164,7 @@ export const FIELDS = {
  * `{"Type":"StandardLogin","Credentials":{"LoginIdentifier":b64(username),
  * "Password":b64(password)}}`, where `b64` is base64 of the UTF-8 bytes (not
  * `btoa`, which mishandles anything outside Latin-1 -- see `base64Utf8` in
- * `worker/providers/adapter.ts`). The two credential keys are fixed regardless
+ * `worker/ehr/adapter.ts`). The two credential keys are fixed regardless
  * of what the page's own (never-submitted) username field happens to be named.
  */
 export const LOGIN_INFO = {

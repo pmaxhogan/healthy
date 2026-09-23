@@ -107,9 +107,9 @@ import type { Blinder } from "../db/blind.ts";
 import type { Ctx } from "../db/client.ts";
 import type { Repos } from "../db/index.ts";
 import type { CalendarEventRow, HealthSystemRow } from "../db/rows.ts";
+import type { PortalVisit } from "../ehr/mychart/index.ts";
 import type { CalendarClient } from "../google/calendar.ts";
 import type { CalendarEventModel, EventRecord } from "../google/types.ts";
-import type { PortalVisit } from "../providers/mychart/index.ts";
 
 /**
  * What the FHIR pass saw for one health system, as the dedupe needs it.

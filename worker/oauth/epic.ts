@@ -32,14 +32,14 @@ import { afterResponse } from "../api/http.ts";
 import { getPorts } from "../api/ports.ts";
 import { isLiveHealthSystem } from "../api/routes/health-systems.ts";
 import { reposFor } from "../db/index.ts";
+import { createPkce } from "../ehr/pkce.ts";
+import { adapterFor } from "../ehr/registry.ts";
 import { SEARCH_REGISTRY } from "../fhir/search-registry.ts";
 import { AppError } from "../lib/errors.ts";
 import { makeLogger } from "../lib/log.ts";
-import { createPkce } from "../providers/pkce.ts";
-import { adapterFor } from "../providers/registry.ts";
 
 import { discoverCached } from "./discovery.ts";
-import { invalidStatePage, oauthPage, providerRefusedPage } from "./pages.ts";
+import { invalidStatePage, oauthPage, authorizationRefusedPage } from "./pages.ts";
 
 import type { AppHonoEnv } from "../auth/gate.ts";
 import type { HealthSystemRow } from "../db/rows.ts";
@@ -169,7 +169,7 @@ epicRouter.get("/callback", async (c) => {
   const healthSystemHint = c.req.query("healthSystem") ?? c.req.query("provider") ?? "";
   if (error !== undefined && error !== "") {
     // The code only. `error_description` is third-party text landing in a document.
-    return providerRefusedPage(
+    return authorizationRefusedPage(
       nonce,
       error,
       healthSystemHint === ""

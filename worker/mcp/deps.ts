@@ -16,9 +16,9 @@
 
 import type { ConnectionStatus, HealthSystemEnvironment } from "../db/rows.ts";
 import type { SyncWarning } from "../db/schemas.ts";
+import type { PortalVisit } from "../ehr/mychart/index.ts";
 import type { Logger } from "../lib/log.ts";
 import type { PolicyRules } from "../policy/rules.ts";
-import type { PortalVisit } from "../providers/mychart/index.ts";
 
 /** Resource type the decoded text of a clinical document is cached under. */
 export const BINARY_TEXT_TYPE = "_binary_text";

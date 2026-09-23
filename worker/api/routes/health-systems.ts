@@ -29,9 +29,9 @@
 import { Hono } from "hono";
 
 import { brandById } from "../../brands.ts";
+import { adapterFor } from "../../ehr/registry.ts";
 import { AppError } from "../../lib/errors.ts";
 import { makeLogger } from "../../lib/log.ts";
-import { adapterFor } from "../../providers/registry.ts";
 import { closeAlert, portalSubject, healthSystemSubject } from "../close-alert.ts";
 import { fromHealthSystemConfigDto, toConnectionDto, toHealthSystemDto } from "../dto.ts";
 import { NO_STORE, afterResponse, apiContext, readJson, readOptionalJson } from "../http.ts";
@@ -47,7 +47,7 @@ import type { HealthSystemRow } from "../../db/rows.ts";
 import type { ApiContext } from "../http.ts";
 import type { HealthSystemDto } from "@shared/types.ts";
 
-/** The only vendor today. `worker/providers/registry.ts` is where a second lands. */
+/** The only vendor today. `worker/ehr/registry.ts` is where a second lands. */
 const VENDOR = "epic";
 
 export const healthSystemsRouter = new Hono<AppHonoEnv>();

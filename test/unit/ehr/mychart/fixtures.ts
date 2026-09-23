@@ -6,7 +6,7 @@
 // that exercises the two field-name shapes, and the visit payloads are invented
 // numbers around invented places.
 //
-// The fetch stub is deliberately *not* `test/unit/providers/fixtures.ts`'s
+// The fetch stub is deliberately *not* `test/unit/ehr/fixtures.ts`'s
 // `stubFetch`: that one normalises a missing body to `""`, and the single most
 // important assertion in this suite is that an empty POST really does carry
 // `body: undefined` and no `Content-Type` -- a distinction `""` erases.

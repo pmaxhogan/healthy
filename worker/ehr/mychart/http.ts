@@ -16,7 +16,7 @@
  * no body: both undici and workerd add `Content-Type: text/plain` to a string
  * body, and the research found a WAF in front of these endpoints that rejects
  * exactly that. So a request with no form passes `body: undefined` and sets no
- * content type, and `test/unit/providers/mychart/client.test.ts` asserts on the
+ * content type, and `test/unit/ehr/mychart/client.test.ts` asserts on the
  * raw `init.body` being `undefined` rather than on a rendered string.
  *
  * **A cross-origin 307/308 never re-sends the form.** A redirect chain is under

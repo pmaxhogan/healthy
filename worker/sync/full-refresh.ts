@@ -72,9 +72,9 @@ import type { SyncTarget } from "./targets.ts";
 import type { Ctx } from "../db/client.ts";
 import type { Repos } from "../db/index.ts";
 import type { SyncWarning } from "../db/schemas.ts";
+import type { FhirClient } from "../ehr/epic/fhir-client.ts";
 import type { RegistryEntry } from "../fhir/search-registry.ts";
 import type { Resource, SearchWarning } from "../fhir/types.ts";
-import type { FhirClient } from "../providers/epic/fhir-client.ts";
 import type { RunKind, RunSummary } from "@shared/types.ts";
 
 /** How long a cached resource stays usable. Eight days, in milliseconds. */

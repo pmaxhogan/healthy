@@ -14,9 +14,9 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { parseUpcoming } from "../../../worker/ehr/mychart/visits.ts";
 import { PORTAL_RAW_WARNING } from "../../../worker/mcp/appointment-items.ts";
 import { buildRules } from "../../../worker/policy/rules.ts";
-import { parseUpcoming } from "../../../worker/providers/mychart/visits.ts";
 
 import {
   NAME_A,
@@ -31,9 +31,9 @@ import {
 } from "./helpers.ts";
 
 import type { FakeState } from "./helpers.ts";
+import type { PortalVisit } from "../../../worker/ehr/mychart/index.ts";
 import type { PortalVisitRecord } from "../../../worker/mcp/deps.ts";
 import type { PolicyRuleInput } from "../../../worker/policy/rules.ts";
-import type { PortalVisit } from "../../../worker/providers/mychart/index.ts";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 const rules = (...input: PolicyRuleInput[]) => buildRules(input);

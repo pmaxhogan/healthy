@@ -3,8 +3,8 @@
 
 import { describe, expect, it } from "vitest";
 
-import { isExternalVisit } from "../../../worker/providers/mychart/external.ts";
-import { parseUpcoming } from "../../../worker/providers/mychart/visits.ts";
+import { isExternalVisit } from "../../../worker/ehr/mychart/external.ts";
+import { parseUpcoming } from "../../../worker/ehr/mychart/visits.ts";
 import {
   RANK_FHIR,
   STALE_SECONDS,

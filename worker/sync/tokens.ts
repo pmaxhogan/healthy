@@ -35,10 +35,10 @@
  */
 
 import { makeRepos } from "../db/index.ts";
+import { createFhirClient } from "../ehr/epic/fhir-client.ts";
+import { adapterFor } from "../ehr/registry.ts";
 import { AppError, isAppError, toAppError } from "../lib/errors.ts";
 import { newToken } from "../lib/ids.ts";
-import { createFhirClient } from "../providers/epic/fhir-client.ts";
-import { adapterFor } from "../providers/registry.ts";
 
 import { openReconnectAlert, resolveReconnectAlert } from "./alerts.ts";
 import { resolveDeps } from "./deps.ts";
@@ -48,9 +48,9 @@ import type { SyncDeps } from "./deps.ts";
 import type { Ctx } from "../db/client.ts";
 import type { Repos } from "../db/index.ts";
 import type { ConnectionRow, HealthSystemRow } from "../db/rows.ts";
+import type { EhrAdapter } from "../ehr/adapter.ts";
+import type { FhirClient } from "../ehr/epic/fhir-client.ts";
 import type { SmartConfig } from "../fhir/types.ts";
-import type { ProviderAdapter } from "../providers/adapter.ts";
-import type { FhirClient } from "../providers/epic/fhir-client.ts";
 
 /** Refresh once this little of the access token's life is left. Five minutes. */
 export const REFRESH_SKEW_MS = 5 * 60 * 1000;
@@ -67,7 +67,7 @@ export interface AccessTokenHandle {
   /** The organisation's R4 Patient id, from the token response. */
   patientId: string;
   smart: SmartConfig;
-  adapter: ProviderAdapter;
+  adapter: EhrAdapter;
   /**
    * A usable access token. Cached; refreshes inside the skew, or when `forceRefresh`
    * says a 401 proved the cached one dead.

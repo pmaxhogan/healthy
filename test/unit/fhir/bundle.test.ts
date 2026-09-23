@@ -9,7 +9,7 @@ import {
   resourcesOfType,
   splitEntries,
 } from "../../../worker/fhir/bundle.ts";
-import { loadFixture } from "../providers/fixtures.ts";
+import { loadFixture } from "../ehr/fixtures.ts";
 
 import type { Bundle, BundleEntry, Encounter } from "../../../worker/fhir/types.ts";
 

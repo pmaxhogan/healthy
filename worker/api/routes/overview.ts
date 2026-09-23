@@ -40,9 +40,9 @@ import type { OverviewDto } from "@shared/types.ts";
  * Row counts the owner would recognise as "cached records".
  *
  * `fhir_cache` also holds the sync engine's own bookkeeping -- one `_smart` row and
- * one `_capability` row per provider, which are a discovery document and an indexed
+ * one `_capability` row per health system, which are a discovery document and an indexed
  * CapabilityStatement, not clinical resources. Counting those on the dashboard would
- * report two cached "records" for a provider that has never been synced.
+ * report two cached "records" for a health system that has never been synced.
  */
 function clinicalCounts(
   counts: readonly { healthSystemId: string; resourceType: string; count: number }[],

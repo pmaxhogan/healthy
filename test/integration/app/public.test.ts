@@ -75,7 +75,7 @@ describe("the public pages", () => {
       //
       // The EHR vendor ("Epic MyChart") is named deliberately and is not a leak --
       // it is the software this integrates with, it is already in package.json and
-      // in the worker/providers/epic/ path, and the vendor's own app review reads
+      // in the worker/ehr/epic/ path, and the vendor's own app review reads
       // /about. What must never appear is a particular hospital or clinic.
       for (const leak of ["hospital", "@gmail", "cloudflareaccess", "america/"]) {
         expect(html, `${path}: ${leak}`).not.toContain(leak);

@@ -6,12 +6,12 @@
 
 import { describe, expect, it } from "vitest";
 
-import { noopLogger } from "../../../../worker/lib/log.ts";
 import {
   candidateMounts,
   discoverPortal,
   mountFromLandedUrl,
-} from "../../../../worker/providers/mychart/discovery.ts";
+} from "../../../../worker/ehr/mychart/discovery.ts";
+import { noopLogger } from "../../../../worker/lib/log.ts";
 
 import {
   ALIAS,

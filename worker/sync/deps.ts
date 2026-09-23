@@ -13,8 +13,8 @@
  * sync uses, so a mistake there fails loudly rather than silently passing.
  */
 
+import type { PortalAdapter } from "../ehr/mychart/index.ts";
 import type { RetryOpts } from "../lib/retry.ts";
-import type { PortalAdapter } from "../providers/mychart/index.ts";
 
 export interface SyncDeps {
   /** Upstream FHIR and Google Calendar transport. Defaults to global fetch. */
@@ -56,7 +56,7 @@ function realSleep(ms: number): Promise<void> {
 /**
  * Bound, not passed by reference: an unbound `fetch` loses its `this` in
  * workerd, which throws "Illegal invocation" the moment anything calls it as
- * `x.fetchImpl(...)` -- as `worker/providers/mychart/http.ts` does. See
+ * `x.fetchImpl(...)` -- as `worker/ehr/mychart/http.ts` does. See
  * `worker/api/ports.ts`'s `defaults()`, which has the same fix already.
  */
 const boundFetch: typeof fetch = (input, init) => fetch(input, init);

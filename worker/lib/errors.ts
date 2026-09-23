@@ -18,7 +18,7 @@ export type ErrorCode =
   | "policy_denied"
   | "crypto"
   | "internal"
-  // Patient-portal scrape (worker/providers/mychart/**). These are deliberately
+  // Patient-portal scrape (worker/ehr/mychart/**). These are deliberately
   // fine-grained: the sync's recovery is different for each one -- an expired
   // session is re-authenticated in place, a rejected code asks the owner for a
   // fresh one, a locked account or a bot block must stop trying.

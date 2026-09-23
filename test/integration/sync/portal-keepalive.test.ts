@@ -28,7 +28,7 @@ import {
 } from "./helpers.ts";
 
 import type { Ctx } from "../../../worker/db/client.ts";
-import type { PortalAdapter } from "../../../worker/providers/mychart/index.ts";
+import type { PortalAdapter } from "../../../worker/ehr/mychart/index.ts";
 import type { FakePortal } from "../portal/helpers.ts";
 
 beforeEach(resetSyncDb);

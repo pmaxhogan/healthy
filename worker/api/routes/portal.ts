@@ -49,10 +49,10 @@
 import { Hono } from "hono";
 
 import { getSetting } from "../../db/settings.ts";
+import { portalAdapterFor } from "../../ehr/mychart/index.ts";
 import { AppError, isAppError } from "../../lib/errors.ts";
 import { makeLogger } from "../../lib/log.ts";
 import { nowSeconds } from "../../lib/time.ts";
-import { portalAdapterFor } from "../../providers/mychart/index.ts";
 import { closeAlert, portalSubject } from "../close-alert.ts";
 import { NO_STORE, apiContext, readJson } from "../http.ts";
 import { portalAccountSchema, portalDiscoverSchema } from "../schemas.ts";
@@ -61,7 +61,7 @@ import { isLiveHealthSystem } from "./health-systems.ts";
 
 import type { AppHonoEnv } from "../../auth/gate.ts";
 import type { HealthSystemRow } from "../../db/rows.ts";
-import type { PortalEndpoint } from "../../providers/mychart/index.ts";
+import type { PortalEndpoint } from "../../ehr/mychart/index.ts";
 import type { ApiContext } from "../http.ts";
 import type {
   PortalAccountDto,
@@ -69,7 +69,7 @@ import type {
   PortalDiscoveryDto,
 } from "@shared/types.ts";
 
-/** The only portal vendor today. `worker/providers/mychart/index.ts` holds the map. */
+/** The only portal vendor today. `worker/ehr/mychart/index.ts` holds the map. */
 const PORTAL_VENDOR = "mychart";
 
 export const portalRouter = new Hono<AppHonoEnv>();

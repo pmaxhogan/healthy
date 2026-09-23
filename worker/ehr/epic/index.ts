@@ -41,7 +41,7 @@ import type {
   AdapterDeps,
   AuthorizeUrlInput,
   ExchangeCodeInput,
-  ProviderAdapter,
+  EhrAdapter,
   RefreshInput,
 } from "../adapter.ts";
 
@@ -226,7 +226,7 @@ export function toTokenSet(body: unknown, nowMs: number): TokenSet {
 
 type TokenGrant = "authorization_code" | "refresh_token";
 
-export function createEpicAdapter(deps: AdapterDeps): ProviderAdapter {
+export function createEpicAdapter(deps: AdapterDeps): EhrAdapter {
   const { fetchImpl, logger, now } = deps;
 
   /** A GET that only has to survive transient failures; bodies are small JSON. */

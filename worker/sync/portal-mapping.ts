@@ -24,7 +24,7 @@
  *
  * **What "off the schedule" means here.** `mapping.ts` knows the FHIR Encounter
  * statuses (`cancelled`, `entered-in-error`); the portal has its own vocabulary,
- * derived in `worker/providers/mychart/wire.ts` from a set of contradictory
+ * derived in `worker/ehr/mychart/wire.ts` from a set of contradictory
  * booleans. `canceled` and `no_show` are the two that mean the appointment is not
  * going to happen, so they are what ghosts an event.
  *
@@ -32,8 +32,8 @@
  * is the owner's own data, bound for their calendar and nowhere else.
  */
 
+import type { PortalVisit, PortalVisitStatus } from "../ehr/mychart/index.ts";
 import type { NormalizedAppointmentView, NormalizedLocationRef } from "../fhir/normalize/types.ts";
-import type { PortalVisit, PortalVisitStatus } from "../providers/mychart/index.ts";
 
 /**
  * The infix that marks the portal half of an event key.

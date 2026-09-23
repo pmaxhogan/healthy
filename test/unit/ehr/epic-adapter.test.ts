@@ -1,19 +1,19 @@
 import { describe, expect, it } from "vitest";
 
-import { AppError } from "../../../worker/lib/errors.ts";
-import { noopLogger } from "../../../worker/lib/log.ts";
 import {
   base64Utf8,
   basicAuthHeader,
   chooseTokenAuthMethod,
   SMART_BASE_SCOPES,
-} from "../../../worker/providers/adapter.ts";
+} from "../../../worker/ehr/adapter.ts";
 import {
   createEpicAdapter,
   indexCapabilities,
   parseSmartConfiguration,
   toTokenSet,
-} from "../../../worker/providers/epic/index.ts";
+} from "../../../worker/ehr/epic/index.ts";
+import { AppError } from "../../../worker/lib/errors.ts";
+import { noopLogger } from "../../../worker/lib/log.ts";
 
 import {
   decodeBasic,
@@ -23,8 +23,8 @@ import {
   stubFetch,
 } from "./fixtures.ts";
 
+import type { TokenAuthMethod } from "../../../worker/ehr/adapter.ts";
 import type { CapabilityStatement, TokenSet } from "../../../worker/fhir/types.ts";
-import type { TokenAuthMethod } from "../../../worker/providers/adapter.ts";
 
 const smartConfig: unknown = loadFixture("smart-configuration.json");
 const metadata = loadFixture<CapabilityStatement>("metadata-small.json");

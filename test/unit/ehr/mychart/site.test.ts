@@ -12,7 +12,7 @@ import {
   isPublicSuffix,
   registrableDomain,
   sameRegistrableSite,
-} from "../../../../worker/providers/mychart/site.ts";
+} from "../../../../worker/ehr/mychart/site.ts";
 
 describe("registrableDomain", () => {
   it.each([

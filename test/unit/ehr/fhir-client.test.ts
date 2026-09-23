@@ -1,16 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { AppError } from "../../../worker/lib/errors.ts";
-import { noopLogger } from "../../../worker/lib/log.ts";
 import {
   createFhirClient,
   fhirUrl,
   sameOrigin,
   searchUrl,
-} from "../../../worker/providers/epic/fhir-client.ts";
+} from "../../../worker/ehr/epic/fhir-client.ts";
+import { AppError } from "../../../worker/lib/errors.ts";
+import { noopLogger } from "../../../worker/lib/log.ts";
 
 import { FAST_RETRY, jsonResponse, loadFixture, stubFetch, TEST_FHIR_BASE } from "./fixtures.ts";
 
+import type {
+  FhirClient,
+  FhirClientDeps,
+  SearchResult,
+} from "../../../worker/ehr/epic/fhir-client.ts";
 import type {
   Bundle,
   BundleEntry,
@@ -19,11 +24,6 @@ import type {
   Patient,
   Resource,
 } from "../../../worker/fhir/types.ts";
-import type {
-  FhirClient,
-  FhirClientDeps,
-  SearchResult,
-} from "../../../worker/providers/epic/fhir-client.ts";
 
 const page1 = loadFixture<Bundle>("encounter-bundle-page1.json");
 const page2 = loadFixture<Bundle>("encounter-bundle-page2.json");

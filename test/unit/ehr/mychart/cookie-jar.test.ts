@@ -10,9 +10,9 @@ import {
   defaultPath,
   domainMatches,
   pathMatches,
-} from "../../../../worker/providers/mychart/cookie-jar.ts";
+} from "../../../../worker/ehr/mychart/cookie-jar.ts";
 
-import type { CookieJarState } from "../../../../worker/providers/mychart/cookie-jar.ts";
+import type { CookieJarState } from "../../../../worker/ehr/mychart/cookie-jar.ts";
 
 const T0 = 1_767_225_600;
 const PAGE = "https://portal.example-portal.test/MyChart/Authentication/Login";

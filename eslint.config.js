@@ -119,7 +119,7 @@ export default tseslint.config(
 
   {
     // A leading underscore marks a deliberately unused binding. Interface
-    // conformance (Hono middleware, ProviderAdapter) regularly forces a
+    // conformance (Hono middleware, EhrAdapter) regularly forces a
     // parameter that a particular implementation does not read.
     files: TS_FILES,
     plugins: { "@typescript-eslint": tseslint.plugin },

@@ -11,8 +11,8 @@
 
 import { describe, expect, it, vi } from "vitest";
 
+import { portalFetch } from "../../../../worker/ehr/mychart/http.ts";
 import { noopLogger } from "../../../../worker/lib/log.ts";
-import { portalFetch } from "../../../../worker/providers/mychart/http.ts";
 
 import {
   html,

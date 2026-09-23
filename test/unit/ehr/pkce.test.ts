@@ -6,9 +6,9 @@ import {
   createPkce,
   randomState,
   randomVerifier,
-} from "../../../worker/providers/pkce.ts";
+} from "../../../worker/ehr/pkce.ts";
 
-import type { Pkce } from "../../../worker/providers/pkce.ts";
+import type { Pkce } from "../../../worker/ehr/pkce.ts";
 
 const UNRESERVED = /^[A-Za-z0-9\-._~]+$/u;
 const BASE64URL = /^[A-Za-z0-9\-_]+$/u;

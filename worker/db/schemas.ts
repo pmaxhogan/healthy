@@ -84,7 +84,7 @@ export const settingSchemas = {
    *
    * No default in source is possible either way -- unlike a real default, this
    * is genuinely absent for almost every install, not merely undisclosed. See
-   * `PortalAdapterDeps.custom` in `worker/providers/mychart/index.ts`.
+   * `PortalAdapterDeps.custom` in `worker/ehr/mychart/index.ts`.
    */
   portal_api_base_path: z.string().min(1).max(200).nullable(),
 } as const;
@@ -234,7 +234,7 @@ export type RunSummaryInput = z.input<typeof runSummarySchema>;
 /**
  * The stored discovery result.
  *
- * Deliberately loose: `worker/providers/mychart/**` owns this shape and adds to
+ * Deliberately loose: `worker/ehr/mychart/**` owns this shape and adds to
  * it as deployments turn out to differ (which login application to drive, for
  * one). Validating the fields the db layer and the sign-in actually read, and
  * passing everything else through untouched, is what lets the adapter evolve
