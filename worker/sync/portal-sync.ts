@@ -86,12 +86,16 @@ import {
   portalVisitView,
 } from "./portal-mapping.ts";
 import {
+  NEEDS_OWNER,
   OTP_WAIT_SECONDS,
+  OWNER_RESERVED_ATTEMPTS,
+  SIGN_IN_DEFERRED,
   attemptsLeft,
   failSignIn,
   openPortalSession,
   portalDeps,
   signInAndWait,
+  unattendedCodeWait,
 } from "./portal-signin.ts";
 
 import type { SyncDeps } from "./deps.ts";
@@ -160,6 +164,15 @@ export interface PortalPassInput {
    * single invocation sleeps for minutes. See `portal-runner.ts`.
    */
   signInWaitSeconds?: number | undefined;
+  /**
+   * True for the scheduled run, which nobody is watching.
+   *
+   * An unattended run re-establishes a dead session only within limits the
+   * owner's own buttons are not held to: it leaves `OWNER_RESERVED_ATTEMPTS` of
+   * the day's sign-ins alone, and it has a code emailed only as often as
+   * `unattendedCodeWait` allows. See `ensureSession`.
+   */
+  unattended?: boolean | undefined;
 }
 
 /** One visit, with the event it would produce and whether it is a duplicate. */
@@ -338,6 +351,20 @@ function keyOf(event: EventRecord): string | null {
  * automatic sign-in attempt per run, and only while the daily budget allows one:
  * the account's own counter is what stops an hourly cron from walking into a
  * lockout, and running out opens the reconnect card rather than retrying.
+ *
+ * The scheduled run is held to less than that, because nobody is watching it
+ * and every code it asks for is an email to the owner:
+ *
+ *  - it stops at `OWNER_RESERVED_ATTEMPTS` left, so the owner's "Sign in now"
+ *    always has attempts to spend;
+ *  - inside the spacing after its last emailed code it does not sign in at
+ *    all -- not even to see whether the trusted device is enough, because
+ *    every look costs an attempt -- and says so on `portalErrors`;
+ *  - once its daily allowance of codes is spent, a sign-in that wants one stops
+ *    before the email (`signInAndWait`'s `unattended`).
+ *
+ * The last two end in `portal_signin_needs_owner` and a reconnect card, except
+ * the spacing, which ends on its own and is only reported.
  */
 async function ensureSession(
   input: PortalPassInput,
@@ -365,6 +392,21 @@ async function ensureSession(
     input.state.summary.portalErrors.push(outcome.code ?? "portal_attempts_exhausted");
     return null;
   }
+  const unattended = input.unattended === true;
+  if (unattended && left <= OWNER_RESERVED_ATTEMPTS) {
+    ctx.log.warn("portal.signin.left_for_owner", { providerId, left });
+    const outcome = await failSignIn(ctx, providerId, NEEDS_OWNER, deps);
+    input.state.summary.portalErrors.push(outcome.code ?? NEEDS_OWNER);
+    return null;
+  }
+  if (unattended) {
+    const codes = await input.repos.portalAccounts.unattendedCodes(providerId);
+    if (unattendedCodeWait(codes, ctx.now()) === "wait") {
+      ctx.log.info("portal.signin.deferred", { providerId, codesToday: codes.today });
+      input.state.summary.portalErrors.push(SIGN_IN_DEFERRED);
+      return null;
+    }
+  }
 
   // The same gate the admin button takes, so the two drivers cannot overlap: two
   // sign-ins can each pass the attempt check above before either increments it,
@@ -377,7 +419,7 @@ async function ensureSession(
   }
   let outcome;
   try {
-    outcome = await signInAndWait(ctx, providerId, deps, waitSeconds);
+    outcome = await signInAndWait(ctx, providerId, deps, waitSeconds, { unattended });
   } finally {
     await releasePortalSignIn(ctx, providerId);
   }

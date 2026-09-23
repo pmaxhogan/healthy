@@ -69,6 +69,9 @@
       "7 * * * *",
       // Daily full-scope refresh that repopulates the MCP read cache.
       "23 6 * * *",
+      // Every ten minutes (UTC): keep live patient-portal sessions from idling
+      // out between hourly runs. Never signs in.
+      "*/10 * * * *",
     ],
   },
   "observability": { "enabled": true },

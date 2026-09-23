@@ -79,8 +79,8 @@ listed rather than left to be inferred:
   bookkeeping. `expires_at` is rounded up to a 30-day boundary, so it does not
   date the visit (see "The visit timeline" below).
 - **`portal_accounts.session_state`, the attempt counters and the
-  timestamps**: whether the session is live and how many sign-ins were spent
-  today.
+  timestamps**: whether the session is live, how many sign-ins were spent
+  today, and how many emailed codes the scheduled sync asked for and when.
 - **`mail_inbox.kind`, `received_at`, `consumed_at`, `expires_at` and
   `raw_size`**: a classification, three timestamps and a byte count. The legacy
   plaintext `from_addr` / `subject` columns were blanked by migration 0007 and

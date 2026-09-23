@@ -345,6 +345,9 @@ function portalInput(run: RunContext, options: CalendarSyncOptions): PortalPassI
     ...(options.signInWaitSeconds !== undefined && {
       signInWaitSeconds: options.signInWaitSeconds,
     }),
+    // "calendar" is the scheduled run's own kind (see `trigger`): the one run no
+    // one is watching, whose sign-ins are held to the unattended limits.
+    unattended: (options.trigger ?? "calendar") === "calendar",
   };
 }
 

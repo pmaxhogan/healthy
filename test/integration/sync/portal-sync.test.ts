@@ -19,7 +19,12 @@ import { setSetting } from "../../../worker/db/settings.ts";
 import { AppError } from "../../../worker/lib/errors.ts";
 import { runCalendarSync } from "../../../worker/sync/calendar-sync.ts";
 import { acquirePortalSignIn, releasePortalSignIn } from "../../../worker/sync/portal-gate.ts";
-import { RECENT_SESSION_SECONDS, recentSessionAge } from "../../../worker/sync/portal-signin.ts";
+import {
+  RECENT_SESSION_SECONDS,
+  UNATTENDED_CODES_PER_DAY,
+  UNATTENDED_CODE_GAP_SECONDS,
+  recentSessionAge,
+} from "../../../worker/sync/portal-signin.ts";
 import {
   OTP_SENDER_DOMAIN,
   PORTAL_ORIGIN,
@@ -50,6 +55,7 @@ import {
 
 import type { FhirServer, SeededProvider, Upstreams } from "./helpers.ts";
 import type { Ctx } from "../../../worker/db/client.ts";
+import type { PortalAccountRow } from "../../../worker/db/rows.ts";
 import type { PortalVisit } from "../../../worker/providers/mychart/index.ts";
 import type { FakePortal } from "../portal/helpers.ts";
 import type { RunSummary } from "@shared/types.ts";
@@ -868,6 +874,158 @@ describe("portal sessions", () => {
     expect(all).not.toContain(PORTAL_ORIGIN);
     expect(all).not.toContain("A. Example");
     expect(all).not.toContain("csn-1");
+  });
+});
+
+/** The hourly cron's own run: trigger "calendar", portal pass only. */
+function scheduledRun(fix: Fixture): Promise<RunSummary> {
+  return runCalendarSync(fix.ctx, {
+    trigger: "calendar",
+    portalOnly: true,
+    deps: { ...fix.upstreams.deps, portalAdapter: fix.portal.adapter },
+  });
+}
+
+/** Codes an earlier unattended sign-in asked for, `hoursAgo` before T0. */
+async function earlierCodes(fix: Fixture, count: number, hoursAgo: number): Promise<void> {
+  const then = syncCtx({ now: () => T0 - hoursAgo * 3600 });
+  for (let code = 0; code < count; code += 1) {
+    await syncRepos(then).portalAccounts.recordUnattendedCode(fix.provider.providerId);
+  }
+}
+
+/** The fixture's portal account row. */
+async function accountOf(fix: Fixture): Promise<PortalAccountRow | null> {
+  return syncRepos(fix.ctx).portalAccounts.get(fix.provider.providerId);
+}
+
+describe("the scheduled run, which nobody is watching", () => {
+  // The incident these pin down: a portal whose session died every hour had the
+  // hourly run email the owner a code every hour, until the day's whole sign-in
+  // budget was gone and the owner could not even retry by hand. An unattended
+  // run may still sign in -- it is the only thing that keeps the calendar
+  // current overnight -- but within limits the owner's own buttons are not held to.
+
+  it("signs in with an emailed code when the session is dead, and counts the code", async () => {
+    const fix = await fixture({
+      portal: { alive: false, loginStatus: "awaiting_code", visits: [portalVisit({ csn: "c-1" })] },
+    });
+    await seedOtp(fix.ctx, "424242");
+
+    const summary = await scheduledRun(fix);
+
+    expect(fix.portal.calls.sendCodes).toBe(1);
+    expect(summary.portalErrors).toStrictEqual([]);
+    expect(summary.eventsInserted).toBe(1);
+    const row = await accountOf(fix);
+    expect(row?.session_state).toBe("active");
+    expect(row?.unattended_codes_today).toBe(1);
+    expect(row?.last_unattended_code_at).toBe(T0);
+  });
+
+  it("does not sign in at all inside the spacing after its last code, and says so", async () => {
+    const fix = await fixture({ portal: { alive: false, loginStatus: "awaiting_code" } });
+    await earlierCodes(fix, 1, 1);
+
+    const summary = await scheduledRun(fix);
+
+    // Not even the password: every look at the trusted device costs an attempt.
+    expect(fix.portal.calls.logins).toBe(0);
+    expect(summary.portalErrors).toStrictEqual(["portal_signin_deferred"]);
+    const row = await accountOf(fix);
+    // A wait that ends on its own: still active, so a later run tries again.
+    expect(row?.session_state).toBe("active");
+    expect(row?.login_attempts_today).toBe(0);
+    expect(fix.upstreams.trelloCards).toStrictEqual([]);
+  });
+
+  it("signs in again once the spacing has passed", async () => {
+    const fix = await fixture({ portal: { alive: false, loginStatus: "awaiting_code" } });
+    await earlierCodes(fix, 1, UNATTENDED_CODE_GAP_SECONDS / 3600);
+    await seedOtp(fix.ctx, "424242");
+
+    const summary = await scheduledRun(fix);
+
+    expect(fix.portal.calls.sendCodes).toBe(1);
+    expect(summary.portalErrors).toStrictEqual([]);
+    const row = await accountOf(fix);
+    expect(row?.unattended_codes_today).toBe(2);
+  });
+
+  it("stops before the email once the day's codes are spent, and hands over to the owner", async () => {
+    const ctx = syncCtx({ trello: true });
+    const provider = await seedConnectedProvider(ctx, {
+      host: HOST,
+      displayName: "A Example Health",
+    });
+    await seedGoogle(ctx);
+    await seedSettings(ctx);
+    await seedPortalAccount(ctx, provider.providerId);
+    const fix: Fixture = {
+      ctx,
+      provider,
+      portal: fakePortal({ alive: false, loginStatus: "awaiting_code" }),
+      upstreams: stubUpstreams({ [HOST]: fhirServer({ patientId: provider.patientId }) }),
+      server: fhirServer({ patientId: provider.patientId }),
+    };
+    // Spent earlier today, long enough ago that the spacing is not the reason.
+    await earlierCodes(fix, UNATTENDED_CODES_PER_DAY, UNATTENDED_CODE_GAP_SECONDS / 3600);
+
+    const summary = await scheduledRun(fix);
+
+    // The password went (a trusted device might have been enough), the email did not.
+    expect(fix.portal.calls.logins).toBe(1);
+    expect(fix.portal.calls.sendCodes).toBe(0);
+    expect(summary.portalErrors).toStrictEqual(["portal_signin_needs_owner"]);
+    const row = await accountOf(fix);
+    expect(row?.session_state).toBe("needs_reauth");
+    expect(row?.last_error_code).toBe("portal_signin_needs_owner");
+    expect(fix.upstreams.trelloCards).toHaveLength(1);
+    expect(fix.upstreams.trelloCards[0]?.desc).toContain("/providers");
+  });
+
+  it("still signs in on a trusted device once the day's codes are spent", async () => {
+    const fix = await fixture({
+      portal: { alive: false, loginStatus: "signed_in", visits: [portalVisit({ csn: "c-1" })] },
+    });
+    await earlierCodes(fix, UNATTENDED_CODES_PER_DAY, UNATTENDED_CODE_GAP_SECONDS / 3600);
+
+    const summary = await scheduledRun(fix);
+
+    expect(fix.portal.calls.logins).toBe(1);
+    expect(summary.portalErrors).toStrictEqual([]);
+    expect(summary.eventsInserted).toBe(1);
+    const row = await accountOf(fix);
+    expect(row?.session_state).toBe("active");
+  });
+
+  it("leaves the day's last attempts to the owner's own button", async () => {
+    const fix = await fixture({ portal: { alive: false, loginStatus: "signed_in" } });
+    // The seeded limit is three; one spent leaves two, which are the owner's.
+    await spendAttempts(fix.ctx, fix.provider.providerId, 1);
+
+    const summary = await scheduledRun(fix);
+
+    expect(fix.portal.calls.logins).toBe(0);
+    expect(summary.portalErrors).toStrictEqual(["portal_signin_needs_owner"]);
+    const row = await accountOf(fix);
+    expect(row?.session_state).toBe("needs_reauth");
+    expect(row?.login_attempts_today).toBe(1);
+  });
+
+  it("does not hold the owner's own run to any of it", async () => {
+    const fix = await fixture({ portal: { alive: false, loginStatus: "awaiting_code" } });
+    await earlierCodes(fix, UNATTENDED_CODES_PER_DAY, 1);
+    await spendAttempts(fix.ctx, fix.provider.providerId, 1);
+    await seedOtp(fix.ctx, "424242");
+
+    const summary = await portalRun(fix);
+
+    expect(fix.portal.calls.sendCodes).toBe(1);
+    expect(summary.portalErrors).toStrictEqual([]);
+    // And an owner-driven code is not counted against the unattended allowance.
+    const row = await accountOf(fix);
+    expect(row?.unattended_codes_today).toBe(UNATTENDED_CODES_PER_DAY);
   });
 });
 

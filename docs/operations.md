@@ -1,13 +1,13 @@
 # Operations
 
-Running day-to-day: what the two cron triggers do, how a rate limit is
+Running day-to-day: what the three cron triggers do, how a rate limit is
 handled, what the reconnect-alert lifecycle looks like, what "needs
 re-auth" actually means, how ghosted calendar events behave, how to rotate
 every secret, and how to wipe the deployment's data.
 
 ## Cron cadence
 
-Both schedules are UTC, and deliberately never translated to local time
+All three schedules are UTC, and deliberately never translated to local time
 anywhere in the code or its comments — doing so would disclose the
 deployment owner's timezone in a public repository.
 
@@ -22,10 +22,37 @@ deployment owner's timezone in a public repository.
   since the refresh just filled the cache the sync's reference resolution
   reads from. Finishes by pruning expired FHIR cache rows, expired OAuth
   states, and `mcp_audit` rows older than a year.
+- **Every ten minutes, `*/10 * * * *`.** The patient-portal session
+  keepalive: one signed-in page load per `active` portal account, and the
+  cookie jar saved back when the session is still alive. A portal's chart
+  session idles out in less than an hour, so a session touched only by the
+  hourly run is dead at every run -- and re-establishing it can mean an
+  emailed code. The keepalive never signs in and never spends an attempt; a
+  dead session is left for the hourly run. It writes no `run_log` row, only a
+  `portal.keepalive` log line per account.
 
 An unrecognised cron string is logged and ignored, not guessed at, so a
 schedule added to `wrangler.jsonc` without matching code is a visible
 no-op rather than an accidental full refresh running on the wrong minute.
+
+## Portal sign-ins the scheduled run makes on its own
+
+When the hourly run finds a portal session dead it may sign in again, but it
+is held to limits the owner's own "Sign in now" is not, because nobody is
+watching it and every code it asks for is an email to the owner:
+
+- **It leaves the day's last two attempts for the owner.** The daily budget
+  (`portal_login_attempt_limit`) is shared with the button; once only two
+  are left, the scheduled run stops signing in.
+- **At most two emailed codes a UTC day, at least six hours apart.** A sign-in
+  that needs no code (a password alone, or a device the portal trusts) is not
+  limited by this. Inside the six hours after its last code the run does not
+  sign in at all -- every look at the trusted device costs an attempt -- and
+  the run's `portalErrors` says `portal_signin_deferred`.
+- **Past that, the account waits for the owner.** A sign-in that wants a code
+  stops before the email, the account goes to `needs_reauth` with
+  `portal_signin_needs_owner`, and a reconnect card is opened. One press of
+  "Sign in now" (which has its reserved attempts) puts it back.
 
 ## Backoff on 429
 

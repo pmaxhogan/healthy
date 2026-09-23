@@ -304,6 +304,15 @@ export interface PortalAccountRow {
   login_attempts_day: number | null;
   needs_reauth_since: number | null;
   updated_at: number;
+  /**
+   * Emailed codes an unattended (scheduled) sign-in asked for today (0008).
+   * Resets by day comparison, exactly like `login_attempts_today`.
+   */
+  unattended_codes_today: number;
+  /** Whole UTC days since the epoch the counter above belongs to. */
+  unattended_codes_day: number | null;
+  /** When the last of those codes was asked for. Unix seconds. */
+  last_unattended_code_at: number | null;
 }
 
 /** A `portal_visits` row's lifecycle: see `migrations/0006_portal_visits.sql`. */

@@ -37,6 +37,9 @@ export type ErrorCode =
   // a URL that hosts no login page, or asked for one sign-in too many today.
   | "portal_discovery_failed"
   | "portal_attempts_exhausted"
+  // The scheduled sync has used what it may of the day's sign-ins and emailed
+  // codes on its own; the rest are kept for the owner's "Sign in now".
+  | "portal_signin_needs_owner"
   // Three more the admin API raises about where a portal *is*, rather than about
   // what it answered. All 4xx for the same reason as the two above: each one is
   // about a URL the owner gave, or a redirect chain from it.
@@ -82,6 +85,9 @@ const STATUS: Record<ErrorCode, number> = {
   // the daily sign-in budget is this app's own rate limit.
   portal_discovery_failed: 400,
   portal_attempts_exhausted: 429,
+  // Not raised to an API caller today, but typed like its neighbour: the app's
+  // own limit on unattended sign-ins, which only the owner's button gets past.
+  portal_signin_needs_owner: 409,
   portal_redirected_offsite: 400,
   portal_insecure_redirect: 400,
   portal_origin_unconfirmed: 400,

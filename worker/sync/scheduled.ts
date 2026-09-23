@@ -1,7 +1,7 @@
 /**
  * Cron dispatch.
  *
- * Two expressions, both UTC (a comment translating either into local time would
+ * Three expressions, all UTC (a comment translating any into local time would
  * disclose where the owner lives, which this repository must not do):
  *
  *   - `7 * * * *`  — hourly. Token keepalive for every connection including
@@ -12,6 +12,11 @@
  *     calendar sync, because the refresh has just filled the cache the sync's
  *     reference resolution reads from and will therefore make almost no upstream
  *     requests. Expired cache rows and stale OAuth states are pruned at the end.
+ *   - `CRON_PORTAL_KEEPALIVE` -- every ten minutes. The portal session keepalive: one
+ *     signed-in page load per live portal session, so the portal's idle timeout
+ *     (shorter than an hour) never sees an hour of silence. It never signs in;
+ *     see `portal-keepalive.ts`. Its minutes never coincide with the hourly
+ *     run's.
  *
  * An unrecognised cron string is logged and ignored rather than guessed at: a
  * schedule added to `wrangler.jsonc` without a branch here is then a visible
@@ -31,6 +36,7 @@ import { errorFields, makeLogger } from "../lib/log.ts";
 import { runCalendarSync } from "./calendar-sync.ts";
 import { runFullRefresh } from "./full-refresh.ts";
 import { runTokenKeepalive } from "./keepalive.ts";
+import { runPortalKeepalive } from "./portal-keepalive.ts";
 
 import type { SyncDeps } from "./deps.ts";
 import type { Ctx } from "../db/client.ts";
@@ -40,6 +46,8 @@ import type { Env } from "../env.ts";
 export const CRON_HOURLY = "7 * * * *";
 /** The daily full-scope refresh of the MCP read cache. */
 export const CRON_DAILY = "23 6 * * *";
+/** The portal session keepalive. See `portal-keepalive.ts`. */
+export const CRON_PORTAL_KEEPALIVE = "*/10 * * * *";
 
 /** How long `mcp_audit` rows are kept. The repo's own default; stated for clarity. */
 const AUDIT_RETENTION_DAYS = 365;
@@ -71,6 +79,10 @@ export async function handleScheduled(
         // Last, and after the work: pruning is housekeeping, and a failure here
         // must not look like a failed sync.
         ectx.waitUntil(prune(ctx));
+        return;
+      }
+      case CRON_PORTAL_KEEPALIVE: {
+        await runPortalKeepalive(ctx, deps);
         return;
       }
       default: {

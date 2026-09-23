@@ -143,6 +143,10 @@ const ALERTING_CODES: ReadonlySet<string> = new Set([
   // out of band: the sync has given up for the day and will not try again until
   // the counter rolls over, so nothing else would surface it before tomorrow.
   "portal_attempts_exhausted",
+  // The scheduled sync has stopped signing in on its own for the day. Nothing
+  // on the Providers page is looked at unprompted, so the card is what tells
+  // the owner the next sign-in is theirs.
+  "portal_signin_needs_owner",
 ]);
 
 /** The emailed verification code never arrived. */
@@ -342,26 +346,36 @@ export async function failSignIn(
  * Resolves with the instant `SendCode` was called, which is the floor for the
  * code poll -- a code that arrived *before* it belongs to an earlier attempt and
  * claiming it would submit a stale code and burn this one too. Null means the
- * password was enough and there is nothing to wait for.
+ * password was enough and there is nothing to wait for -- unless `withheld`,
+ * which means a code *was* wanted and `beforeCode` said not to ask for one.
+ *
+ * `beforeCode` is the unattended driver's say in the one step that emails the
+ * owner: it runs after the password worked and before `SendCode`, and false
+ * stops there. Both owner-driven paths leave it out.
  */
 export async function startSignIn(
   ctx: Ctx,
   providerId: string,
   session: PortalSession,
   credentials: { username: string; password: string },
-): Promise<{ sendCodeAt: number | null }> {
+  options: { beforeCode?: () => Promise<boolean> } = {},
+): Promise<{ sendCodeAt: number | null; withheld: boolean }> {
   const repos = makeRepos(ctx);
   // Before the credentials go anywhere: see the module comment.
   const attempt = await repos.portalAccounts.recordLoginAttempt(providerId);
   ctx.log.info("portal.signin.attempt", { providerId, attempt });
 
   const status = await session.client.login(credentials);
-  if (status === "signed_in") return { sendCodeAt: null };
+  if (status === "signed_in") return { sendCodeAt: null, withheld: false };
 
+  if (options.beforeCode !== undefined && !(await options.beforeCode())) {
+    ctx.log.info("portal.signin.code_withheld", { providerId });
+    return { sendCodeAt: null, withheld: true };
+  }
   await session.client.secondaryValidation.sendCode("email");
   const sendCodeAt = ctx.now();
   ctx.log.info("portal.signin.code_requested", { providerId });
-  return { sendCodeAt };
+  return { sendCodeAt, withheld: false };
 }
 
 /**
@@ -467,18 +481,38 @@ export async function markSessionActive(
  * becomes an outcome, the account state and (where it warrants one) a Trello
  * card. The budget check is the caller's, because the caller is the one that has
  * to tell the owner about `portal_attempts_exhausted`.
+ *
+ * `unattended` is the scheduled sync. It may still sign in with a password
+ * alone or a trusted device, but it has a code emailed only while
+ * `unattendedCodeWait` allows one, and counts each one it asks for; past that,
+ * the sign-in stops before the email and the account waits for the owner.
  */
 export async function signInAndWait(
   ctx: Ctx,
   providerId: string,
   deps: PortalDeps,
   waitSeconds = OTP_WAIT_SECONDS,
+  options: { unattended?: boolean } = {},
 ): Promise<SignInOutcome> {
   let session: PortalSession | null = null;
   try {
     const opened = await openPortalSession(ctx, providerId, deps);
     session = opened.session;
-    const { sendCodeAt } = await startSignIn(ctx, providerId, session, opened.credentials);
+    const accounts = makeRepos(ctx).portalAccounts;
+    const beforeCode = async (): Promise<boolean> => {
+      const codes = await accounts.unattendedCodes(providerId);
+      if (unattendedCodeWait(codes, ctx.now()) !== "allowed") return false;
+      await accounts.recordUnattendedCode(providerId);
+      return true;
+    };
+    const { sendCodeAt, withheld } = await startSignIn(
+      ctx,
+      providerId,
+      session,
+      opened.credentials,
+      options.unattended === true ? { beforeCode } : {},
+    );
+    if (withheld) return await failSignIn(ctx, providerId, NEEDS_OWNER, deps);
     if (sendCodeAt === null) return await markSessionActive(ctx, providerId, session);
 
     // The jar as it stands after `SendCode`: the challenge page's cookies are
@@ -507,6 +541,51 @@ export async function signInAndWait(
     // Whatever happened: a failed sign-in still leaves cookies worth keeping.
     if (session !== null) await persistQuietly(ctx, providerId, session);
   }
+}
+
+/**
+ * How many emailed codes an unattended sign-in may ask for in one UTC day.
+ *
+ * The incident this exists for: a portal whose session died every hour emailed
+ * the owner a code every hour, and spent the day's whole sign-in budget doing
+ * it. Two is enough to recover from one dead session and one retry; after that
+ * the account waits for the owner.
+ */
+export const UNATTENDED_CODES_PER_DAY = 2;
+
+/** The least time between two codes an unattended sign-in asks for. Six hours. */
+export const UNATTENDED_CODE_GAP_SECONDS = 6 * 60 * 60;
+
+/**
+ * Sign-in attempts the scheduled sync leaves for the owner.
+ *
+ * The daily budget (`portal_login_attempt_limit`) is shared with "Sign in now",
+ * so without a reserve an unattended run can leave the owner unable to retry
+ * until tomorrow -- which is what happened. The sync stops signing in on its
+ * own once only this many are left.
+ */
+export const OWNER_RESERVED_ATTEMPTS = 2;
+
+/** The scheduled sync has done what it may on its own; the owner has to act. */
+export const NEEDS_OWNER = "portal_signin_needs_owner";
+
+/** The scheduled sync is waiting out the spacing between emailed codes. */
+export const SIGN_IN_DEFERRED = "portal_signin_deferred";
+
+/**
+ * Whether an unattended sign-in may have a code emailed right now.
+ *
+ * `spent` once today's allowance is used, which only the owner gets past;
+ * `wait` inside the spacing after the last one, which ends on its own.
+ */
+export function unattendedCodeWait(
+  codes: { today: number; lastAt: number | null },
+  now: number,
+): "allowed" | "wait" | "spent" {
+  if (codes.today >= UNATTENDED_CODES_PER_DAY) return "spent";
+  return codes.lastAt !== null && now - codes.lastAt < UNATTENDED_CODE_GAP_SECONDS
+    ? "wait"
+    : "allowed";
 }
 
 /** Saving the jar must never be the thing that fails a sign-in. */

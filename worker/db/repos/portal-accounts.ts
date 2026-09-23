@@ -466,6 +466,45 @@ export function makePortalAccountsRepo(ctx: Ctx) {
     },
 
     /**
+     * Codes an unattended sign-in has had emailed today, and when the last was.
+     *
+     * The count is zero once its stored day is not today's, like
+     * `countLoginAttemptsToday`; `lastAt` is kept across days, because spacing
+     * codes out has nothing to do with where midnight falls.
+     */
+    async unattendedCodes(providerId: string): Promise<{ today: number; lastAt: number | null }> {
+      const row = await byProvider(providerId);
+      if (row === null) return { today: 0, lastAt: null };
+      return {
+        today: row.unattended_codes_day === utcDay(ctx.now()) ? row.unattended_codes_today : 0,
+        lastAt: row.last_unattended_code_at,
+      };
+    },
+
+    /**
+     * Count one code an unattended sign-in is about to have emailed.
+     *
+     * Before the request, for the same reason `recordLoginAttempt` is: an
+     * invocation that dies mid-send has still cost the owner an email. One
+     * statement, so two overlapping runs cannot both read the same count.
+     */
+    async recordUnattendedCode(providerId: string): Promise<void> {
+      await ensure(providerId);
+      const today = utcDay(ctx.now());
+      await run(
+        ctx.db
+          .prepare(
+            `UPDATE portal_accounts
+                SET unattended_codes_today =
+                      CASE WHEN unattended_codes_day = ? THEN unattended_codes_today + 1 ELSE 1 END,
+                    unattended_codes_day = ?, last_unattended_code_at = ?, updated_at = ?
+              WHERE provider_id = ?`,
+          )
+          .bind(today, today, ctx.now(), ctx.now(), providerId),
+      );
+    },
+
+    /**
      * Forget the stored session, keeping the credentials and the endpoint.
      *
      * What the admin UI's "Forget session" button does, and the honest way to

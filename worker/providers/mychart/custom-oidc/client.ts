@@ -74,6 +74,33 @@ export interface CustomOidcClientDeps extends PortalClientDeps {
   custom?: PortalCustomSettings | undefined;
 }
 
+/** Digits after the "0." of a minted trust token. What `String(Math.random())` gives. */
+const TRUST_TOKEN_DIGITS = 16;
+
+/**
+ * [confirmed] A trust-this-device token in the shape the shell's own script mints.
+ *
+ * That script writes `Math.random() + ""` -- a "0." and up to seventeen digits,
+ * never more than twenty characters -- and the shell stores whatever it is sent.
+ * An earlier version posted a 36-character UUID instead, a shape the shell's own
+ * client never produces; the save was answered 200 and the token was then never
+ * honoured. Nothing proves the length was the reason, but there is no reason to
+ * send the shell anything its own client could not have sent. The digits come
+ * from `crypto`, not `Math.random`, because this is a credential.
+ */
+function mintTrustToken(): string {
+  let digits = "";
+  while (digits.length < TRUST_TOKEN_DIGITS) {
+    // Bytes of 250 and up are dropped rather than folded, so every digit is
+    // equally likely.
+    const bytes = crypto.getRandomValues(new Uint8Array(TRUST_TOKEN_DIGITS));
+    for (const byte of bytes) {
+      if (byte < 250 && digits.length < TRUST_TOKEN_DIGITS) digits += String(byte % 10);
+    }
+  }
+  return `0.${digits}`;
+}
+
 /** Fail the same way every time the API base is missing, with a reason. */
 function requireApiBase(deps: CustomOidcClientDeps): string {
   const configured = deps.custom?.apiBasePath;
@@ -126,18 +153,27 @@ export function createCustomOidcClient(deps: CustomOidcClientDeps): PortalClient
    *
    * What the shell's own login screen does when the login response wants a code
    * and the trust cookie exists: post the cookie's value back. True only when
-   * the shell accepted it. A 410 means the shell stopped trusting it, so the
-   * cookie is dropped, as the screen does; anything else keeps it. Every "no"
-   * falls back to the emailed code.
+   * the shell accepted it. Every "no" drops the cookie, as the screen does -- a
+   * 410 through its "forget" branch, any other refusal through its error
+   * handler -- and falls back to the emailed code.
+   *
+   * Dropping it on *every* refusal is load-bearing, not tidiness. A token the
+   * shell will not honour, kept in the jar, is a token that is posted and
+   * refused on every sign-in from then on, each one costing the owner an
+   * emailed code; dropping it is what lets the code sign-in that follows mint
+   * and register a fresh one.
    */
   const trustedDevice = async (userId: string): Promise<boolean> => {
     const api = shell();
     const name = `${userId}${REMEMBER_ME_COOKIE_SUFFIX}`;
     const token = jar.valueOf(api.authBaseUrl, name);
-    if (token === null || token === "") return false;
+    if (token === null || token === "") {
+      logger.info("portal.trust_token_checked", { outcome: "absent", flavor: endpoint.flavor });
+      return false;
+    }
     const check = await postValidateTrustToken(api, { userId, rememberMeToken: token });
     logger.info("portal.trust_token_checked", { outcome: check, flavor: endpoint.flavor });
-    if (check === "forgotten") jar.setCookie(api.authBaseUrl, `${name}=; Path=/; Max-Age=0`);
+    if (check !== "trusted") jar.setCookie(api.authBaseUrl, `${name}=; Path=/; Max-Age=0`);
     return check === "trusted";
   };
 
@@ -239,12 +275,16 @@ export function createCustomOidcClient(deps: CustomOidcClientDeps): PortalClient
    * randomness hook: it already means "mint an opaque per-device id a test can
    * pin," which is exactly what this is too. Failing is not a sign-in failure
    * -- it costs one extra emailed code next time.
+   *
+   * Always a *fresh* token, even when the jar already holds one. The shell's
+   * own screen overwrites its cookie every time it saves, and a code sign-in
+   * is itself the proof that whatever the jar held did not get us in -- so
+   * keeping it, as an earlier version did, meant never re-registering a token
+   * the shell had stopped honouring, and an emailed code on every sign-in.
    */
   const remember = async (api: ShellApi, userId: string): Promise<void> => {
     const name = `${userId}${REMEMBER_ME_COOKIE_SUFFIX}`;
-    if (jar.has(api.authBaseUrl, name)) return;
-    const mintId = deps.generateDeviceId ?? ((): string => crypto.randomUUID());
-    const token = mintId();
+    const token = (deps.generateDeviceId ?? mintTrustToken)();
     const saved = await saveTrustToken(api, { userId, rememberMeToken: token });
     if (!saved) {
       logger.warn("portal.trust_token_not_saved", { flavor: endpoint.flavor });
@@ -253,6 +293,7 @@ export function createCustomOidcClient(deps: CustomOidcClientDeps): PortalClient
     // Session-scoped on purpose: this jar persists session cookies by design, and
     // the server is the thing that decides when the token stops being good.
     jar.setCookie(api.authBaseUrl, `${name}=${token}; Path=/; Secure`);
+    logger.info("portal.trust_token_saved", { flavor: endpoint.flavor });
   };
 
   const validate = async (code: string, rememberMe = true): Promise<void> => {

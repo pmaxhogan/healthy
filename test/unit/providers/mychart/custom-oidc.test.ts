@@ -467,6 +467,49 @@ describe("secondaryValidation.validate", () => {
     expect(jar.getCookieHeader(HOST)).toContain(`${USER_ID}-rememberMeToken=${posted}`);
   });
 
+  it("mints the token in the shape the shell's own script does", async () => {
+    // The shell's script sends `Math.random() + ""`. An earlier version sent a
+    // UUID, a shape the shell's own client never produces, and the saved token
+    // was then never honoured.
+    const stub = twoStepPortal();
+    const portal = await awaitingCode(stub);
+
+    await portal.secondaryValidation.validate("123456", true);
+
+    const save = find(stub, "POST", "/api/mfa/saveTrustThisDeviceToken");
+    const { rememberMeToken } = JSON.parse(save?.body ?? "{}") as { rememberMeToken: string };
+    expect(rememberMeToken).toMatch(/^0\.\d{16}$/u);
+  });
+
+  it("registers a fresh token even when the jar already holds one", async () => {
+    // A code sign-in is itself proof the token in the jar did not get us in.
+    // Keeping it -- as an earlier version did -- meant never registering one the
+    // shell would honour, and a code on every sign-in after that.
+    const stub = twoStepPortal();
+    const jar = trustedJar();
+    const minted = ["synthetic-fresh-token"];
+    const first = createCustomOidcClient({
+      endpoint: ENDPOINT,
+      jar,
+      fetchImpl: stub.fetchImpl,
+      logger: noopLogger,
+      now: () => T0,
+      random: () => 0.5,
+      generateDeviceId: () => minted.shift() ?? "unexpected-second-token",
+    });
+    await first.login(CREDENTIALS);
+    await first.secondaryValidation.sendCode("email");
+
+    await first.secondaryValidation.validate("123456", true);
+
+    const save = find(stub, "POST", "/api/mfa/saveTrustThisDeviceToken");
+    expect(JSON.parse(save?.body ?? "{}")).toStrictEqual({
+      userId: USER_ID,
+      rememberMeToken: "synthetic-fresh-token",
+    });
+    expect(jar.valueOf(HOST, `${USER_ID}-rememberMeToken`)).toBe("synthetic-fresh-token");
+  });
+
   it("does not ask to be trusted when rememberMe is off", async () => {
     const stub = twoStepPortal();
     const portal = await awaitingCode(stub);
@@ -767,7 +810,10 @@ describe("a device the shell trusted before", () => {
     expect(find(stub, "POST", "/shellwebapi/sso/token")).toBeUndefined();
   });
 
-  it("keeps the token but asks for a code on any other refusal", async () => {
+  it("forgets the token and asks for a code on any other refusal too", async () => {
+    // As the shell's own login screen does (its error handler forgets the
+    // cookie). A refused token kept in the jar is refused again on every later
+    // sign-in, each one costing the owner an emailed code.
     const stub = portal({
       ...handoffRoutes(),
       "POST /shellwebapi/login": () => loginResponse(true),
@@ -776,7 +822,44 @@ describe("a device the shell trusted before", () => {
     const jar = trustedJar();
 
     await expect(client(stub, jar).login(CREDENTIALS)).resolves.toBe("awaiting_code");
-    expect(jar.has(HOST, `${USER_ID}-rememberMeToken`)).toBe(true);
+    expect(jar.has(HOST, `${USER_ID}-rememberMeToken`)).toBe(false);
+  });
+
+  it("does not need a code again at the next sign-in once one was entered", async () => {
+    // The whole incident in one test: a token the shell stopped honouring, a
+    // code sign-in, and then a later sign-in that must get in on the device
+    // alone. The fake shell honours only the token it was last asked to save.
+    let registered: string | null = null;
+    const stub = portal({
+      ...handoffRoutes(),
+      "POST /shellwebapi/login": () => loginResponse(true, { email: CONTACT }),
+      "POST /shellwebapi/verification/code/generate": () => json({ success: true }),
+      "POST /shellwebapi/verification/code/validate": () => json({ success: true }),
+      "POST /shellwebapi/api/mfa/saveTrustThisDeviceToken": (call) => {
+        registered = (JSON.parse(call.body ?? "{}") as { rememberMeToken: string }).rememberMeToken;
+        return json({ temporaryPassword: false });
+      },
+      "POST /shellwebapi/api/mfa/validateTrustThisDeviceToken": (call) => {
+        const { rememberMeToken } = JSON.parse(call.body ?? "{}") as { rememberMeToken: string };
+        return rememberMeToken === registered
+          ? json({ temporaryPassword: false })
+          : json({}, { status: 401 });
+      },
+    });
+    const jar = trustedJar();
+
+    const first = client(stub, jar);
+    await expect(first.login(CREDENTIALS)).resolves.toBe("awaiting_code");
+    await first.secondaryValidation.sendCode("email");
+    await first.secondaryValidation.validate("123456", true);
+
+    // A later invocation, after the session died: a new client on the sealed jar.
+    const later = client(stub, CookieJar.deserialise(jar.serialise(), { now: () => T0 }));
+    await expect(later.login(CREDENTIALS)).resolves.toBe("signed_in");
+    const generates = stub.calls.filter((call) =>
+      new URL(call.url).pathname.endsWith("/verification/code/generate"),
+    );
+    expect(generates).toHaveLength(1);
   });
 
   it("asks for a code without calling the check when there is no trust cookie", async () => {

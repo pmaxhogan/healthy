@@ -203,6 +203,10 @@ const CODE_MESSAGES: Record<string, string> = {
     "The portal could not be reached. This usually clears up on its own -- try again shortly.",
   portal_attempts_exhausted:
     "Too many sign-in attempts today. Try again tomorrow, or sign in on the portal's own site.",
+  portal_signin_needs_owner:
+    "The portal signed the session out, and the hourly sync will not email you any more codes on its own today. Press Sign in now when you are ready for the code.",
+  portal_signin_deferred:
+    "The portal signed the session out. The hourly sync is waiting a few hours before emailing you another code; Sign in now does it immediately.",
   portal_discovery_failed: "Could not find MyChart at that address. Check the URL and try again.",
   portal_redirected_offsite:
     "That address sent us to a different site. Check where it went, and paste that address instead if you recognise it.",
