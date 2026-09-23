@@ -19,10 +19,10 @@
  *    a different Worker invocation by a brand-new client** (see
  *    `worker/sync/portal-runner.ts`), and the sealed jar is the only thing that
  *    invocation inherits.
- *  - `validate` submits the code with the same correlation number, then fetches
- *    the trust-this-device token and puts it in the jar by hand -- it is a cookie
- *    the shell's own script writes, so no `Set-Cookie` ever carries it -- and then
- *    runs the bridge.
+ *  - `validate` submits the code with the same correlation number, then mints a
+ *    trust-this-device token itself and puts it in the jar by hand -- it is a
+ *    cookie the shell's own script writes, so no `Set-Cookie` ever carries it --
+ *    and then runs the bridge.
  *  - Everything after sign-in is the classic client, unchanged. The visits
  *    endpoints are identical; only the way in differs.
  *
@@ -38,10 +38,10 @@ import { createMyChartClient } from "../client.ts";
 
 import {
   fetchContact,
-  fetchTrustToken,
   postGenerateCode,
   postLogin,
   postValidateCode,
+  saveTrustToken,
 } from "./api.ts";
 import { bridgeToClassicSession } from "./bridge.ts";
 import { JAR_EXTRAS, REMEMBER_ME_COOKIE_SUFFIX } from "./wire-custom.ts";
@@ -188,18 +188,26 @@ export function createCustomOidcClient(deps: CustomOidcClientDeps): PortalClient
   };
 
   /**
-   * Put the trust-this-device token in the jar.
+   * Mint a trust-this-device token and ask the shell to remember it.
    *
-   * A cookie, not a form field: the shell's own script writes it after asking for
-   * it, so nothing in the response chain sets it and this has to. Failing is not
-   * a sign-in failure -- it costs one extra emailed code next time.
+   * A cookie, not a form field: the token still ends up in the jar by hand
+   * because nothing in the response chain sets it. But the token itself is
+   * *minted here*, not fetched -- a live capture of the shell's own client code
+   * found `saveTrustThisDeviceToken` takes a browser-generated token as
+   * `rememberMeToken`, the reverse of what an earlier version of this file
+   * assumed. `generateDeviceId` is reused rather than adding a second
+   * randomness hook: it already means "mint an opaque per-device id a test can
+   * pin," which is exactly what this is too. Failing is not a sign-in failure
+   * -- it costs one extra emailed code next time.
    */
-  const remember = async (api: ShellApi, userId: string, clientId: number): Promise<void> => {
+  const remember = async (api: ShellApi, userId: string): Promise<void> => {
     const name = `${userId}${REMEMBER_ME_COOKIE_SUFFIX}`;
     if (jar.has(api.authBaseUrl, name)) return;
-    const token = await fetchTrustToken(api, { userId, clientId });
-    if (token === null) {
-      logger.warn("portal.trust_token_missing", { flavor: endpoint.flavor });
+    const mintId = deps.generateDeviceId ?? ((): string => crypto.randomUUID());
+    const token = mintId();
+    const saved = await saveTrustToken(api, { userId, rememberMeToken: token });
+    if (!saved) {
+      logger.warn("portal.trust_token_not_saved", { flavor: endpoint.flavor });
       return;
     }
     // Session-scoped on purpose: this jar persists session cookies by design, and
@@ -221,7 +229,7 @@ export function createCustomOidcClient(deps: CustomOidcClientDeps): PortalClient
       });
     }
     await postValidateCode(api, { code, clientId });
-    if (rememberMe) await remember(api, userId, clientId);
+    if (rememberMe) await remember(api, userId);
     await bridge();
     logger.info("portal.validated", { rememberMe, flavor: endpoint.flavor });
   };

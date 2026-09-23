@@ -30,7 +30,6 @@ import { portalFetch } from "../http.ts";
 
 import {
   API_PATHS,
-  AUTH_CODE_URL_KEYS,
   CHANNEL_KEYS,
   CODE_SOURCE,
   CONTACT_KEYS,
@@ -38,7 +37,7 @@ import {
   GENERATE_FIELDS,
   LOGIN_FIELDS,
   LOGIN_RESPONSE_KEYS,
-  TRUST_TOKEN_KEYS,
+  SAVE_TRUST_TOKEN_FIELDS,
   VALIDATE_FIELDS,
 } from "./wire-custom.ts";
 
@@ -256,16 +255,20 @@ export async function postValidateCode(
 }
 
 /**
- * Fetch the trust-this-device token, or null when the shell offered none.
+ * Tell the shell to trust this device, with a token the *caller* mints.
  *
- * Null rather than a throw: failing to be remembered costs an extra emailed code
- * next time and nothing else, so it must not fail a sign-in that has otherwise
- * just succeeded. [assumption] on the verb and the response key.
+ * [confirmed] request shape, read out of the shell's own client code: the
+ * token is generated in the browser and posted as `rememberMeToken` alongside
+ * the user id. The shell answers with nothing this function reads -- the token
+ * that ends up in the jar as a cookie is the one the caller already minted, not
+ * anything parsed from the response. False rather than a throw on a refusal:
+ * failing to be remembered costs an extra emailed code next time and nothing
+ * else, so it must not fail a sign-in that has otherwise just succeeded.
  */
-export async function fetchTrustToken(
+export async function saveTrustToken(
   api: ShellApi,
-  input: { userId: string; clientId: number },
-): Promise<string | null> {
+  input: { userId: string; rememberMeToken: string },
+): Promise<boolean> {
   const response = await portalFetch(api.http, {
     url: apiUrl(api, API_PATHS.saveTrustToken),
     method: "POST",
@@ -273,10 +276,10 @@ export async function fetchTrustToken(
     accept: "json",
     jsonBody: {
       [GENERATE_FIELDS.userId]: input.userId,
-      [VALIDATE_FIELDS.clientId]: input.clientId,
+      [SAVE_TRUST_TOKEN_FIELDS.rememberMeToken]: input.rememberMeToken,
     },
   });
-  return response.status >= 400 ? null : str(jsonFields(response), TRUST_TOKEN_KEYS);
+  return response.status < 400;
 }
 
 /**
@@ -293,19 +296,4 @@ export async function fetchContact(api: ShellApi, userId: string): Promise<strin
     accept: "json",
   });
   return response.status >= 400 ? null : str(jsonFields(response), CONTACT_KEYS);
-}
-
-/**
- * Ask the shell for the URL that starts the authorization hop, or null.
- *
- * The bridge's second mechanism, used when the handoff stub carried no form to
- * submit. [assumption] throughout -- verb, response shape and key name.
- */
-export async function fetchAuthCodeUrl(api: ShellApi): Promise<string | null> {
-  const response = await portalFetch(api.http, {
-    url: apiUrl(api, API_PATHS.authCode),
-    endpoint: "AuthCode",
-    accept: "json",
-  });
-  return response.status >= 400 ? null : str(jsonFields(response), AUTH_CODE_URL_KEYS);
 }

@@ -24,6 +24,7 @@ import {
   html,
   json,
   openIdFormPageWithNoscriptFallback,
+  openIdRedirectPage,
   OPENID_FORM_PAGE,
   redirect,
   routed,
@@ -138,7 +139,7 @@ function twoStepPortal(login: Record<string, unknown> = {}): PortalFetchStub {
       json({ mfaRequired: true, userId: "OWNER-LOGIN", email: CONTACT, ...login }),
     "POST /shellwebapi/verification/code/generate": () => json({ success: true }),
     "POST /shellwebapi/verification/code/validate": () => json({ success: true }),
-    "POST /shellwebapi/api/mfa/saveTrustThisDeviceToken": () => json({ token: "trust-0001" }),
+    "POST /shellwebapi/api/mfa/saveTrustThisDeviceToken": () => json({ success: true }),
   });
 }
 
@@ -356,7 +357,7 @@ describe("secondaryValidation.validate", () => {
     ).toStrictEqual({ token: "123456", clientId: CLIENT_ID });
   });
 
-  it("puts the trust-this-device token in the jar as a cookie", async () => {
+  it("mints its own trust-this-device token and posts it, rather than reading one back", async () => {
     const stub = twoStepPortal();
     const jar = new CookieJar({ now: () => T0 });
     const first = client(stub, jar);
@@ -367,7 +368,13 @@ describe("secondaryValidation.validate", () => {
 
     // A cookie, not a posted field: nothing in the response chain sets it.
     expect(jar.has(HOST, `${USER_ID}-rememberMeToken`)).toBe(true);
-    expect(find(stub, "POST", "/api/mfa/saveTrustThisDeviceToken")).toBeDefined();
+    const save = find(stub, "POST", "/api/mfa/saveTrustThisDeviceToken");
+    const body: unknown = JSON.parse(save?.body ?? "{}");
+    expect(body).toStrictEqual({ userId: USER_ID, rememberMeToken: expect.any(String) });
+    // The same value that was posted is the one the cookie carries -- this
+    // client mints it, the shell never hands one back.
+    const posted = (body as { rememberMeToken: string }).rememberMeToken;
+    expect(jar.getCookieHeader(HOST)).toContain(`${USER_ID}-rememberMeToken=${posted}`);
   });
 
   it("does not ask to be trusted when rememberMe is off", async () => {
@@ -462,18 +469,43 @@ describe("the OpenID bridge", () => {
     await expect(reasonOf(client(stub).login(CREDENTIALS))).resolves.toBe("no_further_hop");
   });
 
-  it("follows the auth-code URL the shell hands back when there is no form", async () => {
+  it("navigates to the stub's own literal authorization URL when it carries no form", async () => {
+    // The shape a live, unauthenticated capture of a real deployment's stub
+    // actually carried: no `<form>` anywhere on the page, just the controller
+    // call with the URL as one of its own arguments and its flag set to
+    // navigate rather than submit.
     const stub = routed({
       "GET /prd/Authentication/Login": () => redirect(`${HOST}/prd/OpenId?op=synthetic-op`),
-      "GET /prd/OpenId": () => html("<!doctype html><html><body>oidcnonce</body></html>"),
-      "GET /shellwebapi/api/mychartAuth/getAuthCode": () =>
-        json({ url: `${HOST}/prd/Home?code=synthetic-code` }),
+      "GET /prd/OpenId": () =>
+        html(openIdRedirectPage(`${HOST}/prd/OpenId/AuthorizeResult?code=synthetic-code`)),
+      "GET /prd/OpenId/AuthorizeResult": () =>
+        redirect(`${HOST}/prd/Home`, ["EpicSession=synthetic-session; Path=/prd/; Secure"]),
       "GET /prd/Home": () => html(HOME_PAGE),
       "POST /shellwebapi/login": () => json({ authenticated: true, userId: "OWNER-LOGIN" }),
     });
 
     await expect(client(stub).login(CREDENTIALS)).resolves.toBe("signed_in");
-    expect(find(stub, "GET", "/api/mychartAuth/getAuthCode")).toBeDefined();
+    expect(paths(stub)).toStrictEqual([
+      "POST /shellwebapi/login",
+      "GET /prd/Authentication/Login",
+      "GET /prd/OpenId",
+      "GET /prd/OpenId/AuthorizeResult",
+      "GET /prd/Home",
+    ]);
+  });
+
+  it("does not navigate when the stub's own flag says it means to submit a form instead", async () => {
+    // The controller call is present, but says `submitForm: true` -- and no
+    // form exists on the page for the bridge to have found above. Following
+    // the URL anyway would not be what the real script does.
+    const stub = routed({
+      "GET /prd/Authentication/Login": () => redirect(`${HOST}/prd/OpenId?op=synthetic-op`),
+      "GET /prd/OpenId": () =>
+        html(openIdRedirectPage(`${HOST}/prd/OpenId/AuthorizeResult?code=synthetic-code`, true)),
+      "POST /shellwebapi/login": () => json({ authenticated: true, userId: "OWNER-LOGIN" }),
+    });
+
+    await expect(reasonOf(client(stub).login(CREDENTIALS))).resolves.toBe("no_further_hop");
   });
 
   it("gives up with a hop count when the handoff loops for ever", async () => {

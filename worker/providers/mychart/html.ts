@@ -192,6 +192,77 @@ export function autoSubmitForm(
 }
 
 /**
+ * [confirmed] The handoff stub's own controller call, when it carries the
+ * authorization URL as a literal argument rather than rendering a form at all.
+ *
+ * A live, unauthenticated fetch of a real `custom_oidc` deployment's stub
+ * confirmed the shape: `new ....OpenIdRequestController(nonce, state,
+ * codeVerifier, url, workflow, submitForm)`, all six arguments already filled
+ * in server-side. The controller's own script -- the one `MARKERS.openIdHandoff`
+ * already matches by name -- does exactly one of two things with them: when
+ * `submitForm` is `true` it submits `#OIDCForm` (`autoSubmitForm` above, tried
+ * first because a form only exists on the page at all in that case); when it is
+ * `false` it does `window.location = url` *from inside that external, cached
+ * script*, which this module has no way to run. Reading `url` off of this
+ * constructor call, rather than trying to find a `location` assignment inline,
+ * is the only way to follow that hop -- there is no assignment in the fetched
+ * page to find.
+ */
+const OIDC_REQUEST_CALL = /OpenIdRequestController\(([^()]*)\)/iu;
+
+/**
+ * One argument of that call: a double-quoted string, or a bare boolean.
+ * Applied to the short, already-isolated argument list `OIDC_REQUEST_CALL`
+ * captured -- never the whole page -- so a comma inside a quoted value (the
+ * URL argument routinely has several, none of them raw commas, but nothing
+ * here assumes that) never gets mistaken for an argument separator: this
+ * tokenises quoted spans instead of splitting on `,`.
+ */
+const OIDC_ARG = /"([^"]*)"|(true|false)/giu;
+
+/**
+ * A `\uXXXX` escape, exactly as a JS string literal inside a `<script>` tag
+ * carries one -- distinct from `decodeEntities`'s HTML character references,
+ * which this text never goes through at all (it is JS source, not markup).
+ */
+const JS_UNICODE_ESCAPE = /\\u([0-9a-f]{4})/giu;
+
+function decodeJsUnicodeEscapes(value: string): string {
+  return value.replaceAll(JS_UNICODE_ESCAPE, (_whole, hex: string) =>
+    String.fromCodePoint(Number.parseInt(hex, 16)),
+  );
+}
+
+export interface OpenIdRequest {
+  /** The already-minted authorization URL, decoded, exactly as the page carries it. */
+  url: string;
+  /** True when the page means to submit a form instead of navigating here. */
+  submitForm: boolean;
+}
+
+/**
+ * The handoff stub's controller call, parsed. Null when the page carries none
+ * -- a stub that renders `#OIDCForm` and nothing else matches `autoSubmitForm`
+ * and never needs this, and a page that is not this stub at all naturally has
+ * neither.
+ *
+ * The constructor's six arguments are nonce, state, PKCE verifier, the URL,
+ * a workflow label, and the submit-a-form boolean, in that fixed order -- so
+ * the fourth and sixth positions of whatever `OIDC_ARG` finds, in order, are
+ * `url` and `submitForm`.
+ */
+export function parseOpenIdRequest(html: string): OpenIdRequest | null {
+  const call = OIDC_REQUEST_CALL.exec(html);
+  if (call === null) return null;
+  const list = call[1] ?? "";
+  const args = Array.from(list.matchAll(OIDC_ARG), (arg) => arg[1] ?? arg[2] ?? "");
+  const url = args[3];
+  return url === undefined || url === ""
+    ? null
+    : { url: decodeJsUnicodeEscapes(url), submitForm: args[5] === "true" };
+}
+
+/**
  * The inputs of one `<form>`, scoped to that form alone -- never the whole
  * page.
  *

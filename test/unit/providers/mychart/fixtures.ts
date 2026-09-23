@@ -581,6 +581,28 @@ export const OPENID_FORM_PAGE = `<!doctype html><html><body>
 </body></html>`;
 
 /**
+ * The stub's other real shape: no `<form>` at all, just its controller call
+ * with the authorization URL as one of its own arguments.
+ *
+ * This is the shape a live, unauthenticated fetch of a real `custom_oidc`
+ * deployment's stub actually carried: the page renders nothing but an
+ * antiforgery input and a script instantiating the controller with six
+ * literal arguments -- nonce, state, PKCE verifier, the URL, a workflow label,
+ * and a boolean saying whether to submit `#OIDCForm` (`true`) or navigate to
+ * the URL (`false`, the default here). Every value but `url` is a placeholder;
+ * only the shape -- and the class name, which is generic MyChart framework
+ * code, not this deployment's own -- matters to the parser under test.
+ */
+export function openIdRedirectPage(url: string, submitForm = false): string {
+  return `<!doctype html><html><body>
+  <input type="hidden" name="__RequestVerificationToken" value="${TOKEN}" />
+  <script>
+  new $$WP.Authentication.OpenId.Controllers.OpenIdRequestController("synthetic-nonce", "synthetic-state", "synthetic-verifier", "${url}", "0", ${String(submitForm)});
+  </script>
+</body></html>`;
+}
+
+/**
  * `OPENID_FORM_PAGE`, plus the `<noscript>` fallback a real deployment ships
  * alongside it for a browser that will not run its scripts.
  *

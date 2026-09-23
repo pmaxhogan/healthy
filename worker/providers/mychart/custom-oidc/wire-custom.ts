@@ -35,12 +35,11 @@ export const API_PATHS = {
   /** [confirmed] Submits the code. */
   validateCode: "verification/code/validate",
   /**
-   * [confirmed] name, [assumption] verb and response.
-   *
-   * Assumed to be a POST that answers with the trust-this-device token as JSON.
-   * If it is a GET, or answers with nothing, `rememberMe` silently stops working
-   * and every scheduled run asks for a fresh emailed code -- which shows up as a
-   * `portal.code_requested` line on every single sign-in.
+   * [confirmed] name, verb and request shape, read out of the shell's own
+   * client code: a POST of `{ userId, rememberMeToken }`, where the token is
+   * minted by the *browser*, not the server. An earlier version of this file
+   * assumed the opposite -- that this call handed a token back -- which is why
+   * it went unanswered and cost an extra emailed code on every single sign-in.
    */
   saveTrustToken: "api/mfa/saveTrustThisDeviceToken",
   /**
@@ -53,17 +52,23 @@ export const API_PATHS = {
    * `portal_login_failed` with `reason: "mfa_contact_unknown"`.
    */
   mfaContact: "api/mfa/contact/plain",
-  /**
-   * [confirmed] name, [assumption] verb and response.
-   *
-   * The shell's own way of asking for the authorization code that bridges its
-   * session into the classic pages. Assumed to be a GET answering with JSON
-   * carrying the URL to go to next (see `AUTH_CODE_URL_KEYS`). Only used when the
-   * handoff stub carried no auto-submitted form, so a wrong guess shows up as
-   * `portal_login_failed` with a hop count and nothing else.
-   */
-  authCode: "api/mychartAuth/getAuthCode",
 } as const;
+
+/**
+ * There is deliberately no `authCode` path here any more.
+ *
+ * An earlier version of this file guessed that the handoff stub, when it
+ * rendered no form to submit, meant the bridge should ask the shell's API for
+ * the next URL -- `api/mychartAuth/getAuthCode` and friends, names mined out of
+ * the shell's own bundle. A later live capture of the *call sites* around those
+ * same names (not just their existence) found they belong to an unrelated
+ * feature -- the mobile app's deep-link / "back to referrer" handoff -- and are
+ * never invoked from the OpenID stub at all. The real "no form" case turned out
+ * to need no shell call whatsoever: the stub's controller script carries the
+ * already-minted authorization URL as one of its own constructor arguments, so
+ * the bridge reads it straight off the page. See `parseOpenIdRequest` in
+ * `../html.ts` and `bridge.ts`'s `nextRequest`.
+ */
 
 /** [confirmed] The credential POST's fields. Lower-case, unlike the classic form. */
 export const LOGIN_FIELDS = { username: "username", password: "password" } as const;
@@ -129,20 +134,14 @@ export const LOGIN_RESPONSE_KEYS = {
   contact: ["email", "emailAddress", "maskedEmail", "contact"],
 } as const;
 
-/** [assumption] Keys the trust-token response may carry the token under. */
-export const TRUST_TOKEN_KEYS: readonly string[] = ["token", "trustToken", "value", "deviceToken"];
+/**
+ * [confirmed] The save-trust-token body's second field, read out of the
+ * shell's own client code. `userId` (from `GENERATE_FIELDS`) is the other one.
+ */
+export const SAVE_TRUST_TOKEN_FIELDS = { rememberMeToken: "rememberMeToken" } as const;
 
 /** [assumption] Keys the contact lookup may answer with. */
 export const CONTACT_KEYS: readonly string[] = ["email", "emailAddress", "contact", "value"];
-
-/** [assumption] Keys the auth-code response may carry the next URL under. */
-export const AUTH_CODE_URL_KEYS: readonly string[] = [
-  "url",
-  "redirectUrl",
-  "redirectUri",
-  "location",
-  "authorizeUrl",
-];
 
 /**
  * [confirmed] The id of the form the handoff stub's script auto-submits.

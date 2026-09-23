@@ -5,17 +5,23 @@
  * applications. The shell holds the password and the emailed code; the classic
  * pages hold the visits. What joins them is an ordinary OAuth2 authorization-code
  * flow that the classic side starts: `<mount>/Authentication/Login` 302s to
- * `<mount>/OpenId?op=...`, whose page is one hidden form -- the authorization
- * request, already minted server-side, nonce, state and PKCE challenge and all --
- * plus a script whose only job is to submit it. The shell's cookies are what make
- * the authorize hop answer with a code instead of a login screen, and the code
- * comes back to a redirect URI under the mount, where the classic application
- * exchanges it and finally sets *its* session cookie.
+ * `<mount>/OpenId?op=...`, whose page hands the authorization request -- already
+ * minted server-side, nonce, state and PKCE challenge and all -- to a controller
+ * script. A live capture of a real deployment's stub found that script takes the
+ * request as constructor arguments and does exactly one of two things with them:
+ * submit a hidden form (`#OIDCForm`, when the page rendered one) or navigate
+ * straight to the authorization URL, which is then one of those same arguments,
+ * already sitting in the page as a literal string. Neither shape needs a second
+ * round trip to ask the shell anything -- the whole request is already on the
+ * page one way or the other. The shell's cookies are what make the authorize hop
+ * answer with a code instead of a login screen, and the code comes back to a
+ * redirect URI under the mount, where the classic application exchanges it and
+ * finally sets *its* session cookie.
  *
  * So the bridge is not a protocol implementation. It is a browser: follow the
  * chain with the jar attached, do the one thing a fetch client does not do for
- * free -- submit the form a script would have submitted -- and stop when the
- * chain lands somewhere authenticated.
+ * free -- submit the form, or make the navigation, a script would have made --
+ * and stop when the chain lands somewhere authenticated.
  *
  * What that means for the code below:
  *
@@ -36,11 +42,10 @@
 
 import { AppError } from "../../../lib/errors.ts";
 import { sessionLandingOf } from "../client.ts";
-import { autoSubmitForm } from "../html.ts";
+import { autoSubmitForm, parseOpenIdRequest } from "../html.ts";
 import { isOpenIdHandoff, mountedUrl, pathOf, portalFetch } from "../http.ts";
 import { PATHS } from "../wire.ts";
 
-import { fetchAuthCodeUrl } from "./api.ts";
 import { BRIDGE_MAX_HOPS, OIDC_FORM_IDS, SHELL_LOGIN_MARKERS } from "./wire-custom.ts";
 
 import type { ShellApi } from "./api.ts";
@@ -85,10 +90,7 @@ function landingOf(response: PortalResponse, mountPath: string): Landing {
 }
 
 /** The request a page asks for next, or null when it asks for nothing. */
-async function nextRequest(
-  response: PortalResponse,
-  deps: BridgeDeps,
-): Promise<PortalRequest | null> {
+function nextRequest(response: PortalResponse, deps: BridgeDeps): PortalRequest | null {
   // The form a script would have submitted: the authorization request itself.
   const form = autoSubmitForm(response.body, OIDC_FORM_IDS);
   if (form !== null) {
@@ -107,18 +109,29 @@ async function nextRequest(
       form: Object.fromEntries(form.fields),
     };
   }
-  // No form: ask the shell where to go instead. Only worth trying on the stub --
-  // an arbitrary page that happens to be unrecognised is not a handoff.
+  // No form on the page at all: only worth reading the controller call on the
+  // stub -- an arbitrary page that happens to be unrecognised is not a handoff.
   if (landingOf(response, deps.mountPath) !== "handoff") return null;
-  const url = await fetchAuthCodeUrl(deps.api);
-  if (url === null) return null;
+  // The stub's own literal navigation target, when its own flag says it means
+  // to navigate rather than submit a form. See `parseOpenIdRequest`.
+  const request = parseOpenIdRequest(response.body);
+  if (request === null || request.submitForm) {
+    // Neither shape this bridge knows how to follow was on the page: not a URL
+    // or a body, just whether each known shape was present, so a wrong
+    // assumption here is diagnosable without logging anything from the page.
+    deps.logger.warn("portal.oidc_stub_unrecognized", {
+      hasRequestCall: request !== null,
+      submitForm: request?.submitForm ?? null,
+    });
+    return null;
+  }
   let absolute: string;
   try {
-    absolute = new URL(url, deps.api.authBaseUrl).href;
+    absolute = new URL(request.url, response.url).href;
   } catch {
     return null;
   }
-  return { url: absolute, endpoint: "OidcReturn", accept: "html", followBodyRedirects: true };
+  return { url: absolute, endpoint: "OidcAuthorize", accept: "html", followBodyRedirects: true };
 }
 
 function failed(
@@ -166,7 +179,7 @@ export async function bridgeToClassicSession(deps: BridgeDeps): Promise<void> {
       throw failed(deps.logger, hops, response.status, "shell_login", landing);
     }
 
-    const request = await nextRequest(response, deps);
+    const request = nextRequest(response, deps);
     if (request === null) {
       // Nothing left to follow. The chain may nonetheless have set the session
       // cookie on a hop whose landing page this code does not recognise, so go
