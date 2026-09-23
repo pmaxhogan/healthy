@@ -198,12 +198,20 @@ async function takeLease(ctx: Ctx): Promise<boolean> {
   return changes > 0;
 }
 
+/**
+ * Close this run's lease, adding its counts to every earlier run's: the row says
+ * what the backfill did in total, however many runs it took.
+ */
 async function release(
   ctx: Ctx,
   counts: BackfillCounts,
   outcome: { errorCode: string | null; completed: boolean },
 ): Promise<void> {
   const now = ctx.now();
+  const previous = await one<{ progress_json: string }>(
+    ctx.db.prepare("SELECT progress_json FROM data_migrations WHERE name = ?").bind(BLIND_BACKFILL),
+  );
+  const total = addCounts(parseCounts(previous?.progress_json), counts);
   await run(
     ctx.db
       .prepare(
@@ -214,13 +222,42 @@ async function release(
       )
       .bind(
         outcome.errorCode,
-        JSON.stringify(counts),
+        JSON.stringify(total),
         now,
         outcome.completed ? 1 : 0,
         now,
         BLIND_BACKFILL,
       ),
   );
+}
+
+/** Earlier runs' counts, or zeros for a row that has none (or holds junk). */
+function parseCounts(json: string | undefined): BackfillCounts {
+  const counts = emptyCounts();
+  if (json === undefined) return counts;
+  let stored: unknown;
+  try {
+    stored = JSON.parse(json);
+  } catch {
+    return counts;
+  }
+  if (typeof stored !== "object" || stored === null) return counts;
+  for (const key of Object.keys(counts) as (keyof BackfillCounts)[]) {
+    // eslint-disable-next-line security/detect-object-injection -- `key` is one of this type's own field names.
+    const value = (stored as Partial<Record<keyof BackfillCounts, unknown>>)[key];
+    // eslint-disable-next-line security/detect-object-injection -- as above.
+    if (typeof value === "number") counts[key] = value;
+  }
+  return counts;
+}
+
+function addCounts(a: BackfillCounts, b: BackfillCounts): BackfillCounts {
+  const sum = emptyCounts();
+  for (const key of Object.keys(sum) as (keyof BackfillCounts)[]) {
+    // eslint-disable-next-line security/detect-object-injection -- `key` is one of this type's own field names.
+    sum[key] = a[key] + b[key];
+  }
+  return sum;
 }
 
 // ---------------------------------------------------------------------------

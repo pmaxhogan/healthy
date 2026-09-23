@@ -449,6 +449,16 @@ describe("the 0007 backfill", () => {
     expect(summary.eventsInserted).toBe(0);
     expect(h.upstreams.calendar.events()).toHaveLength(3);
     expect(h.upstreams.calendar.byKey().has(await sk(`${providerId}:enc-1`))).toBe(true);
+    // The recorded counts are the two runs' together: the first sealed what it
+    // could before the calendar step stopped it, the second did the rest.
+    const done = await progress();
+    expect(done.completed_at).not.toBeNull();
+    expect(done.counts).toMatchObject({
+      settingsSealed: 2,
+      cacheRowsRekeyed: 1,
+      calendarRowsRekeyed: 2,
+      googleEventsRekeyed: 2,
+    });
   });
 
   it("refuses to run twice at once", async () => {
