@@ -13,7 +13,7 @@
     "dev:worker": "wrangler dev --port 8787",
     "build": "vite build",
     "typecheck": "npm run types && tsc -p tsconfig.worker.json && tsc -p tsconfig.test.json && tsc -p tsconfig.node.json && vue-tsc -p tsconfig.app.json",
-    "types": "wrangler types",
+    "types": "wrangler types --check || wrangler types",
     "prelint": "npm run types",
     "lint": "eslint . && prettier --check .",
     "lint:fix": "eslint . --fix",
