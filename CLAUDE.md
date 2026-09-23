@@ -31,6 +31,28 @@ Consequences for how code is written:
 - Logs carry an explicit field allowlist. Never a token, a bearer header, an
   email, clinical content, or a provider name.
 
+## Develop and validate locally before pushing — always
+
+**Every change is made working locally first. Nothing is pushed to find out
+whether it works.** A push to `main` deploys to production through Workers
+Builds, and a deploy-and-retry loop is slow, burns live resources, and for the
+portal flows emails the owner a verification code and spends the portal's daily
+sign-in attempts.
+
+1. Run the stack locally: `npm run dev:worker` (the Worker on port 8787) and
+   `npm run dev` (the admin UI, which proxies `/api`, `/auth` and `/oauth` to
+   that Worker). Apply migrations with `npm run migrate:local`.
+2. Exercise the change end to end there — the real flow, not only the unit
+   tests — until it works completely.
+3. For code that talks to a third party (Epic, a patient portal, Google,
+   Trello), drive it from a local harness against the real service and save
+   every page or response it receives under the gitignored `.local/` directory
+   (for example `.local/portal-pages/01-login.html`, with status and final URL
+   noted), so it can be inspected, diffed and turned into synthetic fixtures
+   offline. Reuse persisted session state from `.local/` between runs instead
+   of signing in again. Never copy those captures into tracked files.
+4. Only then add synthetic-fixture tests, run `npm run check`, commit and push.
+
 ## Where secrets live
 
 - **Worker secrets** (`wrangler secret put`): the full list is in the README's
