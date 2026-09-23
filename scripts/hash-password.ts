@@ -11,7 +11,12 @@ import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
-import { PBKDF2_ITERATIONS, PBKDF2_KEY_BYTES, PBKDF2_SALT_BYTES } from "@shared/password.ts";
+import {
+  MAX_PBKDF2_ITERATIONS,
+  PBKDF2_ITERATIONS,
+  PBKDF2_KEY_BYTES,
+  PBKDF2_SALT_BYTES,
+} from "@shared/password.ts";
 
 // Base58: unambiguous when read off a screen and retyped.
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -41,8 +46,18 @@ export function generatePassword(): string {
 // argument without any escaping.
 const encode = (b: Buffer): string => b.toString("base64url");
 
-/** Hashes a password into the PASSWORD_HASH storage format (see shared/password.ts). */
+/**
+ * Hashes a password into the PASSWORD_HASH storage format (see shared/password.ts).
+ *
+ * Refuses a cost above what deployed workerd derives: such a hash verifies fine
+ * here and locks the owner out of the admin UI in production.
+ */
 export function hashPassword(password: string, iterations = PBKDF2_ITERATIONS): string {
+  if (iterations > MAX_PBKDF2_ITERATIONS) {
+    throw new RangeError(
+      `PBKDF2 iterations above ${String(MAX_PBKDF2_ITERATIONS)} are not supported by deployed Workers`,
+    );
+  }
   const salt = randomBytes(PBKDF2_SALT_BYTES);
   const hash = pbkdf2Sync(password, salt, iterations, PBKDF2_KEY_BYTES, "sha256");
   return `pbkdf2$sha256$${String(iterations)}$${encode(salt)}$${encode(hash)}`;

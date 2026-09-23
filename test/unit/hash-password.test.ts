@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { PASSWORD_HASH_PATTERN, PBKDF2_ITERATIONS } from "@shared/password.ts";
+import {
+  MAX_PBKDF2_ITERATIONS,
+  PASSWORD_HASH_PATTERN,
+  PBKDF2_ITERATIONS,
+} from "@shared/password.ts";
 
 import { generatePassword, hashPassword, verifyPassword } from "../../scripts/hash-password.ts";
 
@@ -29,6 +33,13 @@ describe("hashPassword", () => {
 
   it("defaults to the production iteration count", () => {
     expect(hashPassword("x")).toContain(`$${String(PBKDF2_ITERATIONS)}$`);
+  });
+
+  it("refuses to mint a hash deployed workerd cannot derive", () => {
+    // The 2026-09-22 incident: a 600,000-iteration secret verified locally and
+    // 500'd the first production login.
+    expect(() => hashPassword("x", MAX_PBKDF2_ITERATIONS + 1)).toThrow(RangeError);
+    expect(() => hashPassword("x", 600_000)).toThrow(/not supported/);
   });
 });
 

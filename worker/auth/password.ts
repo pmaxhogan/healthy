@@ -6,6 +6,7 @@
 // this verifier must agree and neither may import the other.
 
 import {
+  MAX_PBKDF2_ITERATIONS,
   PASSWORD_HASH_PATTERN,
   PBKDF2_ITERATIONS,
   PBKDF2_KEY_BYTES,
@@ -37,9 +38,10 @@ export const MIN_PBKDF2_ITERATIONS = 100_000;
  *
  * Equal to the floor, which makes the cost of a valid hash exactly one number.
  * Raising either without proving a real deploy derives at the new cost is how the
- * same incident happens twice.
+ * same incident happens twice. Defined in shared/password.ts so the script that
+ * mints the hash refuses an over-cap cost too; re-exported here for the Worker.
  */
-export const MAX_PBKDF2_ITERATIONS = 100_000;
+export { MAX_PBKDF2_ITERATIONS } from "@shared/password.ts";
 
 /**
  * Digests shorter than this are refused too, for a subtler reason.

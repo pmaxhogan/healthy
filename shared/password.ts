@@ -18,11 +18,19 @@
  * every test and then broke the first production login (2026-09-22). So the
  * cost is pinned to the production cap; do not raise it without proving a real
  * deploy still accepts it. `verifyPassword` refuses anything below
- * MIN_PBKDF2_ITERATIONS, which is this same number, and
- * `MAX_PBKDF2_ITERATIONS` there is the ceiling the login handler checks before it
- * calls WebCrypto, so an over-cap secret reports itself instead of throwing.
+ * MIN_PBKDF2_ITERATIONS, which is this same number, and `MAX_PBKDF2_ITERATIONS`
+ * below is the ceiling.
  */
 export const PBKDF2_ITERATIONS = 100_000;
+
+/**
+ * The most iterations deployed workerd will derive (see above).
+ *
+ * Here rather than only in the Worker so both ends enforce it: the login handler
+ * reports an over-cap secret instead of calling WebCrypto with it, and
+ * scripts/hash-password.ts refuses to mint one in the first place.
+ */
+export const MAX_PBKDF2_ITERATIONS = 100_000;
 
 /** Derived key length, in bytes. */
 export const PBKDF2_KEY_BYTES = 32;
