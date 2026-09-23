@@ -92,7 +92,7 @@ where it left off.
 
 ## Connecting a client (claude.ai)
 
-1. In claude.ai: **Settings → Connectors → Add custom connector**. Give it a
+1. In claude.ai: **Customize → Connectors → + → Add custom connector**. Give it a
    name and the server URL, `https://<your-host>/mcp` (no trailing slash).
    Click **Continue**.
 2. The **Authentication** screen that follows auto-detects "Register
