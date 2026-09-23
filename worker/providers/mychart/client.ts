@@ -31,6 +31,7 @@
 
 import { AppError } from "../../lib/errors.ts";
 
+import { isLoginPage } from "./discovery.ts";
 import { bodyMentions, findAntiforgeryField, inputFields } from "./html.ts";
 import { isOpenIdHandoff, mountedUrl, pathOf, portalFetch } from "./http.ts";
 import { parsePast, parseUpcoming } from "./visits.ts";
@@ -280,6 +281,14 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
       endpoint: label,
       accept: "html",
       followBodyRedirects: true,
+      // Recognise a landed login page before following any further body
+      // redirect on it, the same guard `discovery.ts` uses and needed for the
+      // same reason: a classic login page's own clickjacking guard (an
+      // unconditional `top.location = ...` in its `else` branch) is never
+      // read as a redirect at all -- see `SCRIPT_ASSIGN` in `html.ts` -- but
+      // an unrelated same-origin `location.replace` elsewhere on the page
+      // must not be followed past a page already known to be the login form.
+      recognizeLanding: isLoginPage,
     });
     if (response.status !== 200) {
       throw new AppError("portal_parse_failed", "the portal did not return the page", {
@@ -528,6 +537,9 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
       endpoint: "Home",
       accept: "html",
       followBodyRedirects: true,
+      // Same reason as `tokenPage`: a dead session lands here on the login
+      // page, whose own frame-busting script must not be read as a redirect.
+      recognizeLanding: isLoginPage,
     });
     const alive = response.status === 200 && landingOf(response) === "signed_in";
     logger.debug("portal.session_check", { alive, status: response.status, probe: "home" });

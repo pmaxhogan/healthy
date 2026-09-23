@@ -192,6 +192,32 @@ describe("login", () => {
     );
   });
 
+  it("signs in even though the login page carries a frame-busting clickjacking guard", async () => {
+    // The classic client's own page fetches (`tokenPage`) must not treat the
+    // guard's `top.location` assignment as a redirect either -- the same bug
+    // as discovery's, reached from the authenticated client instead.
+    const guardedLogin = `<!doctype html><html><head><script>
+      if (self === top) {
+        // not framed; nothing to do
+      } else {
+        top.location = "/MyChart/Home/LogOut";
+      }
+    </script></head><body>
+      <form action="/MyChart/Authentication/Login/DoLogin" method="post">
+        <input type="hidden" name="__RequestVerificationToken" value="${TOKEN}" />
+        <input type="text" name="LoginIdentifier" value="" />
+        <input type="password" name="Password" value="" />
+      </form>
+    </body></html>`;
+    const stub = routed({
+      "GET /MyChart/Authentication/Login": () => html(guardedLogin),
+      "POST /MyChart/Authentication/Login/DoLogin": () => redirect(`${HOST}/MyChart/Home/Index`),
+      "GET /MyChart/Home/Index": () => html(HOME_PAGE),
+    });
+
+    await expect(client(stub).login(CREDENTIALS)).resolves.toBe("signed_in");
+  });
+
   it("reports awaiting_code when the portal redirects to the challenge page", async () => {
     const stub = routed({
       "GET /MyChart/Authentication/Login": () => html(loginPageNew()),

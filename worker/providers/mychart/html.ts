@@ -34,15 +34,35 @@ const META_REFRESH = /<meta\b[^>]*http-equiv\s*=\s*["']?refresh["']?[^>]*>/iu;
 const CONTENT_ATTRIBUTE = /\bcontent\s*=\s*(?:"([^"]*)"|'([^']*)')/iu;
 const REFRESH_URL = /url\s*=\s*['"]?([^'";\s]+)/iu;
 /**
- * `window.location = "..."` / `location.href = '...'`, and `.replace("...")`.
+ * `window.location = "..."` / `location.href = '...'`, restricted to the
+ * page's OWN location: bare `location`, or `window.`/`self.`/`document.`
+ * prefixed. Never `top.location`, `parent.location`, or either through
+ * `window.` -- those fire only when the page is framed, and a classic login
+ * page's own clickjacking guard is exactly
+ * `if (self === top) { ... } else { top.location = "..."; }`. Unconditional
+ * string-scanning has no way to know the `if` never took that `else` branch
+ * on an un-framed load, so the one safe rule is to never treat a
+ * `top.location` or `parent.location` assignment -- however it is reached --
+ * as a same-page redirect at all.
  *
- * Two simple patterns rather than one that covers both: a single alternation
- * with optional prefixes backtracks badly on a long page, and these run on a
- * body a stranger controls. `\blocation` matches inside `window.location` and
- * `top.location` without having to spell either out.
+ * The leading `(?<![\w$.])` is what makes that precise rather than a
+ * denylist of the two known bad prefixes: it refuses a match whose
+ * `location` (or its allowed prefix) is itself preceded by an identifier
+ * character or a `.`, which is what `top.location`, `window.top.location`,
+ * `opener.location` and the rest all have in common -- and it is a
+ * single-character, fixed-width lookbehind, so it stays exactly as bounded
+ * and linear as every other pattern in this module.
+ *
+ * Two simple patterns rather than one that covers both assignment and the
+ * `.replace()`/`.assign()` calls: a single alternation with optional
+ * prefixes backtracks badly on a long page, and these run on a body a
+ * stranger controls.
  */
-const SCRIPT_ASSIGN = /\blocation(?:\.href)?\s*=\s*["']([^"']+)["']/iu;
-const SCRIPT_REPLACE = /\blocation\.replace\s*\(\s*["']([^"']+)["']/iu;
+const SCRIPT_ASSIGN =
+  /(?<![\w$.])(?:(?:window|self|document)\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']/iu;
+/** `location.replace("...")` / `location.assign("...")`, same restriction. */
+const SCRIPT_REPLACE =
+  /(?<![\w$.])(?:(?:window|self|document)\.)?location\.(?:replace|assign)\s*\(\s*["']([^"']+)["']/iu;
 const NAMED_ENTITY = /&(amp|lt|gt|quot|apos|#\d{1,7}|#x[0-9a-f]{1,6});/giu;
 /**
  * [guess] A quoted absolute path whose first segment ends in `webapi`.
@@ -186,6 +206,10 @@ export function autoSubmitForm(
  * JavaScript -- which this client impersonates -- never reaches. Reading it
  * anyway walks the scrape one hop past every page that has both a real handoff
  * and a no-JS fallback, onto a page with none of the markers that identify it.
+ *
+ * A `top.location` or `parent.location` assignment is never read as a
+ * redirect, framed or not: see `SCRIPT_ASSIGN`'s comment for why a classic
+ * login page's own clickjacking guard would otherwise look exactly like one.
  */
 export function bodyRedirectTarget(html: string): string | null {
   const scripted = html.replaceAll(NOSCRIPT_ELEMENT, "");

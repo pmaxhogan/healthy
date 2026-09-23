@@ -367,6 +367,60 @@ describe("discoverPortal", () => {
     }
   });
 
+  it("discovers a classic login page whose own clickjacking guard would otherwise look like a redirect", async () => {
+    // `top.location = ...` in this guard's `else` branch fires only when
+    // framed, and `bodyRedirectTarget` never reads it as a redirect at all
+    // (see `SCRIPT_ASSIGN`) -- but the login-form recognition is the belt on
+    // top of that braces: only the login route is stubbed, so following the
+    // guard at all, by any means, would 404 the whole discovery.
+    const stub = routed({
+      "GET /MyChart/Authentication/Login": () =>
+        html(`<!doctype html><html><head><script>
+          if (self === top) {
+            // not framed; nothing to do
+          } else {
+            top.location = "/MyChart/Home/LogOut";
+          }
+        </script></head><body>
+          <form action="/MyChart/Authentication/Login/DoLogin" method="post">
+            <input type="hidden" name="__RequestVerificationToken" value="${TOKEN}" />
+            <input type="text" name="LoginIdentifier" value="" />
+            <input type="password" name="Password" value="" />
+          </form>
+        </body></html>`),
+    });
+
+    await expect(discoverPortal(HOST, deps(stub))).resolves.toStrictEqual({
+      baseUrl: HOST,
+      mountPath: "/MyChart/",
+      usernameField: "LoginIdentifier",
+      antiforgeryFieldName: "__RequestVerificationToken",
+      flavor: "classic",
+    });
+    expect(stub.calls).toHaveLength(1);
+  });
+
+  it("recognises the login page before following an unrelated same-origin location.replace on it", async () => {
+    const stub = routed({
+      "GET /MyChart/Authentication/Login": () =>
+        html(`<!doctype html><html><head><script>
+          if (window.someUnrelatedFlag) location.replace("/MyChart/somewhere-else");
+        </script></head><body>
+          <form action="/MyChart/Authentication/Login/DoLogin" method="post">
+            <input type="hidden" name="__RequestVerificationToken" value="${TOKEN}" />
+            <input type="text" name="LoginIdentifier" value="" />
+            <input type="password" name="Password" value="" />
+          </form>
+        </body></html>`),
+    });
+
+    await expect(discoverPortal(HOST, deps(stub))).resolves.toMatchObject({
+      mountPath: "/MyChart/",
+      usernameField: "LoginIdentifier",
+    });
+    expect(stub.calls).toHaveLength(1);
+  });
+
   it("probes only the login page, with a browser-shaped request", async () => {
     const stub = routed({
       [`GET /MyChart/Authentication/Login`]: () => html(loginPageNew(TOKEN)),

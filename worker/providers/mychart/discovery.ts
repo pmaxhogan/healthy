@@ -159,6 +159,27 @@ function usernameFieldOf(fields: ReadonlyMap<string, string>): UsernameField | n
   return null;
 }
 
+/**
+ * True when a landed page is a classic login form this client can drive: a
+ * password field, a recognised username field, and an antiforgery token to
+ * echo back.
+ *
+ * Passed as a `recognizeLanding` hook next to `isOpenIdHandoff`, for the same
+ * reason that one is: a classic login page can carry a body-level redirect of
+ * its own that must not be followed once the page is already known to be the
+ * login form -- most notably a clickjacking guard's `else` branch, an
+ * unconditional `top.location = "..."` that `bodyRedirectTarget` never reads
+ * as a redirect in the first place (see `SCRIPT_ASSIGN` in `html.ts`), but
+ * also anything else on the page that merely looks like a same-origin
+ * `location.replace`. Exported so `client.ts` can pass the same test on its
+ * own page fetches, which land on this exact page mid-session.
+ */
+export function isLoginPage(landed: { body: string }): boolean {
+  const fields = inputFields(landed.body);
+  const hasCredentialFields = fields.has(FIELDS.password) && usernameFieldOf(fields) !== null;
+  return hasCredentialFields && findAntiforgeryField(landed.body, ANTIFORGERY_FIELD_NAMES) !== null;
+}
+
 interface Probe {
   endpoint: PortalEndpoint | null;
   /** Why this candidate was not it. Only read when every candidate failed. */
@@ -178,11 +199,13 @@ async function probe(mount: string, baseUrl: string, deps: DiscoveryDeps): Promi
     endpoint: "Login",
     accept: "html",
     followBodyRedirects: true,
-    // Recognise the OpenID handoff stub before any further body-level hop is
-    // considered: the stub itself can carry a body redirect (a no-JS fallback,
-    // or something unrelated), and following it blind would land past the one
-    // page whose markers say which flavour this deployment is.
-    recognizeLanding: isOpenIdHandoff,
+    // Recognise the OpenID handoff stub, or a classic login form, before any
+    // further body-level hop is considered: either one can carry a body
+    // redirect of its own (a no-JS fallback, an unrelated same-origin
+    // `location.replace`, or a clickjacking guard's frame-busting assignment),
+    // and following it blind would land past the one page that answers the
+    // question discovery is asking.
+    recognizeLanding: (landed) => isOpenIdHandoff(landed) || isLoginPage(landed),
   });
   if (response.status !== 200) return { endpoint: null, reason: "http_error" };
   // Belt and braces over `portalFetch`'s own per-hop rule: the value below is

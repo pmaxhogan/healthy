@@ -111,10 +111,14 @@ export interface PortalRequest {
    * Checked on every hop `followBodyRedirects` would otherwise act on, and it
    * takes priority: a hop this returns `true` for is the final answer even when
    * its body also carries a redirect. Discovery uses this to recognise the
-   * OpenID handoff stub before any further body-level hop is considered -- the
-   * stub can carry a redirect of its own (a no-JS fallback, or something
-   * unrelated) and following it blind would walk straight past the one page
-   * that answers the question discovery is asking.
+   * OpenID handoff stub, or a classic login form, before any further
+   * body-level hop is considered -- either one can carry a redirect of its own
+   * (a no-JS fallback, an unrelated same-origin `location.replace`, or a
+   * clickjacking guard's frame-busting assignment) and following it blind
+   * would walk straight past the one page that answers the question discovery
+   * is asking. The authenticated client (`client.ts`) passes the same login-
+   * form check on its own page fetches, which can land on that exact page
+   * mid-session.
    */
   recognizeLanding?: ((landed: { url: string; body: string }) => boolean) | undefined;
 }

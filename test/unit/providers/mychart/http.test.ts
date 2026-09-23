@@ -160,6 +160,56 @@ describe("portalFetch: where a redirect may go", () => {
     expect(response.body).toBe(body);
     expect(stub.calls).toHaveLength(1);
   });
+
+  it.each([
+    ["bare location", (t: string) => `<script>location = "${t}";</script>`],
+    ["window.location", (t: string) => `<script>window.location = "${t}";</script>`],
+    ["document.location", (t: string) => `<script>document.location = "${t}";</script>`],
+    ["self.location", (t: string) => `<script>self.location = "${t}";</script>`],
+    ["window.location.href", (t: string) => `<script>window.location.href = "${t}";</script>`],
+    ["location.replace(", (t: string) => `<script>location.replace("${t}");</script>`],
+    ["location.assign(", (t: string) => `<script>location.assign("${t}");</script>`],
+  ])("follows a same-origin %s redirect", async (_label, page) => {
+    const stub = stubPortal((call) =>
+      html(call.url.endsWith("/Home") ? page(`${SITE}/Landing`) : "<p>ok</p>"),
+    );
+
+    const response = await portalFetch(deps(stub), {
+      url: `${SITE}/Home`,
+      endpoint: "Home",
+      followBodyRedirects: true,
+    });
+
+    expect(response.url).toBe(`${SITE}/Landing`);
+  });
+
+  it.each([
+    ["top.location", (t: string) => `<script>top.location = "${t}";</script>`],
+    ["parent.location", (t: string) => `<script>parent.location = "${t}";</script>`],
+    ["window.top.location", (t: string) => `<script>window.top.location = "${t}";</script>`],
+    ["window.parent.location", (t: string) => `<script>window.parent.location = "${t}";</script>`],
+    ["top.location.replace(", (t: string) => `<script>top.location.replace("${t}");</script>`],
+  ])(
+    "never follows a %s assignment -- it only fires when the page is framed",
+    async (_label, page) => {
+      // This is the shape of a classic login page's clickjacking guard:
+      // `if (self === top) { ... } else { top.location = "..."; }`. String
+      // scanning cannot know the `else` branch never ran on an un-framed load,
+      // so the one safe rule is to never read any of these as a redirect.
+      const body = page(`${SITE}/elsewhere`);
+      const stub = stubPortal(() => html(body));
+
+      const response = await portalFetch(deps(stub), {
+        url: `${SITE}/Home`,
+        endpoint: "Home",
+        followBodyRedirects: true,
+      });
+
+      expect(response.url).toBe(`${SITE}/Home`);
+      expect(response.body).toBe(body);
+      expect(stub.calls).toHaveLength(1);
+    },
+  );
 });
 
 describe("portalFetch: caller headers on a hop that changed origin", () => {
