@@ -47,6 +47,21 @@ const OTP_EMAIL = [
   "This code expires in 15 minutes.",
 ].join("\r\n");
 
+/**
+ * No `text/plain` part at all -- the shape of the live bug: some portals send
+ * their verification code as HTML-only mail, and `worker/mail/parse.ts` has to
+ * flatten the html to find it.
+ */
+const HTML_ONLY_OTP_EMAIL = [
+  "From: MyChart <noreply@mychart.example.org>",
+  "To: 2fa@healthy.example.test",
+  "Subject: Your MyChart security code",
+  "Content-Type: text/html; charset=utf-8",
+  "",
+  "<html><body><p>Your MyChart verification token is <b>507218</b>. " +
+    "It will expire within 5 minutes.</p></body></html>",
+].join("\r\n");
+
 const GMAIL_VERIFY_EMAIL = [
   "From: Gmail Team <forwarding-noreply@google.com>",
   "To: 2fa@healthy.example.test",
@@ -104,6 +119,29 @@ describe("handleInboundEmail: accepted mail", () => {
       allowlist: [TENANT_DOMAIN, "google.com"],
     });
     expect(claimed?.code).toBe("482913");
+  });
+
+  it("accepts an HTML-only OTP email (no text/plain part) and reads the code out of its markup", async () => {
+    await allowTenantDomain();
+    const { message, rejections } = fakeEmail(HTML_ONLY_OTP_EMAIL, {
+      from: "noreply@mychart.example.org",
+    });
+
+    await run(message);
+
+    expect(rejections).toEqual([]);
+    const repos = testRepos({ dataKey: DATA_KEY });
+    const entries = await repos.mailInbox.listRecent(10);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.kind).toBe("otp");
+
+    const claimed = await repos.mailInbox.takeFreshOtp({
+      since: 0,
+      now: entries[0]?.receivedAt ?? 0,
+      expectedSender: null,
+      allowlist: [TENANT_DOMAIN, "google.com"],
+    });
+    expect(claimed?.code).toBe("507218");
   });
 
   it("gives every kind a TTL, not just an otp", async () => {

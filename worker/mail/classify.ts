@@ -165,8 +165,12 @@ const REDIRECTOR_PARAMS = ["q", "url", "continue"] as const;
  * tempfails and the sender retries it for ever. No real verification email is
  * anywhere near this, and a code that is past it is a code the portal did not
  * send.
+ *
+ * Exported so `worker/mail/parse.ts` can cap how much of an HTML-only
+ * message it flattens to text before `classify` ever sees it, rather than
+ * inventing a second magic number that could drift from this one.
  */
-const MAX_CLASSIFY_CHARS = 65_536;
+export const MAX_CLASSIFY_CHARS = 65_536;
 
 /**
  * Strong OTP keywords, checked in priority order so that a message matching
