@@ -54,9 +54,14 @@ import {
   NO_CACHE_PARAM,
   OLDEST_RENDERED_DATE_PARAM,
   PATHS,
+  RAN_DEVICE_CHECK_QUERY,
+  RECONCILE_FORM,
+  RECONCILE_RESPONSE_KEYS,
   REMEMBER_ME_VALUE,
-  SEND_CODE_VARIANTS,
+  SEND_CODE_FORM,
   USERNAME_FIELD_NAMES,
+  VALIDATE_FORM,
+  VALIDATE_RESPONSE_KEYS,
   XHR_HEADER,
 } from "./wire.ts";
 
@@ -85,9 +90,10 @@ export interface PortalClientDeps {
   /** The cache-buster's randomness. Injected so a test can pin the URL. */
   random?: (() => number) | undefined;
   /**
-   * Mints the envelope's `DeviceId` the first time this jar needs one.
-   * Injected so a test can pin the value; defaults to `crypto.randomUUID()`.
-   * See `DEVICE_ID_EXTRA_KEY` for where the result is persisted.
+   * Mints a device id for the `custom_oidc` strategy, which does generate its
+   * own. The classic client never uses it: its `DeviceId` is issued by the
+   * portal -- see `DEVICE_ID_EXTRA_KEY`. Injected so a test can pin the value;
+   * defaults to `crypto.randomUUID()`.
    */
   generateDeviceId?: (() => string) | undefined;
   maxRedirects?: number | undefined;
@@ -104,9 +110,10 @@ export interface SecondaryValidation {
    */
   sendCode(channel: "email"): Promise<void>;
   /**
-   * Submit a code. `rememberMe` asks the portal to trust this device, which is
-   * what puts the cookie in the jar that lets a later run skip the code
-   * entirely -- so it defaults to true.
+   * Submit a code. `rememberMe` asks the portal to trust this device, and a
+   * success issues the remembered-device id (kept in the jar's extras, see
+   * `DEVICE_ID_EXTRA_KEY`) that a later sign-in presents -- so it defaults to
+   * true. A success then walks the page's own navigation to `Home`.
    */
   validate(code: string, rememberMe?: boolean): Promise<void>;
 }
@@ -244,22 +251,13 @@ function echoedFrom(
   return out;
 }
 
-function echoedFields(html: string, exclude: readonly string[]): Map<string, string> {
-  return echoedFrom(inputFields(html), exclude);
-}
-
 /**
- * The envelope's persisted `DeviceId`: minted once per jar, reused after that.
- *
- * See `DEVICE_ID_EXTRA_KEY`'s own comment in `wire.ts` for why reuse is the
- * right default rather than a fresh id per attempt.
+ * The portal-issued remembered-device id, or `""` before one has been issued --
+ * which is exactly what the page's own script sends on a first sign-in. See
+ * `DEVICE_ID_EXTRA_KEY`.
  */
-function deviceIdFor(jar: CookieJar, generate: () => string): string {
-  const existing = jar.getExtra(DEVICE_ID_EXTRA_KEY);
-  if (existing !== null) return existing;
-  const fresh = generate();
-  jar.setExtra(DEVICE_ID_EXTRA_KEY, fresh);
-  return fresh;
+function storedDeviceId(jar: CookieJar): string {
+  return jar.getExtra(DEVICE_ID_EXTRA_KEY) ?? "";
 }
 
 /** A query-string parameter off an absolute URL, or `""` when it is absent. */
@@ -296,20 +294,44 @@ function looksLikeJson(response: PortalResponse): boolean {
 }
 
 /**
- * True when a `SendCode` attempt looks like it worked.
+ * A JSON object body as a `Map`, or null for anything else.
  *
- * Generous about JSON and about an empty body, because the parameter names
- * are a guess and the response shape for a *refusal* is not documented
- * either: any object that does not explicitly say `success: false` counts,
- * an empty 200 counts, and the caller only moves on to the next variant when
- * one does not. **Not generous about a populated HTML body.** A 200 carrying
- * a page is exactly what re-rendering the delivery-method choice (a variant
- * it did not recognise) or an unrelated shell page looks like, and either one
- * means no code was actually sent -- so a non-empty, non-JSON body counts as
- * accepted only when the page it rendered is the code-entry page itself,
+ * A `Map` for the same reason `echoedFrom` returns one: the keys are the
+ * portal's, not ours.
+ */
+function jsonObject(response: PortalResponse): Map<string, unknown> | null {
+  if (!looksLikeJson(response)) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(response.body);
+  } catch {
+    return null;
+  }
+  return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+    ? new Map(Object.entries(parsed))
+    : null;
+}
+
+/** A non-empty string value off a JSON object, or null. */
+function stringField(object: ReadonlyMap<string, unknown>, key: string): string | null {
+  const value = object.get(key);
+  return typeof value === "string" && value !== "" ? value : null;
+}
+
+/**
+ * True when a `SendCode` POST looks like it worked.
+ *
+ * The captured answer is `{"Success":true}`, and the page's own script treats
+ * anything without a truthy `Success` as a failure. This stays a little more
+ * generous than that -- any object that does not explicitly say `success:
+ * false`, and an empty 200, still count -- because the refusal shape was never
+ * captured. **Not generous about a populated HTML body.** A 200 carrying a page
+ * is what a missed antiforgery header or an unrelated shell page looks like,
+ * and either one means no code was actually sent -- so a non-empty, non-JSON
+ * body counts as accepted only when the page it rendered is a code-entry form,
  * i.e. it carries a `TwoFactorCode` input. Treating any old 200 as success
- * here is the bug this guards: it would report `awaiting_code` for a run that
- * never got a code sent and had nothing for the owner to wait for.
+ * would report `awaiting_code` for a run that never got a code sent and had
+ * nothing for the owner to wait for.
  */
 function sendCodeAccepted(response: PortalResponse): boolean {
   if (response.status >= 400 || bodyMentions(response.body, MARKERS.badCredentials)) return false;
@@ -342,7 +364,6 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
   // eslint-disable-next-line sonarjs/pseudo-random -- this randomness is a cache-buster in a query string, never a secret; the endpoints are documented as taking one.
   const random = deps.random ?? ((): number => Math.random());
   const noCache = (): string => String(Math.floor(random() * 1_000_000_000_000_000));
-  const generateDeviceId = deps.generateDeviceId ?? ((): string => crypto.randomUUID());
   const url = (path: string, query: Record<string, string> = {}): string =>
     mountedUrl(endpoint.baseUrl, endpoint.mountPath, path, query);
 
@@ -467,7 +488,7 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
             // this form. See `LOGIN_INFO` in `wire.ts` for the JSON shape.
             form: {
               [page.name]: page.value,
-              [FIELDS.deviceId]: deviceIdFor(jar, generateDeviceId),
+              [FIELDS.deviceId]: storedDeviceId(jar),
               [FIELDS.forMobile]: queryParam(page.response.url, FIELDS.forMobile),
               [FIELDS.postLoginUrl]: queryParam(page.response.url, FIELDS.postLoginUrl),
               [FIELDS.loginInfo]: JSON.stringify({
@@ -487,64 +508,180 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
     return status;
   };
 
+  /**
+   * The challenge page's token, fetched the way a browser reaches it.
+   *
+   * With `RAN_DEVICE_CHECK_QUERY`: the bare path is a device-check stub, and the
+   * page the portal's own script posts `SendCode` and `Validate` from is the one
+   * that stub navigates to.
+   */
+  const challengeToken = (): ReturnType<typeof tokenPage> =>
+    tokenPage(PATHS.secondaryValidation, "SecondaryValidation", RAN_DEVICE_CHECK_QUERY);
+
+  /**
+   * One of the challenge page's own XHR POSTs: form-urlencoded, the token in a
+   * header rather than the body, and a cache-buster on the URL -- the shape a
+   * capture of the page's script showed for `SendCode`, `Validate` and
+   * `ReconcileWebDevice` alike.
+   */
+  const xhrPost = (
+    path: string,
+    label: string,
+    token: string,
+    form: Record<string, string>,
+  ): Promise<PortalResponse> =>
+    portalFetch(http, {
+      url: url(path, { [NO_CACHE_PARAM]: noCache() }),
+      method: "POST",
+      endpoint: label,
+      accept: "json",
+      headers: { ...XHR_HEADER, [ANTIFORGERY_HEADER]: token },
+      form,
+    });
+
   const sendCode = async (_channel: "email"): Promise<void> => {
-    let attempted = 0;
-    for (const variant of SEND_CODE_VARIANTS) {
-      const page = await tokenPage(PATHS.secondaryValidation, "SecondaryValidation");
-      attempted++;
-      const response = await portalFetch(http, {
-        url: url(PATHS.sendCode),
-        method: "POST",
-        endpoint: "SendCode",
-        accept: "json",
-        headers: { ...XHR_HEADER },
-        form: { ...variant, [page.name]: page.value },
-      });
-      if (sendCodeAccepted(response)) {
-        logger.info("portal.code_requested", { attempts: attempted, status: response.status });
-        return;
-      }
+    const page = await challengeToken();
+    const response = await xhrPost(PATHS.sendCode, "SendCode", page.value, { ...SEND_CODE_FORM });
+    if (sendCodeAccepted(response)) {
+      logger.info("portal.code_requested", { status: response.status });
+      return;
     }
-    // Every documented parameter shape was refused. This is reported as a login
-    // failure rather than a 2FA failure: no code was ever sent, so there is
-    // nothing for the owner to wait for and the sign-in simply did not start.
-    logger.warn("portal.code_request_failed", { attempts: attempted });
+    // Reported as a login failure rather than a 2FA failure: no code was ever
+    // sent, so there is nothing for the owner to wait for and the sign-in
+    // simply did not start.
+    logger.warn("portal.code_request_failed", { status: response.status });
     throw new AppError("portal_login_failed", "the portal would not send a verification code", {
       endpoint: "SendCode",
-      attempts: attempted,
+      status: response.status,
     });
+  };
+
+  /**
+   * GET `Home` (or a hop that ends there) and classify where it landed.
+   *
+   * Shared by the liveness check and by the navigation after a successful
+   * `Validate`, which must end on the same positive evidence.
+   */
+  const fetchHome = async (
+    path: string,
+    label: string,
+    query: Record<string, string> = {},
+  ): Promise<{ response: PortalResponse; landed: SessionLanding }> => {
+    const response = await portalFetch(http, {
+      url: url(path, query),
+      endpoint: label,
+      accept: "html",
+      followBodyRedirects: true,
+      // A dead session lands on the login page, or on the OpenID stub, and
+      // neither one's own script may be read as a redirect to follow further.
+      recognizeLanding: (landed) => isLoginPage(landed) || isOpenIdHandoff(landed),
+    });
+    return { response, landed: sessionLandingOf(response, endpoint.mountPath) };
+  };
+
+  /**
+   * What a signed-in page's own script does on load: reconcile the stored
+   * remembered-device id, and take the portal's answer when it says to.
+   *
+   * Best effort, as the browser's own call is -- fired detached, its failure
+   * shown to nobody. It never fails the sign-in, and it logs only whether the
+   * id changed, never the id.
+   */
+  const reconcileDevice = async (home: PortalResponse): Promise<void> => {
+    const stored = storedDeviceId(jar);
+    const field = findAntiforgeryField(home.body, [
+      endpoint.antiforgeryFieldName,
+      ...ANTIFORGERY_FIELD_NAMES,
+    ]);
+    if (field === null) {
+      logger.warn("portal.device_reconcile_skipped", { reason: "no_antiforgery_token" });
+      return;
+    }
+    try {
+      const response = await xhrPost(PATHS.reconcileWebDevice, "ReconcileWebDevice", field.value, {
+        [RECONCILE_FORM.deviceIdKey]: stored,
+        [RECONCILE_FORM.skipSessionCheckKey]: RECONCILE_FORM.skipSessionCheck,
+      });
+      const answer = jsonObject(response);
+      const issued = answer === null ? null : stringField(answer, RECONCILE_RESPONSE_KEYS.deviceId);
+      const updated =
+        issued !== null &&
+        issued !== stored &&
+        (stored === "" || answer?.get(RECONCILE_RESPONSE_KEYS.forceUpdate) === true);
+      if (updated) jar.setExtra(DEVICE_ID_EXTRA_KEY, issued);
+      logger.info("portal.device_reconciled", {
+        status: response.status,
+        json: answer !== null,
+        updated,
+      });
+    } catch (error) {
+      logger.warn("portal.device_reconcile_failed", {
+        code: error instanceof AppError ? error.code : "unknown",
+      });
+    }
   };
 
   const validate = async (code: string, rememberMe = true): Promise<void> => {
     // A fresh token, deliberately: the one `sendCode` used is spent.
-    const page = await tokenPage(PATHS.secondaryValidation, "SecondaryValidation");
-    const response = await portalFetch(http, {
-      url: url(PATHS.validate),
-      method: "POST",
-      endpoint: "Validate",
-      accept: "html",
-      followBodyRedirects: true,
-      form: {
-        ...Object.fromEntries(
-          echoedFields(page.response.body, [FIELDS.twoFactorCode, FIELDS.rememberMe]),
-        ),
-        [page.name]: page.value,
-        [FIELDS.twoFactorCode]: code,
-        ...(rememberMe && { [FIELDS.rememberMe]: REMEMBER_ME_VALUE }),
-      },
+    const page = await challengeToken();
+    const response = await xhrPost(PATHS.validate, "Validate", page.value, {
+      [FIELDS.twoFactorCode]: code,
+      // Always sent, `""` when not trusting the device: the script never omits it.
+      [FIELDS.rememberMe]: rememberMe ? REMEMBER_ME_VALUE : "",
+      ...VALIDATE_FORM,
+      [FIELDS.deviceId]: storedDeviceId(jar),
     });
 
-    const landing = landingOf(response);
-    if (landing === "signed_in") {
-      logger.info("portal.validated", { status: response.status, rememberMe });
-      return;
+    const answer = jsonObject(response);
+    if (answer === null) {
+      // Not the JSON the page's script expects. A bounce to the login page is
+      // the likeliest reason (a dead session answers with a page); anything
+      // else is still the challenge, and so a refused code.
+      if (landingOf(response) === "login") throw loginFailure(response, "Validate");
+      throw new AppError("portal_2fa_rejected", "the portal rejected the verification code", {
+        endpoint: "Validate",
+        status: response.status,
+      });
     }
-    if (landing === "login") throw loginFailure(response, "Validate");
-    // Still on the challenge page: the code was wrong, stale or already used.
-    throw new AppError("portal_2fa_rejected", "the portal rejected the verification code", {
-      endpoint: "Validate",
+    if (answer.get(VALIDATE_RESPONSE_KEYS.success) !== true) {
+      const details = {
+        endpoint: "Validate",
+        status: response.status,
+        invalidCode: answer.get(VALIDATE_RESPONSE_KEYS.invalidCode) === true,
+      };
+      if (answer.get(VALIDATE_RESPONSE_KEYS.mustLogout) === true) {
+        throw new AppError("portal_login_failed", "the portal ended the sign-in", details);
+      }
+      throw new AppError(
+        "portal_2fa_rejected",
+        "the portal rejected the verification code",
+        details,
+      );
+    }
+
+    // The id that lets a later sign-in be recognised as this device. Stored
+    // whenever the portal issues one: it is the portal's, never ours.
+    const issued = stringField(answer, VALIDATE_RESPONSE_KEYS.rememberDeviceId);
+    if (issued !== null) jar.setExtra(DEVICE_ID_EXTRA_KEY, issued);
+
+    // Where the page's script goes next: a redirect chain ending on Home, with
+    // a cookie set on every hop of it.
+    const home = await fetchHome(PATHS.insideAsp, "InsideAsp");
+    if (home.landed === "login") {
+      if (landingOf(home.response) === "login") throw loginFailure(home.response, "InsideAsp");
+      throw new AppError("portal_2fa_rejected", "the portal is still asking for a code", {
+        endpoint: "InsideAsp",
+        status: home.response.status,
+      });
+    }
+    logger.info("portal.validated", {
       status: response.status,
+      rememberMe,
+      deviceIdIssued: issued !== null,
+      landed: home.landed,
+      hops: home.response.hops,
     });
+    if (home.landed === "home") await reconcileDevice(home.response);
   };
 
   /**
@@ -649,16 +786,9 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
    * allowed to propagate.
    */
   const isSessionAlive = async (): Promise<boolean> => {
-    const response = await portalFetch(http, {
-      url: url(PATHS.home, { [NO_CACHE_PARAM]: noCache() }),
-      endpoint: "Home",
-      accept: "html",
-      followBodyRedirects: true,
-      // A dead session lands on the login page, or on the OpenID stub, and
-      // neither one's own script may be read as a redirect to follow further.
-      recognizeLanding: (landed) => isLoginPage(landed) || isOpenIdHandoff(landed),
+    const { response, landed } = await fetchHome(PATHS.home, "Home", {
+      [NO_CACHE_PARAM]: noCache(),
     });
-    const landed = sessionLandingOf(response, endpoint.mountPath);
     const alive = response.status === 200 && landed === "home";
     logger.info("portal.session_check", {
       endpoint: "Home",

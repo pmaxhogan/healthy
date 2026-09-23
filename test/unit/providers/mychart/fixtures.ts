@@ -249,6 +249,23 @@ export function twoFactorPage(token = TOKEN_2): string {
   </body></html>`;
 }
 
+/**
+ * The challenge page as a classic deployment really serves it: no form at all.
+ *
+ * Mirrors the captured structure only -- a lone antiforgery input, the page
+ * context's `Workflow` value and the controller script that builds the UI. No
+ * `TwoFactorCode` input and no `Validate` action anywhere: the page is recognised
+ * by its path, and its XHRs carry the token in a header.
+ */
+export function codeEntryPage(token = TOKEN_2): string {
+  return `<!doctype html><html><body>
+    <input type="hidden" name="__RequestVerificationToken" value="${token}" />
+    <div id="main"></div>
+    <script src="/MyChart/areas/authentication/scripts/controllers/secondaryvalidationcontroller.min.js"></script>
+    <script>var context = { Workflow: 1 };</script>
+  </body></html>`;
+}
+
 /** The login form re-rendered with a rejection message. */
 export const LOGIN_REJECTED_PAGE = `<!doctype html><html><body>
   <p class="error">The information you entered is incorrect.</p>

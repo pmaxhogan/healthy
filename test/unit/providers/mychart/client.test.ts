@@ -18,6 +18,7 @@ import { DEVICE_ID_EXTRA_KEY } from "../../../../worker/providers/mychart/wire.t
 import {
   CHALLENGE_PAGE,
   CLINIC_ZONE,
+  codeEntryPage,
   HOME_PAGE,
   HOST,
   html,
@@ -87,6 +88,13 @@ async function codeOf(promise: Promise<unknown>): Promise<string> {
 
 function bodyOf(call: PortalCall | undefined): URLSearchParams {
   return new URLSearchParams(call?.body ?? "");
+}
+
+/** A form's field names, sorted, so an exact-shape assertion does not depend on order. */
+function sortedKeys(form: URLSearchParams): string[] {
+  const keys: string[] = [];
+  for (const key of form.keys()) keys.push(key);
+  return keys.toSorted((a, b) => a.localeCompare(b));
 }
 
 function find(stub: PortalFetchStub, method: string, suffix: string): PortalCall | undefined {
@@ -365,8 +373,37 @@ describe("login", () => {
   });
 });
 
+/** Invented stand-ins for the portal-issued remembered-device ids. */
+const ISSUED_DEVICE_ID = "synthetic-remembered-device-0001";
+const ROTATED_DEVICE_ID = "synthetic-remembered-device-0002";
+
+/**
+ * The code step as the capture showed it: the challenge page reached with
+ * `ranDeviceCheck=1`, XHRs answering JSON, then `inside.asp` redirecting
+ * through an intermediate hop to a Home page that carries a token.
+ */
+function validatingPortal(
+  overrides: {
+    validate?: () => Response;
+    reconcile?: () => Response;
+    home?: () => Response;
+  } = {},
+): PortalFetchStub {
+  return routed({
+    "GET /MyChart/Authentication/SecondaryValidation": () => html(codeEntryPage()),
+    "POST /MyChart/Authentication/SecondaryValidation/SendCode": () => json({ Success: true }),
+    "POST /MyChart/Authentication/SecondaryValidation/Validate":
+      overrides.validate ?? (() => json({ Success: true, RememberDeviceId: ISSUED_DEVICE_ID })),
+    "GET /MyChart/inside.asp": () => redirect(`${HOST}/MyChart/InsideAsp/Mode`, ["hop1=a; Path=/"]),
+    "GET /MyChart/InsideAsp/Mode": () => redirect(`${HOST}/MyChart/Home`, ["hop2=b; Path=/"]),
+    "GET /MyChart/Home": overrides.home ?? (() => html(visitsListPage(TOKEN))),
+    "POST /MyChart/Authentication/RememberDevices/ReconcileWebDevice":
+      overrides.reconcile ?? (() => json({ deviceId: ISSUED_DEVICE_ID, forceUpdate: false })),
+  });
+}
+
 describe("login envelope (the classic script's LoginInfo POST)", () => {
-  it("posts exactly the token, a generated DeviceId, empty forMobile/postLoginUrl and base64'd LoginInfo -- never jsenabled or the credentials as siblings", async () => {
+  it("posts exactly the token, an empty DeviceId, empty forMobile/postLoginUrl and base64'd LoginInfo -- never jsenabled or the credentials as siblings", async () => {
     const stub = envelopePortal();
     const portal = createMyChartClient({
       endpoint: ENDPOINT,
@@ -375,14 +412,16 @@ describe("login envelope (the classic script's LoginInfo POST)", () => {
       logger: noopLogger,
       now: () => T0,
       random: () => 0.5,
-      generateDeviceId: () => "device-0001",
+      // Never consulted by the classic client: the portal issues the id.
+      generateDeviceId: () => "never-sent",
     });
 
     await expect(portal.login(CREDENTIALS)).resolves.toBe("signed_in");
 
     const form = bodyOf(find(stub, "POST", "/DoLogin"));
     expect(form.get("__RequestVerificationToken")).toBe(TOKEN);
-    expect(form.get("DeviceId")).toBe("device-0001");
+    // A first sign-in sends the field empty, as the captured browser did.
+    expect(form.get("DeviceId")).toBe("");
     // The page's own URL carried neither, so both are sent empty.
     expect(form.get("forMobile")).toBe("");
     expect(form.get("postLoginUrl")).toBe("");
@@ -431,31 +470,30 @@ describe("login envelope (the classic script's LoginInfo POST)", () => {
     expect(form.get("postLoginUrl")).toBe("/MyChart/Home");
   });
 
-  it("persists the generated DeviceId in the jar and reuses it -- never regenerating -- on a later login", async () => {
+  it("sends the portal-issued device id on a later login, once a Validate has issued one", async () => {
     const jar = new CookieJar({ now: () => T0 });
-    let calls = 0;
-    const generateDeviceId = (): string => {
-      calls++;
-      return `device-${String(calls)}`;
-    };
-    const deps = {
-      endpoint: ENDPOINT,
-      jar,
-      logger: noopLogger,
-      now: () => T0,
-      random: () => 0.5,
-      generateDeviceId,
-    };
 
     const firstStub = envelopePortal();
-    await createMyChartClient({ ...deps, fetchImpl: firstStub.fetchImpl }).login(CREDENTIALS);
-    expect(jar.getExtra(DEVICE_ID_EXTRA_KEY)).toBe("device-1");
+    await client(firstStub, jar).login(CREDENTIALS);
+    expect(bodyOf(find(firstStub, "POST", "/DoLogin")).get("DeviceId")).toBe("");
+    expect(jar.getExtra(DEVICE_ID_EXTRA_KEY)).toBeNull();
+
+    await client(validatingPortal(), jar).secondaryValidation.validate("123456");
+    expect(jar.getExtra(DEVICE_ID_EXTRA_KEY)).toBe(ISSUED_DEVICE_ID);
 
     const secondStub = envelopePortal();
-    await createMyChartClient({ ...deps, fetchImpl: secondStub.fetchImpl }).login(CREDENTIALS);
+    await client(secondStub, jar).login(CREDENTIALS);
+    expect(bodyOf(find(secondStub, "POST", "/DoLogin")).get("DeviceId")).toBe(ISSUED_DEVICE_ID);
+  });
 
-    expect(calls).toBe(1);
-    expect(bodyOf(find(secondStub, "POST", "/DoLogin")).get("DeviceId")).toBe("device-1");
+  it("never sends the id an earlier release minted for itself under the old key", async () => {
+    const jar = new CookieJar({ now: () => T0 });
+    jar.setExtra("classic.deviceId", "self-minted-uuid");
+    const stub = envelopePortal();
+
+    await client(stub, jar).login(CREDENTIALS);
+
+    expect(bodyOf(find(stub, "POST", "/DoLogin")).get("DeviceId")).toBe("");
   });
 });
 
@@ -500,60 +538,48 @@ describe("cookies", () => {
 });
 
 describe("secondaryValidation.sendCode", () => {
-  it("posts the first parameter variant and stops when it is accepted", async () => {
-    const stub = routed({
-      "GET /MyChart/Authentication/SecondaryValidation": () => html(twoFactorPage()),
-      "POST /MyChart/Authentication/SecondaryValidation/SendCode": () => json({ success: true }),
-    });
+  it("posts the captured body as the page's own XHR: token in a header, cache-buster on the URL", async () => {
+    const stub = validatingPortal();
 
     await client(stub).secondaryValidation.sendCode("email");
+
+    // The code-entry page, reached the way the device-check stub sends a browser.
+    const page = find(stub, "GET", "/SecondaryValidation");
+    expect(new URL(page?.url ?? "").searchParams.get("ranDeviceCheck")).toBe("1");
 
     const posts = stub.calls.filter((call) => call.method === "POST");
     expect(posts).toHaveLength(1);
-    const form = bodyOf(posts[0]);
-    expect(form.get("Mode")).toBe("Email");
-    expect(form.get("__RequestVerificationToken")).toBe(TOKEN_2);
-    expect(posts[0]?.headers["x-requested-with"]).toBe("XMLHttpRequest");
+    const post = posts[0];
+    expect(new URL(post?.url ?? "").pathname).toBe(
+      "/MyChart/Authentication/SecondaryValidation/SendCode",
+    );
+    expect(new URL(post?.url ?? "").searchParams.get("noCache")).not.toBeNull();
+    expect(post?.headers["content-type"]).toBe("application/x-www-form-urlencoded");
+    expect(post?.headers["x-requested-with"]).toBe("XMLHttpRequest");
+    expect(post?.headers.__requestverificationtoken).toBe(TOKEN_2);
+    const form = bodyOf(post);
+    expect(sortedKeys(form)).toStrictEqual(["deliveryMethodEmail", "resendCode", "workflow"]);
+    expect(form.get("deliveryMethodEmail")).toBe("true");
+    expect(form.get("resendCode")).toBe("false");
+    expect(form.get("workflow")).toBe("1");
   });
 
-  it("tries the next variant when the portal answers success:false", async () => {
-    let attempt = 0;
-    const stub = stubPortal((call) => {
-      const { pathname } = new URL(call.url);
-      if (pathname.endsWith("/SendCode")) {
-        attempt++;
-        return json({ success: attempt === 1 ? false : true });
-      }
-      return html(twoFactorPage());
-    });
-
-    await client(stub).secondaryValidation.sendCode("email");
-
-    const posts = stub.calls.filter((call) => call.method === "POST");
-    expect(posts).toHaveLength(2);
-    expect(bodyOf(posts[1]).get("DeliveryMethod")).toBe("Email");
-  });
-
-  it("fetches a fresh token for every variant, because each POST spends one", async () => {
-    let attempt = 0;
-    const stub = stubPortal((call) => {
-      const { pathname } = new URL(call.url);
-      if (pathname.endsWith("/SendCode")) {
-        attempt++;
-        return attempt === 1 ? new Response("no", { status: 400 }) : json({ success: true });
-      }
-      return html(twoFactorPage(attempt === 0 ? TOKEN : TOKEN_2));
-    });
-
-    await client(stub).secondaryValidation.sendCode("email");
-
-    const gets = stub.calls.filter((call) => call.method === "GET");
-    expect(gets).toHaveLength(2);
-  });
-
-  it("reports portal_login_failed when every variant is refused", async () => {
+  it("reports portal_login_failed when the portal answers Success:false", async () => {
     const stub = routed({
-      "GET /MyChart/Authentication/SecondaryValidation": () => html(twoFactorPage()),
+      "GET /MyChart/Authentication/SecondaryValidation": () => html(codeEntryPage()),
+      "POST /MyChart/Authentication/SecondaryValidation/SendCode": () => json({ Success: false }),
+    });
+
+    await expect(client(stub).secondaryValidation.sendCode("email")).rejects.toMatchObject({
+      code: "portal_login_failed",
+      details: { endpoint: "SendCode" },
+    });
+    expect(stub.calls.filter((call) => call.method === "POST")).toHaveLength(1);
+  });
+
+  it("reports portal_login_failed for a 400", async () => {
+    const stub = routed({
+      "GET /MyChart/Authentication/SecondaryValidation": () => html(codeEntryPage()),
       "POST /MyChart/Authentication/SecondaryValidation/SendCode": () =>
         new Response("no", { status: 400 }),
     });
@@ -563,9 +589,20 @@ describe("secondaryValidation.sendCode", () => {
     );
   });
 
-  it("still accepts an empty 200 -- some deployments answer SendCode with no body at all", async () => {
+  it("never reads a page served with a 200 as a code having been sent", async () => {
     const stub = routed({
-      "GET /MyChart/Authentication/SecondaryValidation": () => html(twoFactorPage()),
+      "GET /MyChart/Authentication/SecondaryValidation": () => html(codeEntryPage()),
+      "POST /MyChart/Authentication/SecondaryValidation/SendCode": () => html(METHOD_CHOICE_PAGE),
+    });
+
+    await expect(codeOf(client(stub).secondaryValidation.sendCode("email"))).resolves.toBe(
+      "portal_login_failed",
+    );
+  });
+
+  it("still accepts an empty 200 -- the refusal shape was never captured", async () => {
+    const stub = routed({
+      "GET /MyChart/Authentication/SecondaryValidation": () => html(codeEntryPage()),
       "POST /MyChart/Authentication/SecondaryValidation/SendCode": () => new Response(""),
     });
 
@@ -575,83 +612,149 @@ describe("secondaryValidation.sendCode", () => {
   });
 });
 
-describe("secondaryValidation.sendCode on a delivery-method choice page", () => {
-  it("keeps trying variants and never accepts the re-rendered choice page, until it posts the email choice", async () => {
-    const stub = stubPortal((call) => {
-      const { pathname } = new URL(call.url);
-      if (pathname.endsWith("/SendCode")) {
-        const body = new URLSearchParams(call.body ?? "");
-        // Only the email delivery-choice variant is honoured; every earlier
-        // guess re-renders the same choice page, a 200 the fix must not treat
-        // as acceptance.
-        return body.get("SelectedDeliveryMethod") === "Email"
-          ? json({ success: true })
-          : html(METHOD_CHOICE_PAGE);
-      }
-      return html(METHOD_CHOICE_PAGE);
-    });
-
-    await client(stub).secondaryValidation.sendCode("email");
-
-    const posts = stub.calls.filter((call) => call.method === "POST");
-    expect(posts.length).toBeGreaterThan(1);
-    expect(bodyOf(posts.at(-1)).get("SelectedDeliveryMethod")).toBe("Email");
-  });
-
-  it("reports portal_login_failed for SendCode when every attempt only re-renders the choice page", async () => {
-    // No variant is ever honoured here: every SendCode POST gets the same 200
-    // HTML page back, which is not a code-sent confirmation.
-    const stub = routed({
-      "GET /MyChart/Authentication/SecondaryValidation": () => html(METHOD_CHOICE_PAGE),
-      "POST /MyChart/Authentication/SecondaryValidation/SendCode": () => html(METHOD_CHOICE_PAGE),
-    });
-
-    await expect(client(stub).secondaryValidation.sendCode("email")).rejects.toMatchObject({
-      code: "portal_login_failed",
-      details: { endpoint: "SendCode" },
-    });
-  });
-});
-
 describe("secondaryValidation.validate", () => {
-  it("re-fetches the challenge page for a fresh token and asks to be remembered", async () => {
-    const stub = routed({
-      "GET /MyChart/Authentication/SecondaryValidation": () => html(twoFactorPage()),
-      "POST /MyChart/Authentication/SecondaryValidation/Validate": () =>
-        redirect(`${HOST}/MyChart/Home/Index`, ["trust=device-1; Path=/; Max-Age=7776000"]),
-      "GET /MyChart/Home/Index": () => html(HOME_PAGE),
-    });
+  it("posts the captured body as an XHR, with a fresh token in a header", async () => {
+    const stub = validatingPortal();
+
+    await client(stub).secondaryValidation.validate("123456");
+
+    const post = find(stub, "POST", "/Validate");
+    expect(new URL(post?.url ?? "").searchParams.get("noCache")).not.toBeNull();
+    expect(post?.headers["x-requested-with"]).toBe("XMLHttpRequest");
+    expect(post?.headers.__requestverificationtoken).toBe(TOKEN_2);
+    const form = bodyOf(post);
+    expect(sortedKeys(form)).toStrictEqual([
+      "DeviceId",
+      "EnrollDeviceTrackingOnRemember",
+      "IsPostLogin2FA",
+      "isTOTP",
+      "RememberMe",
+      "TwoFactorCode",
+      "Workflow",
+    ]);
+    expect(form.get("TwoFactorCode")).toBe("123456");
+    expect(form.get("RememberMe")).toBe("checked");
+    expect(form.get("IsPostLogin2FA")).toBe("false");
+    expect(form.get("EnrollDeviceTrackingOnRemember")).toBe("false");
+    expect(form.get("Workflow")).toBe("1");
+    expect(form.get("isTOTP")).toBe("false");
+    // Nothing issued yet, so empty -- as the captured first sign-in sent it.
+    expect(form.get("DeviceId")).toBe("");
+  });
+
+  it("sends RememberMe empty, never omitted, when the caller says not to trust the device", async () => {
+    const stub = validatingPortal();
+
+    await client(stub).secondaryValidation.validate("123456", false);
+
+    expect(bodyOf(find(stub, "POST", "/Validate")).get("RememberMe")).toBe("");
+  });
+
+  it("stores the issued device id and sends it on the next Validate", async () => {
+    const jar = new CookieJar({ now: () => T0 });
+
+    await client(validatingPortal(), jar).secondaryValidation.validate("123456");
+    expect(jar.getExtra(DEVICE_ID_EXTRA_KEY)).toBe(ISSUED_DEVICE_ID);
+
+    const second = validatingPortal();
+    await client(second, jar).secondaryValidation.validate("654321");
+    expect(bodyOf(find(second, "POST", "/Validate")).get("DeviceId")).toBe(ISSUED_DEVICE_ID);
+  });
+
+  it("walks inside.asp's redirect chain to Home, keeping every hop's cookie", async () => {
+    const stub = validatingPortal();
     const jar = new CookieJar({ now: () => T0 });
 
     await client(stub, jar).secondaryValidation.validate("123456");
 
-    const form = bodyOf(find(stub, "POST", "/Validate"));
-    expect(form.get("TwoFactorCode")).toBe("123456");
-    expect(form.get("RememberMe")).toBe("checked");
-    expect(form.get("__RequestVerificationToken")).toBe(TOKEN_2);
-    // The trust-this-device cookie is the whole point of RememberMe.
-    expect(jar.has(`${HOST}/MyChart/`, "trust")).toBe(true);
+    const paths = stub.calls.map((call) => `${call.method} ${new URL(call.url).pathname}`);
+    expect(paths).toStrictEqual([
+      "GET /MyChart/Authentication/SecondaryValidation",
+      "POST /MyChart/Authentication/SecondaryValidation/Validate",
+      "GET /MyChart/inside.asp",
+      "GET /MyChart/InsideAsp/Mode",
+      "GET /MyChart/Home",
+      "POST /MyChart/Authentication/RememberDevices/ReconcileWebDevice",
+    ]);
+    expect(find(stub, "GET", "/Home")?.headers.cookie).toBe("hop1=a; hop2=b");
   });
 
-  it("omits RememberMe when the caller says not to trust the device", async () => {
-    const stub = routed({
-      "GET /MyChart/Authentication/SecondaryValidation": () => html(twoFactorPage()),
-      "POST /MyChart/Authentication/SecondaryValidation/Validate": () =>
-        redirect(`${HOST}/MyChart/Home/Index`),
-      "GET /MyChart/Home/Index": () => html(HOME_PAGE),
-    });
+  it("reconciles the device the way a signed-in page's script does", async () => {
+    const stub = validatingPortal();
 
-    await client(stub).secondaryValidation.validate("123456", false);
+    await client(stub).secondaryValidation.validate("123456");
 
-    expect(bodyOf(find(stub, "POST", "/Validate")).get("RememberMe")).toBeNull();
+    const post = find(stub, "POST", "/ReconcileWebDevice");
+    expect(new URL(post?.url ?? "").searchParams.get("noCache")).not.toBeNull();
+    expect(post?.headers["x-requested-with"]).toBe("XMLHttpRequest");
+    // Home's own token, not the challenge page's.
+    expect(post?.headers.__requestverificationtoken).toBe(TOKEN);
+    const form = bodyOf(post);
+    expect(sortedKeys(form)).toStrictEqual(["deviceId", "skipSessionCheck"]);
+    expect(form.get("deviceId")).toBe(ISSUED_DEVICE_ID);
+    expect(form.get("skipSessionCheck")).toBe("false");
   });
 
-  it("reports portal_2fa_rejected when the challenge page comes back again", async () => {
-    const stub = routed({
-      "GET /MyChart/Authentication/SecondaryValidation": () => html(twoFactorPage()),
-      "POST /MyChart/Authentication/SecondaryValidation/Validate": () =>
-        html(twoFactorPage(), { status: 200 }),
+  it("takes the reconciled id when the portal says forceUpdate", async () => {
+    const jar = new CookieJar({ now: () => T0 });
+    const stub = validatingPortal({
+      reconcile: () => json({ deviceId: ROTATED_DEVICE_ID, forceUpdate: true }),
     });
+
+    await client(stub, jar).secondaryValidation.validate("123456");
+
+    expect(jar.getExtra(DEVICE_ID_EXTRA_KEY)).toBe(ROTATED_DEVICE_ID);
+  });
+
+  it("keeps the stored id when the reconciled answer does not force an update", async () => {
+    const jar = new CookieJar({ now: () => T0 });
+    const stub = validatingPortal({
+      reconcile: () => json({ deviceId: ROTATED_DEVICE_ID, forceUpdate: false }),
+    });
+
+    await client(stub, jar).secondaryValidation.validate("123456");
+
+    expect(jar.getExtra(DEVICE_ID_EXTRA_KEY)).toBe(ISSUED_DEVICE_ID);
+  });
+
+  it("does not fail a successful sign-in when the reconcile call fails", async () => {
+    const stub = validatingPortal({ reconcile: () => new Response("boom", { status: 500 }) });
+
+    await expect(client(stub).secondaryValidation.validate("123456")).resolves.toBeUndefined();
+  });
+
+  it("reports portal_2fa_rejected for Success:false with InvalidTwoFactorCode", async () => {
+    const stub = validatingPortal({
+      validate: () => json({ Success: false, InvalidTwoFactorCode: true }),
+    });
+
+    await expect(client(stub).secondaryValidation.validate("000000")).rejects.toMatchObject({
+      code: "portal_2fa_rejected",
+      details: { endpoint: "Validate", invalidCode: true },
+    });
+    expect(find(stub, "GET", "/inside.asp")).toBeUndefined();
+  });
+
+  it("reports portal_login_failed when the portal says the sign-in must start over", async () => {
+    const stub = validatingPortal({ validate: () => json({ Success: false, MustLogout: true }) });
+
+    await expect(codeOf(client(stub).secondaryValidation.validate("000000"))).resolves.toBe(
+      "portal_login_failed",
+    );
+  });
+
+  it("reports portal_2fa_rejected when the chain after a success still ends on the challenge", async () => {
+    const stub = validatingPortal({
+      home: () => redirect(`${HOST}/MyChart/Authentication/SecondaryValidation`),
+    });
+
+    await expect(codeOf(client(stub).secondaryValidation.validate("123456"))).resolves.toBe(
+      "portal_2fa_rejected",
+    );
+  });
+
+  it("reports portal_2fa_rejected when the answer is a page rather than JSON", async () => {
+    const stub = validatingPortal({ validate: () => html(codeEntryPage()) });
 
     await expect(codeOf(client(stub).secondaryValidation.validate("000000"))).resolves.toBe(
       "portal_2fa_rejected",
@@ -660,7 +763,7 @@ describe("secondaryValidation.validate", () => {
 
   it("reports portal_login_failed when it is bounced all the way back to login", async () => {
     const stub = routed({
-      "GET /MyChart/Authentication/SecondaryValidation": () => html(twoFactorPage()),
+      "GET /MyChart/Authentication/SecondaryValidation": () => html(codeEntryPage()),
       "POST /MyChart/Authentication/SecondaryValidation/Validate": () =>
         redirect(`${HOST}/MyChart/Authentication/Login`),
       "GET /MyChart/Authentication/Login": () => html(loginPageNew()),

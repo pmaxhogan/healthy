@@ -73,10 +73,27 @@ export const PATHS = {
   doLogin: "Authentication/Login/DoLogin",
   /** [documented] The challenge page; also where a fresh Validate token comes from. */
   secondaryValidation: "Authentication/SecondaryValidation",
-  /** [documented] Asks the portal to send a code. */
+  /**
+   * [confirmed from capture] Asks the portal to send a code. An XHR, not a form
+   * navigation: see `SEND_CODE_FORM`.
+   */
   sendCode: "Authentication/SecondaryValidation/SendCode",
-  /** [documented] Submits the code. */
+  /**
+   * [confirmed from capture] Submits the code. An XHR answering JSON, not a
+   * redirect: see `VALIDATE_FORM` and `VALIDATE_RESPONSE_KEYS`.
+   */
   validate: "Authentication/SecondaryValidation/Validate",
+  /**
+   * [confirmed from capture] Where the page's own script navigates after a
+   * successful `Validate`. It 302s through an intermediate hop to `Home`, and
+   * each hop sets a cookie, so the chain is walked rather than skipped.
+   */
+  insideAsp: "inside.asp",
+  /**
+   * [confirmed from capture] Called by every signed-in page's own script to
+   * reconcile the remembered-device id. See `RECONCILE_FORM`.
+   */
+  reconcileWebDevice: "Authentication/RememberDevices/ReconcileWebDevice",
   /** [confirmed] The upcoming-visits page, whose HTML carries the token. */
   visitsList: "Visits/VisitsList",
   /** [confirmed] The JSON endpoint. Takes NO body. */
@@ -100,9 +117,12 @@ export const PATHS = {
 export const FIELDS = {
   /** [documented] */
   password: "Password",
-  /** [documented] */
+  /** [confirmed from capture] */
   twoFactorCode: "TwoFactorCode",
-  /** [documented] Sent as the literal string below, not "true". */
+  /**
+   * [confirmed from capture] Always sent: `REMEMBER_ME_VALUE` when trusting the
+   * device, `""` when not -- the page's script never omits it.
+   */
   rememberMe: "RememberMe",
   /**
    * [confirmed] A hidden field a live login page carries, presumably flipped
@@ -111,7 +131,8 @@ export const FIELDS = {
    */
   jsEnabled: "jsenabled",
   /**
-   * [confirmed] The envelope's persisted per-browser device id. See
+   * [confirmed from capture] The remembered-device id, on both `DoLogin` and
+   * `Validate`. Empty until a `Validate` has issued one. See
    * `DEVICE_ID_EXTRA_KEY` for where this client keeps its copy.
    */
   deviceId: "DeviceId",
@@ -155,20 +176,34 @@ export const LOGIN_INFO = {
 } as const;
 
 /**
- * [assumption] Where this client persists the envelope's `DeviceId` between
- * logins, in `CookieJar.extras`.
+ * Where this client persists the remembered-device id between logins, in
+ * `CookieJar.extras`.
  *
- * The script itself reads its copy from `localStorage` -- once per browser,
- * confirmed by a live capture -- which this jar has no equivalent of.
- * `extras` is the nearest thing this client has, and reusing the same value on
- * every login rather than minting a fresh one per attempt is the safer
- * assumption: a device id that changes on every run looks less like a
- * returning browser than one that never does.
+ * [confirmed from capture] The id is **issued by the portal**, not minted by
+ * the browser: a first sign-in sends `DeviceId=""` on both `DoLogin` and
+ * `Validate`, and `Validate`'s success JSON carries it back as
+ * `RememberDeviceId`. The page's script keeps it in `localStorage` and sends it
+ * on every later `DoLogin`, `Validate` and `ReconcileWebDevice`; `extras` is
+ * this client's equivalent.
+ *
+ * Renamed from an earlier `classic.deviceId`, which held a random UUID this
+ * client used to mint itself. The portal never issued that value, so it is
+ * deliberately left unread rather than sent as though it had.
  */
-export const DEVICE_ID_EXTRA_KEY = "classic.deviceId";
+export const DEVICE_ID_EXTRA_KEY = "classic.rememberDeviceId";
 
-/** [documented] What `RememberMe` is set to, as an HTML checkbox would send it. */
+/** [confirmed from capture] What `RememberMe` is set to, as the page's script sends it. */
 export const REMEMBER_ME_VALUE = "checked";
+
+/**
+ * [confirmed from capture] The query the challenge page is fetched with.
+ *
+ * The first GET of `SecondaryValidation` renders only a device-check stub whose
+ * script navigates to itself with this query; the code-entry page -- the one
+ * `SendCode` and `Validate` are posted from -- is the second. Fetching that one
+ * directly is where a browser ends up.
+ */
+export const RAN_DEVICE_CHECK_QUERY = { ranDeviceCheck: "1" } as const;
 
 /**
  * [assumption] What a JS-enabled browser sets `jsenabled` to before submitting
@@ -196,7 +231,8 @@ export const ANTIFORGERY_FIELD_NAMES: readonly string[] = [
 ];
 
 /**
- * [convention] The header the token is repeated in on an AJAX POST.
+ * [convention; confirmed from capture on `SendCode`, `Validate` and
+ * `ReconcileWebDevice`] The header the token is repeated in on an AJAX POST.
  *
  * The JSON endpoints are called by the portal's own scripts, which send the
  * token as a header rather than a form field -- and they must, because
@@ -231,27 +267,70 @@ export const OLDEST_RENDERED_DATE_PARAM = "oldestRenderedDate";
 export const NO_CACHE_PARAM = "noCache";
 
 /**
- * [documented, names guessed] `SendCode` parameter variants, tried in order.
+ * [confirmed from capture] The `SendCode` body, exactly as the page's own
+ * script posts it when the owner picks "email".
  *
- * The research says the parameter names vary per deployment and that a scraper
- * has to try them in sequence; it does not say what they are. These are the
- * shapes an ASP.NET MVC action of this kind takes. **The whole list is a guess**
- * -- the one thing live QA should capture from a real browser session is the
- * body this POST actually carries, and then this array becomes one entry.
+ * An XHR: form-urlencoded, the antiforgery token in `ANTIFORGERY_HEADER` (not
+ * the body), `NO_CACHE_PARAM` on the URL, and a `{"Success":true}` JSON answer.
+ * The delivery-method choice is client-side -- a button that picks which of
+ * `deliveryMethodEmail` / `deliveryMethodSMS` is sent as `true` -- which is why
+ * the earlier guessed variants (`Mode`, `DeliveryMethod`, ...) never matched.
+ * Note the lower-case `workflow` here against `Validate`'s `Workflow`.
  */
-export const SEND_CODE_VARIANTS: readonly Record<string, string>[] = [
-  { Mode: "Email" },
-  { DeliveryMethod: "Email" },
-  { Method: "Email" },
-  { SendMode: "Email" },
-  // [guess] Some deployments show a page asking the owner to choose a delivery
-  // method (email or phone/text) before a code is sent at all, rather than
-  // sending straight to whichever contact method is on file -- see
-  // `MARKERS.deliveryMethodChoice`. This is the field name that choice is
-  // guessed to post under.
-  { SelectedDeliveryMethod: "Email" },
-  {},
-];
+export const SEND_CODE_FORM: Readonly<Record<string, string>> = {
+  deliveryMethodEmail: "true",
+  resendCode: "false",
+  workflow: "1",
+};
+
+/**
+ * [confirmed from capture] `Validate`'s body, less `TwoFactorCode`,
+ * `RememberMe` and `DeviceId`, which are filled in per call.
+ *
+ * Same XHR shape as `SEND_CODE_FORM`. `Workflow` is the page's own context value
+ * (`1` for sign-in, the same value `SendCode` sends); the three flags are what
+ * the captured page's context resolved to for a sign-in with an emailed code.
+ */
+export const VALIDATE_FORM: Readonly<Record<string, string>> = {
+  IsPostLogin2FA: "false",
+  EnrollDeviceTrackingOnRemember: "false",
+  Workflow: "1",
+  isTOTP: "false",
+};
+
+/**
+ * Keys in `Validate`'s JSON answer.
+ *
+ * [confirmed from capture] `Success` and `RememberDeviceId` on a success. The
+ * two failure keys are what the page's own script reads on a refusal; a
+ * refusal itself was not captured.
+ */
+export const VALIDATE_RESPONSE_KEYS = {
+  success: "Success",
+  rememberDeviceId: "RememberDeviceId",
+  invalidCode: "InvalidTwoFactorCode",
+  mustLogout: "MustLogout",
+} as const;
+
+/**
+ * [confirmed from capture] `ReconcileWebDevice`'s body.
+ *
+ * Sent with the stored id and `skipSessionCheck=false`, same XHR shape as
+ * `SEND_CODE_FORM`; answered with `{deviceId, forceUpdate}` (see
+ * `RECONCILE_RESPONSE_KEYS`). The page's script replaces its stored id with the
+ * answer's when `forceUpdate` is set or when it had none.
+ */
+export const RECONCILE_FORM = {
+  deviceIdKey: "deviceId",
+  skipSessionCheckKey: "skipSessionCheck",
+  skipSessionCheck: "false",
+} as const;
+
+/** [confirmed from capture] See `RECONCILE_FORM`. */
+export const RECONCILE_RESPONSE_KEYS = {
+  deviceId: "deviceId",
+  forceUpdate: "forceUpdate",
+} as const;
 
 /**
  * Keys carrying the visit's fields in the `LoadUpcoming` JSON.
@@ -507,10 +586,10 @@ export const MARKERS = {
    * because it is not under `PATHS.secondaryValidation` on every deployment
    * and carries none of `MARKERS.secondaryValidation`'s markers either.
    *
-   * [guess] No captured markup for this page. Matched by the radio/select
-   * field names `SEND_CODE_VARIANTS` already guesses at, paired with the
-   * choice itself, plus a couple of plausible prompts. Live QA against a
-   * captured page should replace these with the exact shape.
+   * [guess] No captured markup for this page: on the captured deployment the
+   * choice is script-built on the challenge page itself (see `SEND_CODE_FORM`),
+   * which is recognised by its path. Kept for a deployment that renders the
+   * choice server-side.
    */
   deliveryMethodChoice: [
     'name="deliverymethod"',
