@@ -30,6 +30,21 @@ function withCookies(...cookies: string[]): Response {
   return new Response(null, { status: 302, headers });
 }
 
+describe("domainMatches: public suffixes", () => {
+  it("refuses a Domain that names a public suffix, however well it matches the host", () => {
+    // `a.b.example.co.uk` really does end in `.co.uk`, so the suffix rule alone
+    // used to accept this -- and the jar would then have sent that cookie to every
+    // unrelated host under the suffix. RFC 6265 §5.3 step 5.
+    expect(domainMatches("a.b.example.co.uk", "co.uk")).toBe(false);
+    expect(domainMatches("portal.example.test", "test")).toBe(false);
+  });
+
+  it("still allows the registrable domain just inside that suffix", () => {
+    expect(domainMatches("a.b.example.co.uk", "example.co.uk")).toBe(true);
+    expect(domainMatches("portal.example.test", "example.test")).toBe(true);
+  });
+});
+
 describe("domainMatches", () => {
   it("accepts an exact match and a dot-boundary suffix", () => {
     expect(domainMatches("a.example.test", "a.example.test")).toBe(true);

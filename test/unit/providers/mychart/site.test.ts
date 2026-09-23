@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isPublicSuffix,
   registrableDomain,
   sameRegistrableSite,
 } from "../../../../worker/providers/mychart/site.ts";
@@ -40,6 +41,22 @@ describe("registrableDomain", () => {
     "treats %s as its own site, with nothing to strip",
     (host) => {
       expect(registrableDomain(host)).toBe(host.toLowerCase());
+    },
+  );
+});
+
+describe("isPublicSuffix", () => {
+  it.each(["test", "uk", "co.uk", "com.au", "localhost", ""])(
+    "reports %s as a suffix nobody registers",
+    (domain) => {
+      expect(isPublicSuffix(domain)).toBe(true);
+    },
+  );
+
+  it.each(["example.test", "example.co.uk", "a.example.test", "portal.example.com.au"])(
+    "reports %s as a registrable name",
+    (domain) => {
+      expect(isPublicSuffix(domain)).toBe(false);
     },
   );
 });

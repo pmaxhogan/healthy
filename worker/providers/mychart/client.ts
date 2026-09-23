@@ -182,12 +182,18 @@ function loginFailure(response: PortalResponse, endpoint: string): AppError {
  * forms carry per-request state beyond the antiforgery token, and dropping it
  * fails in a way indistinguishable from a wrong password. Empty inputs are the
  * boxes the user types into and are supplied by the caller instead.
+ *
+ * A `Map`, not an object literal, for the same reason `visits.ts` uses one: the
+ * keys come from the page's own `<input name=...>` attributes, and that is the one
+ * place untrusted markup would otherwise reach a bare object. Harmless today (the
+ * values are strings, so a `__proto__` assignment is a silent no-op) but it is not
+ * a property worth depending on.
  */
-function echoedFields(html: string, exclude: readonly string[]): Record<string, string> {
-  const out: Record<string, string> = {};
+function echoedFields(html: string, exclude: readonly string[]): Map<string, string> {
+  const out = new Map<string, string>();
   for (const [name, value] of inputFields(html)) {
     if (value === "" || exclude.includes(name)) continue;
-    out[name] = value;
+    out.set(name, value);
   }
   return out;
 }
@@ -306,8 +312,11 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
       endpoint: "DoLogin",
       accept: "html",
       followBodyRedirects: true,
+      // `Object.fromEntries` at the boundary, so the page's own attribute names
+      // only ever live in a Map -- see `echoedFields`. The caller's own fields are
+      // spread after, and so always win.
       form: {
-        ...echoedFields(page.response.body, [usernameField, FIELDS.password]),
+        ...Object.fromEntries(echoedFields(page.response.body, [usernameField, FIELDS.password])),
         [page.name]: page.value,
         [usernameField]: credentials.username,
         [FIELDS.password]: credentials.password,
@@ -359,7 +368,9 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
       accept: "html",
       followBodyRedirects: true,
       form: {
-        ...echoedFields(page.response.body, [FIELDS.twoFactorCode, FIELDS.rememberMe]),
+        ...Object.fromEntries(
+          echoedFields(page.response.body, [FIELDS.twoFactorCode, FIELDS.rememberMe]),
+        ),
         [page.name]: page.value,
         [FIELDS.twoFactorCode]: code,
         ...(rememberMe && { [FIELDS.rememberMe]: REMEMBER_ME_VALUE }),
@@ -438,7 +449,11 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
       ...LOAD_UPCOMING_QUERY,
     });
     const parsed = parseUpcoming(payload, timeZone);
-    logger.info("portal.upcoming", { visits: parsed.visits.length, unparsed: parsed.unparsed });
+    logger.info("portal.upcoming", {
+      visits: parsed.visits.length,
+      unparsed: parsed.unparsed,
+      truncated: parsed.truncated,
+    });
     return parsed.visits;
   };
 

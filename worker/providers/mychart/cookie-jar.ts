@@ -11,6 +11,12 @@
  *    domain-match the host that sent it is refused. Without this, one redirect
  *    hop through a vanity host could plant a cookie that this jar would then
  *    send to a different host -- the jar would become the confused deputy.
+ *  - **Public-suffix rejection (§5.3 step 5).** A `Domain=` that names a public
+ *    suffix is refused too. `a.b.example.co.uk` domain-matches `co.uk`, so the
+ *    rule above alone would let a response set a cookie for every `*.co.uk`
+ *    host. `site.ts` holds the small eTLD+1 heuristic that answers it -- not a
+ *    real public-suffix list, which a Worker has no room for, and this jar only
+ *    ever talks to one known portal.
  *  - **Host-only vs domain cookies (§5.3 step 7).** No `Domain` attribute means
  *    the cookie goes back only to that exact host.
  *  - **Default path (§5.1.4).** The directory of the request path, not "/".
@@ -32,6 +38,8 @@
  * Nothing in this module logs. A cookie value is a credential; the jar's own
  * failures are returned as booleans and the caller decides what to say.
  */
+
+import { isPublicSuffix } from "./site.ts";
 
 /** One stored cookie. Serialised as-is, so the field names are the file format. */
 export interface StoredCookie {
@@ -91,12 +99,21 @@ function parseNameValue(pair: string): { name: string; value: string } | null {
     : { name: pair.slice(0, separator).trim(), value: pair.slice(separator + 1).trim() };
 }
 
-/** §5.1.3, with the IP-address case folded in: an IP only ever matches itself. */
+/**
+ * §5.1.3 plus §5.3 step 5: a domain must be a label-boundary suffix of the host,
+ * and must not be a public suffix.
+ *
+ * The public-suffix half is the one RFC 6265 rule this module's header always
+ * claimed to care about and did not implement: `a.b.example.co.uk` *does* end in
+ * `.co.uk`, so without it a portal response could set a cookie the jar would then
+ * send to every unrelated host under that suffix.
+ */
 export function domainMatches(host: string, domain: string): boolean {
   if (host === domain) return true;
   if (!host.endsWith(`.${domain}`)) return false;
   // An IPv4 literal ends in a digit; "10.0.0.1" must not match domain "0.0.1".
-  return !/^\d+\.\d+\.\d+\.\d+$/u.test(host);
+  const isIpv4 = /^\d+\.\d+\.\d+\.\d+$/u.test(host);
+  return !isIpv4 && !isPublicSuffix(domain);
 }
 
 /** §5.1.4. `/a/b` matches request paths `/a/b`, `/a/b/c`, and `/a/b?x` only. */

@@ -53,10 +53,12 @@ import { buildEventBody } from "../google/calendar.ts";
 import { isAppError } from "../lib/errors.ts";
 import { errorFields } from "../lib/log.ts";
 import { fromIso, toIso } from "../lib/time.ts";
+import { MAX_PARSED_VISITS } from "../providers/mychart/index.ts";
 
 import { resolveReconnectAlert } from "./alerts.ts";
 import { buildCalendarModel, ghostModel } from "./mapping.ts";
 import { planChanges } from "./plan.ts";
+import { SIGN_IN_BUSY_CODE, acquirePortalSignIn, releasePortalSignIn } from "./portal-gate.ts";
 import {
   DEDUPE_WINDOW_SECONDS,
   csnOfEncounterId,
@@ -183,6 +185,17 @@ async function syncPortalProvider(input: PortalPassInput, providerId: string): P
   await repos.portalAccounts.saveCookieJar(providerId, session.client.jar.serialise());
   input.state.summary.portalVisits += visits.length;
   ctx.log.info("portal.upcoming", { providerId, visits: visits.length });
+  // The parse stops at `MAX_PARSED_VISITS` (see `visits.ts`), so a malicious or
+  // broken payload cannot drive an unbounded number of calendar inserts into the
+  // owner's primary calendar. Reported as a warning code rather than swallowed,
+  // because "your schedule was truncated" is something the Runs page has to say.
+  // A real schedule that happens to be exactly at the cap reads as truncated too,
+  // which is the right way round to be wrong about it.
+  if (visits.length >= MAX_PARSED_VISITS) {
+    ctx.log.warn("portal.visits_truncated", { providerId, visits: visits.length });
+    input.state.warningCodes.add("portal_visits_truncated");
+    input.state.summary.warnings += 1;
+  }
 
   const provider = await repos.providers.get(providerId);
   if (provider === null) return;
@@ -275,7 +288,21 @@ async function ensureSession(
     return null;
   }
 
-  const outcome = await signInAndWait(ctx, providerId, deps, waitSeconds);
+  // The same gate the admin button takes, so the two drivers cannot overlap: two
+  // sign-ins can each pass the attempt check above before either increments it,
+  // and the second `SendCode` invalidates the code the first is waiting for. See
+  // `portal-gate.ts`.
+  if (!(await acquirePortalSignIn(ctx, providerId, "cron"))) {
+    ctx.log.info("portal.signin_busy", { providerId });
+    input.state.summary.portalErrors.push(SIGN_IN_BUSY_CODE);
+    return null;
+  }
+  let outcome;
+  try {
+    outcome = await signInAndWait(ctx, providerId, deps, waitSeconds);
+  } finally {
+    await releasePortalSignIn(ctx, providerId);
+  }
   if (outcome.phase !== "signed_in") {
     input.state.summary.portalErrors.push(outcome.code ?? "internal");
     return null;

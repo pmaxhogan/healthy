@@ -48,7 +48,11 @@ saying which and why rather than leaving it to be inferred:
   drop them and are written empty.
 - The two Durable Objects (`FULL_REFRESH`, `PORTAL_SIGNIN`) hold a provider
   id, a step name, counts and stable codes. Never a credential, never an
-  emailed code, never a byte of a portal's HTML.
+  emailed code, never a byte of a portal's HTML. `PORTAL_SIGNIN` additionally
+  holds the sign-in gate: one lock per provider that both the admin button and
+  the hourly cron take, so two sign-ins cannot each pass the daily attempt check
+  before either increments it (and so the second `SendCode` cannot invalidate the
+  code the first is waiting for).
 
 **Encryption at rest is applied by the application, not just by the platform.**
 Every sensitive column is sealed before it reaches D1 as

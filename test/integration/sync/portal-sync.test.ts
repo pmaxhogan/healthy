@@ -16,7 +16,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { setSetting } from "../../../worker/db/settings.ts";
 import { AppError } from "../../../worker/lib/errors.ts";
+import { MAX_PARSED_VISITS } from "../../../worker/providers/mychart/index.ts";
 import { runCalendarSync } from "../../../worker/sync/calendar-sync.ts";
+import { acquirePortalSignIn, releasePortalSignIn } from "../../../worker/sync/portal-gate.ts";
 import {
   OTP_SENDER_DOMAIN,
   PORTAL_ORIGIN,
@@ -391,6 +393,63 @@ describe("portal sessions", () => {
     await expect(repos.portalAccounts.getOtpSender(provider.providerId)).resolves.toBe(
       OTP_SENDER_DOMAIN,
     );
+  });
+
+  it("does not sign in at all while another driver holds the gate", async () => {
+    // Two sign-ins for one provider can each pass the attempt check before either
+    // increments it -- overshooting the daily budget that exists to keep the
+    // portal from locking the account -- and the second `SendCode` invalidates the
+    // code the first is waiting for. The admin button's Durable Object is the one
+    // gate, and the hourly pass takes it too.
+    const fix = await fixture({
+      portal: { alive: false, loginStatus: "awaiting_code", visits: [] },
+    });
+    await seedOtp(fix.ctx, "424242");
+    const held = await acquirePortalSignIn(fix.ctx, fix.provider.providerId, "test");
+    expect(held).toBe(true);
+
+    try {
+      const summary = await portalRun(fix);
+
+      expect(fix.portal.calls.logins).toBe(0);
+      expect(fix.portal.calls.sendCodes).toBe(0);
+      expect(summary.portalErrors).toStrictEqual(["portal_signin_busy"]);
+      // No attempt spent either: the budget is for sign-ins actually made.
+      const account = await syncRepos(fix.ctx).portalAccounts.get(fix.provider.providerId);
+      expect(account?.login_attempts_today).toBe(0);
+    } finally {
+      await releasePortalSignIn(fix.ctx, fix.provider.providerId);
+    }
+  });
+
+  it("signs in again once the gate is released", async () => {
+    const fix = await fixture({
+      portal: { alive: false, loginStatus: "awaiting_code", visits: [] },
+    });
+    await seedOtp(fix.ctx, "424242");
+    await acquirePortalSignIn(fix.ctx, fix.provider.providerId, "test");
+    await releasePortalSignIn(fix.ctx, fix.provider.providerId);
+
+    await portalRun(fix);
+
+    expect(fix.portal.submitted).toStrictEqual(["424242"]);
+  });
+
+  it("reports a payload at the visit cap as truncated rather than silently trimming it", async () => {
+    // The candidates come straight from the portal's own response, so without a
+    // cap a broken or malicious payload drives an unbounded number of inserts into
+    // the owner's primary calendar.
+    const visits = Array.from({ length: MAX_PARSED_VISITS }, (_, index) =>
+      portalVisit({ csn: `csn-${String(index)}` }),
+    );
+    const fix = await fixture({ portal: { visits } });
+
+    const summary = await portalRun(fix);
+
+    expect(summary.portalVisits).toBe(MAX_PARSED_VISITS);
+    expect(summary.warnings).toBeGreaterThanOrEqual(1);
+    const runs = await syncRepos(fix.ctx).runLog.listRecent({ limit: 1 });
+    expect(runs[0]?.summary.warnings).toContain("portal_visits_truncated");
   });
 
   it("passes the shell API base and the MFA contact to the adapter when signing in", async () => {

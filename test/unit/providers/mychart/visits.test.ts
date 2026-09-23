@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  MAX_PARSED_VISITS,
   formatAddress,
   isVideoVisit,
   parsePast,
@@ -36,6 +37,14 @@ function byCsn(visits: readonly PortalVisit[], csn: string): PortalVisit {
   const found = visits.find((visit) => visit.csn === csn);
   if (found === undefined) throw new Error(`no visit ${csn}`);
   return found;
+}
+
+/** `count` minimal upcoming rows, each with its own CSN. */
+function manyRows(count: number): Record<string, unknown>[] {
+  return Array.from({ length: count }, (_, index) => ({
+    CSN: `csn-${String(index)}`,
+    Instant: `/Date(${String(VISIT_INSTANT_MS)})/`,
+  }));
 }
 
 function codeOf(run: () => unknown): string {
@@ -212,7 +221,23 @@ describe("parseUpcoming", () => {
       OWNER_ZONE,
     );
 
-    expect(parsed).toStrictEqual({ visits: [], unparsed: 0 });
+    expect(parsed).toStrictEqual({ visits: [], unparsed: 0, truncated: false });
+  });
+
+  it("stops at the cap and says so, so a huge payload cannot flood the calendar", () => {
+    // `MAX_PORTAL_ROWS` bounds only the rows read back from D1; these come
+    // straight from the portal's own response, and without a cap a broken or
+    // malicious payload drives an unbounded number of calendar inserts.
+    const parsed = parseUpcoming({ NextNDaysVisits: manyRows(MAX_PARSED_VISITS + 50) }, OWNER_ZONE);
+
+    expect(parsed.visits).toHaveLength(MAX_PARSED_VISITS);
+    expect(parsed.truncated).toBe(true);
+  });
+
+  it("does not report truncation for a payload that fits", () => {
+    const parsed = parseUpcoming({ NextNDaysVisits: manyRows(3) }, OWNER_ZONE);
+
+    expect(parsed.truncated).toBe(false);
   });
 
   it("fails rather than reporting an empty day when nothing in a full payload parses", () => {
@@ -366,6 +391,7 @@ describe("parsePast", () => {
     expect(parsePast({ List: { [ORG_TOKEN]: { List: [] } } }, OWNER_ZONE)).toStrictEqual({
       visits: [],
       unparsed: 0,
+      truncated: false,
     });
   });
 

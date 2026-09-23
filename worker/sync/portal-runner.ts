@@ -17,7 +17,7 @@
  * sleeps, every one gets a fresh deadline, and the job is durable, so a step that
  * dies is a failed job rather than a lost one.
  *
- * ### One object per provider, and two storage keys
+ * ### One object per provider, and three storage keys
  *
  * The object is addressed by provider id, so two health systems sign in
  * independently and pressing the button twice for one of them is a no-op rather
@@ -28,6 +28,9 @@
  *   - `phase` is what the admin UI polls, and **outlives** the job: after a
  *     sign-in the owner is still looking at the card, and "it failed, with this
  *     code" has to survive long enough to be read.
+ *   - `signin_lock` is the gate **every** sign-in takes, including the hourly
+ *     cron's inline one, which used to be outside all of this. See
+ *     `portal-gate.ts` for why that mattered and why the lock lives here.
  *
  * Only a real sign-in moves `phase`. A manual portal sync whose session is
  * already alive does not touch it -- its progress is a `run_log` row, which is
@@ -77,6 +80,25 @@ import type { PortalSignInPhase, PortalSignInState } from "@shared/types.ts";
 const JOB_KEY = "job";
 /** The last sign-in's progress, which outlives the job. See the header. */
 const PHASE_KEY = "phase";
+/** The gate every sign-in takes, this object's job and the cron's alike. */
+const LOCK_KEY = "signin_lock";
+
+/**
+ * When a held gate is treated as abandoned.
+ *
+ * The same figure as `JOB_STALE_SECONDS` on purpose: a gate is held either by a
+ * job in this object (which expires on the same clock) or by a cron pass whose
+ * longest possible sign-in is the same four-minute code wait plus a sync. It
+ * exists only so a driver that died cannot wedge a provider for ever.
+ */
+const LOCK_STALE_SECONDS = 15 * 60;
+
+/** Who holds the gate, and since when. */
+interface SignInLock {
+  heldAt: number;
+  /** "job" for this object's own alarm loop, "cron" for the hourly pass. */
+  holder: string;
+}
 
 /** How many times the alarm looks for the emailed code before giving up. */
 const MAX_POLLS = Math.ceil(OTP_WAIT_SECONDS / OTP_POLL_SECONDS);
@@ -123,6 +145,31 @@ export interface PortalJobStarted {
 }
 
 export class PortalSignInRunner extends DurableObject<Env> {
+  /**
+   * Take the gate, or report that someone else has it.
+   *
+   * A Durable Object is single-threaded per id, so the read-then-write below is
+   * atomic with respect to every other caller for this provider -- which is the
+   * whole reason the lock lives here rather than in D1.
+   */
+  private async takeLock(holder: string): Promise<boolean> {
+    const existing = await this.ctx.storage.get<SignInLock>(LOCK_KEY);
+    if (existing !== undefined && nowSeconds() - existing.heldAt < LOCK_STALE_SECONDS) {
+      return false;
+    }
+    await this.ctx.storage.put<SignInLock>(LOCK_KEY, { heldAt: nowSeconds(), holder });
+    return true;
+  }
+
+  /** Re-stamp the gate this object already holds, so a long job does not look stale. */
+  private async holdLock(): Promise<void> {
+    await this.ctx.storage.put<SignInLock>(LOCK_KEY, { heldAt: nowSeconds(), holder: "job" });
+  }
+
+  private async dropLock(): Promise<void> {
+    await this.ctx.storage.delete(LOCK_KEY);
+  }
+
   private async step(dbCtx: Ctx, job: PortalJob, deps: PortalDeps): Promise<StepResult> {
     switch (job.step) {
       case "begin": {
@@ -239,6 +286,16 @@ export class PortalSignInRunner extends DurableObject<Env> {
     });
   }
 
+  /** RPC: the hourly cron takes the same gate the button does. See `portal-gate.ts`. */
+  async acquireSignIn(holder: string): Promise<boolean> {
+    return this.takeLock(holder);
+  }
+
+  /** RPC: the cron's `finally`. */
+  async releaseSignIn(): Promise<void> {
+    await this.dropLock();
+  }
+
   /**
    * Queue a job for this object's provider and return.
    *
@@ -252,6 +309,11 @@ export class PortalSignInRunner extends DurableObject<Env> {
     if (existing !== undefined && nowSeconds() - existing.startedAt < JOB_STALE_SECONDS) {
       return { started: false };
     }
+    // The gate, not just the job key: an hourly pass may be signing in right now,
+    // and two sign-ins can each pass the attempt check before either increments
+    // it. `started: false` is the same answer the owner already gets for a double
+    // press, and the card is already written to poll rather than assume.
+    if (!(await this.takeLock("job"))) return { started: false };
     await this.ctx.storage.put<PortalJob>(JOB_KEY, {
       providerId,
       kind,
@@ -283,9 +345,16 @@ export class PortalSignInRunner extends DurableObject<Env> {
       const result = await this.step(dbCtx, job, deps);
       if (result.job === null) {
         await this.ctx.storage.delete(JOB_KEY);
+        // The gate is the job's for exactly as long as the job: released here, so
+        // the next hourly pass is free to sign in rather than waiting out a
+        // staleness timeout.
+        await this.dropLock();
         return;
       }
       await this.ctx.storage.put<PortalJob>(JOB_KEY, result.job);
+      // Re-stamped on every step: a four-minute code wait must not read as an
+      // abandoned gate to the cron pass that starts in the middle of it.
+      await this.holdLock();
       await this.ctx.storage.setAlarm(Date.now() + result.delayMs);
     } catch (error) {
       log.warn("portal.job_failed", { providerId: job.providerId, ...errorFields(error) });
@@ -293,6 +362,7 @@ export class PortalSignInRunner extends DurableObject<Env> {
       // The job is over either way: a retried alarm would spend a second login
       // attempt on one button press. See the header.
       await this.ctx.storage.delete(JOB_KEY);
+      await this.dropLock();
     }
   }
 }

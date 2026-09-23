@@ -31,6 +31,7 @@ export type { PortalClient, PortalCredentials, SecondaryValidation } from "./cli
 export type { PortalCustomSettings } from "./custom-oidc/client.ts";
 export type { PortalEndpoint } from "./discovery.ts";
 export type { PortalVisit } from "./visits.ts";
+export { MAX_PARSED_VISITS } from "./visits.ts";
 export type { PortalFlavor, PortalVisitStatus, UsernameField } from "./wire.ts";
 export { CookieJar } from "./cookie-jar.ts";
 

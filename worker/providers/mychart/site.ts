@@ -92,6 +92,32 @@ export function registrableDomain(host: string): string {
 }
 
 /**
+ * Whether `domain` is a public suffix rather than a name someone registers.
+ *
+ * True for a bare TLD or single label (`test`, `localhost`) and for a known
+ * second-level suffix (`co.uk`). False for anything with a registrable name in
+ * front of one (`example.co.uk`, `a.example.test`).
+ *
+ * The cookie jar uses it to refuse a `Domain=` attribute that names a suffix: a
+ * response from `a.b.example.co.uk` may legally set `Domain=example.co.uk`, but
+ * `Domain=co.uk` would make the jar send that cookie to every sibling host under
+ * it. RFC 6265 §5.3 step 5.
+ *
+ * What it does not know is a suffix outside `SECOND_LEVEL_SUFFIXES` -- a real
+ * public-suffix list knows hundreds, including ones like `github.io` that look
+ * like ordinary domains. For an unknown one this answers false, i.e. accepts a
+ * cookie a browser would refuse. That is the unsafe direction, and it is the
+ * trade-off the module comment describes: this jar only ever talks to the one
+ * portal host the owner confirmed, and the rule above the unknown-suffix case
+ * (the domain must be a label-boundary suffix of the host that sent it) is what
+ * carries the weight.
+ */
+export function isPublicSuffix(domain: string): boolean {
+  const name = domain.trim().toLowerCase().replace(/\.$/u, "");
+  return name === "" || name.split(".").length < 2 || SECOND_LEVEL_SUFFIXES.has(name);
+}
+
+/**
  * Whether two absolute URLs are on the same registrable domain.
  *
  * False when either is not a parseable URL, which is the safe answer: the
