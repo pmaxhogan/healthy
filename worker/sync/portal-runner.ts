@@ -11,15 +11,15 @@
  * sign-in started that way would silently stop in the middle, having already
  * spent an attempt and asked the portal for a code nobody will ever submit.
  *
- * So `POST /api/providers/:id/portal/sign-in` stores a job here and answers 202.
+ * So `POST /api/health-systems/:id/portal/sign-in` stores a job here and answers 202.
  * Each alarm invocation does **one** step -- log in, or look once for the code --
  * and re-arms ten seconds later while there is more to do. No invocation ever
  * sleeps, every one gets a fresh deadline, and the job is durable, so a step that
  * dies is a failed job rather than a lost one.
  *
- * ### One object per provider, and three storage keys
+ * ### One object per health system, and three storage keys
  *
- * The object is addressed by provider id, so two health systems sign in
+ * The object is addressed by health system id, so two health systems sign in
  * independently and pressing the button twice for one of them is a no-op rather
  * than two interleaved sign-ins that would burn the daily attempt budget between
  * them.
@@ -45,7 +45,7 @@
  * counter for the same button press. So every step is wrapped, and any throw
  * becomes `phase: "failed"` with a stable code and a job that is over.
  *
- * Stored state is a provider id, a step name, counts and stable codes. Never the
+ * Stored state is a health system id, a step name, counts and stable codes. Never the
  * emailed code, never a credential, never anything from the portal's HTML.
  */
 
@@ -77,7 +77,7 @@ import type { Ctx } from "../db/client.ts";
 import type { Env } from "../env.ts";
 import type { PortalSignInPhase, PortalSignInState } from "@shared/types.ts";
 
-/** The job in flight. Absent means nothing is running for this provider. */
+/** The job in flight. Absent means nothing is running for this health system. */
 const JOB_KEY = "job";
 /** The last sign-in's progress, which outlives the job. See the header. */
 const PHASE_KEY = "phase";
@@ -90,7 +90,7 @@ const LOCK_KEY = "signin_lock";
  * The same figure as `JOB_STALE_SECONDS` on purpose: a gate is held either by a
  * job in this object (which expires on the same clock) or by a cron pass whose
  * longest possible sign-in is the same four-minute code wait plus a sync. It
- * exists only so a driver that died cannot wedge a provider for ever.
+ * exists only so a driver that died cannot wedge a health system for ever.
  */
 const LOCK_STALE_SECONDS = 15 * 60;
 
@@ -123,7 +123,7 @@ type PortalJobKind = "sign_in" | "sync";
 type PortalJobStep = "begin" | "poll" | "sync";
 
 interface PortalJob {
-  providerId: string;
+  healthSystemId: string;
   kind: PortalJobKind;
   step: PortalJobStep;
   /** Unix second `SendCode` was called: the floor for claiming a code. */
@@ -150,7 +150,7 @@ export class PortalSignInRunner extends DurableObject<Env> {
    * Take the gate, or report that someone else has it.
    *
    * A Durable Object is single-threaded per id, so the read-then-write below is
-   * atomic with respect to every other caller for this provider -- which is the
+   * atomic with respect to every other caller for this health system -- which is the
    * whole reason the lock lives here rather than in D1.
    */
   private async takeLock(holder: string): Promise<boolean> {
@@ -184,7 +184,7 @@ export class PortalSignInRunner extends DurableObject<Env> {
         // live by the time this step is reached, and this invocation must not be the
         // one that starts waiting for an email.
         await runCalendarSync(dbCtx, {
-          providerIds: [job.providerId],
+          healthSystemIds: [job.healthSystemId],
           trigger: "manual",
           portalOnly: true,
           // Zero, not the default: the session is live by the time this step runs,
@@ -200,49 +200,49 @@ export class PortalSignInRunner extends DurableObject<Env> {
   /** Log in, and ask for a code if the portal wants one. */
   private async begin(dbCtx: Ctx, job: PortalJob, deps: PortalDeps): Promise<StepResult> {
     if (job.kind === "sync") {
-      const opened = await openPortalSession(dbCtx, job.providerId, deps);
+      const opened = await openPortalSession(dbCtx, job.healthSystemId, deps);
       const alive = await opened.session.client.isSessionAlive();
       // Whatever the probe was answered with: a refreshed cookie on it must reach
       // the sync step, which is a different invocation with a different client.
-      await persistQuietly(dbCtx, job.providerId, opened.session);
+      await persistQuietly(dbCtx, job.healthSystemId, opened.session);
       if (alive) {
         // Nothing to sign in to, so the phase is left exactly as it was.
         return { job: { ...job, step: "sync" }, delayMs: 0 };
       }
-      const age = await recentSessionAge(dbCtx, job.providerId);
+      const age = await recentSessionAge(dbCtx, job.healthSystemId);
       if (age !== null) {
         // A session proven good minutes ago that is already "dead" is not one a
         // fresh sign-in would fix -- see `RECENT_SESSION_SECONDS`. The sync step
         // still runs, with no code wait, so the run records
         // `portal_session_expired` for the owner and no attempt is spent.
         dbCtx.log.warn("portal.signin.skipped_recent", {
-          providerId: job.providerId,
+          healthSystemId: job.healthSystemId,
           ageSeconds: age,
         });
         return { job: { ...job, step: "sync" }, delayMs: 0 };
       }
     }
 
-    const left = await attemptsLeft(dbCtx, job.providerId);
+    const left = await attemptsLeft(dbCtx, job.healthSystemId);
     if (left <= 0) {
       return await this.finish(dbCtx, job, "portal_attempts_exhausted", deps);
     }
 
     await this.setPhase(job, "logging_in", null);
-    const opened = await openPortalSession(dbCtx, job.providerId, deps);
+    const opened = await openPortalSession(dbCtx, job.healthSystemId, deps);
     const { sendCodeAt } = await startSignIn(
       dbCtx,
-      job.providerId,
+      job.healthSystemId,
       opened.session,
       opened.credentials,
     );
     // Whatever the login left in the jar, including the challenge page's cookies:
     // the next step is a different invocation with a different client, and it can
     // only see what was sealed here.
-    await persistQuietly(dbCtx, job.providerId, opened.session);
+    await persistQuietly(dbCtx, job.healthSystemId, opened.session);
 
     if (sendCodeAt === null) {
-      await markSessionActive(dbCtx, job.providerId, opened.session);
+      await markSessionActive(dbCtx, job.healthSystemId, opened.session);
       await this.setPhase(job, "signed_in", null);
       return { job: job.thenSync ? { ...job, step: "sync" } : null, delayMs: 0 };
     }
@@ -256,12 +256,12 @@ export class PortalSignInRunner extends DurableObject<Env> {
   /** Look once for the emailed code, and submit it if it has arrived. */
   private async poll(dbCtx: Ctx, job: PortalJob, deps: PortalDeps): Promise<StepResult> {
     const sendCodeAt = job.sendCodeAt ?? job.startedAt;
-    const claimed = await claimCode(dbCtx, job.providerId, sendCodeAt);
+    const claimed = await claimCode(dbCtx, job.healthSystemId, sendCodeAt);
     if (claimed === null) {
       const polls = job.polls + 1;
       if (polls >= MAX_POLLS) {
         dbCtx.log.warn("portal.signin.code_timeout", {
-          providerId: job.providerId,
+          healthSystemId: job.healthSystemId,
           waitSeconds: OTP_WAIT_SECONDS,
         });
         return await this.finish(dbCtx, job, "portal_2fa_required", deps);
@@ -272,8 +272,8 @@ export class PortalSignInRunner extends DurableObject<Env> {
     await this.setPhase(job, "validating", null);
     // A fresh session, deliberately: this is a new invocation, and the jar the
     // login sealed is the only thing that carries the challenge page's cookies.
-    const opened = await openPortalSession(dbCtx, job.providerId, deps);
-    await completeSignIn(dbCtx, job.providerId, opened.session, claimed);
+    const opened = await openPortalSession(dbCtx, job.healthSystemId, deps);
+    await completeSignIn(dbCtx, job.healthSystemId, opened.session, claimed);
     await this.setPhase(job, "signed_in", null);
     return { job: job.thenSync ? { ...job, step: "sync" } : null, delayMs: 0 };
   }
@@ -285,7 +285,7 @@ export class PortalSignInRunner extends DurableObject<Env> {
     code: string,
     deps: PortalDeps,
   ): Promise<StepResult> {
-    await failSignIn(dbCtx, job.providerId, code, deps);
+    await failSignIn(dbCtx, job.healthSystemId, code, deps);
     await this.setPhase(job, "failed", code);
     return { job: null, delayMs: 0 };
   }
@@ -314,14 +314,14 @@ export class PortalSignInRunner extends DurableObject<Env> {
   }
 
   /**
-   * Queue a job for this object's provider and return.
+   * Queue a job for this object's health system and return.
    *
    * A storage write and an alarm, so the route can await it and still answer 202
    * well inside any deadline. The daily attempt budget is checked by the route --
    * which has somewhere to report a 429 -- and again by the first step, because a
    * job can sit in storage while another run spends the last attempt.
    */
-  async start(providerId: string, kind: PortalJobKind): Promise<PortalJobStarted> {
+  async start(healthSystemId: string, kind: PortalJobKind): Promise<PortalJobStarted> {
     const existing = await this.ctx.storage.get<PortalJob>(JOB_KEY);
     if (existing !== undefined && nowSeconds() - existing.startedAt < JOB_STALE_SECONDS) {
       return { started: false };
@@ -332,7 +332,7 @@ export class PortalSignInRunner extends DurableObject<Env> {
     // press, and the card is already written to poll rather than assume.
     if (!(await this.takeLock("job"))) return { started: false };
     await this.ctx.storage.put<PortalJob>(JOB_KEY, {
-      providerId,
+      healthSystemId,
       kind,
       step: "begin",
       sendCodeAt: null,
@@ -374,7 +374,7 @@ export class PortalSignInRunner extends DurableObject<Env> {
       await this.holdLock();
       await this.ctx.storage.setAlarm(Date.now() + result.delayMs);
     } catch (error) {
-      log.warn("portal.job_failed", { providerId: job.providerId, ...errorFields(error) });
+      log.warn("portal.job_failed", { healthSystemId: job.healthSystemId, ...errorFields(error) });
       await this.finish(dbCtx, job, isAppError(error) ? error.code : "internal", deps);
       // The job is over either way: a retried alarm would spend a second login
       // attempt on one button press. See the header.
@@ -384,21 +384,21 @@ export class PortalSignInRunner extends DurableObject<Env> {
   }
 }
 
-/** The object for one provider. One per provider; see the header. */
-function runnerFor(ctx: Ctx, providerId: string): DurableObjectStub<PortalSignInRunner> {
-  return ctx.env.PORTAL_SIGNIN.getByName(providerId);
+/** The object for one health system. One per health system; see the header. */
+function runnerFor(ctx: Ctx, healthSystemId: string): DurableObjectStub<PortalSignInRunner> {
+  return ctx.env.PORTAL_SIGNIN.getByName(healthSystemId);
 }
 
-/** Queue a sign-in for one provider. Returns as soon as the job is durable. */
+/** Queue a sign-in for one health system. Returns as soon as the job is durable. */
 export async function startPortalSignIn(
   ctx: Ctx,
-  options: { providerId: string },
+  options: { healthSystemId: string },
 ): Promise<PortalJobStarted> {
-  return runnerFor(ctx, options.providerId).start(options.providerId, "sign_in");
+  return runnerFor(ctx, options.healthSystemId).start(options.healthSystemId, "sign_in");
 }
 
 /**
- * Queue a portal sync for one provider.
+ * Queue a portal sync for one health system.
  *
  * Not `afterResponse`: a portal sync may have to re-establish the session, which
  * is minutes of waiting for an emailed code, and a request's `waitUntil` is
@@ -407,15 +407,15 @@ export async function startPortalSignIn(
  */
 export async function startPortalSync(
   ctx: Ctx,
-  options: { providerId: string },
+  options: { healthSystemId: string },
 ): Promise<PortalJobStarted> {
-  return runnerFor(ctx, options.providerId).start(options.providerId, "sync");
+  return runnerFor(ctx, options.healthSystemId).start(options.healthSystemId, "sync");
 }
 
 /** The sign-in progress the admin UI polls for. */
 export async function portalSignInState(
   ctx: Ctx,
-  options: { providerId: string },
+  options: { healthSystemId: string },
 ): Promise<PortalSignInState> {
-  return runnerFor(ctx, options.providerId).state();
+  return runnerFor(ctx, options.healthSystemId).state();
 }

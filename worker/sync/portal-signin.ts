@@ -45,7 +45,7 @@
  * cannot both submit the same code -- the second finds nothing and waits for the
  * next email, which is the correct behaviour rather than a mysterious rejection.
  *
- * **A claim is bound to the provider that asked for the code.** `claimCode`
+ * **A claim is bound to the health system that asked for the code.** `claimCode`
  * passes the account's expected sender domain, and only that sender's rows are
  * eligible; where there is none yet, the sender allowlist stands in, narrowed to
  * a sender on the same site as this account's own `base_url` -- so a second
@@ -55,7 +55,7 @@
  * portal's own sender arriving in the same window, could have a code of their
  * own choosing POSTed to the owner's real health-system account.
  *
- * Log lines carry the provider id, the phase, stable codes and counts. Never a
+ * Log lines carry the health system id, the phase, stable codes and counts. Never a
  * username, never the code, never a byte of portal markup.
  */
 
@@ -100,7 +100,7 @@ export function portalDeps(deps: SyncDeps = {}): PortalDeps {
   return {
     // Bound, not passed by reference: an unbound `fetch` loses its `this` in
     // workerd, which throws "Illegal invocation" the moment anything calls it
-    // as `x.fetchImpl(...)` -- as `worker/providers/mychart/http.ts` does. See
+    // as `x.fetchImpl(...)` -- as `worker/health-systems/mychart/http.ts` does. See
     // `worker/api/ports.ts`'s `defaults()`, which has the same fix already.
     fetchImpl: deps.fetchImpl ?? ((input, init) => fetch(input, init)),
     sleep: deps.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms))),
@@ -108,7 +108,7 @@ export function portalDeps(deps: SyncDeps = {}): PortalDeps {
   };
 }
 
-/** A client pointed at one provider's portal, plus the way to persist its jar. */
+/** A client pointed at one health system's portal, plus the way to persist its jar. */
 export interface PortalSession {
   client: PortalClient;
   /** Seal whatever the jar holds now. Called on every exit path. */
@@ -144,7 +144,7 @@ const ALERTING_CODES: ReadonlySet<string> = new Set([
   // the counter rolls over, so nothing else would surface it before tomorrow.
   "portal_attempts_exhausted",
   // The scheduled sync has stopped signing in on its own for the day. Nothing
-  // on the Providers page is looked at unprompted, so the card is what tells
+  // on the Health systems page is looked at unprompted, so the card is what tells
   // the owner the next sign-in is theirs.
   "portal_signin_needs_owner",
 ]);
@@ -155,7 +155,7 @@ const CODE_MISS = "portal_2fa_required";
 /**
  * The emailed code never arrived, and it did not arrive last time either.
  *
- * One miss is not worth a card: a slow mail hop explains it, and the Providers
+ * One miss is not worth a card: a slow mail hop explains it, and the Health systems
  * page already shows it. Two in a row -- with no successful sign-in between,
  * because `markActive` clears the stored code -- means the forwarding path is
  * broken, and nothing else tells the owner that out of band. The card goes
@@ -175,7 +175,7 @@ function codeOf(error: unknown): string {
 }
 
 /**
- * Open a client for one provider's portal.
+ * Open a client for one health system's portal.
  *
  * Throws `conflict` when the account is not ready -- no endpoint discovered, or
  * no credentials stored. That is a state the admin UI can fix and is not a portal
@@ -183,14 +183,14 @@ function codeOf(error: unknown): string {
  */
 export async function openPortalSession(
   ctx: Ctx,
-  providerId: string,
+  healthSystemId: string,
   deps: PortalDeps,
 ): Promise<{ session: PortalSession; credentials: { username: string; password: string } }> {
   const repos = makeRepos(ctx);
-  const row = await repos.portalAccounts.get(providerId);
-  if (row === null) throw new AppError("conflict", "this provider has no portal account");
+  const row = await repos.portalAccounts.get(healthSystemId);
+  if (row === null) throw new AppError("conflict", "this health system has no portal account");
   if (row.base_url === null || row.mount_path === null) {
-    throw new AppError("conflict", "the portal endpoint is not known yet", { providerId });
+    throw new AppError("conflict", "the portal endpoint is not known yet", { healthSystemId });
   }
   // Fail closed rather than sign in over cleartext. `base_url` is what
   // `fallbackEndpoint` builds from and what every mounted URL is joined onto, so
@@ -200,14 +200,14 @@ export async function openPortalSession(
     throw new AppError(
       "portal_discovery_failed",
       "the stored portal origin is not https; re-save the portal login",
-      { providerId },
+      { healthSystemId },
     );
   }
-  const secrets = await repos.portalAccounts.getSecrets(providerId);
+  const secrets = await repos.portalAccounts.getSecrets(healthSystemId);
   const username = secrets?.username ?? null;
   const password = secrets?.password ?? null;
   if (username === null || password === null) {
-    throw new AppError("conflict", "no portal credentials are stored", { providerId });
+    throw new AppError("conflict", "no portal credentials are stored", { healthSystemId });
   }
 
   const serialisedJar = secrets?.cookieJar ?? null;
@@ -216,10 +216,10 @@ export async function openPortalSession(
       ? new CookieJar({ now: ctx.now })
       : CookieJar.deserialise(serialisedJar, { now: ctx.now });
   const adapter = deps.deps.portalAdapter ?? createMyChartAdapter();
-  const stored = await repos.portalAccounts.getEndpoint(providerId);
+  const stored = await repos.portalAccounts.getEndpoint(healthSystemId);
   // The adapter's own discovery result, passed back unread where there is one. It
   // carries more than the two columns -- which login strategy this deployment
-  // needs, for one -- and nothing outside `worker/providers/mychart/**` has any
+  // needs, for one -- and nothing outside `worker/health-systems/mychart/**` has any
   // business knowing what.
   const endpoint =
     stored === null
@@ -227,8 +227,8 @@ export async function openPortalSession(
       : (stored as unknown as PortalEndpoint);
   // The two values a `custom_oidc` deployment may need and the endpoint alone
   // cannot always supply -- see `PortalAdapterDeps.custom`'s own comment in
-  // `worker/providers/mychart/index.ts`. Built here, not in the adapter, because
-  // both live outside `worker/providers/mychart/**`: one is a stored setting, the
+  // `worker/health-systems/mychart/index.ts`. Built here, not in the adapter, because
+  // both live outside `worker/health-systems/mychart/**`: one is a stored setting, the
   // other a sealed column. Harmless to build unconditionally -- the classic
   // client ignores it entirely.
   const shellApiBasePath = await getSetting(ctx, "portal_api_base_path");
@@ -247,7 +247,7 @@ export async function openPortalSession(
     session: {
       client,
       persistJar: async () => {
-        await repos.portalAccounts.saveCookieJar(providerId, client.jar.serialise());
+        await repos.portalAccounts.saveCookieJar(healthSystemId, client.jar.serialise());
       },
     },
     credentials: { username, password },
@@ -282,9 +282,9 @@ function fallbackEndpoint(baseUrl: string, mountPath: string): PortalEndpoint {
  * resets by comparing UTC days, so nothing has to clear it -- see
  * `portal-accounts.ts`.
  */
-export async function attemptsLeft(ctx: Ctx, providerId: string): Promise<number> {
+export async function attemptsLeft(ctx: Ctx, healthSystemId: string): Promise<number> {
   const limit = await getSetting(ctx, "portal_login_attempt_limit");
-  const used = await makeRepos(ctx).portalAccounts.countLoginAttemptsToday(providerId);
+  const used = await makeRepos(ctx).portalAccounts.countLoginAttemptsToday(healthSystemId);
   return Math.max(limit - used, 0);
 }
 
@@ -308,8 +308,8 @@ export const RECENT_SESSION_SECONDS = 10 * 60;
  * `last_ok_at` is stamped by `markActive`, which runs on a completed sign-in and
  * on every portal pass that read the visits -- both of which are proof.
  */
-export async function recentSessionAge(ctx: Ctx, providerId: string): Promise<number | null> {
-  const row = await makeRepos(ctx).portalAccounts.get(providerId);
+export async function recentSessionAge(ctx: Ctx, healthSystemId: string): Promise<number | null> {
+  const row = await makeRepos(ctx).portalAccounts.get(healthSystemId);
   const lastOk = row?.last_ok_at ?? null;
   if (lastOk === null) return null;
   const age = ctx.now() - lastOk;
@@ -324,18 +324,18 @@ export async function recentSessionAge(ctx: Ctx, providerId: string): Promise<nu
  */
 export async function failSignIn(
   ctx: Ctx,
-  providerId: string,
+  healthSystemId: string,
   code: string,
   deps: PortalDeps,
 ): Promise<SignInOutcome> {
   try {
     const repos = makeRepos(ctx);
-    const previous = await repos.portalAccounts.markNeedsReauth(providerId, code);
+    const previous = await repos.portalAccounts.markNeedsReauth(healthSystemId, code);
     if (ALERTING_CODES.has(code) || isRepeatedCodeMiss(code, previous)) {
-      await openReconnectAlert(ctx, { providerId, portal: true }, code, deps.deps);
+      await openReconnectAlert(ctx, { healthSystemId, portal: true }, code, deps.deps);
     }
   } catch (error) {
-    ctx.log.error("portal.fail_record_failed", { providerId, ...errorFields(error) });
+    ctx.log.error("portal.fail_record_failed", { healthSystemId, ...errorFields(error) });
   }
   return { phase: "failed", code };
 }
@@ -355,26 +355,26 @@ export async function failSignIn(
  */
 export async function startSignIn(
   ctx: Ctx,
-  providerId: string,
+  healthSystemId: string,
   session: PortalSession,
   credentials: { username: string; password: string },
   options: { beforeCode?: () => Promise<boolean> } = {},
 ): Promise<{ sendCodeAt: number | null; withheld: boolean }> {
   const repos = makeRepos(ctx);
   // Before the credentials go anywhere: see the module comment.
-  const attempt = await repos.portalAccounts.recordLoginAttempt(providerId);
-  ctx.log.info("portal.signin.attempt", { providerId, attempt });
+  const attempt = await repos.portalAccounts.recordLoginAttempt(healthSystemId);
+  ctx.log.info("portal.signin.attempt", { healthSystemId, attempt });
 
   const status = await session.client.login(credentials);
   if (status === "signed_in") return { sendCodeAt: null, withheld: false };
 
   if (options.beforeCode !== undefined && !(await options.beforeCode())) {
-    ctx.log.info("portal.signin.code_withheld", { providerId });
+    ctx.log.info("portal.signin.code_withheld", { healthSystemId });
     return { sendCodeAt: null, withheld: true };
   }
   await session.client.secondaryValidation.sendCode("email");
   const sendCodeAt = ctx.now();
-  ctx.log.info("portal.signin.code_requested", { providerId });
+  ctx.log.info("portal.signin.code_requested", { healthSystemId });
   return { sendCodeAt, withheld: false };
 }
 
@@ -382,7 +382,7 @@ export async function startSignIn(
  * Step two: claim the oldest unconsumed *eligible* code that arrived after
  * `sendCodeAt`.
  *
- * Eligible means "from a sender this provider's codes come from". That binding
+ * Eligible means "from a sender this health system's codes come from". That binding
  * is the point of this step, and it has two states.
  *
  *   - The account has an expected sender (the owner set it, or an earlier
@@ -396,22 +396,22 @@ export async function startSignIn(
  *     exactly the first-sign-in case the learning step in `completeSignIn`
  *     exists to end.
  *
- * Scoped to a provider, not global, so two configured portals cannot claim each
+ * Scoped to a health system, not global, so two configured portals cannot claim each
  * other's code either.
  */
 export async function claimCode(
   ctx: Ctx,
-  providerId: string,
+  healthSystemId: string,
   sendCodeAt: number,
 ): Promise<ClaimedOtp | null> {
   const repos = makeRepos(ctx);
-  const expectedSender = await repos.portalAccounts.getOtpSender(providerId);
+  const expectedSender = await repos.portalAccounts.getOtpSender(healthSystemId);
   const allowlist = parseAllowlistCsv(await getSetting(ctx, "mail_sender_allowlist"));
   // Only consulted by `takeFreshOtp` when there is no expected sender yet.
   // `openPortalSession` refuses to run at all without a `base_url`, so by the
   // time a sign-in is far enough along to be polling for a code this account
   // always has one; null here only for a call outside that guard (a test).
-  const account = await repos.portalAccounts.get(providerId);
+  const account = await repos.portalAccounts.get(healthSystemId);
   const portalHost = hostOf(account?.base_url ?? null);
   return repos.mailInbox.takeFreshOtp({
     since: sendCodeAt,
@@ -441,20 +441,20 @@ function hostOf(baseUrl: string | null): string | null {
  */
 export async function completeSignIn(
   ctx: Ctx,
-  providerId: string,
+  healthSystemId: string,
   session: PortalSession,
   claimed: ClaimedOtp,
 ): Promise<void> {
   await session.client.secondaryValidation.validate(claimed.code, true);
   await session.persistJar();
   const repos = makeRepos(ctx);
-  await repos.portalAccounts.markActive(providerId);
+  await repos.portalAccounts.markActive(healthSystemId);
   // The learning step. The portal itself has just confirmed this code was the
   // one it sent, which makes its sender the authoritative answer to "where do
   // this account's codes come from" -- and from here on the only eligible one.
   // Records nothing when a sender is already stored: see `learnOtpSender`.
-  const learned = await repos.portalAccounts.learnOtpSender(providerId, claimed.senderDomain);
-  ctx.log.info("portal.signin.done", { providerId, viaCode: true, learnedSender: learned });
+  const learned = await repos.portalAccounts.learnOtpSender(healthSystemId, claimed.senderDomain);
+  ctx.log.info("portal.signin.done", { healthSystemId, viaCode: true, learnedSender: learned });
 }
 
 /**
@@ -465,12 +465,12 @@ export async function completeSignIn(
  */
 export async function markSessionActive(
   ctx: Ctx,
-  providerId: string,
+  healthSystemId: string,
   session: PortalSession,
 ): Promise<SignInOutcome> {
   await session.persistJar();
-  await makeRepos(ctx).portalAccounts.markActive(providerId);
-  ctx.log.info("portal.signin.done", { providerId, viaCode: false });
+  await makeRepos(ctx).portalAccounts.markActive(healthSystemId);
+  ctx.log.info("portal.signin.done", { healthSystemId, viaCode: false });
   return OK;
 }
 
@@ -489,31 +489,31 @@ export async function markSessionActive(
  */
 export async function signInAndWait(
   ctx: Ctx,
-  providerId: string,
+  healthSystemId: string,
   deps: PortalDeps,
   waitSeconds = OTP_WAIT_SECONDS,
   options: { unattended?: boolean } = {},
 ): Promise<SignInOutcome> {
   let session: PortalSession | null = null;
   try {
-    const opened = await openPortalSession(ctx, providerId, deps);
+    const opened = await openPortalSession(ctx, healthSystemId, deps);
     session = opened.session;
     const accounts = makeRepos(ctx).portalAccounts;
     const beforeCode = async (): Promise<boolean> => {
-      const codes = await accounts.unattendedCodes(providerId);
+      const codes = await accounts.unattendedCodes(healthSystemId);
       if (unattendedCodeWait(codes, ctx.now()) !== "allowed") return false;
-      await accounts.recordUnattendedCode(providerId);
+      await accounts.recordUnattendedCode(healthSystemId);
       return true;
     };
     const { sendCodeAt, withheld } = await startSignIn(
       ctx,
-      providerId,
+      healthSystemId,
       session,
       opened.credentials,
       options.unattended === true ? { beforeCode } : {},
     );
-    if (withheld) return await failSignIn(ctx, providerId, NEEDS_OWNER, deps);
-    if (sendCodeAt === null) return await markSessionActive(ctx, providerId, session);
+    if (withheld) return await failSignIn(ctx, healthSystemId, NEEDS_OWNER, deps);
+    if (sendCodeAt === null) return await markSessionActive(ctx, healthSystemId, session);
 
     // The jar as it stands after `SendCode`: the challenge page's cookies are
     // what the `Validate` POST has to carry, and this is the last chance to keep
@@ -527,19 +527,19 @@ export async function signInAndWait(
     const polls = Math.ceil(waitSeconds / OTP_POLL_SECONDS);
     for (let poll = 0; poll < polls; poll += 1) {
       await deps.sleep(OTP_POLL_SECONDS * 1000);
-      const claimed = await claimCode(ctx, providerId, sendCodeAt);
+      const claimed = await claimCode(ctx, healthSystemId, sendCodeAt);
       if (claimed === null) continue;
-      await completeSignIn(ctx, providerId, session, claimed);
+      await completeSignIn(ctx, healthSystemId, session, claimed);
       return OK;
     }
-    ctx.log.warn("portal.signin.code_timeout", { providerId, waitSeconds });
-    return await failSignIn(ctx, providerId, "portal_2fa_required", deps);
+    ctx.log.warn("portal.signin.code_timeout", { healthSystemId, waitSeconds });
+    return await failSignIn(ctx, healthSystemId, "portal_2fa_required", deps);
   } catch (error) {
-    ctx.log.warn("portal.signin.failed", { providerId, ...errorFields(error) });
-    return await failSignIn(ctx, providerId, codeOf(error), deps);
+    ctx.log.warn("portal.signin.failed", { healthSystemId, ...errorFields(error) });
+    return await failSignIn(ctx, healthSystemId, codeOf(error), deps);
   } finally {
     // Whatever happened: a failed sign-in still leaves cookies worth keeping.
-    if (session !== null) await persistQuietly(ctx, providerId, session);
+    if (session !== null) await persistQuietly(ctx, healthSystemId, session);
   }
 }
 
@@ -591,12 +591,12 @@ export function unattendedCodeWait(
 /** Saving the jar must never be the thing that fails a sign-in. */
 export async function persistQuietly(
   ctx: Ctx,
-  providerId: string,
+  healthSystemId: string,
   session: PortalSession,
 ): Promise<void> {
   try {
     await session.persistJar();
   } catch (error) {
-    ctx.log.warn("portal.jar_save_failed", { providerId, ...errorFields(error) });
+    ctx.log.warn("portal.jar_save_failed", { healthSystemId, ...errorFields(error) });
   }
 }

@@ -21,10 +21,10 @@
  *  - **Session-expired detection is opt-in per call.** The sign-in flow lands on
  *    login pages legitimately, so only the calls that are supposed to be
  *    authenticated treat a login page as `portal_session_expired`.
- *  - **It holds no state but the jar.** No provider id, no D1, no env: the
+ *  - **It holds no state but the jar.** No health system id, no D1, no env: the
  *    caller owns the account row, loads the jar into this client and seals
  *    whatever the jar looks like afterwards. That is also why nothing here can
- *    log a provider id -- the caller's child logger carries it.
+ *    log a health system id -- the caller's child logger carries it.
  *  - **Nothing from the portal is logged.** Not a URL, not a host, not a mount,
  *    not a body, not a name. Stable endpoint labels, HTTP statuses and counts.
  *  - **The credential POST has two shapes.** Some deployments post the

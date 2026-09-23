@@ -361,7 +361,7 @@ export const VISIT_KEYS = {
   visitType: ["VisitTypeName", "VisitType", "AppointmentType", "Type", "Title"],
   /** [confirmed] `PrimaryProviderName`, nullable. */
   practitioner: ["PrimaryProviderName", "ProviderName", "Provider", "ProviderDisplayName"],
-  /** [confirmed] A list of providers, when the payload has several. */
+  /** [confirmed] A list of providers (the clinicians), when the payload has several. */
   practitioners: ["Providers", "ProviderList"],
   /** [guess] Flat fallback only -- see `DEPARTMENT_OBJECT_KEYS`. */
   department: ["DepartmentName", "Department", "ClinicName"],
