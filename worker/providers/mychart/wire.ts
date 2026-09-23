@@ -88,13 +88,10 @@ export const PATHS = {
    */
   loadPast: "Visits/VisitsList/LoadPast",
   /**
-   * [confirmed] The liveness probe the portal's own scripts use. One byte of
-   * JSON, so it is the cheapest possible "is the session still alive".
-   */
-  keepAlive: "Home/KeepAlive",
-  /**
-   * [confirmed] The landing page, and the fallback liveness check for a
-   * deployment that does not serve `keepAlive`.
+   * [confirmed] The landing page, and the liveness check: a signed-in session is
+   * served it without a redirect. `Home/KeepAlive` is deliberately not used for
+   * that -- it keeps a session alive without saying whether anyone is signed in
+   * to it, so an anonymous session can answer it too. See `isSessionAlive`.
    */
   home: "Home",
 } as const;
@@ -174,9 +171,6 @@ export const LOAD_PAST_QUERY = {
 
 /** [confirmed] `LoadPast`'s paging boundary: an ISO date-time string. */
 export const OLDEST_RENDERED_DATE_PARAM = "oldestRenderedDate";
-
-/** [confirmed] `Home/KeepAlive`'s only parameter: an incrementing counter. */
-export const KEEP_ALIVE_COUNT_PARAM = "cnt";
 
 /** [confirmed] The cache-buster every one of these endpoints carries. */
 export const NO_CACHE_PARAM = "noCache";

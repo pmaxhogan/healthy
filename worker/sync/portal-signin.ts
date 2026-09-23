@@ -261,6 +261,34 @@ export async function attemptsLeft(ctx: Ctx, providerId: string): Promise<number
 }
 
 /**
+ * How recently a session must have been proven good for a failed liveness check
+ * to be *our* problem rather than the portal's.
+ *
+ * A portal session does not die ten minutes after it was established. When the
+ * liveness check fails that soon, the likeliest explanation is that the session
+ * this app thinks it has was never the one the portal serves -- and signing in
+ * again would only repeat whatever went wrong, spending one of the day's
+ * attempts to do it. So inside this window a dead session is reported as
+ * `portal_session_expired` and no sign-in is attempted.
+ */
+export const RECENT_SESSION_SECONDS = 10 * 60;
+
+/**
+ * Seconds since this account's session was last proven good, when that is inside
+ * `RECENT_SESSION_SECONDS`; null otherwise.
+ *
+ * `last_ok_at` is stamped by `markActive`, which runs on a completed sign-in and
+ * on every portal pass that read the visits -- both of which are proof.
+ */
+export async function recentSessionAge(ctx: Ctx, providerId: string): Promise<number | null> {
+  const row = await makeRepos(ctx).portalAccounts.get(providerId);
+  const lastOk = row?.last_ok_at ?? null;
+  if (lastOk === null) return null;
+  const age = ctx.now() - lastOk;
+  return age >= 0 && age < RECENT_SESSION_SECONDS ? age : null;
+}
+
+/**
  * Record the failure: the account's state, and the Trello card when it warrants one.
  *
  * Never throws. A failure to write the failure must not turn into a second,

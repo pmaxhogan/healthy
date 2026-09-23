@@ -56,6 +56,15 @@ export interface ShellApi {
 export interface LoginOutcome {
   /** True when the shell wants a verification code before it will sign in. */
   mfaRequired: boolean;
+  /**
+   * True when the response said outright that the password signed us in.
+   *
+   * False covers both "said no" (which never gets this far -- it is a refusal)
+   * and "said nothing either way", which is the case that matters: the shell's
+   * response shape is `[assumption]`, and a response that names neither flag is
+   * not evidence that no code is needed. See the custom client's `login`.
+   */
+  signedInStated: boolean;
   /** The id every later MFA call is keyed on, lower-cased. Null when unreadable. */
   userId: string | null;
   /** Where a code can be sent, when the response volunteered it. */
@@ -191,6 +200,7 @@ export async function postLogin(
   const userId = str(fields, LOGIN_RESPONSE_KEYS.userId);
   return {
     mfaRequired,
+    signedInStated: yes(fields, LOGIN_RESPONSE_KEYS.signedIn),
     userId: userId === null ? null : userId.toLowerCase(),
     contact: str(fields, LOGIN_RESPONSE_KEYS.contact),
   };

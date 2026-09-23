@@ -33,7 +33,7 @@
  * shell -- and if all three come up empty, the failure says so.
  */
 
-import { AppError } from "../../../lib/errors.ts";
+import { AppError, isAppError } from "../../../lib/errors.ts";
 import { createMyChartClient } from "../client.ts";
 
 import {
@@ -138,7 +138,24 @@ export function createCustomOidcClient(deps: CustomOidcClientDeps): PortalClient
     }
     // "Signed in" has to mean the classic session exists, because that is what
     // the caller marks the account active on.
-    await bridge();
+    try {
+      await bridge();
+    } catch (error) {
+      // A response that named neither "code needed" nor "signed in" is silence,
+      // not a no-code sign-in -- and a shell that is still waiting for its code
+      // is exactly what makes the handoff stop short of the classic session.
+      // So in that one case a failed bridge means "ask for the code", which the
+      // sign-in job already knows how to do. An explicit "signed in" that then
+      // fails to bridge is a real handoff failure and stays one.
+      const ambiguous = !outcome.signedInStated && outcome.userId !== null;
+      if (!ambiguous || !isAppError(error) || error.code !== "portal_login_failed") throw error;
+      logger.info("portal.login", {
+        signInStatus: "awaiting_code",
+        flavor: endpoint.flavor,
+        inferred: true,
+      });
+      return "awaiting_code";
+    }
     logger.info("portal.login", { signInStatus: "signed_in", flavor: endpoint.flavor });
     return "signed_in";
   };

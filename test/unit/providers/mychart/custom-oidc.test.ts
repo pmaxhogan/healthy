@@ -505,17 +505,88 @@ describe("the OpenID bridge", () => {
     expect(paths(stub)).not.toContain("GET /prd/nojs.asp");
   });
 
-  it("accepts a landing it does not recognise when the session is demonstrably alive", async () => {
+  it("accepts a landing it does not recognise once Home itself answers", async () => {
     const stub = routed({
       "GET /prd/Authentication/Login": () => redirect(`${HOST}/prd/OpenId?op=synthetic-op`),
       "GET /prd/OpenId": () => redirect(`${HOST}/prd/Dashboard`),
       "GET /prd/Dashboard": () => html(HOME_PAGE),
-      "GET /prd/Home/KeepAlive": () => json(1),
+      "GET /prd/Home": () => html(HOME_PAGE),
       "POST /shellwebapi/login": () => json({ authenticated: true, userId: "OWNER-LOGIN" }),
     });
 
     await expect(client(stub).login(CREDENTIALS)).resolves.toBe("signed_in");
-    expect(find(stub, "GET", "/prd/Home/KeepAlive")).toBeDefined();
+    expect(find(stub, "GET", "/prd/Home")).toBeDefined();
+  });
+
+  it("does not take a keepalive's word for it when Home says the session is anonymous", async () => {
+    // The regression: the chain stops short of the classic session, the keepalive
+    // answers the anonymous session the stub handed out, and the bridge used to
+    // report signed_in -- leaving the next sync to bounce off VisitsList.
+    const stub = routed({
+      "GET /prd/Authentication/Login": () => redirect(`${HOST}/prd/OpenId?op=synthetic-op`),
+      "GET /prd/OpenId": () => html(OPENID_FORM_PAGE),
+      "POST /shell/api/oauth2/authorize": () => redirect(`${HOST}/app/verify`),
+      "GET /app/verify": () =>
+        html("<!doctype html><html><body><app-root></app-root></body></html>"),
+      "GET /prd/Home/KeepAlive": () => json(1),
+      "GET /prd/Home": () => redirect(`${HOST}/prd/Authentication/Login`),
+      "POST /shellwebapi/login": () => json({ authenticated: true, userId: "OWNER-LOGIN" }),
+    });
+
+    await expect(reasonOf(client(stub).login(CREDENTIALS))).resolves.toBe("no_further_hop");
+    expect(find(stub, "GET", "/prd/Home/KeepAlive")).toBeUndefined();
+  });
+
+  it("does not count a Home that still carries the handoff stub as arrived", async () => {
+    const stub = routed({
+      "GET /prd/Authentication/Login": () => redirect(`${HOST}/prd/Home`),
+      "GET /prd/Home": () => html("<!doctype html><html><body>oidcnonce</body></html>"),
+      "POST /shellwebapi/login": () => json({ authenticated: true, userId: "OWNER-LOGIN" }),
+    });
+
+    await expect(codeOf(client(stub).login(CREDENTIALS))).resolves.toBe("portal_login_failed");
+  });
+});
+
+/** A shell that wants a code but whose login answer never says so. */
+function silentMfaPortal(): PortalFetchStub {
+  return routed({
+    "GET /prd/Authentication/Login": () => redirect(`${HOST}/prd/OpenId?op=synthetic-op`),
+    "GET /prd/OpenId": () => html(OPENID_FORM_PAGE),
+    // Still waiting for its code, so the shell sends the authorize hop back to
+    // one of its own pages instead of answering it.
+    "POST /shell/api/oauth2/authorize": () => redirect(`${HOST}/app/verify`),
+    "GET /app/verify": () => html("<!doctype html><html><body><app-root></app-root></body></html>"),
+    "GET /prd/Home": () => redirect(`${HOST}/prd/Authentication/Login`),
+    "POST /shellwebapi/login": () => json({ userId: "OWNER-LOGIN" }),
+    "POST /shellwebapi/verification/code/generate": () => json({ success: true }),
+  });
+}
+
+describe("a login response that says nothing about a code", () => {
+  it("asks for the code when the handoff then stops short of the classic session", async () => {
+    const stub = silentMfaPortal();
+    const jar = new CookieJar({ now: () => T0 });
+
+    await expect(client(stub, jar).login(CREDENTIALS)).resolves.toBe("awaiting_code");
+    // And the code can actually be requested: the user id survived.
+    await client(stub, jar, { custom: { mfaContact: CONTACT } }).secondaryValidation.sendCode(
+      "email",
+    );
+    expect(find(stub, "POST", "/shellwebapi/verification/code/generate")).toBeDefined();
+  });
+
+  it("still fails outright when the shell said the password signed us in", async () => {
+    const stub = routed({
+      "GET /prd/Authentication/Login": () => redirect(`${HOST}/prd/OpenId?op=synthetic-op`),
+      "GET /prd/OpenId": () => html(OPENID_FORM_PAGE),
+      "POST /shell/api/oauth2/authorize": () => redirect(`${HOST}/app/verify`),
+      "GET /app/verify": () => html("<!doctype html><html><body></body></html>"),
+      "GET /prd/Home": () => redirect(`${HOST}/prd/Authentication/Login`),
+      "POST /shellwebapi/login": () => json({ authenticated: true, userId: "OWNER-LOGIN" }),
+    });
+
+    await expect(codeOf(client(stub).login(CREDENTIALS))).resolves.toBe("portal_login_failed");
   });
 });
 
@@ -526,7 +597,7 @@ describe("everything after sign-in", () => {
         html('<input name="__RequestVerificationToken" value="tok-1" />'),
       "POST /prd/Visits/VisitsList/LoadUpcoming": () =>
         json({ InProgressVisits: [], NextNDaysVisits: [], LaterVisitsList: [] }),
-      "GET /prd/Home/KeepAlive": () => json(1),
+      "GET /prd/Home": () => html(HOME_PAGE),
     });
     const portal = client(stub);
 

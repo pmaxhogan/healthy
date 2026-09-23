@@ -68,6 +68,7 @@ import {
   openPortalSession,
   persistQuietly,
   portalDeps,
+  recentSessionAge,
   startSignIn,
 } from "./portal-signin.ts";
 
@@ -200,8 +201,24 @@ export class PortalSignInRunner extends DurableObject<Env> {
   private async begin(dbCtx: Ctx, job: PortalJob, deps: PortalDeps): Promise<StepResult> {
     if (job.kind === "sync") {
       const opened = await openPortalSession(dbCtx, job.providerId, deps);
-      if (await opened.session.client.isSessionAlive()) {
+      const alive = await opened.session.client.isSessionAlive();
+      // Whatever the probe was answered with: a refreshed cookie on it must reach
+      // the sync step, which is a different invocation with a different client.
+      await persistQuietly(dbCtx, job.providerId, opened.session);
+      if (alive) {
         // Nothing to sign in to, so the phase is left exactly as it was.
+        return { job: { ...job, step: "sync" }, delayMs: 0 };
+      }
+      const age = await recentSessionAge(dbCtx, job.providerId);
+      if (age !== null) {
+        // A session proven good minutes ago that is already "dead" is not one a
+        // fresh sign-in would fix -- see `RECENT_SESSION_SECONDS`. The sync step
+        // still runs, with no code wait, so the run records
+        // `portal_session_expired` for the owner and no attempt is spent.
+        dbCtx.log.warn("portal.signin.skipped_recent", {
+          providerId: job.providerId,
+          ageSeconds: age,
+        });
         return { job: { ...job, step: "sync" }, delayMs: 0 };
       }
     }

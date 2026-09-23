@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { noopLogger } from "../../../../worker/lib/log.ts";
+import { makeLogger, noopLogger } from "../../../../worker/lib/log.ts";
 import { createMyChartClient } from "../../../../worker/providers/mychart/client.ts";
 import { CookieJar } from "../../../../worker/providers/mychart/cookie-jar.ts";
 
@@ -769,41 +769,91 @@ describe("a 200 that is a page where JSON was expected", () => {
   });
 });
 
-describe("isSessionAlive via Home/KeepAlive", () => {
-  it("prefers KeepAlive and never falls back when it answers a scalar", async () => {
-    const stub = routed({ "GET /MyChart/Home/KeepAlive": () => json(1) });
+describe("isSessionAlive needs positive evidence", () => {
+  // The regression these pin down: a liveness check that said "alive" for a
+  // session nobody was signed in to. A keepalive answers an anonymous session as
+  // readily as a signed-in one, and a shell page on the same host carries no
+  // login-form marker, so neither may count -- only a chain that ends on `Home`.
 
-    await expect(client(stub).isSessionAlive()).resolves.toBe(true);
-    expect(stub.calls).toHaveLength(1);
-    expect(new URL(stub.calls[0]?.url ?? "").searchParams.get("cnt")).toBe("1");
-  });
-
-  it("is false without a fallback when KeepAlive itself bounces to login", async () => {
+  it("never asks KeepAlive, whatever it would have answered", async () => {
     const stub = routed({
-      "GET /MyChart/Home/KeepAlive": () => redirect(`${HOST}/MyChart/Authentication/Login`),
-      "GET /MyChart/Authentication/Login": () => html(loginPageNew()),
-      "GET /MyChart/Home": () => html(HOME_PAGE),
+      "GET /MyChart/Home/KeepAlive": () => json(1),
+      "GET /MyChart/Home": () => redirect(`${HOST}/MyChart/Authentication/Login`),
+      "GET /MyChart/Authentication/Login": () => html(OPENID_STUB_PAGE),
     });
 
     await expect(client(stub).isSessionAlive()).resolves.toBe(false);
-    expect(find(stub, "GET", "/MyChart/Home")).toBeUndefined();
+    expect(find(stub, "GET", "/MyChart/Home/KeepAlive")).toBeUndefined();
   });
 
-  it("falls back to Home when the deployment does not serve KeepAlive", async () => {
-    const stub = routed({ "GET /MyChart/Home": () => html(HOME_PAGE) });
-
-    await expect(client(stub).isSessionAlive()).resolves.toBe(true);
-    expect(find(stub, "GET", "/MyChart/Home")).toBeDefined();
-  });
-
-  it("falls back to Home when KeepAlive answers a whole page", async () => {
+  it("is false when a dead session is sent to the OpenID stub", async () => {
     const stub = routed({
-      "GET /MyChart/Home/KeepAlive": () => html(HOME_PAGE),
-      "GET /MyChart/Home": () => html(HOME_PAGE),
+      "GET /MyChart/Home": () => redirect(`${HOST}/MyChart/Authentication/Login`),
+      "GET /MyChart/Authentication/Login": () => redirect(`${HOST}/MyChart/OpenId?op=synthetic`),
+      "GET /MyChart/OpenId": () => html(OPENID_STUB_PAGE),
+    });
+
+    await expect(client(stub).isSessionAlive()).resolves.toBe(false);
+  });
+
+  it("is false when the chain ends on a page off the mount that is no login form", async () => {
+    // The shape of a login shell served from the same host: a script-rendered
+    // page with nothing on it any login-form marker would match.
+    const stub = routed({
+      "GET /MyChart/Home": () => redirect(`${HOST}/app/welcome`),
+      "GET /app/welcome": () =>
+        html("<!doctype html><html><body><app-root></app-root></body></html>"),
+    });
+
+    await expect(client(stub).isSessionAlive()).resolves.toBe(false);
+  });
+
+  it("is true when Home redirects to a page below itself", async () => {
+    const stub = routed({
+      "GET /MyChart/Home": () => redirect(`${HOST}/MyChart/Home/Index`),
+      "GET /MyChart/Home/Index": () => html(HOME_PAGE),
     });
 
     await expect(client(stub).isSessionAlive()).resolves.toBe(true);
-    expect(stub.calls).toHaveLength(2);
+  });
+
+  it("logs the landing kind, the status and the hop count, and never a URL", async () => {
+    const lines: string[] = [];
+    const logger = makeLogger(
+      {},
+      {
+        sink: (_level, line) => {
+          lines.push(line);
+        },
+      },
+    );
+    const stub = routed({
+      "GET /MyChart/Home": () => redirect(`${HOST}/app/welcome`),
+      "GET /app/welcome": () => html("<!doctype html><html><body></body></html>"),
+    });
+    const portal = createMyChartClient({
+      endpoint: ENDPOINT,
+      jar: new CookieJar({ now: () => T0 }),
+      fetchImpl: stub.fetchImpl,
+      logger,
+      now: () => T0,
+      random: () => 0.5,
+    });
+
+    await portal.isSessionAlive();
+
+    const check = lines
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .find((line) => line.event === "portal.session_check");
+    expect(check).toMatchObject({
+      endpoint: "Home",
+      status: 200,
+      hops: 1,
+      landed: "other",
+      alive: false,
+    });
+    expect(lines.join(" ")).not.toContain(HOST);
+    expect(lines.join(" ")).not.toContain("/app/");
   });
 });
 

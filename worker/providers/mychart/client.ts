@@ -33,14 +33,13 @@ import { AppError } from "../../lib/errors.ts";
 
 import { isLoginPage } from "./discovery.ts";
 import { bodyMentions, findAntiforgeryField, inputFields } from "./html.ts";
-import { isOpenIdHandoff, mountedUrl, pathOf, portalFetch } from "./http.ts";
+import { isOpenIdHandoff, mountedUrl, normaliseMount, pathOf, portalFetch } from "./http.ts";
 import { parsePast, parseUpcoming } from "./visits.ts";
 import {
   ANTIFORGERY_FIELD_NAMES,
   ANTIFORGERY_HEADER,
   FIELDS,
   JS_ENABLED_VALUE,
-  KEEP_ALIVE_COUNT_PARAM,
   LOAD_PAST_QUERY,
   LOAD_UPCOMING_QUERY,
   MARKERS,
@@ -127,15 +126,7 @@ export interface PortalClient {
 /** Where a redirect chain stopped, which is the only reliable sign-in signal. */
 type Landing = "signed_in" | "awaiting_code" | "login";
 
-/**
- * Longest body `Home/KeepAlive` may answer with and still count as alive.
- *
- * The capture measured one byte -- a single JSON scalar. A handful of characters
- * of slack covers `true` and a quoted digit; anything beyond that is a page.
- */
-const SCALAR_BODY_LIMIT = 8;
-
-function landingOf(response: PortalResponse): Landing {
+function landingOf(response: Pick<PortalResponse, "url" | "body">): Landing {
   const path = pathOf(response.url);
   const onValidation =
     path.includes(PATHS.secondaryValidation.toLowerCase()) ||
@@ -151,6 +142,28 @@ function landingOf(response: PortalResponse): Landing {
   const bounced =
     onLoginPage || isOpenIdHandoff(response) || bodyMentions(response.body, MARKERS.loginForm);
   return bounced ? "login" : "signed_in";
+}
+
+/** Where a liveness probe ended up. Logged, so it is a kind and never a URL. */
+export type SessionLanding = "login" | "home" | "other";
+
+/**
+ * Classify a liveness probe's landing.
+ *
+ * `home` only for a page at `<mount>Home` (or below it) that is not itself a
+ * login page, challenge or handoff stub: that is the one answer that proves a
+ * signed-in session. `login` for every flavour of "go and sign in". Anything
+ * else -- a shell page, an interstitial, an error page -- is `other`, and is not
+ * alive: see `isSessionAlive`.
+ */
+export function sessionLandingOf(
+  response: Pick<PortalResponse, "url" | "body">,
+  mountPath: string,
+): SessionLanding {
+  if (landingOf(response) !== "signed_in") return "login";
+  const home = `${normaliseMount(mountPath)}${PATHS.home}`.toLowerCase();
+  const path = pathOf(response.url);
+  return path === home || path.startsWith(`${home}/`) ? "home" : "other";
 }
 
 /** A login page reached from an authenticated call means the session died. */
@@ -288,7 +301,9 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
       // read as a redirect at all -- see `SCRIPT_ASSIGN` in `html.ts` -- but
       // an unrelated same-origin `location.replace` elsewhere on the page
       // must not be followed past a page already known to be the login form.
-      recognizeLanding: isLoginPage,
+      // The OpenID stub likewise: it is where a dead `custom_oidc` session
+      // lands, and its own script is a hop into the shell, not a page to read.
+      recognizeLanding: (landed) => isLoginPage(landed) || isOpenIdHandoff(landed),
     });
     if (response.status !== 200) {
       throw new AppError("portal_parse_failed", "the portal did not return the page", {
@@ -498,51 +513,48 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
   };
 
   /**
-   * The portal's own liveness endpoint: one byte of JSON behind the login wall.
+   * Is the session alive -- decided by a page only a signed-in session is served.
    *
-   * Returns null for "this deployment did not answer it", which is not the same
-   * as a dead session -- a deployment old enough not to serve `KeepAlive` 404s
-   * here, and the `Home` fallback is what decides. A 200 that is a login page is
-   * a real answer, though, and short-circuits.
+   * `Home`, and only a chain that *ends* on `Home` under this mount, counts. That
+   * is positive evidence, and nothing weaker is accepted any more:
+   *
+   *  - Not `Home/KeepAlive`. It used to be asked first, and a short 200 from it
+   *    counted as alive -- but a keepalive exists to keep *a* session alive, not
+   *    to say whose, and an anonymous session (the one the OpenID stub itself
+   *    hands out) can be answered just as briefly. That false positive lets a
+   *    `custom_oidc` bridge that never reached the classic session report
+   *    `signed_in`, and the sync after it pass its liveness check only to bounce
+   *    off `VisitsList` with `portal_session_expired`.
+   *  - Not "any page that is not a login page". On a deployment whose login lives
+   *    in a separate shell on the same host, a dead session can be redirected into
+   *    that shell's own pages, which carry no login-form marker at all.
+   *
+   * One `portal.session_check` line per probe, with the landing *kind* -- never a
+   * URL -- because "alive or not" alone cannot say which of those happened.
+   *
+   * Deliberately not `assertSession`: the answer to this question is a boolean,
+   * and a transport failure or a bot block is a different thing again and is
+   * allowed to propagate.
    */
-  const keepAlive = async (): Promise<boolean | null> => {
-    const response = await portalFetch(http, {
-      url: url(PATHS.keepAlive, {
-        [KEEP_ALIVE_COUNT_PARAM]: "1",
-        [NO_CACHE_PARAM]: noCache(),
-      }),
-      endpoint: "KeepAlive",
-      accept: "json",
-    });
-    if (response.status !== 200) return null;
-    if (landingOf(response) !== "signed_in") return false;
-    // A scalar, per the capture. Anything longer is a page, and a page here means
-    // this deployment answers the path with something else entirely -- which is
-    // "do not know", not "dead", so the `Home` fallback gets to decide.
-    const isScalar = response.body.trim().length <= SCALAR_BODY_LIMIT;
-    return isScalar || null;
-  };
-
   const isSessionAlive = async (): Promise<boolean> => {
-    // Deliberately not `assertSession`: the answer to this question is a
-    // boolean, and a transport failure or a bot block is a different thing again
-    // and is allowed to propagate.
-    const probed = await keepAlive();
-    if (probed !== null) {
-      logger.debug("portal.session_check", { alive: probed, probe: "keepalive" });
-      return probed;
-    }
     const response = await portalFetch(http, {
       url: url(PATHS.home, { [NO_CACHE_PARAM]: noCache() }),
       endpoint: "Home",
       accept: "html",
       followBodyRedirects: true,
-      // Same reason as `tokenPage`: a dead session lands here on the login
-      // page, whose own frame-busting script must not be read as a redirect.
-      recognizeLanding: isLoginPage,
+      // A dead session lands on the login page, or on the OpenID stub, and
+      // neither one's own script may be read as a redirect to follow further.
+      recognizeLanding: (landed) => isLoginPage(landed) || isOpenIdHandoff(landed),
     });
-    const alive = response.status === 200 && landingOf(response) === "signed_in";
-    logger.debug("portal.session_check", { alive, status: response.status, probe: "home" });
+    const landed = sessionLandingOf(response, endpoint.mountPath);
+    const alive = response.status === 200 && landed === "home";
+    logger.info("portal.session_check", {
+      endpoint: "Home",
+      status: response.status,
+      hops: response.hops,
+      landed,
+      alive,
+    });
     return alive;
   };
 

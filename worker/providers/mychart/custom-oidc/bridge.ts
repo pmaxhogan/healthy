@@ -35,6 +35,7 @@
  */
 
 import { AppError } from "../../../lib/errors.ts";
+import { sessionLandingOf } from "../client.ts";
 import { autoSubmitForm } from "../html.ts";
 import { isOpenIdHandoff, mountedUrl, pathOf, portalFetch } from "../http.ts";
 import { PATHS } from "../wire.ts";
@@ -57,6 +58,8 @@ export interface BridgeDeps {
    * The liveness check to confirm a landing with. Injected rather than
    * reimplemented: the classic client already knows how to ask, and the answer
    * to "did the bridge work" is exactly the answer to "is the session alive".
+   * It only says yes for a request that ends on the classic `Home` page, so a
+   * bridge that is confirmed this way has, in effect, finished there.
    */
   isSessionAlive: () => Promise<boolean>;
   maxHops?: number | undefined;
@@ -67,10 +70,13 @@ type Landing = "authenticated" | "shell_login" | "handoff" | "unknown";
 
 function landingOf(response: PortalResponse, mountPath: string): Landing {
   const path = pathOf(response.url);
-  // A page under the mount's own landing path, and nothing else, counts as
-  // arrived. Checked first because it is the only positive answer there is.
-  const home = `${mountPath}${PATHS.home}`.toLowerCase();
-  if (path.startsWith(home) && response.status === 200) return "authenticated";
+  // The mount's own landing page, and nothing else, counts as arrived -- judged
+  // by exactly the rule the liveness check uses, so "the bridge worked" and "the
+  // session is alive" can never disagree about the same page. Checked first
+  // because it is the only positive answer there is.
+  if (response.status === 200 && sessionLandingOf(response, mountPath) === "home") {
+    return "authenticated";
+  }
   // The handoff before the shell's login route, because the classic login path
   // contains the substring `/login` too: a stub served *at* that path would
   // otherwise read as a credential failure rather than as a hop to follow.
@@ -115,7 +121,17 @@ async function nextRequest(
   return { url: absolute, endpoint: "OidcReturn", accept: "html", followBodyRedirects: true };
 }
 
-function failed(hops: number, status: number, reason: string): AppError {
+function failed(
+  logger: Logger,
+  hops: number,
+  status: number,
+  reason: string,
+  landed: Landing,
+): AppError {
+  // Logged here because `errorFields` never carries `details`: without this line
+  // a failed handoff is one bare `portal_login_failed` with no way to tell a
+  // shell login screen from a chain that simply stopped short of `Home`.
+  logger.warn("portal.oidc_bridge_failed", { hops, status, reason, landed });
   return new AppError("portal_login_failed", "the OpenID handoff did not sign us in", {
     endpoint: "OidcBridge",
     hops,
@@ -146,21 +162,30 @@ export async function bridgeToClassicSession(deps: BridgeDeps): Promise<void> {
       deps.logger.info("portal.oidc_bridged", { hops, status: response.status });
       return;
     }
-    if (landing === "shell_login") throw failed(hops, response.status, "shell_login");
+    if (landing === "shell_login") {
+      throw failed(deps.logger, hops, response.status, "shell_login", landing);
+    }
 
     const request = await nextRequest(response, deps);
     if (request === null) {
       // Nothing left to follow. The chain may nonetheless have set the session
-      // cookie on a hop whose landing page this code does not recognise, so ask
-      // rather than guess -- and only then give up.
+      // cookie on a hop whose landing page this code does not recognise, so go
+      // to `Home` and look -- which is positive evidence, not a guess: the probe
+      // only answers yes for a chain that ends on the classic landing page.
       if (await deps.isSessionAlive()) {
         deps.logger.info("portal.oidc_bridged", { hops, status: response.status, viaProbe: true });
         return;
       }
-      throw failed(hops, response.status, "no_further_hop");
+      throw failed(deps.logger, hops, response.status, "no_further_hop", landing);
     }
     response = await portalFetch(deps.api.http, request);
   }
 
-  throw failed(limit, response.status, "hop_budget");
+  throw failed(
+    deps.logger,
+    limit,
+    response.status,
+    "hop_budget",
+    landingOf(response, deps.mountPath),
+  );
 }

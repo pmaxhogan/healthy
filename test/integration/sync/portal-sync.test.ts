@@ -19,6 +19,7 @@ import { AppError } from "../../../worker/lib/errors.ts";
 import { MAX_PARSED_VISITS } from "../../../worker/providers/mychart/index.ts";
 import { runCalendarSync } from "../../../worker/sync/calendar-sync.ts";
 import { acquirePortalSignIn, releasePortalSignIn } from "../../../worker/sync/portal-gate.ts";
+import { RECENT_SESSION_SECONDS, recentSessionAge } from "../../../worker/sync/portal-signin.ts";
 import {
   OTP_SENDER_DOMAIN,
   PORTAL_ORIGIN,
@@ -610,5 +611,34 @@ describe("portal sessions", () => {
     expect(all).not.toContain(PORTAL_ORIGIN);
     expect(all).not.toContain("A. Example");
     expect(all).not.toContain("csn-1");
+  });
+});
+
+describe("a session proven good minutes ago", () => {
+  // What the manual sync consults before spending a sign-in attempt on a session
+  // that failed its liveness check: one proven good this recently is not one a
+  // fresh sign-in would fix. See `RECENT_SESSION_SECONDS`.
+
+  it("is recent right after the account was marked active", async () => {
+    const provider = await seedConnectedProvider(syncCtx(), { host: HOST });
+    await seedPortalAccount(syncCtx(), provider.providerId);
+
+    const later = syncCtx({ now: () => T0 + 60 });
+    await expect(recentSessionAge(later, provider.providerId)).resolves.toBe(60);
+  });
+
+  it("stops being recent once the window has passed", async () => {
+    const provider = await seedConnectedProvider(syncCtx(), { host: HOST });
+    await seedPortalAccount(syncCtx(), provider.providerId);
+
+    const later = syncCtx({ now: () => T0 + RECENT_SESSION_SECONDS });
+    await expect(recentSessionAge(later, provider.providerId)).resolves.toBeNull();
+  });
+
+  it("is never recent for an account that has never been proven good", async () => {
+    const provider = await seedConnectedProvider(syncCtx(), { host: HOST });
+    await seedPortalAccount(syncCtx(), provider.providerId, { active: false });
+
+    await expect(recentSessionAge(syncCtx(), provider.providerId)).resolves.toBeNull();
   });
 });
