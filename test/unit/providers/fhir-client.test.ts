@@ -4,7 +4,6 @@ import { AppError } from "../../../worker/lib/errors.ts";
 import { noopLogger } from "../../../worker/lib/log.ts";
 import {
   createFhirClient,
-  DEFAULT_MAX_PAGES,
   fhirUrl,
   sameOrigin,
   searchUrl,
@@ -14,6 +13,7 @@ import { FAST_RETRY, jsonResponse, loadFixture, stubFetch, TEST_FHIR_BASE } from
 
 import type {
   Bundle,
+  BundleEntry,
   Encounter,
   OperationOutcome,
   Patient,
@@ -22,7 +22,6 @@ import type {
 import type {
   FhirClient,
   FhirClientDeps,
-  SearchOptions,
   SearchResult,
 } from "../../../worker/providers/epic/fhir-client.ts";
 
@@ -67,6 +66,20 @@ function pagedStub(): ReturnType<typeof stubFetch> {
   });
 }
 
+/** A searchset Bundle of `count` synthetic Encounters, optionally pointing at `next`. */
+function genBundle(id: string, count: number, next: string | null): Bundle {
+  const entry: BundleEntry[] = Array.from({ length: count }, (_, index) => ({
+    search: { mode: "match" },
+    resource: { resourceType: "Encounter", id: `${id}-${String(index)}`, status: "finished" },
+  }));
+  return {
+    resourceType: "Bundle",
+    type: "searchset",
+    entry,
+    ...(next !== null && { link: [{ relation: "next", url: next }] }),
+  };
+}
+
 describe("url helpers", () => {
   it("resolves paths with and without a trailing slash on the base", () => {
     expect(fhirUrl(TEST_FHIR_BASE, "metadata")).toBe(`${TEST_FHIR_BASE}/metadata`);
@@ -90,10 +103,6 @@ describe("url helpers", () => {
     // Same host, different port: still a different origin.
     expect(sameOrigin("https://fhir.example-health.test:8443/api", TEST_FHIR_BASE)).toBe(false);
     expect(sameOrigin("not a url", TEST_FHIR_BASE)).toBe(false);
-  });
-
-  it("defaults to 20 pages", () => {
-    expect(DEFAULT_MAX_PAGES).toBe(20);
   });
 });
 
@@ -127,14 +136,57 @@ describe("search paging", () => {
     }
   });
 
-  it("stops at maxPages and warns instead of truncating silently", async () => {
-    const stub = pagedStub();
-    const options: SearchOptions = { maxPages: 2 };
+  it("has no page ceiling: it follows next through dozens of pages", async () => {
+    const base = `${TEST_FHIR_BASE}/Encounter?patient=${PATIENT}&page=`;
+    const totalPages = 25;
+    const stub = stubFetch((call) => {
+      const match = /[?&]page=(\d+)/u.exec(call.url);
+      const page = match?.[1] === undefined ? 0 : Number(match[1]);
+      const isLast = page === totalPages - 1;
+      // The last page has fewer entries than every page before it and still
+      // has to be reached purely by following `next`, never by a count check.
+      const count = isLast ? 7 : 100;
+      const next = isLast ? null : `${base}${String(page + 1)}`;
+      return jsonResponse(genBundle(`p${String(page)}`, count, next));
+    });
 
-    const result = await client(stub.fetchImpl).search("Encounter", SEARCH_PARAMS, options);
+    const result = await client(stub.fetchImpl).search("Encounter", SEARCH_PARAMS);
 
-    expect(result.pages).toBe(2);
-    expect(result.warnings.map((warning) => warning.code)).toContain("incomplete");
+    expect(result.pages).toBe(totalPages);
+    expect(stub.calls).toHaveLength(totalPages);
+    expect(result.resources).toHaveLength(24 * 100 + 7);
+    expect(result.warnings).toStrictEqual([]);
+  });
+
+  it("follows a page whose entry count is below _count as long as it still has a next link", async () => {
+    const first = `${TEST_FHIR_BASE}/Encounter?patient=${PATIENT}&continue-token=only-3`;
+    const stub = stubFetch((call) =>
+      jsonResponse(
+        call.url.includes("only-3") ? genBundle("small", 3, null) : genBundle("big", 100, first),
+      ),
+    );
+
+    const result = await client(stub.fetchImpl).search("Encounter", SEARCH_PARAMS);
+
+    expect(stub.calls).toHaveLength(2);
+    expect(result.resources).toHaveLength(103);
+  });
+
+  it("throws instead of looping forever when next repeats a URL already visited", async () => {
+    const urlA = `${TEST_FHIR_BASE}/Encounter?patient=${PATIENT}&continue-token=a`;
+    const urlB = `${TEST_FHIR_BASE}/Encounter?patient=${PATIENT}&continue-token=b`;
+    // firstUrl -> A -> B -> A: A is visited a second time.
+    const stub = stubFetch((call) => {
+      if (call.url === urlA) return jsonResponse(genBundle("a", 1, urlB));
+      return jsonResponse(genBundle(call.url === urlB ? "b" : "first", 1, urlA));
+    });
+
+    const error = await expectAppError(client(stub.fetchImpl).search("Encounter", SEARCH_PARAMS));
+
+    expect(error.code).toBe("upstream_error");
+    expect(error.details).toMatchObject({ resourceType: "Encounter" });
+    // firstUrl, A, B, then A again -- caught before a fifth request is made.
+    expect(stub.calls).toHaveLength(3);
   });
 
   it("refuses to follow a next link that points at another origin", async () => {

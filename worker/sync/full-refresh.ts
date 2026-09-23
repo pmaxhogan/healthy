@@ -429,8 +429,10 @@ async function fetchEntry(
   const resources: Resource[] = [];
   const warnings: SearchWarning[] = [];
   const seen = new Set<string>();
-  // `sinceIso` is deliberately omitted: the cache is the owner's whole record,
-  // and paging is already capped by the client's `maxPages`.
+  // `sinceIso` is deliberately omitted: the cache is the owner's whole record.
+  // The search itself pages to the end with no ceiling; the only thing that
+  // stops it early is a repeated `next` link, which surfaces as a thrown
+  // error and is recorded below as this resource type's failure for the day.
   for (const params of entry.params(session.patientId)) {
     const result = await session.client.search(entry.resourceType, params);
     warnings.push(...result.warnings);

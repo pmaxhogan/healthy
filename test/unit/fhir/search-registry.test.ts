@@ -181,6 +181,31 @@ describe("filterSupported", () => {
     expect(observation.params(PATIENT)[0]?.category).toBe("laboratory");
   });
 
+  it("keeps Encounter even when the organisation's CapabilityStatement omits date", () => {
+    // The full daily refresh never sends `date` (see `full-refresh.ts`), so an
+    // organisation that simply does not list "date" among Encounter's search
+    // parameters must not lose Encounter from the refresh entirely -- that used
+    // to happen via a `needsCapability: "date"` on the registry entry, which
+    // this fixture would have tripped.
+    const noDate = {
+      fhirVersion: "4.0.1",
+      resources: {
+        Encounter: { interactions: ["search-type"], searchParams: ["patient", "_count"] },
+      },
+    };
+
+    const filtered = filterSupported(SEARCH_REGISTRY, noDate);
+    const encounter = entryFor("Encounter", filtered);
+
+    expect(encounter).toBeDefined();
+    expect(encounter.params(PATIENT)).toStrictEqual([{ patient: PATIENT, _count: "100" }]);
+    // Asking with a since would have included date; the organisation does not
+    // advertise it, so it is pruned rather than sent unsupported.
+    expect(encounter.params(PATIENT, "2026-06-23")).toStrictEqual([
+      { patient: PATIENT, _count: "100" },
+    ]);
+  });
+
   it("de-duplicates parameter sets that pruning collapsed together", () => {
     const custom: RegistryEntry[] = [
       {

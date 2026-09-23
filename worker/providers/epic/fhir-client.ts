@@ -39,9 +39,6 @@ import type { Resource, SearchWarning } from "../../fhir/types.ts";
 import type { Logger } from "../../lib/log.ts";
 import type { RetryOpts } from "../../lib/retry.ts";
 
-/** Pages a single search will follow before it gives up and warns. */
-export const DEFAULT_MAX_PAGES = 20;
-
 const FHIR_JSON = "application/fhir+json";
 
 export interface FhirClientDeps {
@@ -63,10 +60,6 @@ export interface FhirClientDeps {
   retry?: RetryOpts | undefined;
 }
 
-export interface SearchOptions {
-  maxPages?: number | undefined;
-}
-
 export interface SearchResult<T> {
   resources: T[];
   warnings: SearchWarning[];
@@ -77,10 +70,14 @@ export interface SearchResult<T> {
 export interface FhirClient {
   /** A single resource by id, or null when the organisation has no such row. */
   read<T extends Resource = Resource>(resourceType: string, id: string): Promise<T | null>;
+  /**
+   * Follows `Bundle.link[relation=next]` to the very end -- there is no page
+   * ceiling. The owner's record is whatever size it is; see `paginate` for the
+   * one thing that does stop a search early: the same `next` link twice.
+   */
   search<T extends Resource = Resource>(
     resourceType: string,
     params: Record<string, string>,
-    options?: SearchOptions,
   ): Promise<SearchResult<T>>;
 }
 
@@ -321,35 +318,44 @@ export function createFhirClient(deps: FhirClientDeps): FhirClient {
     return next;
   }
 
-  async function paginate(
-    resourceType: string,
-    firstUrl: string,
-    maxPages: number,
-  ): Promise<SearchResult<Resource>> {
+  /**
+   * Follow `next` to the end. There is no page ceiling: the owner's record is
+   * whatever size it is, and a health system with an unusually long history is
+   * exactly the case a cap would silently truncate.
+   *
+   * The one thing that does stop this early is `next` repeating a URL already
+   * visited in this walk -- an upstream bug (or an off-by-one in a paging
+   * cursor) serving the same page forever is a real failure mode, and looping
+   * on it forever would be worse than any page cap. That is reported loudly,
+   * as a thrown error, not folded into a warning: `refreshResourceType` catches
+   * it, records the failure in `fhir_sync_state`, and does not cache a partial
+   * result under a resource type that looked like it succeeded.
+   */
+  async function paginate(resourceType: string, firstUrl: string): Promise<SearchResult<Resource>> {
     const sink = {
       resources: [] as Resource[],
       seen: new Set<string>(),
       warnings: [] as SearchWarning[],
     };
+    const visited = new Set<string>([firstUrl]);
     let url: string | null = firstUrl;
     let pages = 0;
-    while (url !== null && pages < maxPages) {
+    while (url !== null) {
       const outcome = await request(url, resourceType);
       pages += 1;
       if (outcome.kind === "not-found") {
         throw new AppError("upstream_error", "FHIR search endpoint not found", { resourceType });
       }
-      url = readPage(resourceType, outcome.body, sink);
-    }
-    if (url !== null) {
-      logger.warn("fhir.max_pages_reached", { resourceType, pages });
-      sink.warnings.push({
-        resourceType,
-        severity: "warning",
-        code: "incomplete",
-        epicCode: null,
-        diagnostics: `stopped after ${String(maxPages)} pages`,
-      });
+      const next = readPage(resourceType, outcome.body, sink);
+      if (next !== null && visited.has(next)) {
+        logger.warn("fhir.next_link_repeated", { resourceType, pages });
+        throw new AppError("upstream_error", "FHIR pagination returned a repeated next link", {
+          resourceType,
+          pages,
+        });
+      }
+      if (next !== null) visited.add(next);
+      url = next;
     }
     logger.debug("fhir.search", {
       resourceType,
@@ -393,12 +399,10 @@ export function createFhirClient(deps: FhirClientDeps): FhirClient {
     async search<T extends Resource = Resource>(
       resourceType: string,
       params: Record<string, string>,
-      options?: SearchOptions,
     ): Promise<SearchResult<T>> {
-      const maxPages = options?.maxPages ?? DEFAULT_MAX_PAGES;
       const firstUrl = searchUrl(baseUrl, resourceType, params);
       try {
-        return (await paginate(resourceType, firstUrl, maxPages)) as SearchResult<T>;
+        return (await paginate(resourceType, firstUrl)) as SearchResult<T>;
       } catch (error) {
         if (!(error instanceof PagingExpiredError)) throw error;
         // The session expired mid-walk. Page boundaries shift between runs, so
@@ -406,7 +410,7 @@ export function createFhirClient(deps: FhirClientDeps): FhirClient {
         // once. `resourceKey` de-duplication covers the overlap either way.
         logger.info("fhir.paging_restart", { resourceType });
         try {
-          return (await paginate(resourceType, firstUrl, maxPages)) as SearchResult<T>;
+          return (await paginate(resourceType, firstUrl)) as SearchResult<T>;
         } catch (retryError) {
           if (!(retryError instanceof PagingExpiredError)) throw retryError;
           throw new AppError("upstream_unavailable", "FHIR paging session expired twice", {

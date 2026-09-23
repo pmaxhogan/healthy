@@ -89,7 +89,16 @@ export const SEARCH_REGISTRY: readonly RegistryEntry[] = [
     epicApiName: "Encounter.Search",
     uscdi: "v1",
     params: patientSince,
-    needsCapability: "date",
+    // No `needsCapability` here, deliberately, and unlike Procedure and
+    // DiagnosticReport below only by coincidence of history: those two use the
+    // same `patientSince` builder and have never required "date" either. The
+    // full daily refresh never passes `sinceIso` (see `full-refresh.ts`), so it
+    // never sends `date` for any of the three -- requiring the organisation to
+    // advertise a parameter this call never uses would drop Encounter from the
+    // whole refresh for any organisation whose CapabilityStatement simply omits
+    // "date" from the list, even though the request that matters would have
+    // worked. (The hourly appointment sync builds its own Encounter search
+    // directly, in `appointmentEncounterSearch`, and does send `date` there.)
   },
   {
     resourceType: "Condition",
