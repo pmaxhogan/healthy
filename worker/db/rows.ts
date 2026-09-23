@@ -62,7 +62,7 @@ export interface HealthSystemRow {
   deleted_at: number | null;
 }
 
-/** The raw `health_systems` row (0008): the identity columns sealed in place. */
+/** The raw `health_systems` row (0009): the identity columns sealed in place. */
 export interface HealthSystemDbRow extends Omit<
   HealthSystemRow,
   "display_name" | "fhir_base_url" | "brand_key" | "portal_url" | "config_json"
@@ -185,7 +185,7 @@ export interface CalendarEventRow {
  *
  * `calendar_id` is `blindCalendarId(...)`, and the real calendar id and start
  * live in `detail_enc`, sealed against `calendar_events.detail_enc.<google_event_id>`
- * (0007). There is no plaintext start column (0008).
+ * (0007). There is no plaintext start column (0009).
  */
 export interface CalendarEventDbRow extends Omit<CalendarEventRow, "calendar_id" | "start_at"> {
   calendar_id: string;
@@ -247,7 +247,7 @@ export interface MailInboxRow {
    * For a forwarded portal message this is the health system's own sending
    * address -- an organisation identity, and a value the sender chose. NULL on
    * a row written before 0005 (none is left: 0007 purged their plaintext and
-   * 0008 dropped the plaintext columns).
+   * 0009 dropped the plaintext columns).
    */
   from_addr_enc: string | null;
   /** The subject, sealed against `mail_inbox.subject_enc.<id>` (0005). */
@@ -321,7 +321,7 @@ export interface PortalAccountRow {
   last_unattended_code_at: number | null;
 }
 
-/** The raw `portal_accounts` row (0008): the location columns sealed in place. */
+/** The raw `portal_accounts` row (0009): the location columns sealed in place. */
 export interface PortalAccountDbRow extends Omit<
   PortalAccountRow,
   "base_url" | "mount_path" | "endpoint_json"

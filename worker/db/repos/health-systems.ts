@@ -17,7 +17,7 @@
  * (the `health_systems_live` index is on `deleted_at, vendor`), so the list is sorted
  * after it is opened. A repo instance opens each row once and reuses the result
  * until the row's `updated_at` moves, so a sync run that reads the same health system
- * five times decrypts it once. The columns carry `_enc` names since 0008; the
+ * five times decrypts it once. The columns carry `_enc` names since 0009; the
  * AAD keeps the name each value was first sealed under
  * (`health_systems.<plain name>.<id>`), because the AAD is part of the tag.
  */

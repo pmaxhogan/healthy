@@ -32,7 +32,7 @@
  * **It writes no `run_log` row.** Six rows an hour of "the session is still
  * alive" would bury the Runs page; the log line is the record.
  *
- * Log lines carry the provider id and whether the session was alive. Never a
+ * Log lines carry the health system id and whether the session was alive. Never a
  * cookie, a URL or a byte of portal markup.
  */
 
@@ -72,10 +72,10 @@ export async function runPortalKeepalive(
   }
   const resolved = portalDeps(deps);
   for (const account of accounts) {
-    const providerId = account.provider_id;
+    const healthSystemId = account.health_system_id;
     summary.accounts += 1;
     try {
-      const { session } = await openPortalSession(ctx, providerId, resolved);
+      const { session } = await openPortalSession(ctx, healthSystemId, resolved);
       // `isSessionAlive` is an authenticated page load, which is the keepalive:
       // the portal resets its idle clock on any signed-in request.
       const alive = await session.client.isSessionAlive();
@@ -83,9 +83,9 @@ export async function runPortalKeepalive(
         summary.alive += 1;
         await session.persistJar();
       }
-      ctx.log.info("portal.keepalive", { providerId, alive });
+      ctx.log.info("portal.keepalive", { healthSystemId, alive });
     } catch (error) {
-      ctx.log.warn("portal.keepalive_failed", { providerId, ...errorFields(error) });
+      ctx.log.warn("portal.keepalive_failed", { healthSystemId, ...errorFields(error) });
     }
   }
   return summary;

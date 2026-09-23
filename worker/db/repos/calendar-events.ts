@@ -27,7 +27,7 @@
  *     seal per row, opened once per row per `list`; the AAD is bound to
  *     `google_event_id`, which `rekey` leaves alone and every write that changes
  *     it re-seals in the same statement. There is no plaintext start column
- *     (0008 dropped it).
+ *     (0009 dropped it).
  *
  * Ghosting is the reason `state` and `ghosted_at` exist, and the migration's
  * CHECK ties them together: `state = 'ghost'` exactly when `ghosted_at` is set.

@@ -127,7 +127,7 @@ describe("mailInbox.insert", () => {
     expect(sealedSubject ?? "").toMatch(/^v2:/u);
     expect(sealedSubject).not.toContain("security code");
 
-    // 0008 dropped the pre-0005 plaintext pair outright.
+    // 0009 dropped the pre-0005 plaintext pair outright.
     const columns = await env.DB.prepare("SELECT name FROM pragma_table_info('mail_inbox')").all<{
       name: string;
     }>();

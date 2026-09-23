@@ -1,4 +1,4 @@
-// The schema after 0009, as D1 actually has it: the renamed table, the foreign
+// The schema after 0010, as D1 actually has it: the renamed table, the foreign
 // keys that followed it, and the rebuilt rule-type constraint.
 
 import { env } from "cloudflare:test";
@@ -14,7 +14,7 @@ const CHILDREN = [
   "portal_visits",
 ];
 
-describe("the health_systems rename (0009)", () => {
+describe("the health_systems rename (0010)", () => {
   it("leaves no table, column or index named after a provider", async () => {
     const objects = await env.DB.prepare(
       "SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE '_cf_%' AND name <> 'd1_migrations'",

@@ -23,7 +23,7 @@
  *     an unchanged visit from an updated one without re-sealing every row every
  *     hour. Keyed, because a plain sha256 of a guessable visit is a confirmation
  *     oracle.
- *   - There is no start column (0008 dropped it): the visit's start is in the
+ *   - There is no start column (0009 dropped it): the visit's start is in the
  *     payload, and every reader here already opens the payload.
  *   - `expires_at` is coarsened to a `EXPIRY_BUCKET_SECONDS` boundary. It is a
  *     year after the visit, so to the second it *was* the visit's start time;

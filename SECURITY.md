@@ -84,7 +84,7 @@ listed rather than left to be inferred:
 - **`mail_inbox.kind`, `received_at`, `consumed_at`, `expires_at` and
   `raw_size`**: a classification, three timestamps and a byte count. The legacy
   plaintext `from_addr` / `subject` columns were blanked by migration 0007 and
-  dropped by 0008.
+  dropped by 0009.
 - **`mcp_audit`, `run_log`**: that a tool ran, by which client, how many rows
   came back, and each sync run's counts and error codes. The owner's activity
   times and clinical counts (for example a tool's `result_count`) are visible
@@ -114,7 +114,7 @@ used to read it plaintext was decided on its own:
   health system's rows by `health_system_id` (indexed) and narrowed them to the
   window in memory, so the start moved into the sealed `detail_enc` with no new
   query and no new round trip: `list` opens each row it reads anyway. No
-  plaintext bucket is kept; the old `start_at` column is dropped (0008).
+  plaintext bucket is kept; the old `start_at` column is dropped (0009).
 - **Ordering** (`calendar_events.list`, `portal_visits.list`): applied after
   the rows are opened. A health system has tens of rows, not thousands.
 - **"Is this visit over yet"** (`portal_visits.record`): only the rows the

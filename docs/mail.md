@@ -85,7 +85,7 @@ organisation identity and message content, and both attacker-chosen on the
 reject path. They are now sealed (padded, so the ciphertext's length does not
 give the address or the subject away) with the AAD bound to
 `mail_inbox.from_addr_enc.<id>` / `mail_inbox.subject_enc.<id>`. The two old
-plaintext columns were blanked by migration 0007 and dropped by 0008.
+plaintext columns were blanked by migration 0007 and dropped by 0009.
 
 **Every kind has a TTL**, not only `otp`: 10 minutes for `otp`, 6 hours for
 `forward_verify`, 24 hours for `other` (including the `POST /api/mail/test`

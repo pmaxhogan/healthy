@@ -193,7 +193,9 @@ export async function runPortalPass(input: PortalPassInput): Promise<void> {
   const accounts = await repos.portalAccounts.listActive();
   const wanted = input.healthSystemIds;
   const selected =
-    wanted === undefined ? accounts : accounts.filter((row) => wanted.includes(row.health_system_id));
+    wanted === undefined
+      ? accounts
+      : accounts.filter((row) => wanted.includes(row.health_system_id));
   if (selected.length === 0) {
     ctx.log.debug("portal.no_accounts", { active: accounts.length });
     return;
@@ -484,7 +486,8 @@ async function buildPortalCandidates(
 
   const skipped = builds.filter((build) => build.duplicate).length;
   input.state.summary.portalSkipped += skipped;
-  if (skipped > 0) input.ctx.log.info("portal.deduped", { healthSystemId: healthSystem.id, skipped });
+  if (skipped > 0)
+    input.ctx.log.info("portal.deduped", { healthSystemId: healthSystem.id, skipped });
   return builds;
 }
 
@@ -643,7 +646,10 @@ async function removeDuplicates(
       }
       if (await input.repos.calendarEvents.remove(row.event_key)) removed += 1;
     } catch (error) {
-      input.ctx.log.warn("portal.duplicate_remove_failed", { healthSystemId, ...errorFields(error) });
+      input.ctx.log.warn("portal.duplicate_remove_failed", {
+        healthSystemId,
+        ...errorFields(error),
+      });
     }
   }
   input.ctx.log.info("portal.duplicates_removed", { healthSystemId, removed });

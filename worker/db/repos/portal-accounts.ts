@@ -31,7 +31,7 @@
  * `portal_accounts.<column>.<healthSystemId>`. They are read once per sign-in or
  * portal run (the row is opened when it is read, and the hops of a sign-in reuse
  * the opened values), so this is a decrypt per run, not per request. The columns
- * carry `_enc` names since 0008; the AAD keeps the name each value was first
+ * carry `_enc` names since 0009; the AAD keeps the name each value was first
  * sealed under (`portal_accounts.base_url.<id>`), because it is part of the tag.
  * Every short
  * credential column is sealed padded (`sealShort`), so a ciphertext no longer
@@ -482,8 +482,10 @@ export function makePortalAccountsRepo(ctx: Ctx) {
      * `countLoginAttemptsToday`; `lastAt` is kept across days, because spacing
      * codes out has nothing to do with where midnight falls.
      */
-    async unattendedCodes(providerId: string): Promise<{ today: number; lastAt: number | null }> {
-      const row = await byProvider(providerId);
+    async unattendedCodes(
+      healthSystemId: string,
+    ): Promise<{ today: number; lastAt: number | null }> {
+      const row = await byHealthSystem(healthSystemId);
       if (row === null) return { today: 0, lastAt: null };
       return {
         today: row.unattended_codes_day === utcDay(ctx.now()) ? row.unattended_codes_today : 0,
@@ -498,8 +500,8 @@ export function makePortalAccountsRepo(ctx: Ctx) {
      * invocation that dies mid-send has still cost the owner an email. One
      * statement, so two overlapping runs cannot both read the same count.
      */
-    async recordUnattendedCode(providerId: string): Promise<void> {
-      await ensure(providerId);
+    async recordUnattendedCode(healthSystemId: string): Promise<void> {
+      await ensure(healthSystemId);
       const today = utcDay(ctx.now());
       await run(
         ctx.db
@@ -508,9 +510,9 @@ export function makePortalAccountsRepo(ctx: Ctx) {
                 SET unattended_codes_today =
                       CASE WHEN unattended_codes_day = ? THEN unattended_codes_today + 1 ELSE 1 END,
                     unattended_codes_day = ?, last_unattended_code_at = ?, updated_at = ?
-              WHERE provider_id = ?`,
+              WHERE health_system_id = ?`,
           )
-          .bind(today, today, ctx.now(), ctx.now(), providerId),
+          .bind(today, today, ctx.now(), ctx.now(), healthSystemId),
       );
     },
 

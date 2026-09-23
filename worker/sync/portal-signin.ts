@@ -63,21 +63,17 @@ import { isHttpsUrl } from "@shared/url.ts";
 
 import { makeRepos } from "../db/index.ts";
 import { getSetting } from "../db/settings.ts";
+import { CookieJar, createMyChartAdapter } from "../ehr/mychart/index.ts";
 import { AppError, isAppError } from "../lib/errors.ts";
 import { errorFields } from "../lib/log.ts";
 import { parseAllowlistCsv } from "../mail/classify.ts";
-import { CookieJar, createMyChartAdapter } from "../ehr/mychart/index.ts";
 
 import { openReconnectAlert } from "./alerts.ts";
 
 import type { SyncDeps } from "./deps.ts";
 import type { Ctx } from "../db/client.ts";
 import type { ClaimedOtp } from "../db/repos/mail-inbox.ts";
-import type {
-  PortalClient,
-  PortalCustomSettings,
-  PortalEndpoint,
-} from "../ehr/mychart/index.ts";
+import type { PortalClient, PortalCustomSettings, PortalEndpoint } from "../ehr/mychart/index.ts";
 import type { PortalSignInPhase } from "@shared/types.ts";
 
 /** How long to wait for the emailed code before giving up. */

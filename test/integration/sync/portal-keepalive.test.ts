@@ -21,7 +21,7 @@ import { PORTAL_MOUNT, PORTAL_ORIGIN, fakePortal, seedPortalAccount } from "../p
 import {
   recordingLog,
   resetSyncDb,
-  seedConnectedProvider,
+  seedConnectedHealthSystem,
   syncCtx,
   syncEnv,
   syncRepos,
@@ -55,33 +55,33 @@ async function seededAccount(
   host: string,
   options: { active?: boolean } = {},
 ): Promise<string> {
-  const provider = await seedConnectedProvider(ctx, { host });
-  await seedPortalAccount(ctx, provider.providerId, options);
-  return provider.providerId;
+  const healthSystem = await seedConnectedHealthSystem(ctx, { host });
+  await seedPortalAccount(ctx, healthSystem.healthSystemId, options);
+  return healthSystem.healthSystemId;
 }
 
-async function storedJar(ctx: Ctx, providerId: string): Promise<string | null> {
-  const secrets = await syncRepos(ctx).portalAccounts.getSecrets(providerId);
+async function storedJar(ctx: Ctx, healthSystemId: string): Promise<string | null> {
+  const secrets = await syncRepos(ctx).portalAccounts.getSecrets(healthSystemId);
   return secrets?.cookieJar ?? null;
 }
 
 describe("the portal keepalive", () => {
   it("touches a live session once and saves the jar it came back with", async () => {
     const ctx = syncCtx();
-    const providerId = await seededAccount(ctx, "fhir.a.example.test");
+    const healthSystemId = await seededAccount(ctx, "fhir.a.example.test");
     const portal = fakePortal({ alive: true });
 
     const summary = await runPortalKeepalive(ctx, { portalAdapter: refreshingAdapter(portal) });
 
     expect(summary).toStrictEqual({ accounts: 1, alive: 1 });
     expect(portal.calls.sessionChecks).toBe(1);
-    expect(await storedJar(ctx, providerId)).toContain(REFRESHED);
+    expect(await storedJar(ctx, healthSystemId)).toContain(REFRESHED);
   });
 
   it("never signs in, and leaves a dead session exactly as it was", async () => {
     const ctx = syncCtx();
-    const providerId = await seededAccount(ctx, "fhir.a.example.test");
-    const before = await syncRepos(ctx).portalAccounts.get(providerId);
+    const healthSystemId = await seededAccount(ctx, "fhir.a.example.test");
+    const before = await syncRepos(ctx).portalAccounts.get(healthSystemId);
     const portal = fakePortal({ alive: false, loginStatus: "awaiting_code" });
 
     const summary = await runPortalKeepalive(ctx, { portalAdapter: refreshingAdapter(portal) });
@@ -90,8 +90,8 @@ describe("the portal keepalive", () => {
     expect(portal.calls.logins).toBe(0);
     expect(portal.calls.sendCodes).toBe(0);
     // A dead jar is not saved over whatever a concurrent sign-in may be writing.
-    expect(await storedJar(ctx, providerId)).not.toContain(REFRESHED);
-    const after = await syncRepos(ctx).portalAccounts.get(providerId);
+    expect(await storedJar(ctx, healthSystemId)).not.toContain(REFRESHED);
+    const after = await syncRepos(ctx).portalAccounts.get(healthSystemId);
     expect(after?.session_state).toBe("active");
     expect(after?.login_attempts_today).toBe(0);
     expect(after?.cookie_jar_enc).toBe(before?.cookie_jar_enc);
@@ -130,7 +130,7 @@ describe("the portal keepalive", () => {
     expect(jars.filter((jar) => jar?.includes(REFRESHED) === true)).toHaveLength(1);
   });
 
-  it("logs the provider and whether it was alive, and never a cookie or the portal", async () => {
+  it("logs the health system and whether it was alive, and never a cookie or the portal", async () => {
     const { log, lines } = recordingLog();
     const ctx = syncCtx({ log });
     await seededAccount(ctx, "fhir.a.example.test");

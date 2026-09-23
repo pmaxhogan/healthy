@@ -899,13 +899,13 @@ function scheduledRun(fix: Fixture): Promise<RunSummary> {
 async function earlierCodes(fix: Fixture, count: number, hoursAgo: number): Promise<void> {
   const then = syncCtx({ now: () => T0 - hoursAgo * 3600 });
   for (let code = 0; code < count; code += 1) {
-    await syncRepos(then).portalAccounts.recordUnattendedCode(fix.provider.providerId);
+    await syncRepos(then).portalAccounts.recordUnattendedCode(fix.healthSystem.healthSystemId);
   }
 }
 
 /** The fixture's portal account row. */
 async function accountOf(fix: Fixture): Promise<PortalAccountRow | null> {
-  return syncRepos(fix.ctx).portalAccounts.get(fix.provider.providerId);
+  return syncRepos(fix.ctx).portalAccounts.get(fix.healthSystem.healthSystemId);
 }
 
 describe("the scheduled run, which nobody is watching", () => {
@@ -963,19 +963,19 @@ describe("the scheduled run, which nobody is watching", () => {
 
   it("stops before the email once the day's codes are spent, and hands over to the owner", async () => {
     const ctx = syncCtx({ trello: true });
-    const provider = await seedConnectedProvider(ctx, {
+    const healthSystem = await seedConnectedHealthSystem(ctx, {
       host: HOST,
       displayName: "A Example Health",
     });
     await seedGoogle(ctx);
     await seedSettings(ctx);
-    await seedPortalAccount(ctx, provider.providerId);
+    await seedPortalAccount(ctx, healthSystem.healthSystemId);
     const fix: Fixture = {
       ctx,
-      provider,
+      healthSystem,
       portal: fakePortal({ alive: false, loginStatus: "awaiting_code" }),
-      upstreams: stubUpstreams({ [HOST]: fhirServer({ patientId: provider.patientId }) }),
-      server: fhirServer({ patientId: provider.patientId }),
+      upstreams: stubUpstreams({ [HOST]: fhirServer({ patientId: healthSystem.patientId }) }),
+      server: fhirServer({ patientId: healthSystem.patientId }),
     };
     // Spent earlier today, long enough ago that the spacing is not the reason.
     await earlierCodes(fix, UNATTENDED_CODES_PER_DAY, UNATTENDED_CODE_GAP_SECONDS / 3600);
@@ -990,7 +990,7 @@ describe("the scheduled run, which nobody is watching", () => {
     expect(row?.session_state).toBe("needs_reauth");
     expect(row?.last_error_code).toBe("portal_signin_needs_owner");
     expect(fix.upstreams.trelloCards).toHaveLength(1);
-    expect(fix.upstreams.trelloCards[0]?.desc).toContain("/providers");
+    expect(fix.upstreams.trelloCards[0]?.desc).toContain("/health-systems");
   });
 
   it("still signs in on a trusted device once the day's codes are spent", async () => {
@@ -1011,7 +1011,7 @@ describe("the scheduled run, which nobody is watching", () => {
   it("leaves the day's last attempts to the owner's own button, and waits", async () => {
     const fix = await fixture({ portal: { alive: false, loginStatus: "signed_in" } });
     // The seeded limit is three; one spent leaves two, which are the owner's.
-    await spendAttempts(fix.ctx, fix.provider.providerId, 1);
+    await spendAttempts(fix.ctx, fix.healthSystem.healthSystemId, 1);
 
     const summary = await scheduledRun(fix);
 
@@ -1027,7 +1027,7 @@ describe("the scheduled run, which nobody is watching", () => {
   it("does not hold the owner's own run to any of it", async () => {
     const fix = await fixture({ portal: { alive: false, loginStatus: "awaiting_code" } });
     await earlierCodes(fix, UNATTENDED_CODES_PER_DAY, 1);
-    await spendAttempts(fix.ctx, fix.provider.providerId, 1);
+    await spendAttempts(fix.ctx, fix.healthSystem.healthSystemId, 1);
     await seedOtp(fix.ctx, "424242");
 
     const summary = await portalRun(fix);
