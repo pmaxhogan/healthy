@@ -173,10 +173,15 @@ Shows the setup checklist below, the pending Gmail verification code/link
   application-layer encrypted; a D1 snapshot names no health system.
 - **No bodies stored, ever.** Only the four fields listed above survive
   parsing, for every kind, including `other`.
-- **Never logged.** `handleInboundEmail` logs only the kind, the sender's
-  _domain_, the message size, and (on acceptance) the row's id — never the
-  full address, the subject or a code. See `worker/lib/log.ts` and
-  `SECURITY.md` for the redaction rules this convention layers on top of.
+- **Never logged.** `handleInboundEmail` logs whether the sender was allowed
+  (a boolean), the classification, the message size, and (on acceptance) the
+  row's id — never the address, never the domain, never the subject, never a
+  code. The domain used to be logged: for a forwarded portal message it is the
+  health system's own sending domain, which `SECURITY.md` puts in the
+  never-hand-to-the-logger category, and on the reject path it is a string an
+  unauthenticated remote sender chooses. The redactor now also drops any field
+  named after a host, a domain or an origin, so a future caller cannot
+  reintroduce it. See `worker/lib/log.ts` and `SECURITY.md`.
 - **The mailbox is not a hardened channel.** Anyone who learns the mail
   address can attempt to send it mail; the allowlist, the content pattern
   match, the sender binding, and the 10-minute single-use TTL together are

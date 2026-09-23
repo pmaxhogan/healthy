@@ -239,7 +239,10 @@ app.onError((error, c) => {
   // message can quote an upstream response, and an upstream response here can
   // carry patient detail, so it never reaches the client.
   if (isAppError(error)) {
-    logLine("warn", "app_error", { code: error.code });
+    // `errorCode`, not `code`: the redactor drops a bare `code` (it names the
+    // OAuth authorization code), which would make every one of these read
+    // "[redacted]".
+    logLine("warn", "app_error", { errorCode: error.code });
     return c.json<ApiError>({ error: error.code }, error.status as ContentfulStatusCode, {
       "cache-control": "no-store",
     });

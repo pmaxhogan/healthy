@@ -100,8 +100,13 @@ guarantee is two parts, and it is worth being precise about which is which:
 
 - _Enforced_ by the redactor: keys that name a credential (`token`, `secret`,
   `password`, `authorization`, `cookie`, `refresh`, `verifier`, `api_key`,
-  `private`, `email`), the exact keys `code` and `state`, and keys naming a
-  patient or FHIR identifier are replaced wholesale. By shape, it strips
+  `private`, `email`), keys that name a host, a domain or an origin (`domain`,
+  `hostname`, `origin` anywhere in the name, and `host` as an exact key — a
+  sending domain names a health system, and "ghosted" contains "host", which is
+  why that one is exact), the exact keys `code` and `state`, and keys naming a
+  patient or FHIR identifier are replaced wholesale. The corollary of `code`
+  being dropped: every stable error code this project logs travels as
+  `errorCode`, never as `code`. By shape, it strips
   `Bearer`/`Basic` credentials, the value of a credential-bearing query
   parameter (`?code=`, `access_token=`, `token=`…), anything address-shaped, and
   any long opaque run — 32 or more characters of base64url, dots included, which

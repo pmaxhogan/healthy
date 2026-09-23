@@ -239,7 +239,7 @@ describe("handleInboundEmail: logging", () => {
     return lines.map((line) => JSON.parse(line) as Record<string, unknown>);
   }
 
-  it("names only the kind, sender domain, size and id for an accepted message", async () => {
+  it("names the kind, the allow decision, the size and the id -- never the sender", async () => {
     await allowTenantDomain();
     const { message } = fakeEmail(OTP_EMAIL, { from: "noreply@mychart.example.org" });
 
@@ -248,26 +248,32 @@ describe("handleInboundEmail: logging", () => {
     const accepted = loggedLines().find((line) => line.event === "mail.accepted");
     expect(accepted).toMatchObject({
       kind: "otp",
-      fromDomain: "mychart.example.org",
+      // A boolean, not the domain. For a forwarded portal message that domain is
+      // the health system's own, and `SECURITY.md` says an organisation identity
+      // is never handed to the logger.
+      senderAllowed: true,
       // The keyword that tipped classification into 'otp' -- see
       // worker/mail/classify.ts -- never the code itself (checked below).
       otp_match: "code is",
     });
     expect(accepted?.id).toEqual(expect.any(String));
-    expect(JSON.stringify(accepted)).not.toContain("482913");
-    expect(JSON.stringify(accepted)).not.toContain("noreply@");
+    const line = JSON.stringify(accepted);
+    expect(line).not.toContain("482913");
+    expect(line).not.toContain("noreply@");
+    expect(line).not.toContain("mychart.example.org");
   });
 
-  it("names only the reason and sender domain for a rejected message, never the full address", async () => {
+  it("names only the reason and the allow decision for a rejected message", async () => {
     const { message } = fakeEmail(SPAM_EMAIL, { from: "prizes@not-allowed.example.net" });
 
     await run(message);
 
     const rejected = loggedLines().find((line) => line.event === "mail.rejected");
-    expect(rejected).toMatchObject({
-      reason: "not_allowed",
-      fromDomain: "not-allowed.example.net",
-    });
-    expect(JSON.stringify(rejected)).not.toContain("prizes@");
+    expect(rejected).toMatchObject({ reason: "not_allowed", senderAllowed: false });
+    const line = JSON.stringify(rejected);
+    expect(line).not.toContain("prizes@");
+    // The reject path is the one where a remote sender chooses the string, so this
+    // is also what stops them writing into the logs at will.
+    expect(line).not.toContain("not-allowed.example.net");
   });
 });

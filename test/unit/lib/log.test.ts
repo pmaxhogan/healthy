@@ -150,6 +150,44 @@ describe("redactValue", () => {
     expect(redactValue("email", "owner")).toBe("[redacted]");
   });
 
+  it("redacts a host, a domain or an origin by key: each one names a health system", () => {
+    // A sending domain or a portal hostname is an organisation identity, which
+    // `SECURITY.md` puts in the never-hand-to-the-logger category -- and it is far
+    // under the opaque threshold, so no shape rule would catch it. The reject path
+    // of the inbound-mail handler makes it an unauthenticated remote sender's
+    // choice of string as well.
+    for (const key of [
+      "fromDomain",
+      "domain",
+      "senderDomain",
+      "host",
+      "hostname",
+      "landedOrigin",
+      "origin",
+    ]) {
+      expect(redactValue(key, "mail.example.test"), key).toBe("[redacted]");
+    }
+  });
+
+  it("leaves the ghost counters alone, even though 'ghosted' contains 'host'", () => {
+    // Why `host` is an exact-key rule and not a substring one: the calendar sync
+    // counts ghosted events on every run and those counts are the point of the
+    // Runs page.
+    expect(redactValue("eventsGhosted", 3)).toBe(3);
+    expect(redactValue("ghosted", 3)).toBe(3);
+    expect(redactValue("ghost_color_id", "8")).toBe("8");
+  });
+
+  it("keeps a stable error code readable under the name this project uses for one", () => {
+    // The bare key `code` names the OAuth authorization code and is dropped
+    // wholesale, which is why every stable code travels as `errorCode`. An
+    // `/api` rejection logged under `code` read "[redacted]" in production.
+    expect(redactValue("errorCode", "portal_redirected_offsite")).toBe("portal_redirected_offsite");
+    expect(redactValue("error_code", "bad_request")).toBe("bad_request");
+    expect(redactValue("statusCode", 404)).toBe(404);
+    expect(redactValue("code", "bad_request")).toBe("[redacted]");
+  });
+
   it("recurses into nested objects and arrays", () => {
     expect(
       redactValue("outer", {

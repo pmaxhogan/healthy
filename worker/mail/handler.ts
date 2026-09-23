@@ -14,19 +14,17 @@
  * The allowlist check is against the parsed `From:` header, never
  * `message.from` (the SMTP envelope sender): see `worker/mail/parse.ts` for
  * why those two disagree for a Gmail-forwarded message.
+ *
+ * Nothing here logs the sender. Every line carries whether the sender was
+ * allowed, the classification, the size and this app's own row id -- never the
+ * address, never the domain, never the subject, never a code.
  */
 
 import { reposFor } from "../db/index.ts";
 import { getSetting } from "../db/settings.ts";
 import { errorFields, makeLogger } from "../lib/log.ts";
 
-import {
-  classify,
-  domainOf,
-  isAllowedSender,
-  mailTtlSeconds,
-  parseAllowlistCsv,
-} from "./classify.ts";
+import { classify, isAllowedSender, mailTtlSeconds, parseAllowlistCsv } from "./classify.ts";
 import { parseInboundEmail } from "./parse.ts";
 
 import type { Env } from "../env.ts";
@@ -67,11 +65,17 @@ export async function handleInboundEmail(
     return;
   }
 
-  const fromDomain = domainOf(parsed.from);
   const allowlistCsv = await getSetting(repos.ctx, "mail_sender_allowlist");
-  if (!isAllowedSender(parsed.from, parseAllowlistCsv(allowlistCsv))) {
+  // The allow decision, never the domain that produced it. For a forwarded portal
+  // message the sender's domain is the health system's own -- an organisation
+  // identity, which `SECURITY.md` says must not be handed to the logger at all --
+  // and on the reject path it is additionally a string an unauthenticated remote
+  // sender chooses. A boolean answers every question the logs are asked here
+  // ("did mail arrive", "was it kept"), and `mail_inbox` has the rest, sealed.
+  const senderAllowed = isAllowedSender(parsed.from, parseAllowlistCsv(allowlistCsv));
+  if (!senderAllowed) {
     message.setReject("not allowed");
-    log.warn("mail.rejected", { reason: "not_allowed", fromDomain, rawSize: parsed.rawSize });
+    log.warn("mail.rejected", { reason: "not_allowed", senderAllowed, rawSize: parsed.rawSize });
     return;
   }
 
@@ -93,7 +97,7 @@ export async function handleInboundEmail(
     log.info("mail.accepted", {
       id: entry.id,
       kind: entry.kind,
-      fromDomain,
+      senderAllowed,
       rawSize: entry.rawSize,
       // Which keyword tipped classification into 'otp' -- never the code
       // itself -- so a future misclassification (like the one this field
@@ -101,7 +105,7 @@ export async function handleInboundEmail(
       ...(classification.reason !== null && { otp_match: classification.reason }),
     });
   } catch (error) {
-    log.error("mail.insert_failed", { fromDomain, ...errorFields(error) });
+    log.error("mail.insert_failed", { senderAllowed, ...errorFields(error) });
     throw error;
   }
 

@@ -85,7 +85,7 @@ async function countGrants(api: ApiContext, env: Env): Promise<number> {
     return grants.length;
   } catch (error) {
     logLine("warn", "api_grants_unavailable", {
-      code: isAppError(error) ? error.code : "unknown",
+      errorCode: isAppError(error) ? error.code : "unknown",
     });
     return 0;
   }

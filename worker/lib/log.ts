@@ -16,6 +16,12 @@
  *     with "[redacted]". A 24-character Epic patient id is well under the opaque
  *     threshold, so shape alone would never catch it. The rule over-matches
  *     (`fhirCacheRowId` goes too) and that is the direction to err in.
+ *   - keys naming a host, a domain or an origin are replaced too. A sending domain
+ *     or a portal hostname names a health system, which is the category this
+ *     project is strictest about, and it is far under the opaque threshold, so
+ *     nothing else would catch it. `domain`, `hostname` and `origin` match as
+ *     substrings; `host` matches only as an exact key, because "ghosted" contains
+ *     it and the sync's ghost counters are legitimate fields.
  *   - string values containing "Bearer <x>" or "Basic <x>" lose the credential
  *   - the value of a credential-bearing query parameter (`?code=`, `&access_token=`,
  *     `token=`, `state=`…) is replaced, wherever it appears inside a longer string
@@ -55,7 +61,7 @@ export interface Logger {
 }
 
 const SENSITIVE_KEY =
-  /token|secret|password|passwd|authorization|cookie|refresh|verifier|api[_-]?key|private|email/i;
+  /token|secret|password|passwd|authorization|cookie|refresh|verifier|api[_-]?key|private|email|domain|hostname|origin/i;
 /**
  * Keys naming a patient or FHIR identifier.
  *
@@ -66,7 +72,13 @@ const SENSITIVE_KEY =
  */
 const IDENTIFIER_KEY = /(patient|fhir)[a-z0-9_-]*id/i;
 // Exact matches, compared after stripping separators and case: see the header.
-const SENSITIVE_EXACT = new Set(["code", "state", "authcode", "codeverifier", "nonce"]);
+//
+// `host` is here rather than in `SENSITIVE_KEY` on purpose: "ghosted" contains
+// "host", and `eventsGhosted` / `ghost_color_id` are fields this project logs
+// deliberately. An exact match catches the one shape that matters -- a caller
+// passing `{ host }` -- while `hostname` and `domain` are unambiguous enough to
+// match anywhere.
+const SENSITIVE_EXACT = new Set(["code", "state", "authcode", "codeverifier", "nonce", "host"]);
 const WHITESPACE_RUN = /(\s+)/;
 const BEARER = /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/g;
 /**

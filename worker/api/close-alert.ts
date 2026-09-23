@@ -26,7 +26,7 @@ export async function closeAlert(api: ApiContext, env: Env, subject: string): Pr
   } catch (error) {
     // Includes the "Trello is not configured" case, which is a legitimate state.
     logLine("warn", "api_alert_card_not_closed", {
-      code: isAppError(error) ? error.code : "unknown",
+      errorCode: isAppError(error) ? error.code : "unknown",
     });
   }
 }

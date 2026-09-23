@@ -77,7 +77,7 @@ export function afterResponse(
     } catch (error) {
       logLine("warn", "api_background_failed", {
         event,
-        code: isAppError(error) ? error.code : "unknown",
+        errorCode: isAppError(error) ? error.code : "unknown",
       });
     }
   };
@@ -189,7 +189,12 @@ export function apiErrorHandler(error: Error, c: Context<AppHonoEnv>): Response 
   // and the logger is not a place to find that out.
   // One redacted JSON line, like every other log this Worker writes. The path is
   // safe (ids of our own rows) and the redactor is what keeps it that way.
-  if (status >= 500) logLine("error", "api_error", { code: body.error, path: c.req.path });
-  else logLine("warn", "api_rejected", { code: body.error, path: c.req.path });
+  //
+  // `errorCode`, not `code`: the bare key `code` is redacted wholesale (it names
+  // the OAuth authorization code), so every rejection used to be logged as
+  // "[redacted]" -- observed live. `errorCode` is the name this project's stable
+  // codes travel under everywhere else.
+  if (status >= 500) logLine("error", "api_error", { errorCode: body.error, path: c.req.path });
+  else logLine("warn", "api_rejected", { errorCode: body.error, path: c.req.path });
   return c.json<ApiError>(body, status, NO_STORE);
 }

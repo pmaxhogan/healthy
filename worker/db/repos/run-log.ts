@@ -105,7 +105,7 @@ export function makeRunLogRepo(ctx: Ctx) {
           )
           .bind(ctx.now(), JSON.stringify(summary), startedBefore),
       );
-      if (changes > 0) ctx.log.warn("run.swept", { runs: changes, code: RUN_ABORTED_CODE });
+      if (changes > 0) ctx.log.warn("run.swept", { runs: changes, errorCode: RUN_ABORTED_CODE });
       return changes;
     },
 
