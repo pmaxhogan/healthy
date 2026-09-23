@@ -446,7 +446,7 @@ describe("the OpenID bridge", () => {
     expect(find(stub, "GET", "/prd/Home")?.headers.cookie).toContain("EpicSession=");
   });
 
-  it("reports portal_login_failed when a hop lands on the shell's own login screen", async () => {
+  it("reports portal_handoff_failed when a hop lands on the shell's own login screen", async () => {
     const stub = routed({
       "GET /prd/Authentication/Login": () => redirect(`${HOST}/prd/OpenId?op=synthetic-op`),
       "GET /prd/OpenId": () => redirect(`${HOST}/app/login`),
@@ -454,7 +454,7 @@ describe("the OpenID bridge", () => {
       "POST /shellwebapi/login": () => json({ authenticated: true, userId: "OWNER-LOGIN" }),
     });
 
-    await expect(codeOf(client(stub).login(CREDENTIALS))).resolves.toBe("portal_login_failed");
+    await expect(codeOf(client(stub).login(CREDENTIALS))).resolves.toBe("portal_handoff_failed");
     await expect(reasonOf(client(stub).login(CREDENTIALS))).resolves.toBe("shell_login");
   });
 
@@ -576,7 +576,7 @@ describe("the OpenID bridge", () => {
       "POST /shellwebapi/login": () => json({ authenticated: true, userId: "OWNER-LOGIN" }),
     });
 
-    await expect(codeOf(client(stub).login(CREDENTIALS))).resolves.toBe("portal_login_failed");
+    await expect(codeOf(client(stub).login(CREDENTIALS))).resolves.toBe("portal_handoff_failed");
   });
 });
 
@@ -618,7 +618,7 @@ describe("a login response that says nothing about a code", () => {
       "POST /shellwebapi/login": () => json({ authenticated: true, userId: "OWNER-LOGIN" }),
     });
 
-    await expect(codeOf(client(stub).login(CREDENTIALS))).resolves.toBe("portal_login_failed");
+    await expect(codeOf(client(stub).login(CREDENTIALS))).resolves.toBe("portal_handoff_failed");
   });
 });
 

@@ -93,6 +93,15 @@ function getCallCount(api: FakeFetch): number {
 }
 
 /**
+ * A `signIn.updatedAt` well after the account fixture's own `updatedAt`
+ * ("2026-09-21T11:07:00.000Z"), the way a real `setPhase` call would stamp it
+ * on every step. The card prefers whichever of the two is fresher (see
+ * `effectiveSignIn` in `src/lib/use-portal-account.ts`), so a poll sequence
+ * has to look like the runner is still the one that ran most recently.
+ */
+const RUNNER_UPDATED_AT = 1_800_000_000;
+
+/**
  * GET #n's response, by 1-based call order: #1 is the initial load.
  *
  * `signInCode` is `PortalSignInState.code` -- the stable failure code the
@@ -107,7 +116,7 @@ function phaseSequence(phases: PortalSignInPhase[], signInCode: string | null = 
         phase: phases[Math.min(n - 1, phases.length - 1)] ?? "idle",
         code: n >= phases.length ? signInCode : null,
         startedAt: null,
-        updatedAt: null,
+        updatedAt: RUNNER_UPDATED_AT,
       },
     });
 }
@@ -456,6 +465,115 @@ describe("PortalAccountCard: sign-in polling", () => {
     const button = wrapper.findAll("button").find((b) => b.text().includes("Sign in now"));
     expect(button?.attributes("disabled")).toBeDefined();
   });
+
+  it("does not claim a sign-in started, or poll, when the runner queued nothing", async () => {
+    // `started: false` means another driver already holds the sign-in gate, or
+    // an existing job has not gone stale yet -- see `PortalSignInRunner.start`.
+    // Polling regardless (as this card used to) watches a phase nothing is
+    // about to move: the very first tick finds it not in progress and stops,
+    // and the button reverts to "Sign in now" within a few seconds even though
+    // it never actually queued a job.
+    toasts.length = 0;
+    const { wrapper, api } = await mountLoaded({
+      get: () => portalAccount({ hasCredentials: true }),
+      signIn: () => fakeResponse({ status: 202, body: { accepted: true, started: false } }),
+    });
+
+    await clickSignIn(wrapper);
+
+    expect(toasts.map((t) => t.text)).not.toContain("Sign-in started.");
+    expect(
+      wrapper
+        .findAll("button")
+        .find((b) => b.text().includes("Sign in now"))
+        ?.text(),
+    ).toBe("Sign in now");
+
+    // The one refresh `onSignIn` does when nothing new started (the initial
+    // load, plus this reload) -- not an unattended poll.
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(getCallCount(api)).toBe(2);
+  });
+
+  it("keeps polling after a started: false refresh if that refresh shows a job is actually live", async () => {
+    // The reverse of the case above: another press, or the cron, already has a
+    // real job running through this same Durable Object, so the refresh
+    // `onSignIn` does on `started: false` comes back in progress -- and that is
+    // worth picking back up rather than leaving the card looking idle.
+    const { wrapper, api } = await mountLoaded({
+      // #1 is the initial load, #2 the refresh `onSignIn` does on `started:
+      // false`, still in progress; #3 is the first poll tick after that.
+      get: phaseSequence(["awaiting_code", "awaiting_code", "signed_in"]),
+      signIn: () => fakeResponse({ status: 202, body: { accepted: true, started: false } }),
+    });
+
+    await clickSignIn(wrapper);
+    expect(wrapper.text()).toContain(
+      "Waiting for the emailed code — it arrives via your Gmail forwarding filter",
+    );
+    expect(getCallCount(api)).toBe(2);
+
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(wrapper.text()).toContain("Signed in");
+    expect(getCallCount(api)).toBe(3);
+  });
+});
+
+describe("PortalAccountCard: freshest sign-in outcome", () => {
+  it("shows the account row's own newer failure over a stale runner phase", async () => {
+    const { wrapper } = await mountLoaded({
+      get: () =>
+        portalAccount({
+          hasCredentials: true,
+          state: "needs_reauth",
+          lastErrorCode: "portal_handoff_failed",
+          needsReauthSince: "2026-09-21T15:07:00.000Z",
+          updatedAt: "2026-09-21T15:07:00.000Z",
+          // A much older manual attempt's failure, still sitting in the runner.
+          signIn: { phase: "failed", code: "portal_login_failed", startedAt: 1, updatedAt: 1 },
+        }),
+    });
+
+    expect(wrapper.text()).toContain(`Failed: ${codeMessage("portal_handoff_failed")}`);
+    expect(wrapper.text()).not.toContain(codeMessage("portal_login_failed"));
+  });
+
+  it("keeps the runner's own failure when it is the more recent outcome", async () => {
+    const { wrapper } = await mountLoaded({
+      get: () =>
+        portalAccount({
+          hasCredentials: true,
+          state: "needs_reauth",
+          lastErrorCode: "portal_login_failed",
+          updatedAt: "2026-09-21T11:07:00.000Z",
+          signIn: {
+            phase: "failed",
+            code: "portal_handoff_failed",
+            startedAt: 1,
+            updatedAt: 1_800_000_000,
+          },
+        }),
+    });
+
+    expect(wrapper.text()).toContain(`Failed: ${codeMessage("portal_handoff_failed")}`);
+    expect(wrapper.text()).not.toContain(codeMessage("portal_login_failed"));
+  });
+
+  it("shows nothing extra when the account row is newer but its last outcome was a success", async () => {
+    const { wrapper } = await mountLoaded({
+      get: () =>
+        portalAccount({
+          hasCredentials: true,
+          state: "active",
+          lastErrorCode: null,
+          updatedAt: "2026-09-21T15:07:00.000Z",
+          // A stale manual failure that a newer, successful cron pass supersedes.
+          signIn: { phase: "failed", code: "portal_login_failed", startedAt: 1, updatedAt: 1 },
+        }),
+    });
+
+    expect(wrapper.text()).not.toContain("Failed:");
+  });
 });
 
 describe("PortalAccountCard: sync, forget and remove", () => {
@@ -531,6 +649,7 @@ describe("PortalAccountCard: sync, forget and remove", () => {
 describe("portal error codes: human messages", () => {
   it.each([
     ["portal_login_failed", "username or password"],
+    ["portal_handoff_failed", "did not hand off"],
     ["portal_2fa_required", "emailed verification code"],
     ["portal_2fa_rejected", "wrong, expired, or already used"],
     ["portal_locked", "locked or disabled"],

@@ -152,7 +152,7 @@ export const CONTACT_KEYS: readonly string[] = ["email", "emailAddress", "contac
  * [assumption] that the challenge really is server-minted every time -- a
  * deployment that expected the client to mint one would answer the authorize hop
  * with an invalid-request page, and the bridge would report
- * `portal_login_failed`.
+ * `portal_handoff_failed`.
  */
 export const OIDC_FORM_IDS: readonly string[] = ["OIDCForm"];
 

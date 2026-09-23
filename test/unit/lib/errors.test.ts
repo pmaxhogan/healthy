@@ -22,6 +22,7 @@ describe("AppError", () => {
       ["crypto", 500],
       ["internal", 500],
       ["portal_login_failed", 502],
+      ["portal_handoff_failed", 502],
       ["portal_2fa_required", 409],
       ["portal_2fa_rejected", 409],
       ["portal_locked", 409],

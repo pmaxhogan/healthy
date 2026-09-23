@@ -35,7 +35,7 @@
  *    on one of the later ones.
  *  - **The hop budget is the loop's bound, and exhausting it is a failure.** An
  *    authorization chain that will not terminate is a portal that will not sign us
- *    in, which is `portal_login_failed` -- not a parse problem and not a retry.
+ *    in, which is `portal_handoff_failed` -- not a parse problem and not a retry.
  *  - **Nothing is logged but a hop count and a status.** Not a URL: these carry
  *    the mount, the host, an authorization code and a state nonce.
  */
@@ -142,10 +142,14 @@ function failed(
   landed: Landing,
 ): AppError {
   // Logged here because `errorFields` never carries `details`: without this line
-  // a failed handoff is one bare `portal_login_failed` with no way to tell a
+  // a failed handoff is one bare `portal_handoff_failed` with no way to tell a
   // shell login screen from a chain that simply stopped short of `Home`.
   logger.warn("portal.oidc_bridge_failed", { hops, status, reason, landed });
-  return new AppError("portal_login_failed", "the OpenID handoff did not sign us in", {
+  // A distinct code from `portal_login_failed`: the shell already accepted the
+  // password (that is *why* this chain was ever started), so this is not a
+  // credential problem -- it is the OIDC handoff itself failing to reach the
+  // classic session. The admin UI has a different sentence for each.
+  return new AppError("portal_handoff_failed", "the OpenID handoff did not sign us in", {
     endpoint: "OidcBridge",
     hops,
     status,
@@ -156,9 +160,9 @@ function failed(
 /**
  * Follow the handoff until the classic session exists.
  *
- * Throws `portal_login_failed` when a hop lands on the shell's login screen (the
- * app-level session was not good after all), when a page asks for nothing further
- * and the session still is not alive, or when the hop budget runs out.
+ * Throws `portal_handoff_failed` when a hop lands on the shell's login screen
+ * (the app-level session was not good after all), when a page asks for nothing
+ * further and the session still is not alive, or when the hop budget runs out.
  */
 export async function bridgeToClassicSession(deps: BridgeDeps): Promise<void> {
   const limit = deps.maxHops ?? BRIDGE_MAX_HOPS;

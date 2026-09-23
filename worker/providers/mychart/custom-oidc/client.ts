@@ -148,7 +148,7 @@ export function createCustomOidcClient(deps: CustomOidcClientDeps): PortalClient
       // sign-in job already knows how to do. An explicit "signed in" that then
       // fails to bridge is a real handoff failure and stays one.
       const ambiguous = !outcome.signedInStated && outcome.userId !== null;
-      if (!ambiguous || !isAppError(error) || error.code !== "portal_login_failed") throw error;
+      if (!ambiguous || !isAppError(error) || error.code !== "portal_handoff_failed") throw error;
       logger.info("portal.login", {
         signInStatus: "awaiting_code",
         flavor: endpoint.flavor,

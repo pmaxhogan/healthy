@@ -187,6 +187,8 @@ const CODE_MESSAGES: Record<string, string> = {
   // portal card wants a different sentence for "try again", "wait for the
   // code" and "stop trying", not one generic upstream-failure message.
   portal_login_failed: "The portal rejected that username or password.",
+  portal_handoff_failed:
+    "Signed in, but the portal did not hand off to your chart session. Try again in a bit, or sign in on the portal's own site.",
   portal_2fa_required: "The portal is waiting for the emailed verification code.",
   portal_2fa_rejected: "That verification code was wrong, expired, or already used.",
   portal_locked:

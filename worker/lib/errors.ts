@@ -23,6 +23,7 @@ export type ErrorCode =
   // session is re-authenticated in place, a rejected code asks the owner for a
   // fresh one, a locked account or a bot block must stop trying.
   | "portal_login_failed" // username/password rejected
+  | "portal_handoff_failed" // signed in, but the OpenID handoff to the classic session did not complete
   | "portal_2fa_required" // the portal wants an emailed code before it will answer
   | "portal_2fa_rejected" // the code was wrong, stale, or already used
   | "portal_locked" // the portal locked or disabled the account
@@ -63,6 +64,10 @@ const STATUS: Record<ErrorCode, number> = {
   // (it asks the owner to wait for the emailed code), which is why it is a 409
   // rather than a 502: there is something the owner can do about it.
   portal_login_failed: 502,
+  // Same rationale as portal_login_failed: the credentials were fine, but the
+  // handoff to the classic session never landed, which is just as much "not
+  // our caller's fault" as a rejected password.
+  portal_handoff_failed: 502,
   portal_2fa_required: 409,
   portal_2fa_rejected: 409,
   portal_locked: 409,

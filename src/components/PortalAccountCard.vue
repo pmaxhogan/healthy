@@ -17,7 +17,7 @@ import { endpoints, isPortalSignInInProgress } from "../api/endpoints.ts";
 import { relativeTime } from "../lib/format.ts";
 import { toastSuccess } from "../lib/toasts.ts";
 import { useAction } from "../lib/use-load.ts";
-import { usePortalAccount } from "../lib/use-portal-account.ts";
+import { effectiveSignIn, usePortalAccount } from "../lib/use-portal-account.ts";
 
 import ConfirmDialog from "./ConfirmDialog.vue";
 import StateBlock from "./StateBlock.vue";
@@ -100,18 +100,22 @@ const PHASE_TEXT: Partial<Record<PortalSignInPhase, string>> = {
   signed_in: "Signed in",
 };
 
+/**
+ * The runner's own phase and the account row's own state can describe two
+ * different sign-in attempts -- see `effectiveSignIn`'s own comment -- so this
+ * is the freshest of the two, not simply `signIn` off the wire.
+ */
+const outcome = computed(() =>
+  portal.account.data.value === null ? null : effectiveSignIn(portal.account.data.value),
+);
+
 const phaseLine = computed<string | null>(() => {
-  const p = phase.value;
-  if (!p || p === "idle") return null;
-  if (p === "failed") {
-    // The stable failure code lives on `signIn.code`, not the account's own
-    // `lastErrorCode` -- the sign-in runner's progress is tracked separately
-    // from the durable session state (see `PortalSignInState` in
-    // shared/types.ts), and it is this attempt's code that belongs here.
-    const code = portal.account.data.value?.signIn.code ?? null;
-    return `Failed: ${code === null ? "the sign-in failed" : codeMessage(code)}`;
+  const eff = outcome.value;
+  if (eff === null || eff.phase === "idle") return null;
+  if (eff.phase === "failed") {
+    return `Failed: ${eff.code === null ? "the sign-in failed" : codeMessage(eff.code)}`;
   }
-  return PHASE_TEXT[p] ?? null;
+  return PHASE_TEXT[eff.phase] ?? null;
 });
 
 const canSave = computed(() => draft.username.trim() !== "" && draft.password !== "");
@@ -195,12 +199,36 @@ async function submit(confirmedOrigin: string): Promise<void> {
   discovered.value = null;
 }
 
+/**
+ * Whether the last `POST .../portal/sign-in` actually queued a job -- a `ref`
+ * (not a bare `let`) for the same reason `seeded` above is one: it is written
+ * from inside the callback `onSignIn` hands to `signIn.run`.
+ */
+const signInStarted = ref(false);
+
 async function onSignIn(): Promise<void> {
+  // `started: false` means the button did not actually queue anything -- the
+  // hourly cron already holds the sign-in gate, or an existing job has not
+  // gone stale yet (see `PortalSignInRunner.start`). Polling unconditionally in
+  // that case, as this used to, watches a phase nothing is about to move: the
+  // very first tick finds it not in progress and stops, and the button reverts
+  // to "Sign in now" within a few seconds even though a sign-in may genuinely
+  // still be running elsewhere.
   const ok = await signIn.run(async () => {
-    await endpoints.startPortalSignIn(props.providerId);
-    toastSuccess("Sign-in started.");
+    const result = await endpoints.startPortalSignIn(props.providerId);
+    signInStarted.value = result.started;
+    if (result.started) toastSuccess("Sign-in started.");
   });
-  if (ok) portal.pollSignIn();
+  if (!ok) return;
+  if (signInStarted.value) {
+    portal.pollSignIn();
+    return;
+  }
+  // Refresh once instead of announcing a sign-in that never started, then keep
+  // polling only if that refresh shows one is genuinely still in progress.
+  await portal.account.reload();
+  const live = portal.account.data.value?.signIn.phase;
+  if (live !== undefined && isPortalSignInInProgress(live)) portal.pollSignIn();
 }
 
 async function onSync(): Promise<void> {

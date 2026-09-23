@@ -233,6 +233,50 @@ describe("GET /api/providers/:id/portal", () => {
     expect(dto.hasSession).toBe(true);
     expect(dto.lastVisitCount).toBe(1);
   });
+
+  it("can report a sign-in port that lags behind a newer outcome on the account row", async () => {
+    // The hourly cron's inline `signInAndWait` (worker/sync/portal-sync.ts)
+    // writes the account row directly -- `markNeedsReauth`, `markActive` -- and
+    // never touches the sign-in runner's own Durable Object storage, which only
+    // `worker/sync/portal-runner.ts`'s alarm loop moves. So a stale phase from
+    // an earlier manual attempt can sit in `signIn` long after a newer cron pass
+    // has recorded a different outcome on the row itself. This is the wire-level
+    // divergence `effectiveSignIn` (src/lib/use-portal-account.ts) resolves by
+    // comparing `signIn.updatedAt` against the account's own `updatedAt`; this
+    // test locks in the shape that comparison depends on.
+    const STALE_PHASE: PortalSignInState = {
+      phase: "failed",
+      code: "portal_login_failed",
+      startedAt: 1,
+      updatedAt: 1,
+    };
+    usePorts({
+      portal: {
+        startSignIn: () => Promise.resolve({ started: true }),
+        startSync: () => Promise.resolve({ started: true }),
+        signInState: () => Promise.resolve(STALE_PHASE),
+      },
+    });
+    const providerId = await seedProvider();
+    const ctx = testCtx();
+    await seedPortalAccount(ctx, providerId);
+
+    // The cron path, simulated directly: only the account row moves.
+    await testRepos().portalAccounts.markNeedsReauth(providerId, "portal_handoff_failed");
+
+    const dto = await json<PortalAccountStatusDto>(
+      await owner().get(`/api/providers/${providerId}/portal`),
+    );
+
+    expect(dto.signIn).toStrictEqual(STALE_PHASE);
+    expect(dto.state).toBe("needs_reauth");
+    expect(dto.lastErrorCode).toBe("portal_handoff_failed");
+    expect(dto.updatedAt).not.toBeNull();
+    // The account row is the fresher of the two, on the same clock `signIn`'s
+    // own `updatedAt` is in -- unix seconds, not the ISO instants elsewhere on
+    // this DTO. See `PortalSignInState.updatedAt`'s own doc comment.
+    expect(Date.parse(dto.updatedAt ?? "") / 1000).toBeGreaterThan(dto.signIn.updatedAt ?? 0);
+  });
 });
 
 describe("PUT /api/providers/:id/portal", () => {
