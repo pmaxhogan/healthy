@@ -15,7 +15,7 @@ Put the resulting ids into `wrangler.jsonc`:
 
 - `d1_databases[0].database_id` — the D1 database id.
 - `kv_namespaces[0].id` — the KV namespace id. The binding name must stay
-  `OAUTH_KV`; `@cloudflare/workers-oauth-health_system` requires that exact name
+  `OAUTH_KV`; `@cloudflare/workers-oauth-provider` requires that exact name
   and it is not configurable.
 - `account_id` — your Cloudflare account id.
 

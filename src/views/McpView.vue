@@ -3,7 +3,7 @@
 // policy denies, and what has been called.
 //
 // The audit log records the shape of a call and never its content -- tool,
-// client, provider ids, a result count. That is why it can be shown here at all.
+// client, health system ids, a result count. That is why it can be shown here at all.
 
 import { computed, ref, watch } from "vue";
 
@@ -22,7 +22,7 @@ const AUDIT_LIMITS = [25, 50, 100, 250] as const;
 const settings = useLoad((signal) => endpoints.settings(signal));
 const grants = useLoad((signal) => endpoints.mcpGrants(signal));
 const rules = useLoad((signal) => endpoints.policyRules(signal));
-const providers = useLoad((signal) => endpoints.providers(signal));
+const healthSystems = useLoad((signal) => endpoints.healthSystems(signal));
 const tools = useLoad((signal) => mcpToolsOrNone(signal));
 
 const auditLimit = ref<number>(50);
@@ -40,12 +40,12 @@ const serverUrl = computed(() => `${location.origin}/mcp`);
 const timezone = computed(() => settings.data.value?.timezone ?? null);
 // A Map, not a record: the keys come from audit rows and indexing an object with
 // them is what security/detect-object-injection is there to flag.
-const providerNames = computed(
-  () => new Map((providers.data.value ?? []).map((p) => [p.id, p.displayName])),
+const healthSystemNames = computed(
+  () => new Map((healthSystems.data.value ?? []).map((p) => [p.id, p.displayName])),
 );
 
-function nameProvider(id: string): string {
-  return providerNames.value.get(id) ?? id;
+function nameHealthSystem(id: string): string {
+  return healthSystemNames.value.get(id) ?? id;
 }
 
 // A rule the policy engine cannot parse is stored, listed, and enforcing nothing.
@@ -176,7 +176,7 @@ async function onRevoke(id: string): Promise<void> {
 
       <PolicyRuleForm
         :tools="tools.data.value ?? []"
-        :providers="providers.data.value ?? []"
+        :health-systems="healthSystems.data.value ?? []"
         :busy="addRule.busy.value"
         @submit="onAddRule"
       />
@@ -265,7 +265,7 @@ async function onRevoke(id: string): Promise<void> {
                 <th>Tool</th>
                 <th>When</th>
                 <th>Client</th>
-                <th>Providers</th>
+                <th>Health systems</th>
                 <th class="num">Results</th>
                 <th>Result</th>
                 <th class="num">Took</th>
@@ -278,7 +278,7 @@ async function onRevoke(id: string): Promise<void> {
                   {{ relativeTime(entry.ts) }}
                 </td>
                 <td>{{ entry.clientId }}</td>
-                <td>{{ entry.providerIds.map(nameProvider).join(", ") || "—" }}</td>
+                <td>{{ entry.healthSystemIds.map(nameHealthSystem).join(", ") || "—" }}</td>
                 <td class="num">{{ entry.resultCount }}</td>
                 <td class="nowrap" :class="{ 'danger-text': !entry.ok }">
                   {{ entry.ok ? "ok" : (entry.errorCode ?? "error") }}

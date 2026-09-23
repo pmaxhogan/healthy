@@ -19,13 +19,13 @@ const TOOL_MESSAGE = {
   inputSchema: {
     type: "object",
     properties: {
-      provider: { type: "string", minLength: 1 },
+      healthSystem: { type: "string", minLength: 1 },
       id: { type: "string", minLength: 1 },
     },
-    required: ["provider", "id"],
+    required: ["healthSystem", "id"],
     additionalProperties: false,
   },
-  skeleton: { provider: "", id: "" },
+  skeleton: { healthSystem: "", id: "" },
 };
 
 const world: { postMessage: ReturnType<typeof vi.fn> } = { postMessage: vi.fn() };
@@ -95,7 +95,7 @@ describe("SandboxApp", () => {
 
     editorOf(wrapper).vm.$emit(
       "update:modelValue",
-      JSON.stringify({ provider: "prov-1", id: "doc-1" }),
+      JSON.stringify({ healthSystem: "prov-1", id: "doc-1" }),
     );
     await flushPromises();
 
@@ -122,7 +122,7 @@ describe("SandboxApp", () => {
     await flushPromises();
     editorOf(wrapper).vm.$emit(
       "update:modelValue",
-      JSON.stringify({ provider: "prov-1", id: "doc-1" }),
+      JSON.stringify({ healthSystem: "prov-1", id: "doc-1" }),
     );
     await flushPromises();
 
@@ -130,7 +130,11 @@ describe("SandboxApp", () => {
     await flushPromises();
 
     expect(world.postMessage).toHaveBeenCalledWith(
-      { type: "run", name: "get_document_text", arguments: { provider: "prov-1", id: "doc-1" } },
+      {
+        type: "run",
+        name: "get_document_text",
+        arguments: { healthSystem: "prov-1", id: "doc-1" },
+      },
       "*",
     );
     expect(wrapper.text()).toContain("Running");
@@ -143,7 +147,7 @@ describe("SandboxApp", () => {
     await flushPromises();
     editorOf(wrapper).vm.$emit(
       "update:modelValue",
-      JSON.stringify({ provider: "prov-1", id: "doc-1" }),
+      JSON.stringify({ healthSystem: "prov-1", id: "doc-1" }),
     );
     await flushPromises();
     editorOf(wrapper).vm.$emit("run");
@@ -164,7 +168,7 @@ describe("SandboxApp", () => {
     await flushPromises();
     editorOf(wrapper).vm.$emit(
       "update:modelValue",
-      JSON.stringify({ provider: "prov-1", id: "doc-1" }),
+      JSON.stringify({ healthSystem: "prov-1", id: "doc-1" }),
     );
     await flushPromises();
     editorOf(wrapper).vm.$emit("run");
@@ -187,7 +191,7 @@ describe("SandboxApp", () => {
 
     sendFromParent({
       type: "tool",
-      name: "list_providers",
+      name: "list_health_systems",
       description: "The connected health systems.",
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
       skeleton: {},

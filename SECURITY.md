@@ -47,7 +47,7 @@ Three treatments, and every column is in exactly one of them:
 | Patient-portal location: base URL, mount path, discovered endpoint                          | D1                  | Sealed in place, padded                                  |
 | Inbound mail: code, sender, subject                                                         | D1                  | Sealed, padded                                           |
 | Login rate-limit key                                                                        | D1                  | Keyed digest of the client IP                            |
-| MCP access and refresh tokens                                                               | Workers KV          | Managed by `@cloudflare/workers-oauth-health_system`     |
+| MCP access and refresh tokens                                                               | Workers KV          | Managed by `@cloudflare/workers-oauth-provider`          |
 | Admin password                                                                              | Worker secret       | PBKDF2-SHA256, 100k iterations, per-hash salt            |
 | Encryption key, API credentials                                                             | Worker secrets      | Cloudflare-managed                                       |
 | Full-refresh progress                                                                       | Durable Object      | Plaintext: health system ids, a run id, counts, codes    |

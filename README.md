@@ -72,7 +72,7 @@ are largely in place; hardening and the first real deployment are ongoing.
 
 One Worker does everything. Requests arrive at a custom domain behind
 Cloudflare Access, pass a password gate, and are handled by a Hono app that
-serves the admin API and the built SPA. `@cloudflare/workers-oauth-health_system`
+serves the admin API and the built SPA. `@cloudflare/workers-oauth-provider`
 sits in front of the same Worker and owns the MCP-facing OAuth surface
 (`/mcp*`, `/oauth/token`, `/oauth/register`, `/.well-known/*`), so an AI
 client — which cannot complete an interactive Access login — never has to.

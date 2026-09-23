@@ -80,7 +80,7 @@ interface SyncPort {
  * One MCP grant as the store hands it over.
  *
  * `id` is the only field required. Everything else is optional because the shape
- * ultimately comes from `@cloudflare/workers-oauth-health_system`, which owns it and has
+ * ultimately comes from `@cloudflare/workers-oauth-provider`, which owns it and has
  * changed it between releases -- so the projection in `routes/mcp.ts` fills the gaps
  * rather than trusting them to be there. A full `McpGrantDto` satisfies this, which
  * is what the live implementation returns.

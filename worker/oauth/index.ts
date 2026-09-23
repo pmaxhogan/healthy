@@ -10,7 +10,7 @@
 //
 // The MCP client-facing endpoints (`POST /oauth/token`, `POST /oauth/register`
 // and `/.well-known/*`) do NOT belong here. They are served by
-// @cloudflare/workers-oauth-health system, which wraps this whole Hono app in
+// @cloudflare/workers-oauth-provider, which wraps this whole Hono app in
 // worker/index.ts, and they must bypass the owner gate -- an MCP client has no
 // Access identity and no password session.
 //

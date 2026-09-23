@@ -27,7 +27,7 @@ import type { McpToolCallResponse, McpToolSchemaDto } from "@shared/types.ts";
 
 const TOOLS: McpToolSchemaDto[] = [
   {
-    name: "list_providers",
+    name: "list_health_systems",
     description: "The connected health systems and what each one exposes.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
@@ -36,8 +36,8 @@ const TOOLS: McpToolSchemaDto[] = [
     description: "The text of one clinical note.",
     inputSchema: {
       type: "object",
-      properties: { provider: { type: "string" }, id: { type: "string" } },
-      required: ["provider", "id"],
+      properties: { healthSystem: { type: "string" }, id: { type: "string" } },
+      required: ["healthSystem", "id"],
       additionalProperties: false,
     },
   },
@@ -118,7 +118,7 @@ describe("McpToolTester", () => {
     await flushPromises();
 
     expect(world.contentWindow.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "tool", name: "list_providers", skeleton: {} }),
+      expect.objectContaining({ type: "tool", name: "list_health_systems", skeleton: {} }),
       "*",
     );
   });
@@ -155,7 +155,7 @@ describe("McpToolTester", () => {
     await flushPromises();
     world.contentWindow.postMessage.mockClear();
 
-    sendFromFrame({ type: "run", name: "list_providers", arguments: "not an object" });
+    sendFromFrame({ type: "run", name: "list_health_systems", arguments: "not an object" });
     await flushPromises();
 
     expect(world.contentWindow.postMessage).not.toHaveBeenCalled();
@@ -175,7 +175,7 @@ describe("McpToolTester", () => {
       expect.objectContaining({
         type: "tool",
         name: "get_document_text",
-        skeleton: { provider: "", id: "" },
+        skeleton: { healthSystem: "", id: "" },
       }),
       "*",
     );
@@ -183,16 +183,18 @@ describe("McpToolTester", () => {
 
   it("runs a real tool and posts the exact result back to the frame", async () => {
     const response: McpToolCallResponse = {
-      request: { name: "list_providers", arguments: {} },
+      request: { name: "list_health_systems", arguments: {} },
       result: { isError: false, data: { items: [] } },
       durationMs: 12,
     };
-    mountTester({ "/api/mcp/tools/list_providers/call": () => fakeResponse({ body: response }) });
+    mountTester({
+      "/api/mcp/tools/list_health_systems/call": () => fakeResponse({ body: response }),
+    });
     await flushPromises();
     sendFromFrame({ type: "ready" });
     await flushPromises();
 
-    sendFromFrame({ type: "run", name: "list_providers", arguments: {} });
+    sendFromFrame({ type: "run", name: "list_health_systems", arguments: {} });
     await flushPromises();
 
     expect(world.contentWindow.postMessage).toHaveBeenCalledWith(
@@ -203,7 +205,7 @@ describe("McpToolTester", () => {
 
   it("posts a call-error with the server's structured issues when the call is rejected", async () => {
     mountTester({
-      "/api/mcp/tools/list_providers/call": () =>
+      "/api/mcp/tools/list_health_systems/call": () =>
         fakeResponse({
           status: 400,
           body: {
@@ -217,7 +219,7 @@ describe("McpToolTester", () => {
     sendFromFrame({ type: "ready" });
     await flushPromises();
 
-    sendFromFrame({ type: "run", name: "list_providers", arguments: {} });
+    sendFromFrame({ type: "run", name: "list_health_systems", arguments: {} });
     await flushPromises();
 
     expect(world.contentWindow.postMessage).toHaveBeenCalledWith(
@@ -242,14 +244,14 @@ describe("McpToolTester", () => {
     sendFromFrame({ type: "ready" });
     await flushPromises();
 
-    sendFromFrame({ type: "run", name: "list_providers", arguments: {} });
+    sendFromFrame({ type: "run", name: "list_health_systems", arguments: {} });
     await flushPromises();
     await wrapper.find("select").setValue("get_document_text");
     await flushPromises();
     world.contentWindow.postMessage.mockClear();
 
     resolveCall({
-      request: { name: "list_providers", arguments: {} },
+      request: { name: "list_health_systems", arguments: {} },
       result: { isError: false, data: {} },
       durationMs: 1,
     });

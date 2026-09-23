@@ -51,7 +51,7 @@ function wantsJson(pathname: string): boolean {
   // browser navigation redirected back from a health system, so the right answer to a
   // missing session is the login form with `?next=` pointing at the full callback
   // URL. (The machine-facing /oauth/token and /oauth/register are served by
-  // @cloudflare/workers-oauth-health system, outside this app and outside this gate.)
+  // @cloudflare/workers-oauth-provider, outside this app and outside this gate.)
   return pathname === "/api" || pathname.startsWith("/api/");
 }
 

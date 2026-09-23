@@ -16,7 +16,7 @@ export interface Env {
   /** Primary datastore: health systems, connections, FHIR cache, audit, run log. */
   DB: D1Database;
   /**
-   * Token and grant storage for @cloudflare/workers-oauth-health system. The
+   * Token and grant storage for @cloudflare/workers-oauth-provider. The
    * binding name is fixed by that library and cannot be changed.
    */
   OAUTH_KV: KVNamespace;

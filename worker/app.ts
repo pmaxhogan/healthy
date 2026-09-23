@@ -183,7 +183,7 @@ app.post("/auth/logout", () => {
  * additionally Origin-checked by the guard registered above. See
  * `worker/mcp/consent-page.ts` for the rest of the reasoning.
  *
- * `@cloudflare/workers-oauth-health_system` does NOT serve `/authorize` itself -- it
+ * `@cloudflare/workers-oauth-provider` does NOT serve `/authorize` itself -- it
  * advertises the path in its metadata and forwards the request to this handler,
  * which is why the consent page lives inside the gated app rather than beside the
  * token endpoint.
