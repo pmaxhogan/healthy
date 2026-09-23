@@ -43,7 +43,8 @@ watching it and every code it asks for is an email to the owner:
 
 - **It leaves the day's last two attempts for the owner.** The daily budget
   (`portal_login_attempt_limit`) is shared with the button; once only two
-  are left, the scheduled run stops signing in.
+  are left, the scheduled run stops signing in until the next UTC day
+  (reported as `portal_signin_deferred`; the account stays `active`).
 - **At most two emailed codes a UTC day, at least six hours apart.** A sign-in
   that needs no code (a password alone, or a device the portal trusts) is not
   limited by this. Inside the six hours after its last code the run does not

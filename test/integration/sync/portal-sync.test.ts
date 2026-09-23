@@ -999,7 +999,7 @@ describe("the scheduled run, which nobody is watching", () => {
     expect(row?.session_state).toBe("active");
   });
 
-  it("leaves the day's last attempts to the owner's own button", async () => {
+  it("leaves the day's last attempts to the owner's own button, and waits", async () => {
     const fix = await fixture({ portal: { alive: false, loginStatus: "signed_in" } });
     // The seeded limit is three; one spent leaves two, which are the owner's.
     await spendAttempts(fix.ctx, fix.provider.providerId, 1);
@@ -1007,10 +1007,12 @@ describe("the scheduled run, which nobody is watching", () => {
     const summary = await scheduledRun(fix);
 
     expect(fix.portal.calls.logins).toBe(0);
-    expect(summary.portalErrors).toStrictEqual(["portal_signin_needs_owner"]);
+    expect(summary.portalErrors).toStrictEqual(["portal_signin_deferred"]);
     const row = await accountOf(fix);
-    expect(row?.session_state).toBe("needs_reauth");
+    // A wait that ends at the next UTC day: still active, and no card.
+    expect(row?.session_state).toBe("active");
     expect(row?.login_attempts_today).toBe(1);
+    expect(fix.upstreams.trelloCards).toStrictEqual([]);
   });
 
   it("does not hold the owner's own run to any of it", async () => {

@@ -510,6 +510,35 @@ describe("secondaryValidation.validate", () => {
     expect(jar.valueOf(HOST, `${USER_ID}-rememberMeToken`)).toBe("synthetic-fresh-token");
   });
 
+  it("sets the trust cookie before the save, so the save carries it", async () => {
+    const stub = twoStepPortal();
+    const portal = await awaitingCode(stub);
+
+    await portal.secondaryValidation.validate("123456", true);
+
+    const save = find(stub, "POST", "/api/mfa/saveTrustThisDeviceToken");
+    const { rememberMeToken } = JSON.parse(save?.body ?? "{}") as { rememberMeToken: string };
+    expect(save?.headers.cookie ?? "").toContain(`${USER_ID}-rememberMeToken=${rememberMeToken}`);
+  });
+
+  it("drops the trust cookie again when the shell will not save it", async () => {
+    const stub = portal({
+      ...handoffRoutes(),
+      "POST /shellwebapi/login": () => loginResponse(true, { email: CONTACT }),
+      "POST /shellwebapi/verification/code/generate": () => json({ success: true }),
+      "POST /shellwebapi/verification/code/validate": () => json({ success: true }),
+      "POST /shellwebapi/api/mfa/saveTrustThisDeviceToken": () => json({}, { status: 401 }),
+    });
+    const jar = new CookieJar({ now: () => T0 });
+    const first = client(stub, jar);
+    await first.login(CREDENTIALS);
+    await first.secondaryValidation.sendCode("email");
+
+    await first.secondaryValidation.validate("123456", true);
+
+    expect(jar.has(HOST, `${USER_ID}-rememberMeToken`)).toBe(false);
+  });
+
   it("does not ask to be trusted when rememberMe is off", async () => {
     const stub = twoStepPortal();
     const portal = await awaitingCode(stub);

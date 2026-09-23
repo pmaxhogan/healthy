@@ -285,14 +285,19 @@ export function createCustomOidcClient(deps: CustomOidcClientDeps): PortalClient
   const remember = async (api: ShellApi, userId: string): Promise<void> => {
     const name = `${userId}${REMEMBER_ME_COOKIE_SUFFIX}`;
     const token = (deps.generateDeviceId ?? mintTrustToken)();
+    // Cookie first, then the save, in the shell's own order: its script writes
+    // the cookie and only then posts, so the save request carries the cookie as
+    // well as the body. Session-scoped on purpose: this jar persists session
+    // cookies by design, and the server decides when the token stops being good.
+    jar.setCookie(api.authBaseUrl, `${name}=${token}; Path=/; Secure`);
     const saved = await saveTrustToken(api, { userId, rememberMeToken: token });
     if (!saved) {
+      // As the shell's own error handler does: a token it would not save is
+      // not one to offer it next time.
+      jar.setCookie(api.authBaseUrl, `${name}=; Path=/; Max-Age=0`);
       logger.warn("portal.trust_token_not_saved", { flavor: endpoint.flavor });
       return;
     }
-    // Session-scoped on purpose: this jar persists session cookies by design, and
-    // the server is the thing that decides when the token stops being good.
-    jar.setCookie(api.authBaseUrl, `${name}=${token}; Path=/; Secure`);
     logger.info("portal.trust_token_saved", { flavor: endpoint.flavor });
   };
 

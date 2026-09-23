@@ -567,7 +567,7 @@ export const UNATTENDED_CODE_GAP_SECONDS = 6 * 60 * 60;
 export const OWNER_RESERVED_ATTEMPTS = 2;
 
 /** The scheduled sync has done what it may on its own; the owner has to act. */
-export const NEEDS_OWNER = "portal_signin_needs_owner";
+const NEEDS_OWNER = "portal_signin_needs_owner";
 
 /** The scheduled sync is waiting out the spacing between emailed codes. */
 export const SIGN_IN_DEFERRED = "portal_signin_deferred";

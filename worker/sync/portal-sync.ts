@@ -86,7 +86,6 @@ import {
   portalVisitView,
 } from "./portal-mapping.ts";
 import {
-  NEEDS_OWNER,
   OTP_WAIT_SECONDS,
   OWNER_RESERVED_ATTEMPTS,
   SIGN_IN_DEFERRED,
@@ -356,15 +355,17 @@ function keyOf(event: EventRecord): string | null {
  * and every code it asks for is an email to the owner:
  *
  *  - it stops at `OWNER_RESERVED_ATTEMPTS` left, so the owner's "Sign in now"
- *    always has attempts to spend;
+ *    always has attempts to spend, and waits for the next UTC day;
  *  - inside the spacing after its last emailed code it does not sign in at
  *    all -- not even to see whether the trusted device is enough, because
  *    every look costs an attempt -- and says so on `portalErrors`;
  *  - once its daily allowance of codes is spent, a sign-in that wants one stops
  *    before the email (`signInAndWait`'s `unattended`).
  *
- * The last two end in `portal_signin_needs_owner` and a reconnect card, except
- * the spacing, which ends on its own and is only reported.
+ * Only the last ends in `portal_signin_needs_owner` and a reconnect card: a
+ * code is really needed and the run may not ask for one. The other two are
+ * waits that end on their own, reported as `portal_signin_deferred` with the
+ * account left `active`.
  */
 async function ensureSession(
   input: PortalPassInput,
@@ -394,9 +395,11 @@ async function ensureSession(
   }
   const unattended = input.unattended === true;
   if (unattended && left <= OWNER_RESERVED_ATTEMPTS) {
-    ctx.log.warn("portal.signin.left_for_owner", { providerId, left });
-    const outcome = await failSignIn(ctx, providerId, NEEDS_OWNER, deps);
-    input.state.summary.portalErrors.push(outcome.code ?? NEEDS_OWNER);
+    // A wait that ends on its own, at the next UTC day, like the spacing below:
+    // the account stays active and nothing is opened, so a portal that signs in
+    // on its trusted device resumes by itself tomorrow.
+    ctx.log.info("portal.signin.left_for_owner", { providerId, left });
+    input.state.summary.portalErrors.push(SIGN_IN_DEFERRED);
     return null;
   }
   if (unattended) {
