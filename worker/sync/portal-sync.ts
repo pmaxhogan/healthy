@@ -63,6 +63,7 @@ import { MAX_PARSED_VISITS } from "../providers/mychart/index.ts";
 import { resolveReconnectAlert } from "./alerts.ts";
 import { buildCalendarModel, ghostModel } from "./mapping.ts";
 import { planChanges } from "./plan.ts";
+import { outranks, portalRank, sameVisitAcrossProviders } from "./portal-dedupe.ts";
 import { SIGN_IN_BUSY_CODE, acquirePortalSignIn, releasePortalSignIn } from "./portal-gate.ts";
 import {
   DEDUPE_WINDOW_SECONDS,
@@ -83,6 +84,7 @@ import {
 import type { SyncDeps } from "./deps.ts";
 import type { CalendarMapping, MappingSettings } from "./mapping.ts";
 import type { PlanCandidate, PlanEntry } from "./plan.ts";
+import type { Sighting } from "./portal-dedupe.ts";
 import type { PortalSession } from "./portal-signin.ts";
 import type { RunState } from "./run.ts";
 import type { Ctx } from "../db/client.ts";
@@ -107,6 +109,12 @@ export interface FhirSighting {
   csns: Set<string>;
   /** Shifted starts of the events the FHIR pass mapped, as unix seconds. */
   starts: number[];
+  /**
+   * The same Encounters as the cross-provider dedupe sees them: real (unshifted)
+   * start and CSN. Only a CSN can tie another organisation's portal copy to one
+   * of these -- see `worker/sync/portal-dedupe.ts`.
+   */
+  sightings: Sighting[];
 }
 
 /** Everything the portal pass needs. Built by `calendar-sync.ts`, which has it all. */
@@ -166,23 +174,44 @@ export async function runPortalPass(input: PortalPassInput): Promise<void> {
     return;
   }
 
+  // Two phases, so that every portal's visits are stored before any calendar is
+  // written: which copy of a visit two organisations both list gets the event is
+  // decided from `portal_visits` (see `crossProviderDuplicate`), and deciding it
+  // while a provider later in this loop had not yet been read would let whichever
+  // ran first win, and the loser be calendared too.
+  const loaded: { providerId: string; visits: PortalVisit[] }[] = [];
   for (const account of selected) {
     const providerId = account.provider_id;
     try {
-      await syncPortalProvider(input, providerId);
+      const visits = await loadPortalVisits(input, providerId);
+      if (visits !== null) loaded.push({ providerId, visits });
     } catch (error) {
-      const code = isAppError(error) ? error.code : "internal";
-      input.state.summary.portalErrors.push(code);
-      ctx.log.error("portal.provider_failed", { providerId, ...errorFields(error) });
+      portalFailed(input, providerId, error);
+    }
+  }
+  for (const { providerId, visits } of loaded) {
+    try {
+      await syncPortalCalendar(input, providerId, visits);
+    } catch (error) {
+      portalFailed(input, providerId, error);
     }
   }
 }
 
-/** One provider: session, visits, diff, writes. */
-async function syncPortalProvider(input: PortalPassInput, providerId: string): Promise<void> {
+function portalFailed(input: PortalPassInput, providerId: string, error: unknown): void {
+  const code = isAppError(error) ? error.code : "internal";
+  input.state.summary.portalErrors.push(code);
+  input.ctx.log.error("portal.provider_failed", { providerId, ...errorFields(error) });
+}
+
+/** One provider's first phase: session, visits, and the stored copy. Null: no session. */
+async function loadPortalVisits(
+  input: PortalPassInput,
+  providerId: string,
+): Promise<PortalVisit[] | null> {
   const { ctx, repos } = input;
   const session = await ensureSession(input, providerId);
-  if (session === null) return;
+  if (session === null) return null;
 
   const visits = await session.client.loadUpcoming(input.timezone);
   // The jar as it is now: `LoadUpcoming` refreshes the session cookie, and
@@ -202,10 +231,20 @@ async function syncPortalProvider(input: PortalPassInput, providerId: string): P
     input.state.summary.warnings += 1;
   }
 
+  if ((await repos.providers.get(providerId)) === null) return null;
+  await recordVisits(input, providerId, visits);
+  return visits;
+}
+
+/** One provider's second phase: diff and write its calendar events. */
+async function syncPortalCalendar(
+  input: PortalPassInput,
+  providerId: string,
+  visits: readonly PortalVisit[],
+): Promise<void> {
+  const { ctx, repos } = input;
   const provider = await repos.providers.get(providerId);
   if (provider === null) return;
-
-  await recordVisits(input, providerId, visits);
 
   const builds = await buildPortalCandidates(input, provider, visits);
   const stored = await repos.calendarEvents.list({
@@ -366,6 +405,8 @@ async function buildPortalCandidates(
   ];
 
   const config = await input.repos.providers.getConfig(provider.id);
+  const now = input.ctx.now();
+  const others = await otherSightings(input, provider.id, now);
   const builds: PortalCandidateBuild[] = [];
   for (const visit of visits) {
     const mapping = await buildCalendarModel(portalVisitView(provider.id, visit), {
@@ -379,9 +420,11 @@ async function buildPortalCandidates(
       nowIso: input.nowIso,
     });
     const start = fromIso(mapping.model.start);
+    const mine = portalSighting(provider.id, visit, now, now);
     const duplicate =
       (seen?.csns.has(visit.csn) ?? false) ||
-      starts.some((other) => Math.abs(other - start) <= DEDUPE_WINDOW_SECONDS);
+      starts.some((other) => Math.abs(other - start) <= DEDUPE_WINDOW_SECONDS) ||
+      others.some((other) => sameVisitAcrossProviders(other, mine) && outranks(other, mine));
     builds.push({ visit, mapping, duplicate });
   }
 
@@ -389,6 +432,51 @@ async function buildPortalCandidates(
   input.state.summary.portalSkipped += skipped;
   if (skipped > 0) input.ctx.log.info("portal.deduped", { providerId: provider.id, skipped });
   return builds;
+}
+
+/** One portal visit as the cross-provider dedupe sees it. */
+function portalSighting(
+  providerId: string,
+  visit: PortalVisit,
+  fetchedAt: number,
+  now: number,
+): Sighting {
+  return {
+    providerId,
+    start: fromIso(visit.start),
+    csn: visit.csn,
+    practitioner: visit.practitioner,
+    department: visit.department,
+    location: visit.locationName,
+    rank: portalRank(visit.external === true, fetchedAt, now),
+  };
+}
+
+/**
+ * Every other provider's sightings a visit here could be a copy of: the portal
+ * visits they last stored (this run's included -- the first phase stored them)
+ * and the Encounters their FHIR pass mapped this run.
+ *
+ * A visit here that is the same appointment as one of these, and is outranked by
+ * it, is treated exactly like a visit the FHIR pass already calendared: not
+ * inserted, and ghosted if it had been. That is what keeps a visit two
+ * organisations' portals both list to one event, while a visit only another
+ * organisation's portal lists -- its own portal is not connected, or failing --
+ * is still calendared from the copy there is.
+ */
+async function otherSightings(
+  input: PortalPassInput,
+  providerId: string,
+  now: number,
+): Promise<Sighting[]> {
+  const stored = await input.repos.portalVisits.listExcept(providerId);
+  const sightings = stored.map((row) =>
+    portalSighting(row.providerId, row.visit, row.fetchedAt, now),
+  );
+  for (const [otherId, seen] of input.fhirSeen) {
+    if (otherId !== providerId) sightings.push(...seen.sightings);
+  }
+  return sightings;
 }
 
 /** The candidates, the two model maps, and the rows that only need a timestamp. */

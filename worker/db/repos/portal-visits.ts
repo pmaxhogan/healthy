@@ -70,6 +70,17 @@ function startSeconds(visit: PortalVisit): number | null {
 }
 
 export function makePortalVisitsRepo(ctx: Ctx) {
+  const decode = async (row: PortalVisitRow): Promise<StoredPortalVisit> => ({
+    providerId: row.provider_id,
+    csn: row.csn,
+    visit: JSON.parse(
+      await open(ctx.env, row.payload_enc, aad(row.provider_id, row.csn)),
+    ) as PortalVisit,
+    state: row.state,
+    missingSince: row.missing_since,
+    fetchedAt: row.fetched_at,
+  });
+
   return {
     /**
      * Store every visit one `LoadUpcoming` returned, and mark the future ones it
@@ -175,18 +186,24 @@ export function makePortalVisitsRepo(ctx: Ctx) {
           )
           .bind(providerId, ctx.now(), LIST_LIMIT),
       );
-      return Promise.all(
-        rows.map(async (row) => ({
-          providerId: row.provider_id,
-          csn: row.csn,
-          visit: JSON.parse(
-            await open(ctx.env, row.payload_enc, aad(row.provider_id, row.csn)),
-          ) as PortalVisit,
-          state: row.state,
-          missingSince: row.missing_since,
-          fetchedAt: row.fetched_at,
-        })),
+      return Promise.all(rows.map((row) => decode(row)));
+    },
+
+    /**
+     * Every live visit of every provider but one: what the portal pass compares a
+     * provider's visits against to find the ones another organisation's record
+     * already covers (`worker/sync/portal-dedupe.ts`).
+     */
+    async listExcept(providerId: string): Promise<StoredPortalVisit[]> {
+      const rows = await all<PortalVisitRow>(
+        ctx.db
+          .prepare(
+            `SELECT * FROM portal_visits WHERE provider_id <> ? AND expires_at > ?
+              ORDER BY start_at, provider_id, csn LIMIT ?`,
+          )
+          .bind(providerId, ctx.now(), LIST_LIMIT),
       );
+      return Promise.all(rows.map((row) => decode(row)));
     },
 
     /** Drop everything past its expiry. Called from the scheduled handler. */

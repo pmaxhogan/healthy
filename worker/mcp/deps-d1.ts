@@ -130,7 +130,11 @@ async function loadReferencePool(repos: Repos, providerId: string): Promise<unkn
 /** One provider's stored portal visits, projected to what the tools read. */
 async function loadPortalVisits(repos: Repos, providerId: string): Promise<PortalVisitRecord[]> {
   const rows = await repos.portalVisits.list(providerId);
-  return rows.map((row) => ({ visit: row.visit, missing: row.state === "missing" }));
+  return rows.map((row) => ({
+    visit: row.visit,
+    missing: row.state === "missing",
+    fetchedAt: row.fetchedAt,
+  }));
 }
 
 async function loadProviders(repos: Repos): Promise<ProviderInfo[]> {

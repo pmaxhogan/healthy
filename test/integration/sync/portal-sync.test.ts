@@ -48,6 +48,7 @@ import {
 
 import type { FhirServer, SeededProvider, Upstreams } from "./helpers.ts";
 import type { Ctx } from "../../../worker/db/client.ts";
+import type { PortalVisit } from "../../../worker/providers/mychart/index.ts";
 import type { FakePortal } from "../portal/helpers.ts";
 import type { RunSummary } from "@shared/types.ts";
 import type * as fhir4 from "fhir/r4";
@@ -361,6 +362,64 @@ describe("portal visits stored for the MCP", () => {
 
     const [row] = await syncRepos(fix.ctx).portalVisits.list(fix.provider.providerId);
     expect(row).toMatchObject({ csn: "csn-1", state: "active" });
+  });
+});
+
+async function secondOrganisation(fix: Fixture, visits: PortalVisit[]): Promise<void> {
+  const other = await seedConnectedProvider(fix.ctx, {
+    host: "fhir.b.example.test",
+    displayName: "B Example Health",
+  });
+  await syncRepos(fix.ctx).portalVisits.record(other.providerId, visits, { complete: true });
+}
+
+const shared = (overrides: Partial<PortalVisit> = {}): PortalVisit =>
+  portalVisit({ csn: "csn-a-view", start: SOON, external: true, ...overrides });
+
+describe("one visit, one event, across organisations", () => {
+  // Provider B's stored visits stand in for a second organisation whose portal
+  // pass already ran (or whose session is failing now): the dedupe reads them from
+  // `portal_visits` either way. Its copy of the visit is first-hand; provider A's
+  // portal lists the same visit second-hand, through a shared record.
+  it("does not calendar a second-hand copy of a visit its own organisation lists", async () => {
+    const fix = await fixture({ portal: { visits: [shared()] } });
+    await secondOrganisation(fix, [portalVisit({ csn: "csn-b-own", start: SOON })]);
+
+    const summary = await portalRun(fix);
+
+    expect(summary.eventsInserted).toBe(0);
+    expect(summary.portalSkipped).toBe(1);
+    // Still stored: the MCP decides between the two copies for itself.
+    const stored = await syncRepos(fix.ctx).portalVisits.list(fix.provider.providerId);
+    expect(stored.map((row) => row.csn)).toStrictEqual(["csn-a-view"]);
+  });
+
+  it("calendars the second-hand copy when it is the only one there is", async () => {
+    const fix = await fixture({ portal: { visits: [shared()] } });
+
+    const summary = await portalRun(fix);
+
+    expect(summary.eventsInserted).toBe(1);
+    expect(calendarKeys(fix)).toStrictEqual([portalKey(fix.provider, "csn-a-view")]);
+  });
+
+  it("calendars a visit at the same time as a different one elsewhere", async () => {
+    const fix = await fixture({
+      portal: { visits: [portalVisit({ csn: "csn-a-own", start: SOON })] },
+    });
+    await secondOrganisation(fix, [
+      portalVisit({
+        csn: "csn-b-own",
+        start: SOON,
+        practitioner: "Q. Other, DO",
+        department: "Other Dermatology",
+      }),
+    ]);
+
+    const summary = await portalRun(fix);
+
+    expect(summary.eventsInserted).toBe(1);
+    expect(calendarKeys(fix)).toStrictEqual([portalKey(fix.provider, "csn-a-own")]);
   });
 });
 

@@ -69,6 +69,8 @@ export interface CachedRow {
 export interface PortalVisitRecord {
   visit: PortalVisit;
   missing: boolean;
+  /** Unix seconds the portal pass last saw it. A stale copy loses cross-provider ties. */
+  fetchedAt: number;
 }
 
 /** Live row counts, for `get_health_summary` and the admin overview. */

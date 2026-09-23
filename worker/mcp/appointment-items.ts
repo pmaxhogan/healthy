@@ -33,6 +33,12 @@
  */
 
 import { appointmentViewFromEncounter, mapResolver } from "../fhir/normalize/index.ts";
+import {
+  RANK_FHIR,
+  outranks,
+  portalRank,
+  sameVisitAcrossProviders,
+} from "../sync/portal-dedupe.ts";
 import { DEDUPE_WINDOW_SECONDS, portalVisitView } from "../sync/portal-mapping.ts";
 
 import { collect, spec, withinWindow } from "./collect.ts";
@@ -40,6 +46,7 @@ import { collect, spec, withinWindow } from "./collect.ts";
 import type { TaggedItem } from "./collect.ts";
 import type { PortalVisitRecord, ProviderInfo, ToolDeps } from "./deps.ts";
 import type { RawEntry } from "../policy/filter.ts";
+import type { Sighting } from "../sync/portal-dedupe.ts";
 
 /** Told to the caller whenever a portal item's `raw` is the bare placeholder. */
 export const PORTAL_RAW_WARNING = "portal_items_have_no_raw";
@@ -83,6 +90,8 @@ interface Entry {
   start: number;
   csn: string | undefined;
   portal: boolean;
+  /** What the cross-provider dedupe compares. See `worker/sync/portal-dedupe.ts`. */
+  sighting: Sighting;
 }
 
 function stringOf(item: TaggedItem, key: string): string | undefined {
@@ -93,6 +102,27 @@ function stringOf(item: TaggedItem, key: string): string | undefined {
 function startOf(item: TaggedItem): number {
   const start = stringOf(item, "start");
   return start === undefined ? NaN : Date.parse(start);
+}
+
+/** The location's name, when the item has a location with one. */
+function locationName(item: TaggedItem): string | undefined {
+  const location: unknown = Object.hasOwn(item, "location") ? item.location : undefined;
+  if (typeof location !== "object" || location === null) return undefined;
+  const name: unknown = Reflect.get(location, "name");
+  return typeof name === "string" ? name : undefined;
+}
+
+/** One item as the cross-provider matcher sees it. */
+function sightingOf(item: TaggedItem, providerId: string, rank: Sighting["rank"]): Sighting {
+  return {
+    providerId,
+    start: Math.floor(startOf(item) / 1000),
+    csn: stringOf(item, "csn"),
+    practitioner: stringOf(item, "practitioner"),
+    department: stringOf(item, "department"),
+    location: locationName(item),
+    rank,
+  };
 }
 
 /** The FHIR half: every cached Encounter, projected, unwindowed. */
@@ -109,6 +139,7 @@ async function fhirEntries(
           resourceType: "Encounter",
           ...appointmentViewFromEncounter(item, { provider: item.provider, refs: NO_REFS }),
           source: "fhir",
+          firstParty: true,
         }),
       }),
     ],
@@ -123,17 +154,19 @@ async function fhirEntries(
       start: startOf(item),
       csn: stringOf(item, "csn"),
       portal: false,
+      sighting: sightingOf(item, providerId, RANK_FHIR),
     };
   });
 }
 
 /** One stored portal visit as an item, tagged exactly like a FHIR one. */
-function portalEntry(provider: ProviderInfo, record: PortalVisitRecord): Entry {
+function portalEntry(provider: ProviderInfo, record: PortalVisitRecord, now: number): Entry {
   // No `encounterId`: a portal visit has no Encounter, and the view's stand-in
   // (`csn:<csn>`) is the calendar's event-key format -- a second copy of the CSN
   // that an `Encounter.csn` deny rule would not reach.
   const view: Record<string, unknown> = { ...portalVisitView(provider.id, record.visit) };
   delete view.encounterId;
+  const external = record.visit.external;
   const tags = { provider: provider.displayName, providerId: provider.id };
   const item: TaggedItem = {
     resourceType: "Encounter",
@@ -142,6 +175,10 @@ function portalEntry(provider: ProviderInfo, record: PortalVisitRecord): Entry {
     // as anyone can tell, it was cancelled.
     ...(record.missing && { status: "canceled" }),
     source: "portal",
+    // A copy another organisation's visit arrived through: which portal it was
+    // seen in, so a caller can tell it is second-hand.
+    firstParty: external !== true,
+    ...(external === true && { via: provider.id }),
     ...tags,
   };
   return {
@@ -151,6 +188,7 @@ function portalEntry(provider: ProviderInfo, record: PortalVisitRecord): Entry {
     start: startOf(item),
     csn: record.visit.csn,
     portal: true,
+    sighting: sightingOf(item, provider.id, portalRank(external === true, record.fetchedAt, now)),
   };
 }
 
@@ -185,12 +223,13 @@ async function mergePortal(
   deps: ToolDeps,
   providers: readonly ProviderInfo[],
   entries: Entry[],
+  now: number,
 ): Promise<void> {
   const claimed = new Set<Entry>();
   for (const provider of providers) {
     const records = await deps.portalVisits(provider.id);
     for (const record of records) {
-      const portal = portalEntry(provider, record);
+      const portal = portalEntry(provider, record, now);
       const match = entries.find(
         (entry) => !entry.portal && !claimed.has(entry) && sameVisit(entry, portal),
       );
@@ -202,6 +241,27 @@ async function mergePortal(
       enrich(match, portal);
     }
   }
+}
+
+/**
+ * One item per visit across providers: a visit several organisations' records
+ * list is answered once, by the sighting that outranks the rest (see
+ * `worker/sync/portal-dedupe.ts`). A visit only one of them lists is always kept.
+ */
+function collapseAcrossProviders(entries: readonly Entry[]): Entry[] {
+  const byPrecedence = [...entries];
+  byPrecedence.sort((a, b) => {
+    if (outranks(a.sighting, b.sighting)) return -1;
+    return outranks(b.sighting, a.sighting) ? 1 : 0;
+  });
+  const kept: Entry[] = [];
+  for (const entry of byPrecedence) {
+    const covered = kept.some((winner) =>
+      sameVisitAcrossProviders(winner.sighting, entry.sighting),
+    );
+    if (!covered) kept.push(entry);
+  }
+  return kept;
 }
 
 function compare(order: "asc" | "desc"): (a: Entry, b: Entry) => number {
@@ -228,9 +288,9 @@ export async function collectAppointments(
 ): Promise<Appointments> {
   const raw = options.raw === true;
   const entries = await fhirEntries(deps, providers, raw);
-  await mergePortal(deps, providers, entries);
+  await mergePortal(deps, providers, entries, deps.now());
 
-  const kept = entries.filter((entry) =>
+  const kept = collapseAcrossProviders(entries).filter((entry) =>
     withinWindow(stringOf(entry.item, "start"), options.from, options.to),
   );
   kept.sort(compare(options.order));

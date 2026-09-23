@@ -77,6 +77,7 @@ import { getGoogleCalendarFor } from "./google-tokens.ts";
 import { sha256Hex } from "./hash.ts";
 import { buildCalendarModel, ghostModel } from "./mapping.ts";
 import { eventKeyOf, planChanges } from "./plan.ts";
+import { RANK_FHIR } from "./portal-dedupe.ts";
 import { portalKeyPrefix } from "./portal-mapping.ts";
 import { adoptPortalRows, runPortalPass } from "./portal-sync.ts";
 import { collectEncounterReferences, resolveReferences } from "./references.ts";
@@ -87,6 +88,7 @@ import { getFhirClientFor } from "./tokens.ts";
 import type { SyncDeps } from "./deps.ts";
 import type { CalendarMapping, MappingSettings } from "./mapping.ts";
 import type { PlanCandidate, PlanEntry } from "./plan.ts";
+import type { Sighting } from "./portal-dedupe.ts";
 import type { FhirSighting, PortalPassInput } from "./portal-sync.ts";
 import type { RunState } from "./run.ts";
 import type { SyncTarget } from "./targets.ts";
@@ -447,11 +449,18 @@ function recordSightings(
 ): void {
   const csns = new Set<string>();
   const starts: number[] = [];
+  const sightings: Sighting[] = [];
   for (const mapping of mappings.values()) {
     if (mapping.csn !== undefined) csns.add(mapping.csn);
     starts.push(fromIso(mapping.model.start));
+    sightings.push({
+      providerId,
+      start: fromIso(mapping.reportedStart),
+      csn: mapping.csn,
+      rank: RANK_FHIR,
+    });
   }
-  run.fhirSeen.set(providerId, { csns, starts });
+  run.fhirSeen.set(providerId, { csns, starts, sightings });
 }
 
 /** Tally warnings on the run and report whether the view was filtered. */

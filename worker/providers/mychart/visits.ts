@@ -31,6 +31,7 @@
 import { AppError } from "../../lib/errors.ts";
 import { toIsoInZone } from "../../lib/time.ts";
 
+import { isExternalVisit } from "./external.ts";
 import {
   ADDRESS_KEYS,
   DEPARTMENT_KEYS,
@@ -64,6 +65,12 @@ export interface PortalVisit {
   phone?: string;
   isVideo: boolean;
   status: PortalVisitStatus;
+  /**
+   * Set (to true) only when the payload says the visit belongs to another
+   * organisation than the portal listing it -- a shared-record copy. Absent means
+   * first-party, or unknown. See `external.ts`.
+   */
+  external?: true;
 }
 
 export interface ParsedUpcoming {
@@ -304,6 +311,7 @@ function toVisit(record: object, fallbackTimeZone: string): PortalVisit | null {
     timeZone,
     visitType: visitType ?? "Appointment",
     isVideo: isVideoVisit(fields),
+    ...(isExternalVisit(fields) && { external: true as const }),
     status: statusOf(fields),
     ...optional,
   };

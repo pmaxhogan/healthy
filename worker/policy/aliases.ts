@@ -754,7 +754,8 @@ const ENCOUNTER_NORMALIZED_FIELDS = [
  * `field` rules that reach them are `Encounter.<field>` rules. Without these the
  * write-time check would refuse `Encounter.practitioner` even though that is the
  * key the owner sees in an answer. `source` says whether an item came from FHIR
- * or from the patient portal's upcoming-visits list.
+ * or from the patient portal's upcoming-visits list; `firstParty` and `via` say
+ * whether a portal item is another organisation's visit, seen second-hand.
  */
 const APPOINTMENT_VIEW_FIELDS = [
   "encounterId",
@@ -763,7 +764,9 @@ const APPOINTMENT_VIEW_FIELDS = [
   "org",
   "csn",
   "source",
-] as const satisfies readonly (keyof NormalizedAppointmentView | "source")[];
+  "firstParty",
+  "via",
+] as const satisfies readonly (keyof NormalizedAppointmentView | "source" | "firstParty" | "via")[];
 
 const CONDITION_NORMALIZED_FIELDS = [
   ...NORMALIZED_BASE_FIELDS,

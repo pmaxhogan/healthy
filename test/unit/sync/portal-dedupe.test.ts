@@ -1,0 +1,149 @@
+// One visit seen by several organisations: what counts as the same visit, and
+// which sighting speaks for it. Every name below is invented.
+
+import { describe, expect, it } from "vitest";
+
+import { isExternalVisit } from "../../../worker/providers/mychart/external.ts";
+import { parseUpcoming } from "../../../worker/providers/mychart/visits.ts";
+import {
+  RANK_FHIR,
+  STALE_SECONDS,
+  normalizeLabel,
+  outranks,
+  portalRank,
+  sameVisitAcrossProviders,
+} from "../../../worker/sync/portal-dedupe.ts";
+
+import type { Sighting } from "../../../worker/sync/portal-dedupe.ts";
+
+const START = 1_790_000_000;
+const NOW = START - 86_400;
+
+function row(csn: string, external: boolean): Record<string, unknown> {
+  return {
+    Csn: csn,
+    Instant: `/Date(${String(START * 1000)})/`,
+    VisitTypeName: "Office Visit",
+    ...(external && { IsExternal: true }),
+  };
+}
+
+function sighting(overrides: Partial<Sighting> = {}): Sighting {
+  return {
+    providerId: "prov_a",
+    start: START,
+    practitioner: "A. Example, MD",
+    department: "Example Cardiology",
+    rank: 1,
+    ...overrides,
+  };
+}
+
+describe("normalizeLabel", () => {
+  it("ignores case, punctuation, credentials and word order", () => {
+    expect(normalizeLabel("Rivers, Ada MD")).toBe(normalizeLabel("Dr. Ada Rivers"));
+    expect(normalizeLabel("EXAMPLE  Cardiology")).toBe(normalizeLabel("example-cardiology"));
+  });
+
+  it("is empty for nothing at all", () => {
+    expect(normalizeLabel(undefined)).toBe("");
+    expect(normalizeLabel(" , MD ")).toBe("");
+  });
+});
+
+describe("sameVisitAcrossProviders", () => {
+  it("matches one visit listed by two providers within the tolerance", () => {
+    const b = sighting({ providerId: "prov_b", start: START + 120, practitioner: "Dr A Example" });
+
+    expect(sameVisitAcrossProviders(sighting(), b)).toBe(true);
+  });
+
+  it("never matches within one provider: that is the same-provider rule's job", () => {
+    expect(sameVisitAcrossProviders(sighting(), sighting())).toBe(false);
+  });
+
+  it("keeps two different visits at the same time apart", () => {
+    const other = sighting({
+      providerId: "prov_b",
+      practitioner: "Q. Other, DO",
+      department: "Example Dermatology",
+    });
+
+    expect(sameVisitAcrossProviders(sighting(), other)).toBe(false);
+  });
+
+  it("keeps two clinicians at one clinic at one time apart", () => {
+    const other = sighting({ providerId: "prov_b", practitioner: "Q. Other, DO" });
+
+    expect(sameVisitAcrossProviders(sighting(), other)).toBe(false);
+  });
+
+  it("matches on the department when neither names a practitioner", () => {
+    const a = sighting({ practitioner: undefined });
+    const b = sighting({ providerId: "prov_b", practitioner: undefined });
+
+    expect(sameVisitAcrossProviders(a, b)).toBe(true);
+  });
+
+  it("does not match on time alone", () => {
+    const a = sighting({ practitioner: undefined, department: undefined });
+    const b = sighting({ providerId: "prov_b", practitioner: undefined, department: undefined });
+
+    expect(sameVisitAcrossProviders(a, b)).toBe(false);
+  });
+
+  it("matches on a shared CSN, but never across more than the tolerance", () => {
+    const a = sighting({ csn: "csn-1", practitioner: undefined, department: undefined });
+    const near = { ...a, providerId: "prov_b", start: START + 60 };
+    const far = { ...a, providerId: "prov_b", start: START + 3600 };
+
+    expect(sameVisitAcrossProviders(a, near)).toBe(true);
+    expect(sameVisitAcrossProviders(a, far)).toBe(false);
+  });
+});
+
+describe("precedence", () => {
+  it("puts FHIR over a portal copy, and a first-hand copy over a second-hand one", () => {
+    const fhir = sighting({ providerId: "prov_z", rank: RANK_FHIR });
+    const firstHand = sighting({ providerId: "prov_y", rank: portalRank(false, NOW, NOW) });
+    const secondHand = sighting({ providerId: "prov_a", rank: portalRank(true, NOW, NOW) });
+
+    expect(outranks(fhir, firstHand)).toBe(true);
+    expect(outranks(firstHand, secondHand)).toBe(true);
+    expect(outranks(secondHand, firstHand)).toBe(false);
+  });
+
+  it("lets a fresh second-hand copy beat a stale first-hand one", () => {
+    const stale = sighting({ rank: portalRank(false, NOW - STALE_SECONDS - 1, NOW) });
+    const fresh = sighting({ providerId: "prov_b", rank: portalRank(true, NOW, NOW) });
+
+    expect(outranks(fresh, stale)).toBe(true);
+  });
+
+  it("breaks a tie the same way from either side", () => {
+    const lower = sighting();
+    const higher = sighting({ providerId: "prov_b" });
+
+    expect(outranks(lower, higher)).toBe(true);
+    expect(outranks(higher, lower)).toBe(false);
+  });
+});
+
+describe("the external flag on a visit", () => {
+  it("reads a top-level flag or one on a nested organisation object", () => {
+    expect(isExternalVisit(new Map([["IsExternal", true]]))).toBe(true);
+    expect(isExternalVisit(new Map([["Organization", { IsExternal: "true" }]]))).toBe(true);
+    expect(isExternalVisit(new Map([["Organization", { IsExternal: false }]]))).toBe(false);
+    expect(isExternalVisit(new Map())).toBe(false);
+  });
+
+  it("marks only the visits that say so when a payload is parsed", () => {
+    const { visits } = parseUpcoming(
+      { NextNDaysVisits: [row("csn-own", false), row("csn-shared", true)] },
+      "UTC",
+    );
+
+    expect(visits.find((visit) => visit.csn === "csn-own")).not.toHaveProperty("external");
+    expect(visits.find((visit) => visit.csn === "csn-shared")?.external).toBe(true);
+  });
+});

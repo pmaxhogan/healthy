@@ -60,6 +60,27 @@ Encounters:
   `items` and `raw` stay aligned), and the answer carries the warning
   `portal_items_have_no_raw`.
 
+- **One visit, one item, across organisations.** A portal can list visits
+  booked at _other_ health systems the account shares records with, so the
+  same visit can arrive from two providers. Two sightings from different
+  providers are one visit when their starts are within five minutes and they
+  share a CSN, or name the same practitioner, or — when no practitioner
+  disagrees — the same department or location (all compared after
+  normalising case, punctuation, word order and credentials). Time alone
+  never merges two visits, so two different appointments at the same time
+  are both kept. The copy that answers is, in order: a FHIR Encounter; a
+  portal copy that does not say it is another organisation's; one that does;
+  a portal copy not refreshed for two days (its portal is failing). Nothing
+  is ever dropped for being second-hand: when the owning organisation has no
+  copy — not connected, or failing — the second-hand one is kept, marked
+  `firstParty: false` and `via: <provider id>` (the portal it was seen in).
+  Every other item carries `firstParty: true`. Whether a visit is
+  second-hand is read from the portal's own markers, which no captured
+  payload has shown yet; without one a visit counts as first-hand. The
+  calendar sync applies the same rule, so such a visit gets one event; a
+  second-hand event already on the calendar when the owner's copy turns up
+  is ghosted, as any duplicate is.
+
 `get_health_summary`'s appointments section uses the same merge: the five
 appointments nearest to now, upcoming ones first (soonest first), then the
 latest past ones.
@@ -130,7 +151,8 @@ rule has a `ruleType` and a `target`:
 apply to every resource type. For `Encounter` there are three vocabularies:
 the raw FHIR resource, the normalized Encounter (`get_encounters`), and the
 flat appointment view (`get_appointments`, `get_health_summary`) with its own
-names — `practitioner`, `specialty`, `org`, `csn`, `encounterId`, `source`. A
+names — `practitioner`, `specialty`, `org`, `csn`, `encounterId`, `source`,
+`firstParty`, `via`. A
 rule naming a field in any of them removes every name that field has in the
 others: `Encounter.practitioner`, `Encounter.practitioners` and
 `Encounter.participant` all remove the practitioner from both tools and from

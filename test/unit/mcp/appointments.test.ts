@@ -21,6 +21,7 @@ import { parseUpcoming } from "../../../worker/providers/mychart/visits.ts";
 import {
   NAME_A,
   NAME_B,
+  NOW,
   PROVIDER_A,
   PROVIDER_B,
   callTool,
@@ -53,9 +54,10 @@ function visit(overrides: Partial<PortalVisit> & { csn: string; start: string })
   };
 }
 
-const stored = (value: PortalVisit, missing = false): PortalVisitRecord => ({
+const stored = (value: PortalVisit, missing = false, fetchedAt = NOW): PortalVisitRecord => ({
   visit: value,
   missing,
+  fetchedAt,
 });
 
 /** `/Date(<ms>)/`, the portal's own instant encoding. */
@@ -361,5 +363,104 @@ describe("get_health_summary", () => {
       "csn-far",
       "enc-past",
     ]);
+  });
+});
+
+describe("one visit, one item, across organisations", () => {
+  // A visit at provider A that provider B's portal also lists (shared records).
+  // Same appointment, seen a minute apart, with B's copy marked second-hand.
+  const firstHand = visit({ csn: "csn-a1", start: "2026-06-10T15:00:00+00:00" });
+  const secondHand = visit({
+    csn: "csn-b9",
+    start: "2026-06-10T15:01:00+00:00",
+    practitioner: "Dr P Example",
+    external: true,
+  });
+
+  it("answers with the owning organisation's copy when both are present", async () => {
+    world.state.portalVisits.set(PROVIDER_A, [stored(firstHand)]);
+    world.state.portalVisits.set(PROVIDER_B, [stored(secondHand)]);
+
+    const answer = await callTool(world.client, "get_appointments");
+    const june = portalItems(answer.items).filter((item) =>
+      String(item.start).startsWith("2026-06-10"),
+    );
+
+    expect(june).toHaveLength(1);
+    expect(june[0]).toMatchObject({ providerId: PROVIDER_A, csn: "csn-a1", firstParty: true });
+    expect(june[0]).not.toHaveProperty("via");
+  });
+
+  it("keeps the second-hand copy, marked as such, when the owner has none", async () => {
+    world.state.portalVisits.set(PROVIDER_B, [stored(secondHand)]);
+
+    const answer = await callTool(world.client, "get_appointments");
+    const june = portalItems(answer.items).filter((item) =>
+      String(item.start).startsWith("2026-06-10"),
+    );
+
+    expect(june).toHaveLength(1);
+    expect(june[0]).toMatchObject({ providerId: PROVIDER_B, firstParty: false, via: PROVIDER_B });
+  });
+
+  it("prefers a fresh second-hand copy over the owner's stale one", async () => {
+    world.state.portalVisits.set(PROVIDER_A, [stored(firstHand, false, NOW - 5 * 86_400)]);
+    world.state.portalVisits.set(PROVIDER_B, [stored(secondHand)]);
+
+    const answer = await callTool(world.client, "get_appointments");
+    const june = portalItems(answer.items).filter((item) =>
+      String(item.start).startsWith("2026-06-10"),
+    );
+
+    expect(june.map((item) => item.providerId)).toStrictEqual([PROVIDER_B]);
+  });
+
+  it("keeps two different visits at the same time, one at each organisation", async () => {
+    world.state.portalVisits.set(PROVIDER_A, [stored(firstHand)]);
+    world.state.portalVisits.set(PROVIDER_B, [
+      stored(
+        visit({
+          csn: "csn-b2",
+          start: "2026-06-10T15:00:00+00:00",
+          practitioner: "Q. Other, DO",
+          department: "Other Clinic Dermatology",
+          locationName: "Other Building",
+        }),
+      ),
+    ]);
+
+    const answer = await callTool(world.client, "get_appointments");
+    const june = portalItems(answer.items).filter((item) =>
+      String(item.start).startsWith("2026-06-10"),
+    );
+
+    expect(june.map((item) => item.csn)).toStrictEqual(["csn-a1", "csn-b2"]);
+  });
+
+  it("lets a FHIR Encounter claim another organisation's portal copy of it", async () => {
+    // enc-shared is provider A's; B's portal lists it second-hand, same CSN.
+    world.state.pools.get(PROVIDER_A)?.Encounter?.push({
+      resourceType: "Encounter",
+      id: "enc-shared",
+      status: "planned",
+      class: { code: "AMB" },
+      identifier: [{ type: { text: "CSN" }, value: "csn-shared" }],
+      period: { start: "2026-06-12T15:00:00Z" },
+    });
+    world.state.portalVisits.set(PROVIDER_B, [
+      stored(
+        visit({
+          csn: "csn-shared",
+          start: "2026-06-12T15:00:00+00:00",
+          external: true,
+        }),
+      ),
+    ]);
+
+    const answer = await callTool(world.client, "get_appointments");
+    const day = answer.items.filter((item) => String(item.start).startsWith("2026-06-12"));
+
+    expect(day).toHaveLength(1);
+    expect(day[0]).toMatchObject({ source: "fhir", providerId: PROVIDER_A });
   });
 });
