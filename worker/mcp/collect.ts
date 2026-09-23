@@ -189,6 +189,23 @@ function inWindow(order: number, after: number | undefined, before: number | und
     : (after === undefined || order >= after) && (before === undefined || order <= before);
 }
 
+/**
+ * Whether one ISO date falls inside a caller's `from`/`to` window, by exactly the
+ * rules `collect` applies: a bare `to` date covers that whole day, and an item
+ * with no usable date is only kept when there is no window at all.
+ *
+ * For items that do not come out of the FHIR cache (the portal's visits) but
+ * must be windowed as if they did.
+ */
+export function withinWindow(
+  date: string | undefined,
+  from: string | undefined,
+  to: string | undefined,
+): boolean {
+  const ms = date === undefined ? NaN : Date.parse(date);
+  return inWindow(Number.isNaN(ms) ? NO_DATE : ms, bound(from, false), bound(to, true));
+}
+
 /** Every entry one provider contributes for one spec. */
 function entriesFor(
   provider: ProviderInfo,

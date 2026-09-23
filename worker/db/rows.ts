@@ -272,3 +272,23 @@ export interface PortalAccountRow {
   needs_reauth_since: number | null;
   updated_at: number;
 }
+
+/** A `portal_visits` row's lifecycle: see `migrations/0006_portal_visits.sql`. */
+export type PortalVisitState = "active" | "missing";
+
+export interface PortalVisitRow {
+  provider_id: string;
+  /** The portal's contact-serial number. Plaintext, like `calendar_events.portal_csn`. */
+  csn: string;
+  /** The parsed visit as JSON, sealed against `portal_visits.payload_enc.<providerId>:<csn>`. */
+  payload_enc: string;
+  content_hash: string;
+  start_at: number;
+  /** The portal's own status word, from the fixed `PortalVisitStatus` vocabulary. */
+  status: string;
+  state: PortalVisitState;
+  /** When a future visit first stopped being returned. Null while `active`. */
+  missing_since: number | null;
+  fetched_at: number;
+  expires_at: number;
+}

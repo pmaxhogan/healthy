@@ -32,6 +32,7 @@ import type {
   CallerIdentity,
   DocumentTextRequest,
   DocumentTextResult,
+  PortalVisitRecord,
   ProviderInfo,
   SyncStatusEntry,
   ToolDeps,
@@ -60,6 +61,7 @@ interface CallCache {
   syncStatus: Promise<SyncStatusEntry[]> | null;
   pools: Map<string, Promise<unknown[]>>;
   resources: Map<string, Promise<CachedRow[]>>;
+  visits: Map<string, Promise<PortalVisitRecord[]>>;
 }
 
 function emptyCache(): CallCache {
@@ -71,6 +73,7 @@ function emptyCache(): CallCache {
     syncStatus: null,
     pools: new Map(),
     resources: new Map(),
+    visits: new Map(),
   };
 }
 
@@ -122,6 +125,12 @@ async function loadReferencePool(repos: Repos, providerId: string): Promise<unkn
     ),
   );
   return groups.flat().map((row) => row.resource);
+}
+
+/** One provider's stored portal visits, projected to what the tools read. */
+async function loadPortalVisits(repos: Repos, providerId: string): Promise<PortalVisitRecord[]> {
+  const rows = await repos.portalVisits.list(providerId);
+  return rows.map((row) => ({ visit: row.visit, missing: row.state === "missing" }));
 }
 
 async function loadProviders(repos: Repos): Promise<ProviderInfo[]> {
@@ -176,6 +185,15 @@ export function makeToolDeps(options: ToolDepsOptions): ToolDeps {
       if (pending === undefined) {
         pending = loadReferencePool(repos, providerId);
         cache.pools.set(providerId, pending);
+      }
+      return pending;
+    },
+
+    portalVisits(providerId: string): Promise<PortalVisitRecord[]> {
+      let pending = cache.visits.get(providerId);
+      if (pending === undefined) {
+        pending = loadPortalVisits(repos, providerId);
+        cache.visits.set(providerId, pending);
       }
       return pending;
     },

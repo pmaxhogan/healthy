@@ -3,7 +3,8 @@
  *
  * It answers "what is in here, and what has happened lately" in a single round
  * trip -- a count of every cached resource type per health system, plus the five
- * most recent appointments, conditions, medications and lab results. A model that
+ * appointments nearest to now (the patient portal's upcoming visits included) and
+ * the five most recent conditions, medications and lab results. A model that
  * starts here knows which of the other twenty-three tools are worth calling.
  *
  * The counts are emitted as items carrying `resourceType`, not as a separate
@@ -12,6 +13,7 @@
  * the summary would still say how many there are.
  */
 
+import { collectAppointments } from "../appointment-items.ts";
 import { WINDOW_ARGS, toolArgs } from "../args.ts";
 import { collect, effectiveLimit, selectProviders, spec } from "../collect.ts";
 import { BINARY_TEXT_TYPE, MAX_LIMIT } from "../deps.ts";
@@ -28,17 +30,14 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 const RECENT_PER_SECTION = 5;
 
 /**
- * The four things a summary is asked about, and how to read each one.
+ * Three of the four things a summary is asked about, and how to read each one.
+ * The fourth, appointments, is {@link nearestAppointments}.
  *
  * The label goes out as `section`, not `category`: several normalized shapes
  * already carry a FHIR `category` array, and reusing the name would have the
  * summary's own label silently overwrite the resource's.
  */
 const SECTIONS: { section: string; specs: () => CollectSpec[] }[] = [
-  {
-    section: "appointments",
-    specs: () => [spec("Encounter", { dateOf: (item) => item.start })],
-  },
   {
     section: "conditions",
     specs: () => [spec("Condition", { dateOf: (item) => item.recorded ?? item.onset })],
@@ -58,11 +57,43 @@ const SECTIONS: { section: string; specs: () => CollectSpec[] }[] = [
   },
 ];
 
+/**
+ * The appointments nearest to now: the next ones first, then the latest past
+ * ones to fill the section.
+ *
+ * Read through `collectAppointments`, the same merge `get_appointments` uses, so
+ * the patient portal's upcoming visits are here too -- they are the only
+ * upcoming appointments there are, because Epic's FHIR view never returns one
+ * before it happens. "Most recent" by start date alone would fill the section
+ * with the furthest-out visits and hide next week's.
+ */
+async function nearestAppointments(
+  deps: ToolDeps,
+  providers: readonly ProviderInfo[],
+  now: number,
+): Promise<TaggedItem[]> {
+  const { items } = await collectAppointments(deps, providers, { order: "asc" });
+  const nowMs = now * 1000;
+  const isUpcoming = (item: TaggedItem): boolean =>
+    typeof item.start === "string" && Date.parse(item.start) >= nowMs;
+  const upcoming: TaggedItem[] = [];
+  // Latest first; `items` is soonest first, so each past one goes to the front.
+  const past: TaggedItem[] = [];
+  for (const item of items) {
+    if (isUpcoming(item)) upcoming.push(item);
+    else past.unshift(item);
+  }
+  return [...upcoming, ...past].slice(0, RECENT_PER_SECTION);
+}
+
 async function recentItems(
   deps: ToolDeps,
   providers: readonly ProviderInfo[],
+  now: number,
 ): Promise<TaggedItem[]> {
   const out: TaggedItem[] = [];
+  const appointments = await nearestAppointments(deps, providers, now);
+  out.push(...appointments.map((item) => ({ ...item, kind: "recent", section: "appointments" })));
   for (const entry of SECTIONS) {
     const collected = await collect(deps, providers, { specs: entry.specs() });
     for (const item of collected.items.slice(0, RECENT_PER_SECTION)) {
@@ -80,8 +111,9 @@ export function registerSummaryTool(server: McpServer, deps: ToolDeps): void {
       name: "get_health_summary",
       description:
         "Start here. How many of each resource type each connected health system " +
-        "has cached (items with kind `count`), plus the five most recent " +
-        "appointments, conditions, medications and lab results across all of them " +
+        "has cached (items with kind `count`), plus the five appointments nearest " +
+        "to now (upcoming first, patient-portal visits included) and the five most " +
+        "recent conditions, medications and lab results across all of them " +
         "(kind `recent`, labelled by `section`).",
       schema: toolArgs(WINDOW_ARGS),
     },
@@ -104,7 +136,7 @@ export function registerSummaryTool(server: McpServer, deps: ToolDeps): void {
           count: count.count,
         });
       }
-      items.push(...(await recentItems(deps, providers)));
+      items.push(...(await recentItems(deps, providers, run.now)));
 
       return respond({
         tool: "get_health_summary",

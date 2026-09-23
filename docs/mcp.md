@@ -21,6 +21,49 @@ The server registers (in `worker/mcp/tools/index.ts`): `get_health_summary`,
 the underlying FHIR resource (filtered by the same policy as the normalised
 one). The admin UI's MCP page (`/connectors`) lists the live catalogue.
 
+### Appointments: FHIR and the patient portal
+
+Epic's patient-facing FHIR view does not return an Encounter until a visit
+has happened, so the only record of an _upcoming_ appointment is the patient
+portal. The hourly portal pass stores every visit the portal's upcoming list
+returns (all of its buckets, however far ahead) in `portal_visits`, sealed
+like the FHIR cache, and `get_appointments` merges those with the cached
+Encounters:
+
+- **One visit, one item.** A portal visit and an Encounter for the same
+  provider are the same appointment when their CSNs match, or — when either
+  side has no CSN — when their starts are within five minutes (the calendar
+  sync's own dedupe rule). The answer then carries the FHIR item, with any
+  field it lacks (practitioner, department, location, end, visit type)
+  filled from the portal's copy, and never both.
+- **Every item says where it came from**: `source: "fhir"` or
+  `source: "portal"`. A portal item has the same flat shape as a FHIR one
+  (`start`, `end`, `status`, `visitType`, `practitioner`, `department`,
+  `location`, `telehealth`, `csn`, `provider`) but no `encounterId`, since
+  there is no Encounter behind it. Its `status` is the portal's own word
+  (`scheduled`, `confirmed`, `canceled`, …); a future visit the portal has
+  stopped listing is reported as `canceled`, mirroring the grey "Cancelled"
+  event on the calendar.
+- **Window and order.** With no arguments the window is "from now", with no
+  upper bound, soonest first — every upcoming visit the portal lists is
+  returned, up to `limit` (default 50). `includePast: true` or an explicit
+  `from` widens the window into the past, and the answer is then newest
+  first. `to`, `providers` and `limit` apply to portal items exactly as to
+  FHIR ones.
+- **Policy.** Portal items are tagged `resourceType: "Encounter"`, so a
+  `resource` rule on `Encounter`, a `provider` rule, and every
+  `Encounter.<field>` rule reach them through the same choke point.
+- **`raw: true` never carries the portal payload.** Its keys are in neither
+  vocabulary a `field` rule is written in, so a rule meant to hide, say, an
+  address could not be relied on to reach it. A portal item's `raw` entry is
+  a bare `{ "resourceType": "Encounter" }` placeholder (one per item, so
+  `items` and `raw` stay aligned), and the answer carries the warning
+  `portal_items_have_no_raw`.
+
+`get_health_summary`'s appointments section uses the same merge: the five
+appointments nearest to now, upcoming ones first (soonest first), then the
+latest past ones.
+
 A single settings toggle, **MCP enabled**, is a kill switch: when it is off,
 every tool call answers `mcp_disabled` immediately, without reading
 anything. It does not revoke any grant — turning it back on resumes exactly
@@ -84,7 +127,14 @@ rule has a `ruleType` and a `target`:
 | `field`    | a dotted path, see below                 | The named field is deep-deleted from the normalised item and the raw FHIR resource behind it; the path may be written in either vocabulary, and a path that names nothing in both is refused with `400 bad_request`. |
 
 **Field paths** are `ResourceType.path.to.field`, or `*.path.to.field` to
-apply to every resource type. A path segment of `[]` — on its own, or as a
+apply to every resource type. For `Encounter` there are three vocabularies:
+the raw FHIR resource, the normalized Encounter (`get_encounters`), and the
+flat appointment view (`get_appointments`, `get_health_summary`) with its own
+names — `practitioner`, `specialty`, `org`, `csn`, `encounterId`, `source`. A
+rule naming a field in any of them removes every name that field has in the
+others: `Encounter.practitioner`, `Encounter.practitioners` and
+`Encounter.participant` all remove the practitioner from both tools and from
+the raw resource. A path segment of `[]` — on its own, or as a
 suffix on the segment before it (`components[]` and `components.[]` mean
 the same thing) — steps into every element of an array, so
 `Observation.component[].valueQuantity.value` removes that one value from

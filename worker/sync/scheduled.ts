@@ -85,8 +85,8 @@ export async function handleScheduled(
 }
 
 /**
- * Retention: expired cache rows, expired OAuth states, year-old audit rows, and
- * expired inbound mail.
+ * Retention: expired cache rows, expired OAuth states, year-old audit rows,
+ * expired inbound mail, and portal visits a year past their date.
  *
  * `mail_inbox` is pruned here as well as from the email handler, because the
  * handler only runs when mail arrives: a mailbox that goes quiet would otherwise
@@ -99,7 +99,8 @@ async function prune(ctx: Ctx): Promise<void> {
     const states = await repos.oauthStates.purgeExpired();
     const audit = await repos.mcpAudit.prune(AUDIT_RETENTION_DAYS);
     const mail = await repos.mailInbox.purgeExpired(ctx.now());
-    ctx.log.info("cron.pruned", { cache, states, audit, mail });
+    const visits = await repos.portalVisits.purgeExpired();
+    ctx.log.info("cron.pruned", { cache, states, audit, mail, visits });
   } catch (error) {
     ctx.log.warn("cron.prune_failed", errorFields(error));
   }

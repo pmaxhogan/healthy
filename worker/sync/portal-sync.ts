@@ -38,10 +38,15 @@
  * **A canceled or no-show visit is ghosted with its own details.** Those are still
  * *in* the payload, so unlike a vanished one there is a model to render: the event
  * is patched to the grey, transparent, "Cancelled:" variant rather than merely
- * having its row marked. A vanished future visit has no model left -- nothing
- * caches portal payloads -- so it gets the row-only ghost the diff already has for
- * that case, and the calendar entry is left alone rather than rewritten from
- * guesses.
+ * having its row marked. A vanished future visit gets the row-only ghost the diff
+ * already has for that case, and the calendar entry is left alone rather than
+ * rewritten from guesses. (`portal_visits` does keep the last payload now, for the
+ * MCP -- see `recordVisits` -- but the calendar deliberately does not re-render a
+ * ghost from a copy it did not just read.)
+ *
+ * Every visit this pass reads is also written to `portal_visits`, with the same
+ * "missing only if still ahead" rule, because that table -- not the calendar -- is
+ * what `get_appointments` serves upcoming visits from.
  *
  * Log lines carry provider ids, counts and stable codes. Never a visit, a
  * practitioner, a CSN, a code or a byte of portal markup -- the CSN is an upstream
@@ -200,6 +205,8 @@ async function syncPortalProvider(input: PortalPassInput, providerId: string): P
   const provider = await repos.providers.get(providerId);
   if (provider === null) return;
 
+  await recordVisits(input, providerId, visits);
+
   const builds = await buildPortalCandidates(input, provider, visits);
   const stored = await repos.calendarEvents.list({
     providerId,
@@ -242,6 +249,29 @@ async function syncPortalProvider(input: PortalPassInput, providerId: string): P
   // The portal answered, so whatever the reconnect card was warning about is over.
   await repos.portalAccounts.markActive(providerId);
   await resolveReconnectAlert(ctx, { providerId, portal: true }, input.deps);
+}
+
+/**
+ * Keep this run's visits for the MCP, before the calendar diff can fail.
+ *
+ * `get_appointments` reads upcoming visits from `portal_visits`, not from the
+ * calendar, so this is what makes a visit the portal knows about answerable at
+ * all. A truncated list is stored but proves nothing about absence, so nothing is
+ * marked missing from it. A failure here costs the MCP one run's freshness and is
+ * logged; it must not cost the owner their calendar, so it does not throw.
+ */
+async function recordVisits(
+  input: PortalPassInput,
+  providerId: string,
+  visits: readonly PortalVisit[],
+): Promise<void> {
+  try {
+    await input.repos.portalVisits.record(providerId, visits, {
+      complete: visits.length < MAX_PARSED_VISITS,
+    });
+  } catch (error) {
+    input.ctx.log.warn("portal.visits_store_failed", { providerId, ...errorFields(error) });
+  }
 }
 
 /** The `key` marker on a Google event, or null when it carries none. */
@@ -417,8 +447,8 @@ async function portalPlanInputs(
       offSchedule: true,
       absent: true,
       upcoming: true,
-      // Nothing caches portal payloads, so the details this event was built from
-      // are gone: the row is ghosted and the calendar entry left as it is.
+      // The calendar is not re-rendered from `portal_visits`' last copy: the row is
+      // ghosted and the calendar entry left as it is.
       hasModel: false,
     });
   }

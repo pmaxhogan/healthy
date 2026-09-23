@@ -20,6 +20,7 @@ surface, and the MCP surface.
 | Per-organisation client secrets       | D1             | AES-GCM-256, application layer                   |
 | Patient identifiers                   | D1             | AES-GCM-256, application layer                   |
 | Cached FHIR resources                 | D1             | AES-GCM-256, application layer                   |
+| Patient-portal upcoming visits        | D1             | AES-GCM-256, application layer                   |
 | MCP access and refresh tokens         | Workers KV     | Managed by `@cloudflare/workers-oauth-provider`  |
 | Admin password                        | Worker secret  | PBKDF2-SHA256, 100k iterations, per-hash salt    |
 | Encryption key, API credentials       | Worker secrets | Cloudflare-managed                               |
@@ -30,7 +31,7 @@ surface, and the MCP surface.
 | Full-refresh progress                 | Durable Object | Plaintext: provider ids, a run id, counts, codes |
 | Portal sign-in progress               | Durable Object | Plaintext: a provider id, a step, counts, codes  |
 
-Three tables hold values that are **plaintext on purpose**, and it is worth
+Four tables hold values that are **plaintext on purpose**, and it is worth
 saying which and why rather than leaving it to be inferred:
 
 - `portal_accounts.base_url`, `mount_path` and `endpoint_json`, and the
@@ -46,6 +47,13 @@ saying which and why rather than leaving it to be inferred:
   which names anyone. The sender, the subject and the code are sealed. The
   legacy `from_addr` / `subject` columns are kept only until a migration can
   drop them and are written empty.
+- `portal_visits.csn`, `start_at`, `status`, `state` and the timestamps: the
+  portal's visit number (already stored the same way as
+  `calendar_events.portal_csn`), the visit's start (as `calendar_events`
+  stores it), a word from a fixed status vocabulary, and bookkeeping. The
+  visit itself — practitioner, department, address, phone — is only in
+  `payload_enc`, sealed against `portal_visits.payload_enc.<providerId>:<csn>`.
+  Rows are purged a year after the visit.
 - The two Durable Objects (`FULL_REFRESH`, `PORTAL_SIGNIN`) hold a provider
   id, a step name, counts and stable codes. Never a credential, never an
   emailed code, never a byte of a portal's HTML. `PORTAL_SIGNIN` additionally

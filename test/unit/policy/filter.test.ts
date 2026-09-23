@@ -279,6 +279,71 @@ describe("field rules across the normalized/raw vocabulary divide", () => {
   });
 });
 
+describe("field rules against the appointment view", () => {
+  // `get_appointments` serves Encounters -- and the patient portal's upcoming
+  // visits -- in a flat shape whose names differ from the normalized Encounter's
+  // (`practitioner` for `practitioners`, `org` for `organization`). A rule written
+  // in any of the three vocabularies has to reach it.
+  const appointment = {
+    resourceType: "Encounter",
+    provider: "Example Health",
+    providerId: "prov_a",
+    source: "portal",
+    status: "scheduled",
+    start: "2026-07-01T09:00:00+00:00",
+    practitioner: "P. Example, MD",
+    org: "Example Org",
+    csn: "csn-1",
+    telehealth: false,
+  };
+  const encounterItem = {
+    resourceType: "Encounter",
+    id: "enc-1",
+    provider: "Example Health",
+    providerId: "prov_a",
+    practitioners: [{ name: "Q. Example, DO" }],
+  };
+
+  for (const target of [
+    "Encounter.practitioner",
+    "Encounter.practitioners",
+    "Encounter.participant",
+  ]) {
+    it(`strips the practitioner from both shapes for ${target}`, () => {
+      const serialised = serialise({
+        tool: "get_appointments",
+        items: [appointment, encounterItem],
+        rules: rules({ rule_type: "field", target }),
+      });
+
+      expect(serialised).not.toContain("P. Example, MD");
+      expect(serialised).not.toContain("Q. Example, DO");
+      expect(serialised).toContain("csn-1");
+    });
+  }
+
+  it("strips the org for a rule on the normalized or raw organisation", () => {
+    for (const target of ["Encounter.organization", "Encounter.serviceProvider"]) {
+      const serialised = serialise({
+        tool: "get_appointments",
+        items: [appointment],
+        rules: rules({ rule_type: "field", target }),
+      });
+      expect(serialised, target).not.toContain("Example Org");
+    }
+  });
+
+  it("strips the CSN for a rule on identifiers", () => {
+    const serialised = serialise({
+      tool: "get_appointments",
+      items: [appointment],
+      rules: rules({ rule_type: "field", target: "Encounter.identifiers" }),
+    });
+
+    expect(JSON.parse(serialised).items[0]).not.toHaveProperty("csn");
+  });
+});
+
 describe("the sensitive default", () => {
   it("withholds a declared sensitive field with no rule at all", () => {
     const serialised = serialise({

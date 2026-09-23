@@ -782,6 +782,7 @@ function capabilityStatement(
 const TABLES = [
   "login_attempts",
   "mail_inbox",
+  "portal_visits",
   "portal_accounts",
   "mcp_policy",
   "mcp_audit",

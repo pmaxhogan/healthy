@@ -51,6 +51,7 @@ import { FIELD_ALIASES as SPECIMEN_ALIASES } from "../fhir/normalize/specimen.ts
 import type {
   FieldAlias,
   NormalizedAllergy,
+  NormalizedAppointmentView,
   NormalizedCarePlan,
   NormalizedCareTeam,
   NormalizedCondition,
@@ -744,6 +745,26 @@ const ENCOUNTER_NORMALIZED_FIELDS = [
   "identifiers",
 ] as const satisfies readonly (keyof NormalizedEncounter)[];
 
+/**
+ * The appointment view's own field names.
+ *
+ * `get_appointments` and `get_health_summary` serve Encounters in the flat
+ * calendar-facing shape (`NormalizedAppointmentView`), still tagged
+ * `resourceType: "Encounter"` so a `resource` rule reaches them -- and so the
+ * `field` rules that reach them are `Encounter.<field>` rules. Without these the
+ * write-time check would refuse `Encounter.practitioner` even though that is the
+ * key the owner sees in an answer. `source` says whether an item came from FHIR
+ * or from the patient portal's upcoming-visits list.
+ */
+const APPOINTMENT_VIEW_FIELDS = [
+  "encounterId",
+  "practitioner",
+  "specialty",
+  "org",
+  "csn",
+  "source",
+] as const satisfies readonly (keyof NormalizedAppointmentView | "source")[];
+
 const CONDITION_NORMALIZED_FIELDS = [
   ...NORMALIZED_BASE_FIELDS,
   "code",
@@ -935,7 +956,7 @@ const ORGANIZATION_NORMALIZED_FIELDS = [
 ] as const satisfies readonly (keyof NormalizedOrganization)[];
 
 const NORMALIZED_FIELDS_BY_TYPE = {
-  Encounter: ENCOUNTER_NORMALIZED_FIELDS,
+  Encounter: [...ENCOUNTER_NORMALIZED_FIELDS, ...APPOINTMENT_VIEW_FIELDS],
   Condition: CONDITION_NORMALIZED_FIELDS,
   Observation: OBSERVATION_NORMALIZED_FIELDS,
   MedicationRequest: MEDICATION_REQUEST_NORMALIZED_FIELDS,

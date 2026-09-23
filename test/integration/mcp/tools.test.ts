@@ -17,6 +17,7 @@ import { makeRepos } from "../../../worker/db/index.ts";
 import { setSetting } from "../../../worker/db/settings.ts";
 import { makeToolDeps } from "../../../worker/mcp/deps-d1.ts";
 import { registerTools } from "../../../worker/mcp/tools/index.ts";
+import { parseUpcoming } from "../../../worker/providers/mychart/visits.ts";
 import { resetDb } from "../db/helpers.ts";
 
 import type { Repos } from "../../../worker/db/index.ts";
@@ -351,6 +352,144 @@ describe("policy rows in D1", () => {
 
     expect(before.items).toHaveLength(2);
     expect(after.error).toBe("policy_denied");
+  });
+});
+
+/** `/Date(<ms>)/`, the portal's own instant encoding. */
+const wcf = (iso: string): string => `/Date(${String(Date.parse(iso))})/`;
+
+/** One synthetic `LoadUpcoming` row. */
+function upcomingRow(csn: string, iso: string): Record<string, unknown> {
+  return {
+    CSN: csn,
+    Instant: wcf(iso),
+    TimeZone: "UTC",
+    VisitType: "Follow-up",
+    ProviderName: "P. Portal, MD",
+    DepartmentName: "Portal Example Clinic",
+  };
+}
+
+/**
+ * Seven synthetic visits across all three `LoadUpcoming` buckets and about seven
+ * months, parsed by the real parser and stored by the real repo -- the path the
+ * hourly portal pass takes.
+ */
+async function storeSevenMonths(providerId: string): Promise<void> {
+  const parsed = parseUpcoming(
+    {
+      InProgressVisits: [upcomingRow("csn-1", "2026-06-01T01:00:00Z")],
+      NextNDaysVisits: [
+        upcomingRow("csn-2", "2026-06-05T15:00:00Z"),
+        upcomingRow("csn-3", "2026-06-12T15:00:00Z"),
+      ],
+      LaterVisitsList: [
+        upcomingRow("csn-6", "2026-11-20T15:00:00Z"),
+        upcomingRow("csn-4", "2026-08-10T15:00:00Z"),
+        upcomingRow("csn-7", "2026-12-28T15:00:00Z"),
+        upcomingRow("csn-5", "2026-09-30T15:00:00Z"),
+      ],
+    },
+    "UTC",
+  );
+  await repos().portalVisits.record(providerId, parsed.visits, { complete: true });
+}
+
+describe("portal visits through the MCP", () => {
+  it("returns every stored upcoming visit, soonest first, however far out", async () => {
+    await storeSevenMonths(world.seeded.providerA);
+
+    const answer = await call(world.client, "get_appointments");
+
+    expect(
+      answer.items.filter((item) => item.source === "portal").map((item) => item.csn),
+    ).toStrictEqual(["csn-1", "csn-2", "csn-3", "csn-4", "csn-5", "csn-6", "csn-7"]);
+    // enc-a (2026-07-01) sits between csn-3 and csn-4.
+    expect(answer.items.map((item) => item.csn ?? item.encounterId)).toStrictEqual([
+      "csn-1",
+      "csn-2",
+      "csn-3",
+      "enc-a",
+      "csn-4",
+      "csn-5",
+      "csn-6",
+      "csn-7",
+    ]);
+  });
+
+  it("gives one item for a visit both FHIR and the portal know about", async () => {
+    const parsed = parseUpcoming(
+      { NextNDaysVisits: [upcomingRow("csn-dup", "2026-07-01T09:02:00Z")] },
+      "UTC",
+    );
+    await repos().portalVisits.record(world.seeded.providerA, parsed.visits, { complete: true });
+
+    const answer = await call(world.client, "get_appointments");
+
+    expect(answer.items).toHaveLength(1);
+    expect(answer.items[0]).toMatchObject({
+      source: "fhir",
+      encounterId: "enc-a",
+      practitioner: "Dr Ada Rivers",
+      department: "Portal Example Clinic",
+    });
+  });
+
+  it("narrows to the providers asked for and to the window", async () => {
+    await storeSevenMonths(world.seeded.providerA);
+
+    const other = await call(world.client, "get_appointments", { providers: [NAME_B] });
+    const summer = await call(world.client, "get_appointments", {
+      from: "2026-08-01",
+      to: "2026-09-30",
+    });
+
+    expect(other.items).toStrictEqual([]);
+    expect(summer.items.map((item) => item.csn)).toStrictEqual(["csn-5", "csn-4"]);
+  });
+
+  it("strips a denied field from portal items, and never serves their payload as raw", async () => {
+    await storeSevenMonths(world.seeded.providerA);
+    await repos().mcpPolicy.add("field", "Encounter.practitioner");
+
+    const answer = await call(world.client, "get_appointments", { raw: true });
+    const parsed = JSON.parse(answer.text) as {
+      raw: { resource: Record<string, unknown> }[];
+      warnings: string[];
+    };
+
+    expect(answer.text).not.toContain("P. Portal, MD");
+    expect(answer.items.filter((item) => item.source === "portal")).toHaveLength(7);
+    expect(parsed.raw).toHaveLength(answer.items.length);
+    expect(JSON.stringify(parsed.raw)).not.toContain("Portal Example Clinic");
+    expect(parsed.warnings).toContain("portal_items_have_no_raw");
+  });
+
+  it("drops portal items with a resource rule on Encounter", async () => {
+    await storeSevenMonths(world.seeded.providerA);
+    await repos().mcpPolicy.add("resource", "Encounter");
+
+    const answer = await call(world.client, "get_appointments");
+
+    expect(answer.items).toStrictEqual([]);
+    expect(answer.text).not.toContain("Portal Example Clinic");
+  });
+
+  it("puts the next portal visits at the head of the summary's appointments", async () => {
+    await storeSevenMonths(world.seeded.providerA);
+
+    const answer = await call(world.client, "get_health_summary");
+    const appointments = answer.items.filter(
+      (item) => item.kind === "recent" && item.section === "appointments",
+    );
+
+    expect(appointments.map((item) => item.csn ?? item.encounterId)).toStrictEqual([
+      "csn-1",
+      "csn-2",
+      "csn-3",
+      "enc-a",
+      "csn-4",
+    ]);
   });
 });
 

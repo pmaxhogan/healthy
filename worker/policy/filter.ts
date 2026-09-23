@@ -35,8 +35,6 @@ import {
   type PolicyRules,
 } from "./rules.ts";
 
-import type { AliasDirection } from "./aliases.ts";
-
 /** A raw FHIR resource as a tool hands it over, tagged with its provider. */
 export interface RawEntry {
   /** Provider display name, matching the normalized item's `provider`. */
@@ -180,10 +178,13 @@ function applyFieldRules(
   warnings: Set<string>,
 ): unknown {
   let current = value;
-  const direction: AliasDirection = shape === "normalized" ? "toNormalized" : "toRaw";
   for (const rule of fieldRulesFor(rules, resourceType)) {
     let ruleChanged = false;
-    for (const candidate of expandPath(resourceType, rule.path, direction)) {
+    const candidates =
+      shape === "normalized"
+        ? normalizedCandidates(resourceType, rule.path)
+        : expandPath(resourceType, rule.path, "toRaw");
+    for (const candidate of candidates) {
       const next = prune(current, candidate);
       // `remove` is unreachable for a parsed (or alias-translated) rule: every
       // candidate keeps at least one segment, and only an empty path removes
@@ -195,6 +196,34 @@ function applyFieldRules(
     if (ruleChanged) warnings.add(`policy_field_removed:${rule.target}`);
   }
   return current;
+}
+
+/**
+ * Every normalized-shape path a rule should be tried as.
+ *
+ * The rule's own translation into the normalized vocabulary, plus a round trip
+ * through the raw one: a rule written as `Encounter.practitioners` goes to raw
+ * `participant`, and back to every normalized name that field has --
+ * `practitioners` on the Encounter shape and `practitioner` on the appointment
+ * view `get_appointments` serves under the same resource type. Without the round
+ * trip a rule written against one normalized shape would silently miss the
+ * other, which is a leak rather than an inconvenience. It can only add paths
+ * that name the same raw field, so it strips more, never less.
+ */
+function normalizedCandidates(
+  resourceType: string,
+  path: readonly string[],
+): (readonly string[])[] {
+  const out = new Map<string, readonly string[]>();
+  const add = (candidate: readonly string[]): void => {
+    out.set(candidate.join("\u{0}"), candidate);
+  };
+  for (const candidate of expandPath(resourceType, path, "toNormalized")) add(candidate);
+  for (const raw of expandPath(resourceType, path, "toRaw")) {
+    for (const candidate of expandPath(resourceType, raw, "toNormalized")) add(candidate);
+  }
+  // eslint-disable-next-line unicorn/prefer-iterator-to-array -- Iterator#toArray() needs a lib newer than the ES2022 one this Worker compiles against (see `sortedWarnings`).
+  return [...out.values()];
 }
 
 /**

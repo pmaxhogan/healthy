@@ -251,7 +251,8 @@ describe("normalized output", () => {
     const upcoming = await callTool(world.client, "get_appointments");
     const everything = await callTool(world.client, "get_appointments", { includePast: true });
 
-    expect(upcoming.items.map((item) => item.encounterId)).toStrictEqual(["enc-b", "enc-future"]);
+    // Soonest first: "what is next" is the question an upcoming window answers.
+    expect(upcoming.items.map((item) => item.encounterId)).toStrictEqual(["enc-future", "enc-b"]);
     expect(upcoming.warnings).toContain("window_defaults_to_upcoming_only");
     expect(everything.items.map((item) => item.encounterId)).toContain("enc-past");
   });

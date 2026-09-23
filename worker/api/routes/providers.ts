@@ -186,6 +186,9 @@ providersRouter.delete("/:id", async (c) => {
   const connection = await api.repos.connections.getForProvider(row.id);
   if (connection !== null) await api.repos.connections.disconnect(connection.id);
   await api.repos.fhirCache.clearProvider(row.id);
+  // The portal's stored visits are clinical content too, and the soft delete below
+  // never fires their ON DELETE CASCADE either.
+  await api.repos.portalVisits.clearProvider(row.id);
   // For the same reason the cache is cleared rather than left: a portal login is a
   // password to a whole medical record, and the row's ON DELETE CASCADE never fires
   // because a provider is soft-deleted. Leaving the sealed credentials and cookie

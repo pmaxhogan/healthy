@@ -161,6 +161,14 @@ describe("fieldRuleResolves", () => {
     expect(fieldRuleResolves(parseFieldTarget("*.nonesuch")!)).toBe(false);
   });
 
+  it("accepts the appointment view's own field names under Encounter", () => {
+    // `get_appointments` serves Encounter-tagged items in the flat view shape,
+    // portal visits included, so these are keys the owner actually sees.
+    for (const field of ["practitioner", "org", "csn", "encounterId", "specialty", "source"]) {
+      expect(fieldRuleResolves(parseFieldTarget(`Encounter.${field}`)!), field).toBe(true);
+    }
+  });
+
   it("cannot disprove a resource type it has no vocabulary for, so it accepts", () => {
     expect(fieldRuleResolves(parseFieldTarget("Binary.data")!)).toBe(true);
   });

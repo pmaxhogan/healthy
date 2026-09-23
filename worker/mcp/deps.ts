@@ -18,6 +18,7 @@ import type { ConnectionStatus, ProviderEnvironment } from "../db/rows.ts";
 import type { SyncWarning } from "../db/schemas.ts";
 import type { Logger } from "../lib/log.ts";
 import type { PolicyRules } from "../policy/rules.ts";
+import type { PortalVisit } from "../providers/mychart/index.ts";
 
 /** How many cached rows one tool may scan per provider per resource type. */
 export const CACHE_SCAN_LIMIT = 500;
@@ -57,6 +58,17 @@ export interface CachedRow {
   /** The organisation's own `meta.lastUpdated`, in unix seconds, if it gave one. */
   lastUpdated: number | null;
   fetchedAt: number;
+}
+
+/**
+ * One visit the patient portal reported, as the portal pass last stored it.
+ *
+ * `missing` is the calendar's ghost rule: a visit that stopped being returned
+ * while it was still ahead. Treated as cancelled.
+ */
+export interface PortalVisitRecord {
+  visit: PortalVisit;
+  missing: boolean;
 }
 
 /** Live row counts, for `get_health_summary` and the admin overview. */
@@ -150,6 +162,12 @@ export interface ToolDeps {
    * rows one provider's references resolve against, for `mapResolver`.
    */
   referencePool(providerId: string): Promise<unknown[]>;
+  /**
+   * The upcoming visits the patient-portal pass last stored for one provider
+   * (`portal_visits`), earliest first. Epic's FHIR view never returns a visit
+   * before it happens, so this is where `get_appointments` finds them.
+   */
+  portalVisits(providerId: string): Promise<PortalVisitRecord[]>;
   counts(): Promise<CacheCount[]>;
   syncStatus(): Promise<SyncStatusEntry[]>;
   /**

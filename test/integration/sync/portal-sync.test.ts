@@ -211,8 +211,8 @@ describe("portal visits on the calendar", () => {
     expect(summary.eventsGhosted).toBe(1);
     const row = await syncRepos(fix.ctx).calendarEvents.getByKey(portalKey(fix.provider, "csn-1"));
     expect(row?.state).toBe("ghost");
-    // Nothing caches portal payloads, so there is no model to render a ghost from:
-    // the row is marked and the entry the owner is looking at is left alone.
+    // The calendar is not re-rendered from a copy it did not just read: the row is
+    // marked and the entry the owner is looking at is left alone.
     expect(fix.upstreams.calendar.patches).toBe(patchesBefore);
     expect(fix.upstreams.calendar.byKey().get(portalKey(fix.provider, "csn-1"))?.summary).toBe(
       "Follow-up · A. Example, MD",
@@ -297,6 +297,70 @@ describe("portal visits that FHIR also knows about", () => {
     expect(row?.source).toBe("fhir");
     expect(row?.portal_csn).toBeNull();
     expect(row?.state).toBe("active");
+  });
+});
+
+describe("portal visits stored for the MCP", () => {
+  it("stores every visit the portal returned, including one FHIR already calendared", async () => {
+    const fix = await fixture({
+      portal: {
+        visits: [
+          portalVisit({ csn: "csn-1", start: SOON }),
+          portalVisit({ csn: "csn-2", start: "2026-12-01T15:00:00+00:00", isVideo: true }),
+        ],
+      },
+    });
+    withEncounters(fix, [appointment("enc-1", SOON)]);
+
+    await portalRun(fix, false);
+
+    // The calendar skipped csn-1 as a duplicate; the MCP's copy keeps both, and
+    // leaves the dedupe to the tool, which also sees the Encounter.
+    const stored = await syncRepos(fix.ctx).portalVisits.list(fix.provider.providerId);
+    expect(stored.map((row) => row.csn)).toStrictEqual(["csn-1", "csn-2"]);
+    expect(stored[1]?.visit).toStrictEqual(
+      portalVisit({ csn: "csn-2", start: "2026-12-01T15:00:00+00:00", isVideo: true }),
+    );
+    expect(stored.every((row) => row.state === "active")).toBe(true);
+  });
+
+  it("updates a stored visit when the portal changes it", async () => {
+    const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1" })] } });
+    await portalRun(fix);
+
+    fix.portal.visits = [portalVisit({ csn: "csn-1", visitType: "Annual physical" })];
+    await portalRun(fix);
+
+    const [row] = await syncRepos(fix.ctx).portalVisits.list(fix.provider.providerId);
+    expect(row?.visit.visitType).toBe("Annual physical");
+  });
+
+  it("stores a canceled visit with its status, and marks a vanished future one missing", async () => {
+    const fix = await fixture({
+      portal: { visits: [portalVisit({ csn: "csn-1" }), portalVisit({ csn: "csn-2" })] },
+    });
+    await portalRun(fix);
+
+    fix.portal.visits = [portalVisit({ csn: "csn-1", status: "canceled" })];
+    await portalRun(fix);
+
+    const stored = await syncRepos(fix.ctx).portalVisits.list(fix.provider.providerId);
+    const byCsn = new Map(stored.map((row) => [row.csn, row]));
+    expect(byCsn.get("csn-1")).toMatchObject({ state: "active", missingSince: null });
+    expect(byCsn.get("csn-1")?.visit.status).toBe("canceled");
+    expect(byCsn.get("csn-2")).toMatchObject({ state: "missing", missingSince: T0 });
+  });
+
+  it("leaves a stored visit alone once it is in the past and drops out of the list", async () => {
+    const past = "2026-06-15T11:00:00+00:00";
+    const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1", start: past })] } });
+    await portalRun(fix);
+
+    fix.portal.visits = [];
+    await portalRun(fix);
+
+    const [row] = await syncRepos(fix.ctx).portalVisits.list(fix.provider.providerId);
+    expect(row).toMatchObject({ csn: "csn-1", state: "active" });
   });
 });
 

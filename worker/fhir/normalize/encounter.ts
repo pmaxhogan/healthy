@@ -33,6 +33,16 @@ import type * as fhir4 from "fhir/r4";
  * match over the visit type and location name) rather than one raw field
  * renamed, so there is nothing in the raw resource a rule against them could
  * alias to.
+ *
+ * The second group is the appointment view (`appointmentViewFromEncounter`),
+ * which `get_appointments` and `get_health_summary` serve tagged
+ * `resourceType: "Encounter"`. It renames the same raw fields again --
+ * `participant` becomes `practitioner`, `serviceProvider` becomes `org` -- so a
+ * rule written against the raw field must strip the view's copy too. Two
+ * normalized names sharing one raw field is also what lets the policy filter
+ * treat `practitioners` and `practitioner` as the same concept (see
+ * `normalizedCandidates` in `worker/policy/filter.ts`). `specialty` has no
+ * entry: it is read off the referenced Practitioner, not the Encounter.
  */
 export const FIELD_ALIASES: readonly FieldAlias[] = [
   { normalized: ["visitType"], raw: [["type"]] },
@@ -42,6 +52,11 @@ export const FIELD_ALIASES: readonly FieldAlias[] = [
   { normalized: ["organization"], raw: [["serviceProvider"]] },
   { normalized: ["reasons"], raw: [["reasonCode"]] },
   { normalized: ["identifiers"], raw: [["identifier"]] },
+  // The appointment view's names for the same raw fields.
+  { normalized: ["practitioner"], raw: [["participant"]] },
+  { normalized: ["org"], raw: [["serviceProvider"]] },
+  { normalized: ["csn"], raw: [["identifier"]] },
+  { normalized: ["encounterId"], raw: [["id"]] },
 ];
 
 const CSN_TYPE_CODE = "CSN";

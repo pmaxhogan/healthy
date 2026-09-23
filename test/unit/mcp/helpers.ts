@@ -22,6 +22,7 @@ import type {
   CacheCount,
   CachedRow,
   DocumentTextResult,
+  PortalVisitRecord,
   ProviderInfo,
   SyncStatusEntry,
   ToolDeps,
@@ -227,6 +228,8 @@ export interface FakeState {
   rules: PolicyRules;
   providers: ProviderInfo[];
   pools: Map<string, Pool>;
+  /** What the portal pass stored, by provider id. Empty unless a test adds some. */
+  portalVisits: Map<string, PortalVisitRecord[]>;
   counts: CacheCount[];
   syncStatus: SyncStatusEntry[];
   document: DocumentTextResult;
@@ -241,6 +244,7 @@ export interface FakeOverrides {
   rules?: PolicyRules;
   providers?: ProviderInfo[];
   pools?: Map<string, Pool>;
+  portalVisits?: Map<string, PortalVisitRecord[]>;
   document?: DocumentTextResult;
 }
 
@@ -263,6 +267,7 @@ export function fakeState(overrides: FakeOverrides = {}): FakeState {
     rules: overrides.rules ?? EMPTY_RULES,
     providers: overrides.providers ?? [provider(PROVIDER_A, NAME_A), provider(PROVIDER_B, NAME_B)],
     pools,
+    portalVisits: overrides.portalVisits ?? new Map(),
     counts,
     syncStatus: [
       {
@@ -339,6 +344,7 @@ export function fakeDeps(state: FakeState): ToolDeps {
         ...fromPool(pool, "Organization"),
       ]);
     },
+    portalVisits: (providerId) => Promise.resolve(state.portalVisits.get(providerId) ?? []),
     counts: () => Promise.resolve(state.counts),
     syncStatus: () => Promise.resolve(state.syncStatus),
     documentText: () => Promise.resolve(state.document),
