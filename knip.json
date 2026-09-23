@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["scripts/*.{ts,mjs}", "test/**/*.test.ts", "test/**/setup.ts"],
+  "entry": ["scripts/*.{ts,mjs}", "test/**/*.test.ts", "test/**/setup.ts", "src/sandbox/main.ts"],
   "project": [
     "worker/**/*.ts",
     "src/**/*.{ts,vue}",
@@ -9,7 +9,7 @@
     "test/**/*.ts"
   ],
   "ignoreDependencies": ["cloudflare"],
-  "vite": { "config": ["vite.config.ts"] },
+  "vite": { "config": ["vite.config.ts", "vite.sandbox.config.ts"] },
   "vitest": { "config": ["vitest.config.ts"] },
   "wrangler": { "config": ["wrangler.jsonc"] }
 }

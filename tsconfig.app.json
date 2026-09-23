@@ -3,8 +3,11 @@
   "compilerOptions": {
     // ES2023 for the non-mutating array methods (toSorted, findLast): eslint's
     // unicorn/no-array-sort requires them over the in-place originals, and every
-    // browser that can run this admin UI has had them for years.
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    // browser that can run this admin UI has had them for years. ES2024 adds
+    // `Promise.withResolvers`, which `unicorn/prefer-promise-with-resolvers`
+    // requires over extracting a resolver from `new Promise(...)`'s executor;
+    // every browser that has ES2023's array methods has this too.
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "types": ["vite/client"],
     "jsx": "preserve",
     "baseUrl": "."

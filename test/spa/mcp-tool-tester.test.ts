@@ -1,12 +1,24 @@
-// The "Try a tool" panel: the argument editor's live validation (parse errors,
-// schema errors, Run disabled while invalid) and the Ctrl/Cmd+Enter shortcut.
-// The read-only JSON viewer's own behaviour (fold/expand, search, copy) is
-// covered by test/spa/json-viewer.test.ts; this file only checks that a result
-// makes it onto the page at all once a call succeeds or fails.
+// McpToolTester.vue: the parent side of "Try a tool". It fetches the tool
+// list, embeds the sandboxed iframe, and is the ONLY thing on this side of the
+// boundary that may call /api -- so what is worth pinning here is the
+// postMessage traffic (both directions), not the argument editor or the JSON
+// viewers, which now live inside the sandbox (see json-editor.test.ts,
+// json-viewer.test.ts and sandbox-app.test.ts).
+//
+// happy-dom's <iframe> never really navigates, so `contentWindow` is always
+// `null` -- which would make every `event.source` check pass by coincidence and
+// prove nothing. `HTMLIFrameElement.prototype.contentWindow` is patched for
+// the length of this file to a fake window with a spyable `postMessage`, so the
+// identity check in McpToolTester.vue is exercised the way it is meant to be:
+// a message from that exact object passes, a message from anywhere else does
+// not.
 
 import { flushPromises, mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { MCP_SANDBOX_PATH } from "@shared/mcp-sandbox.ts";
+
+import { endpoints } from "../../src/api/endpoints.ts";
 import McpToolTester from "../../src/components/McpToolTester.vue";
 
 import { fakeResponse, installFakeApi } from "./helpers.ts";
@@ -17,127 +29,236 @@ const TOOLS: McpToolSchemaDto[] = [
   {
     name: "list_providers",
     description: "The connected health systems and what each one exposes.",
-    inputSchema: {
-      type: "object",
-      properties: { limit: { type: "integer", minimum: 1, maximum: 200 } },
-      additionalProperties: false,
-    },
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
     name: "get_document_text",
     description: "The text of one clinical note.",
     inputSchema: {
       type: "object",
-      properties: {
-        provider: { type: "string", minLength: 1 },
-        id: { type: "string", minLength: 1 },
-      },
+      properties: { provider: { type: "string" }, id: { type: "string" } },
       required: ["provider", "id"],
       additionalProperties: false,
     },
   },
 ];
 
-function mountTester(routes: Record<string, () => Response> = {}): ReturnType<typeof mount> {
-  installFakeApi({ "/api/mcp/tools/schema": () => fakeResponse({ body: TOOLS }), ...routes });
-  return mount(McpToolTester);
-}
+/**
+ * Everything one test needs reset per run, held in one object rather than
+ * several top-level `let`s that `beforeEach`/`afterEach` would have to
+ * reassign (this project's tests use a holder for exactly that reason; see
+ * test/unit/mcp/tools.test.ts's own comment on the same pattern).
+ *
+ * `mounted` matters beyond tidiness: `onMounted` adds a real
+ * `window.addEventListener("message", ...)`, and happy-dom's `window` is
+ * shared across the tests in this file -- an un-unmounted wrapper from an
+ * earlier test keeps answering `sendFromFrame` calls in every test after it,
+ * which is indistinguishable from a real bug until it silently inflates the
+ * call count of a later test's assertions.
+ */
+const world: {
+  contentWindow: { postMessage: ReturnType<typeof vi.fn> };
+  originalDescriptor: PropertyDescriptor | undefined;
+  mounted: ReturnType<typeof mount>[];
+} = {
+  contentWindow: { postMessage: vi.fn() },
+  originalDescriptor: undefined,
+  mounted: [],
+};
 
-/** Waits out both the schema load and the lazily-imported JsonViewer chunk. */
-async function settle(): Promise<void> {
-  await flushPromises();
-  await flushPromises();
-  await flushPromises();
-}
-
-describe("McpToolTester argument validation", () => {
-  it("picks the first tool and starts valid with its empty skeleton", async () => {
-    const wrapper = mountTester();
-    await settle();
-
-    expect((wrapper.find("select").element as HTMLSelectElement).value).toBe("list_providers");
-    expect((wrapper.find("textarea").element as HTMLTextAreaElement).value.trim()).toBe("{}");
-    expect(wrapper.find("button.primary").attributes("disabled")).toBeUndefined();
+beforeEach(() => {
+  world.contentWindow = { postMessage: vi.fn() };
+  world.originalDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLIFrameElement.prototype,
+    "contentWindow",
+  );
+  Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", {
+    configurable: true,
+    get: () => world.contentWindow,
   });
-
-  it("prefills a skeleton of the required fields when a tool needs them, and disables Run", async () => {
-    const wrapper = mountTester();
-    await settle();
-
-    await wrapper.find("select").setValue("get_document_text");
-    await settle();
-
-    const textarea = wrapper.find("textarea").element as HTMLTextAreaElement;
-    const skeleton = JSON.parse(textarea.value) as Record<string, unknown>;
-    expect(skeleton).toStrictEqual({ provider: "", id: "" });
-    // Both required strings are still empty, which minLength: 1 refuses.
-    expect(wrapper.find("button.primary").attributes("disabled")).toBeDefined();
-    expect(wrapper.text()).toContain("too short");
-  });
-
-  it("shows a parse error and disables Run for invalid JSON", async () => {
-    const wrapper = mountTester();
-    await settle();
-
-    await wrapper.find("textarea").setValue("{ not json");
-    await settle();
-
-    expect(wrapper.find("button.primary").attributes("disabled")).toBeDefined();
-    expect(wrapper.text().toLowerCase()).toContain("json");
-  });
-
-  it("re-enables Run once the arguments satisfy the schema", async () => {
-    const wrapper = mountTester();
-    await settle();
-    await wrapper.find("select").setValue("get_document_text");
-    await settle();
-
-    await wrapper.find("textarea").setValue(JSON.stringify({ provider: "prov-1", id: "doc-1" }));
-    await settle();
-
-    expect(wrapper.find("button.primary").attributes("disabled")).toBeUndefined();
-  });
+  world.mounted = [];
 });
 
-describe("McpToolTester running a call", () => {
-  it("runs on Ctrl+Enter and renders the request and result once it lands", async () => {
-    const response: McpToolCallResponse = {
-      request: { name: "list_providers", arguments: {} },
-      result: { isError: false, data: { items: [], warnings: [], truncated: false } },
-      durationMs: 4,
-    };
-    const wrapper = mountTester({
-      "/api/mcp/tools/list_providers/call": () => fakeResponse({ body: response }),
-    });
-    await settle();
+afterEach(() => {
+  for (const wrapper of world.mounted) wrapper.unmount();
+  if (world.originalDescriptor) {
+    Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", world.originalDescriptor);
+  }
+});
 
-    await wrapper.find("textarea").trigger("keydown", { key: "Enter", ctrlKey: true });
-    await settle();
-    await settle();
+function mountTester(routes: Record<string, () => Response> = {}): ReturnType<typeof mount> {
+  installFakeApi({ "/api/mcp/tools/schema": () => fakeResponse({ body: TOOLS }), ...routes });
+  const wrapper = mount(McpToolTester);
+  world.mounted.push(wrapper);
+  return wrapper;
+}
 
-    expect(wrapper.text()).toContain("Request");
-    expect(wrapper.text()).toContain("Result");
-    expect(wrapper.text()).not.toContain("error");
+/** Simulates the frame answering, as only the real frame's window could. */
+function sendFromFrame(data: unknown): void {
+  globalThis.dispatchEvent(
+    new MessageEvent("message", { data, source: world.contentWindow as unknown as Window }),
+  );
+}
+
+describe("McpToolTester", () => {
+  it("embeds the sandboxed page with no allow-same-origin", async () => {
+    const wrapper = mountTester();
+    await flushPromises();
+
+    const iframe = wrapper.find("iframe");
+    expect(iframe.attributes("src")).toBe(MCP_SANDBOX_PATH);
+    expect(iframe.attributes("sandbox")).toBe("allow-scripts");
   });
 
-  it("shows the server's structured issues when the call itself is rejected", async () => {
-    const wrapper = mountTester({
+  it("posts the selected tool to the frame once it says it is ready", async () => {
+    mountTester();
+    await flushPromises();
+
+    sendFromFrame({ type: "ready" });
+    await flushPromises();
+
+    expect(world.contentWindow.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "tool", name: "list_providers", skeleton: {} }),
+      "*",
+    );
+  });
+
+  it("ignores a message whose source is not the frame's own contentWindow", async () => {
+    mountTester();
+    await flushPromises();
+
+    globalThis.dispatchEvent(
+      new MessageEvent("message", {
+        data: { type: "ready" },
+        source: globalThis as unknown as Window,
+      }),
+    );
+    await flushPromises();
+
+    expect(world.contentWindow.postMessage).not.toHaveBeenCalled();
+  });
+
+  it("ignores a message with a name this version does not recognise", async () => {
+    mountTester();
+    await flushPromises();
+
+    sendFromFrame({ type: "not-a-real-message" });
+    await flushPromises();
+
+    expect(world.contentWindow.postMessage).not.toHaveBeenCalled();
+  });
+
+  it("ignores a run whose arguments are not a plain object", async () => {
+    mountTester();
+    await flushPromises();
+    sendFromFrame({ type: "ready" });
+    await flushPromises();
+    world.contentWindow.postMessage.mockClear();
+
+    sendFromFrame({ type: "run", name: "list_providers", arguments: "not an object" });
+    await flushPromises();
+
+    expect(world.contentWindow.postMessage).not.toHaveBeenCalled();
+  });
+
+  it("re-sends the newly selected tool's schema when the picker changes", async () => {
+    const wrapper = mountTester();
+    await flushPromises();
+    sendFromFrame({ type: "ready" });
+    await flushPromises();
+    world.contentWindow.postMessage.mockClear();
+
+    await wrapper.find("select").setValue("get_document_text");
+    await flushPromises();
+
+    expect(world.contentWindow.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "tool",
+        name: "get_document_text",
+        skeleton: { provider: "", id: "" },
+      }),
+      "*",
+    );
+  });
+
+  it("runs a real tool and posts the exact result back to the frame", async () => {
+    const response: McpToolCallResponse = {
+      request: { name: "list_providers", arguments: {} },
+      result: { isError: false, data: { items: [] } },
+      durationMs: 12,
+    };
+    mountTester({ "/api/mcp/tools/list_providers/call": () => fakeResponse({ body: response }) });
+    await flushPromises();
+    sendFromFrame({ type: "ready" });
+    await flushPromises();
+
+    sendFromFrame({ type: "run", name: "list_providers", arguments: {} });
+    await flushPromises();
+
+    expect(world.contentWindow.postMessage).toHaveBeenCalledWith(
+      { type: "result", isError: false, data: { items: [] }, durationMs: 12 },
+      "*",
+    );
+  });
+
+  it("posts a call-error with the server's structured issues when the call is rejected", async () => {
+    mountTester({
       "/api/mcp/tools/list_providers/call": () =>
         fakeResponse({
           status: 400,
           body: {
             error: "bad_request",
             message: "the arguments did not match the tool's input schema",
-            details: { issues: ["Input validation error: bad limit"] },
+            details: { issues: ["boom"] },
           },
         }),
     });
-    await settle();
+    await flushPromises();
+    sendFromFrame({ type: "ready" });
+    await flushPromises();
 
-    await wrapper.find("button.primary").trigger("click");
-    await settle();
-    await settle();
+    sendFromFrame({ type: "run", name: "list_providers", arguments: {} });
+    await flushPromises();
 
-    expect(wrapper.text()).toContain("Input validation error: bad limit");
+    expect(world.contentWindow.postMessage).toHaveBeenCalledWith(
+      {
+        type: "call-error",
+        message: "the arguments did not match the tool's input schema",
+        issues: ["boom"],
+      },
+      "*",
+    );
+  });
+
+  it("drops a result for a tool the owner has since switched away from", async () => {
+    // The fake API layer resolves synchronously, which leaves no window to
+    // switch tools before the fetch settles. Controlling `endpoints.callMcpTool`
+    // directly gives the test exactly that window.
+    const { promise: pending, resolve: resolveCall } = Promise.withResolvers<McpToolCallResponse>();
+    const callSpy = vi.spyOn(endpoints, "callMcpTool").mockReturnValue(pending);
+
+    const wrapper = mountTester();
+    await flushPromises();
+    sendFromFrame({ type: "ready" });
+    await flushPromises();
+
+    sendFromFrame({ type: "run", name: "list_providers", arguments: {} });
+    await flushPromises();
+    await wrapper.find("select").setValue("get_document_text");
+    await flushPromises();
+    world.contentWindow.postMessage.mockClear();
+
+    resolveCall({
+      request: { name: "list_providers", arguments: {} },
+      result: { isError: false, data: {} },
+      durationMs: 1,
+    });
+    await flushPromises();
+
+    expect(world.contentWindow.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "result" }),
+      "*",
+    );
+    callSpy.mockRestore();
   });
 });

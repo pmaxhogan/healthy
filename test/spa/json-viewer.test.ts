@@ -1,5 +1,5 @@
 import { flushPromises, mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import JsonViewer from "../../src/components/JsonViewer.vue";
 
@@ -47,5 +47,51 @@ describe("JsonViewer", () => {
 
     // `JSON.stringify({ a: 1 }, null, 2)` is `{\n  "a": 1\n}`, 12 bytes.
     expect(wrapper.text()).toContain("12 B");
+  });
+
+  // No global toast queue here: this component has to work inside the sandboxed
+  // page (src/sandbox/SandboxApp.vue), which has no ToastStack to render one --
+  // so "copied" is a local flash on the button itself.
+  describe("Copy", () => {
+    let writeText: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText },
+      });
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("copies the pretty-printed JSON and flashes Copied, then reverts", async () => {
+      const wrapper = mount(JsonViewer, { props: { value: { a: 1 } } });
+      await flushPromises();
+
+      await wrapper.find("button.spacer").trigger("click");
+      await flushPromises();
+
+      expect(writeText).toHaveBeenCalledWith('{\n  "a": 1\n}');
+      expect(wrapper.find("button.spacer").text()).toBe("Copied");
+
+      vi.advanceTimersByTime(1500);
+      await flushPromises();
+      expect(wrapper.find("button.spacer").text()).toBe("Copy");
+    });
+
+    it("leaves the button reading Copy when the clipboard refuses", async () => {
+      writeText.mockRejectedValueOnce(new Error("denied"));
+      const wrapper = mount(JsonViewer, { props: { value: { a: 1 } } });
+      await flushPromises();
+
+      await wrapper.find("button.spacer").trigger("click");
+      await flushPromises();
+
+      expect(wrapper.find("button.spacer").text()).toBe("Copy");
+    });
   });
 });

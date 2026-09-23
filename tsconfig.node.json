@@ -21,6 +21,7 @@
     "scripts/**/*.mjs",
     "test/unit/**/*.ts",
     "vite.config.ts",
+    "vite.sandbox.config.ts",
     "vitest.config.ts",
     "eslint.config.js"
   ]

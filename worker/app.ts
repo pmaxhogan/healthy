@@ -19,6 +19,8 @@
 
 import { Hono } from "hono";
 
+import { MCP_SANDBOX_PATH } from "@shared/mcp-sandbox.ts";
+
 import { apiRouter } from "./api/index.ts";
 import { csrfGuard } from "./auth/csrf.ts";
 import { ownerGate, safeNextPath, type AppHonoEnv } from "./auth/gate.ts";
@@ -220,16 +222,49 @@ app.route("/oauth", oauthRouter);
  * The response is always re-wrapped: headers on a response that came from a
  * subrequest are immutable, and the securityHeaders middleware has to be able to
  * write to them on the way out.
+ *
+ * `MCP_SANDBOX_PATH` gets one more rewrite: its `<script>` tag has no `src` at
+ * all. It is built by a *second*, separate Vite config
+ * (`vite.sandbox.config.ts`) that inlines the script and its CSS straight into
+ * the HTML, with no `/assets/*` files of its own -- an ES module fetched via
+ * `<script src>` is always CORS-mode with credentials "same-origin", and this
+ * page's sandboxed, opaque origin (`sandbox="allow-scripts"`, no
+ * `allow-same-origin`; see `shared/mcp-sandbox.ts`) makes that fetch
+ * cross-origin, sent with no cookie at all -- so `ownerGate` would answer with
+ * the login page instead of the script, which fails silently: no console line,
+ * no failed network entry, nothing but a page that never mounts. The
+ * *document's own* navigation is unaffected (a top-level frame navigation
+ * always carries credentials, CORS or not), which is what made this take a
+ * real browser and a lot of curling to find. Inlining sidesteps the whole
+ * problem by making the navigation the only request this page ever makes -- but
+ * an inline script still needs a CSP nonce, and a static build cannot bake in
+ * something that has to be fresh per response, so it is stamped on here,
+ * server-side, right before the matching CSP (`sandboxContentSecurityPolicy`,
+ * `worker/auth/security-headers.ts`) goes out with the same nonce.
  */
 app.all("*", async (c) => {
   const asset = await c.env.ASSETS.fetch(c.req.raw);
   const headers = new Headers(asset.headers);
+  const pathname = new URL(c.req.url).pathname;
   const isImmutable =
-    new URL(c.req.url).pathname.startsWith("/assets/") &&
+    pathname.startsWith("/assets/") &&
     (asset.ok || asset.status === 304) &&
     !(headers.get("content-type") ?? "").includes("text/html");
   headers.set("cache-control", isImmutable ? "public, max-age=31536000, immutable" : "no-store");
-  return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers });
+  const response = new Response(asset.body, {
+    status: asset.status,
+    statusText: asset.statusText,
+    headers,
+  });
+  if (pathname !== MCP_SANDBOX_PATH || !asset.ok) return response;
+  const nonce = c.get("nonce");
+  return new HTMLRewriter()
+    .on("script", {
+      element(element) {
+        element.setAttribute("nonce", nonce);
+      },
+    })
+    .transform(response);
 });
 
 app.notFound((c) => c.json<ApiError>({ error: "not_found" }, 404));

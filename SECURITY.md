@@ -167,6 +167,49 @@ not appear in a response.
 there is no code path from a tool call to a write, to a health system or to the
 calendar.
 
+**The "Try a tool" panel runs in a sandboxed, opaque-origin iframe.** The admin
+UI's `/connectors` page lets the owner call a real MCP tool from the browser
+(`worker/mcp/admin-call.ts` connects a real `McpServer` — the real zod schemas,
+the real exposure policy, the real audit wrapper — to the SDK's own in-memory
+transport, and every call is audited as `admin-console`, never bypassing the
+choke point above). The tool's JSON argument editor and result viewer need
+CodeMirror 6, and CodeMirror needs to inject styles at runtime with no CSP
+nonce of its own to carry — which the app's main CSP, deliberately, has no
+exception for. Rather than loosen `style-src` app-wide, that editor and viewer
+are served as a second, self-contained page (`shared/mcp-sandbox.ts`'s
+`MCP_SANDBOX_PATH`, `/tool-sandbox`) with its own, narrower CSP
+(`sandboxContentSecurityPolicy`, `worker/auth/security-headers.ts`) and
+embedded by `src/components/McpToolTester.vue` in
+`<iframe sandbox="allow-scripts">` — deliberately without `allow-same-origin`,
+which gives the loaded document an opaque origin: no cookies, no session
+storage, and `default-src`/`connect-src`/`img-src`/`font-src` all `'none'`
+mean it could not call `/api` even if it had a session to call with. The one
+relaxation anywhere in this app's CSP, `style-src 'unsafe-inline'`, lives only
+on this route, and is safe only because every other directive there is
+_more_ restrictive than the default policy, not less (see that function's own
+comment for the full argument, including why `script-src` is a nonce rather
+than `'self'` or an origin literal).
+
+The parent does the authenticated `/api/mcp/tools/*` calls and hands the tool
+schema, request and result to the frame with `postMessage`; the frame never
+touches the network. Both directions validate the message's shape at runtime
+(`isSandboxInboundMessage`/`isSandboxOutboundMessage`) and the parent checks
+`event.source` against the iframe's own `contentWindow` — `event.origin` is
+the literal string `"null"` for an opaque origin and cannot be used as an
+identity check. The frame's own page is built by a _second_, separate Vite
+config (`vite.sandbox.config.ts`) that inlines its script and stylesheet
+directly into the HTML with no `/assets/*` files of its own: a module script
+loaded via `<script src>` is always fetched CORS-mode with credentials
+"same-origin", and against this page's opaque origin that fetch is genuinely
+cross-origin, so no cookie is sent and `ownerGate` answers with the login page
+instead of the script — a failure with no console line and no failed network
+entry, found only by comparing a working standalone load against a silently
+blank embedded one. Inlining makes the top-level navigation (which, unlike a
+subresource fetch, always carries credentials) the only request the page ever
+makes; the inline script still needs its own CSP nonce, stamped on per
+response by `worker/app.ts` with `HTMLRewriter`, since a static build cannot
+bake in something that has to be fresh every time.
+
 **Least privilege on the calendar.** Google is authorised only for
 `calendar.events.owned` and a read-only calendar list. The sync additionally
 refuses to read or modify any event that does not carry its own
