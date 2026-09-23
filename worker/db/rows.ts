@@ -43,6 +43,10 @@ export interface SettingRow {
   updated_at: number;
 }
 
+/**
+ * A health system's row as the repo hands it out: the identity columns opened.
+ * The stored row is `ProviderDbRow`, where each of them is an `_enc` column.
+ */
 export interface ProviderRow {
   id: string;
   vendor: string;
@@ -56,6 +60,18 @@ export interface ProviderRow {
   created_at: number;
   updated_at: number;
   deleted_at: number | null;
+}
+
+/** The raw `providers` row (0008): the identity columns sealed in place. */
+export interface ProviderDbRow extends Omit<
+  ProviderRow,
+  "display_name" | "fhir_base_url" | "brand_key" | "portal_url" | "config_json"
+> {
+  display_name_enc: string;
+  fhir_base_url_enc: string;
+  brand_key_enc: string | null;
+  portal_url_enc: string | null;
+  config_enc: string;
 }
 
 export interface ConnectionRow {
@@ -167,15 +183,13 @@ export interface CalendarEventRow {
 /**
  * The raw `calendar_events` row.
  *
- * Since 0007: `calendar_id` is `blindCalendarId(...)`, `start_at` is NULL, and
- * the real calendar id and start live in `detail_enc`, sealed against
- * `calendar_events.detail_enc.<google_event_id>`. A row written before 0007 has
- * the plaintext columns and no `detail_enc` until the backfill reaches it.
+ * `calendar_id` is `blindCalendarId(...)`, and the real calendar id and start
+ * live in `detail_enc`, sealed against `calendar_events.detail_enc.<google_event_id>`
+ * (0007). There is no plaintext start column (0008).
  */
 export interface CalendarEventDbRow extends Omit<CalendarEventRow, "calendar_id" | "start_at"> {
   calendar_id: string;
-  start_at: number | null;
-  detail_enc: string | null;
+  detail_enc: string;
 }
 
 export interface AlertRow {
@@ -226,23 +240,14 @@ export interface LoginAttemptRow {
 
 export interface MailInboxRow {
   id: string;
-  /**
-   * Legacy plaintext sender, superseded by `from_addr_enc` (0005).
-   *
-   * NOT NULL in the schema and not dropped yet, so a row written since 0005
-   * carries an empty string here and the real value in the sealed column. Read
-   * only as the fallback for a row written before it.
-   */
-  from_addr: string;
-  /** Legacy plaintext subject, superseded by `subject_enc` (0005). Empty since. */
-  subject: string | null;
   received_at: number;
   /**
    * The sender address, sealed against `mail_inbox.from_addr_enc.<id>` (0005).
    *
    * For a forwarded portal message this is the health system's own sending
    * address -- an organisation identity, and a value the sender chose. NULL on
-   * a row written before 0005.
+   * a row written before 0005 (none is left: 0007 purged their plaintext and
+   * 0008 dropped the plaintext columns).
    */
   from_addr_enc: string | null;
   /** The subject, sealed against `mail_inbox.subject_enc.<id>` (0005). */
@@ -264,6 +269,7 @@ export interface MailInboxRow {
  */
 export interface PortalAccountRow {
   provider_id: string;
+  /** Opened from `base_url_enc`. */
   base_url: string | null;
   mount_path: string | null;
   /**
@@ -315,6 +321,16 @@ export interface PortalAccountRow {
   last_unattended_code_at: number | null;
 }
 
+/** The raw `portal_accounts` row (0008): the location columns sealed in place. */
+export interface PortalAccountDbRow extends Omit<
+  PortalAccountRow,
+  "base_url" | "mount_path" | "endpoint_json"
+> {
+  base_url_enc: string | null;
+  mount_path_enc: string | null;
+  endpoint_enc: string | null;
+}
+
 /** A `portal_visits` row's lifecycle: see `migrations/0006_portal_visits.sql`. */
 export type PortalVisitState = "active" | "missing";
 
@@ -325,7 +341,6 @@ export interface PortalVisitRow {
   /** The parsed visit as JSON, sealed against `portal_visits.payload_enc.<providerId>:<csn>`. */
   payload_enc: string;
   content_hash: string;
-  start_at: number;
   /** The portal's own status word, from the fixed `PortalVisitStatus` vocabulary. */
   status: string;
   state: PortalVisitState;

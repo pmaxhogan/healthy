@@ -82,11 +82,10 @@ at any kind.
 plaintext columns until 0005. For a forwarded portal message the first is the
 health system's own sending address and the second its own subject line — an
 organisation identity and message content, and both attacker-chosen on the
-reject path. They are now sealed with the AAD bound to
+reject path. They are now sealed (padded, so the ciphertext's length does not
+give the address or the subject away) with the AAD bound to
 `mail_inbox.from_addr_enc.<id>` / `mail_inbox.subject_enc.<id>`. The two old
-columns still exist (`from_addr` is `NOT NULL`) and new rows write an empty
-string into them; dropping them is a later migration, once no row predating
-0005 survives — which the retention below guarantees within a week.
+plaintext columns were blanked by migration 0007 and dropped by 0008.
 
 **Every kind has a TTL**, not only `otp`: 10 minutes for `otp`, 6 hours for
 `forward_verify`, 24 hours for `other` (including the `POST /api/mail/test`

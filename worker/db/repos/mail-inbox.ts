@@ -185,15 +185,11 @@ export function makeMailInboxRepo(ctx: Ctx) {
   /**
    * The row's sender domain.
    *
-   * `from_addr_enc` where there is one, and the plaintext `from_addr` column
-   * for a row written before 0005. An unreadable ciphertext reads as "no
-   * sender", which makes the row ineligible for any claim rather than
-   * eligible for all of them.
+   * An absent or unreadable ciphertext reads as "no sender", which makes the
+   * row ineligible for any claim rather than eligible for all of them.
    */
   const senderDomainOf = async (row: MailInboxRow): Promise<string> => {
-    const sealed = row.from_addr_enc ?? null;
-    if (sealed === null) return domainOf(row.from_addr);
-    const opened = await openOrNull(ctx.env, sealed, fromAad(row.id));
+    const opened = await openOrNull(ctx.env, row.from_addr_enc, fromAad(row.id));
     return opened === null ? "" : domainOf(opened);
   };
 
@@ -209,10 +205,7 @@ export function makeMailInboxRepo(ctx: Ctx) {
       }
       // Only this kind: the subject of a portal message is the portal's own
       // wording about the owner's care, and nothing on the Mail page needs it.
-      subject =
-        row.subject_enc === null
-          ? nonEmpty(row.subject)
-          : await openOrNull(ctx.env, row.subject_enc, subjectAad(row.id));
+      subject = await openOrNull(ctx.env, row.subject_enc, subjectAad(row.id));
     }
     return {
       id: row.id,
@@ -240,12 +233,9 @@ export function makeMailInboxRepo(ctx: Ctx) {
       await run(
         ctx.db
           .prepare(
-            // `from_addr` is NOT NULL and the pair of plaintext columns is not
-            // dropped yet (see 0005), so both are written empty: the real values
-            // only ever land in the sealed columns beside them.
             `INSERT INTO mail_inbox
-               (id, received_at, from_addr, subject, from_addr_enc, subject_enc, kind, code_enc, expires_at, raw_size)
-             VALUES (?, ?, '', '', ?, ?, ?, ?, ?, ?)`,
+               (id, received_at, from_addr_enc, subject_enc, kind, code_enc, expires_at, raw_size)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .bind(
             id,
@@ -371,9 +361,4 @@ function eligible(senderDomain: string, filter: OtpClaimFilter): boolean {
         filter.portalHost !== null &&
         registrableDomain(senderDomain) === registrableDomain(filter.portalHost)
     : domainAllowed(senderDomain, [filter.expectedSender]);
-}
-
-/** A stored string that may be the empty placeholder 0005 writes. */
-function nonEmpty(value: string | null): string | null {
-  return value === null || value === "" ? null : value;
 }

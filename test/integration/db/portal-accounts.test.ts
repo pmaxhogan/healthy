@@ -476,7 +476,7 @@ describe("where the portal is, sealed", () => {
       .bind(providerId)
       .first();
     expect(JSON.stringify(raw).toLowerCase()).not.toContain("distinctive");
-    for (const column of ["base_url", "mount_path", "endpoint_json"]) {
+    for (const column of ["base_url_enc", "mount_path_enc", "endpoint_enc"]) {
       expect(String(raw?.[column]), column).toMatch(/^v2:/u);
     }
 

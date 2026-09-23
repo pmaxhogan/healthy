@@ -17,19 +17,19 @@
  * (the `providers_live` index is on `deleted_at, vendor`), so the list is sorted
  * after it is opened. A repo instance opens each row once and reuses the result
  * until the row's `updated_at` moves, so a sync run that reads the same provider
- * five times decrypts it once. A row the backfill has not reached is still
- * plaintext and reads either way; the rename migration moves the columns to
- * `_enc` names.
+ * five times decrypts it once. The columns carry `_enc` names since 0008; the
+ * AAD keeps the name each value was first sealed under
+ * (`providers.<plain name>.<id>`), because the AAD is part of the tag.
  */
 
 import { AppError } from "../../lib/errors.ts";
 import { newId } from "../../lib/ids.ts";
 import { all, one, run } from "../client.ts";
-import { aadFor, open, openLegacy, sealShort } from "../crypto.ts";
+import { aadFor, open, sealShort } from "../crypto.ts";
 import { parseJsonColumn, providerConfigSchema } from "../schemas.ts";
 
 import type { Ctx } from "../client.ts";
-import type { ProviderEnvironment, ProviderRow } from "../rows.ts";
+import type { ProviderDbRow, ProviderEnvironment, ProviderRow } from "../rows.ts";
 import type { ProviderConfig, ProviderConfigInput } from "../schemas.ts";
 
 interface CreateProvider {
@@ -57,17 +57,19 @@ const SELECT = "SELECT * FROM providers";
 
 const secretAad = (id: string): string => aadFor("providers", "client_secret_enc", id);
 
-/** The identity columns, sealed in place. */
-export const PROVIDER_IDENTITY_COLUMNS = [
-  "display_name",
-  "fhir_base_url",
-  "brand_key",
-  "portal_url",
-  "config_json",
-] as const;
-type IdentityColumn = (typeof PROVIDER_IDENTITY_COLUMNS)[number];
+/** The identity fields, by the name their AAD was bound to. */
+type IdentityColumn = "display_name" | "fhir_base_url" | "brand_key" | "portal_url" | "config_json";
 
-export const providerIdentityAad = (column: IdentityColumn, id: string): string =>
+/** Which stored column holds each identity field. */
+const STORED: Record<IdentityColumn, string> = {
+  display_name: "display_name_enc",
+  fhir_base_url: "fhir_base_url_enc",
+  brand_key: "brand_key_enc",
+  portal_url: "portal_url_enc",
+  config_json: "config_enc",
+};
+
+const providerIdentityAad = (column: IdentityColumn, id: string): string =>
   aadFor("providers", column, id);
 
 export function makeProvidersRepo(ctx: Ctx) {
@@ -76,24 +78,32 @@ export function makeProvidersRepo(ctx: Ctx) {
   const sealNullable = (column: IdentityColumn, id: string, value: string | null) =>
     value === null ? null : sealIdentity(column, id, value);
   const openIdentity = (column: IdentityColumn, id: string, value: string) =>
-    openLegacy(ctx.env, value, providerIdentityAad(column, id));
+    open(ctx.env, value, providerIdentityAad(column, id));
 
   // Opened rows, by id, valid while `updated_at` is unchanged. Per repo
   // instance, and repos are built per request or per run.
   const opened = new Map<string, { updatedAt: number; row: Promise<ProviderRow> }>();
 
-  const decodeFresh = async (row: ProviderRow): Promise<ProviderRow> => ({
-    ...row,
-    display_name: await openIdentity("display_name", row.id, row.display_name),
-    fhir_base_url: await openIdentity("fhir_base_url", row.id, row.fhir_base_url),
-    brand_key:
-      row.brand_key === null ? null : await openIdentity("brand_key", row.id, row.brand_key),
-    portal_url:
-      row.portal_url === null ? null : await openIdentity("portal_url", row.id, row.portal_url),
-    config_json: await openIdentity("config_json", row.id, row.config_json),
-  });
+  const decodeFresh = async (row: ProviderDbRow): Promise<ProviderRow> => {
+    const {
+      display_name_enc: displayName,
+      fhir_base_url_enc: fhirBaseUrl,
+      brand_key_enc: brandKey,
+      portal_url_enc: portalUrl,
+      config_enc: config,
+      ...plain
+    } = row;
+    return {
+      ...plain,
+      display_name: await openIdentity("display_name", row.id, displayName),
+      fhir_base_url: await openIdentity("fhir_base_url", row.id, fhirBaseUrl),
+      brand_key: brandKey === null ? null : await openIdentity("brand_key", row.id, brandKey),
+      portal_url: portalUrl === null ? null : await openIdentity("portal_url", row.id, portalUrl),
+      config_json: await openIdentity("config_json", row.id, config),
+    };
+  };
 
-  const decode = (row: ProviderRow): Promise<ProviderRow> => {
+  const decode = (row: ProviderDbRow): Promise<ProviderRow> => {
     const cached = opened.get(row.id);
     if (cached?.updatedAt === row.updated_at) {
       // The plaintext columns (deletion, timestamps) come from the row just read;
@@ -107,7 +117,7 @@ export function makeProvidersRepo(ctx: Ctx) {
   };
 
   const byId = async (id: string): Promise<ProviderRow | null> => {
-    const row = await one<ProviderRow>(ctx.db.prepare(`${SELECT} WHERE id = ?`).bind(id));
+    const row = await one<ProviderDbRow>(ctx.db.prepare(`${SELECT} WHERE id = ?`).bind(id));
     return row === null ? null : decode(row);
   };
 
@@ -131,8 +141,8 @@ export function makeProvidersRepo(ctx: Ctx) {
         ctx.db
           .prepare(
             `INSERT INTO providers
-               (id, vendor, display_name, brand_key, fhir_base_url, portal_url, environment,
-                client_secret_enc, config_json, created_at, updated_at)
+               (id, vendor, display_name_enc, brand_key_enc, fhir_base_url_enc, portal_url_enc,
+                environment, client_secret_enc, config_enc, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .bind(
@@ -165,23 +175,23 @@ export function makeProvidersRepo(ctx: Ctx) {
         values.push(value);
       };
       if (patch.displayName !== undefined) {
-        put("display_name", await sealIdentity("display_name", id, patch.displayName));
+        put(STORED.display_name, await sealIdentity("display_name", id, patch.displayName));
       }
       if (patch.fhirBaseUrl !== undefined) {
-        put("fhir_base_url", await sealIdentity("fhir_base_url", id, patch.fhirBaseUrl));
+        put(STORED.fhir_base_url, await sealIdentity("fhir_base_url", id, patch.fhirBaseUrl));
       }
       if (patch.brandKey !== undefined) {
-        put("brand_key", await sealNullable("brand_key", id, patch.brandKey));
+        put(STORED.brand_key, await sealNullable("brand_key", id, patch.brandKey));
       }
       if (patch.portalUrl !== undefined) {
-        put("portal_url", await sealNullable("portal_url", id, patch.portalUrl));
+        put(STORED.portal_url, await sealNullable("portal_url", id, patch.portalUrl));
       }
       if (patch.environment !== undefined) put("environment", patch.environment);
       if (patch.config !== undefined) {
         // Replace rather than merge: the admin UI always sends the whole config,
         // and a merge would make removing an override impossible.
         const json = JSON.stringify(providerConfigSchema.parse(patch.config));
-        put("config_json", await sealIdentity("config_json", id, json));
+        put(STORED.config_json, await sealIdentity("config_json", id, json));
       }
       put("updated_at", ctx.now());
 
@@ -198,7 +208,7 @@ export function makeProvidersRepo(ctx: Ctx) {
 
     async list(options: { includeDeleted?: boolean } = {}): Promise<ProviderRow[]> {
       const where = options.includeDeleted ? "" : " WHERE deleted_at IS NULL";
-      const rows = await all<ProviderRow>(ctx.db.prepare(`${SELECT}${where}`));
+      const rows = await all<ProviderDbRow>(ctx.db.prepare(`${SELECT}${where}`));
       const decoded = await Promise.all(rows.map((row) => decode(row)));
       // The name is sealed, so the order the admin UI shows is applied here.
       // Sorted in place: `decoded` is this call's own array.
@@ -247,23 +257,18 @@ export function makeProvidersRepo(ctx: Ctx) {
 }
 
 /** `row` with the identity columns of an already-opened copy of it. */
-async function withIdentity(row: ProviderRow, opened: Promise<ProviderRow>): Promise<ProviderRow> {
-  return { ...row, ...pickIdentity(await opened) };
-}
-
-/** The opened identity values of a row. */
-function pickIdentity(
-  row: ProviderRow,
-): Pick<
-  ProviderRow,
-  "display_name" | "fhir_base_url" | "brand_key" | "portal_url" | "config_json"
-> {
+async function withIdentity(
+  row: ProviderDbRow,
+  opened: Promise<ProviderRow>,
+): Promise<ProviderRow> {
   return {
-    display_name: row.display_name,
-    fhir_base_url: row.fhir_base_url,
-    brand_key: row.brand_key,
-    portal_url: row.portal_url,
-    config_json: row.config_json,
+    ...(await opened),
+    vendor: row.vendor,
+    environment: row.environment,
+    client_secret_enc: row.client_secret_enc,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    deleted_at: row.deleted_at,
   };
 }
 

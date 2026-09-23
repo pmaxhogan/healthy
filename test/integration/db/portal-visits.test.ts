@@ -173,9 +173,8 @@ describe("portal_visits.record", () => {
     expect(changed.written).toBe(1);
     const [row] = await repos.portalVisits.list(providerId);
     expect(row?.visit.visitType).toBe("Annual physical");
-    // The start moved with it, but only inside the payload: the column says nothing.
+    // The start moved with it, but only inside the payload: there is no column.
     expect(row?.visit.start).toBe(at(6 * DAY));
-    expect(await rawColumn("portal_visits", "start_at", "csn = ?", csn1)).toBe(0);
   });
 
   it("marks a future visit that stopped being returned as missing, and restores it", async () => {
@@ -284,7 +283,7 @@ describe("what portal_visits stores", () => {
 
     expect(dump).not.toContain("csn-secret");
     expect(raw?.csn).toBe(await storedCsn(providerId, "csn-secret"));
-    expect(raw?.start_at).toBe(0);
+    expect(raw).not.toHaveProperty("start_at");
     // The expiry is a bucket boundary, so it no longer dates the visit to the second.
     expect(Number(raw?.expires_at) % EXPIRY_BUCKET_SECONDS).toBe(0);
     expect(dump).not.toContain(String(T0 + DAY + 1234));

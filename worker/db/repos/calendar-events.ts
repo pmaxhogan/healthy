@@ -26,7 +26,8 @@
  *     (the window filter, the "is it over yet" rule, the start-time dedupe). One
  *     seal per row, opened once per row per `list`; the AAD is bound to
  *     `google_event_id`, which `rekey` leaves alone and every write that changes
- *     it re-seals in the same statement. `start_at` is written NULL.
+ *     it re-seals in the same statement. There is no plaintext start column
+ *     (0008 dropped it).
  *
  * Ghosting is the reason `state` and `ghosted_at` exist, and the migration's
  * CHECK ties them together: `state = 'ghost'` exactly when `ghosted_at` is set.
@@ -87,7 +88,7 @@ interface EventDetail {
   startAt: number | null;
 }
 
-export const calendarDetailAad = (googleEventId: string): string =>
+const calendarDetailAad = (googleEventId: string): string =>
   aadFor("calendar_events", "detail_enc", googleEventId);
 
 /**
@@ -161,11 +162,6 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
 
   const decode = async (row: CalendarEventDbRow): Promise<CalendarEventRow> => {
     const { detail_enc: detailEnc, ...rest } = row;
-    if (detailEnc === null) {
-      // Written before 0007 and not yet reached by the backfill: the plaintext
-      // columns are still the truth.
-      return rest;
-    }
     const detail = JSON.parse(
       await open(ctx.env, detailEnc, calendarDetailAad(row.google_event_id)),
     ) as EventDetail;
@@ -207,16 +203,15 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
           .prepare(
             `INSERT INTO calendar_events
                (event_key, provider_id, encounter_id, calendar_id, google_event_id, fingerprint,
-                state, start_at, first_seen_at, last_seen_at, ghosted_at, updated_at,
+                state, first_seen_at, last_seen_at, ghosted_at, updated_at,
                 source, portal_csn, detail_enc)
-             VALUES (?, ?, ?, ?, ?, ?, 'active', NULL, ?, ?, NULL, ?, ?, ?, ?)
+             VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, NULL, ?, ?, ?, ?)
              ON CONFLICT (event_key) DO UPDATE SET
                encounter_id = excluded.encounter_id,
                calendar_id = excluded.calendar_id,
                google_event_id = excluded.google_event_id,
                fingerprint = excluded.fingerprint,
                state = CASE WHEN ? THEN 'active' ELSE calendar_events.state END,
-               start_at = NULL,
                last_seen_at = excluded.last_seen_at,
                ghosted_at = CASE WHEN ? THEN NULL ELSE calendar_events.ghosted_at END,
                updated_at = excluded.updated_at,
@@ -457,8 +452,7 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
       await run(
         ctx.db
           .prepare(
-            `UPDATE calendar_events SET calendar_id = ?, detail_enc = ?, start_at = NULL,
-                    updated_at = ?
+            `UPDATE calendar_events SET calendar_id = ?, detail_enc = ?, updated_at = ?
               WHERE event_key = ?`,
           )
           .bind(

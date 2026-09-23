@@ -23,7 +23,6 @@ import {
   isSealed,
   isUnpadded,
   open,
-  openLegacy,
   padBucket,
   seal,
   sealShort,
@@ -186,14 +185,5 @@ describe("padded sealing", () => {
     expect(isSealed(v1) && isSealed(v2)).toBe(true);
     expect(await open(KEY, v1, aad)).toBe("owner@example.test");
     expect(await open(KEY, v2, aad)).toBe("owner@example.test");
-  });
-
-  it("passes a pre-0007 plaintext value through openLegacy, and opens a sealed one", async () => {
-    const aad = aadFor("providers", "display_name", "p1");
-
-    expect(await openLegacy(KEY, "Example Health", aad)).toBe("Example Health");
-    expect(await openLegacy(KEY, await sealShort(KEY, "Example Health", aad), aad)).toBe(
-      "Example Health",
-    );
   });
 });

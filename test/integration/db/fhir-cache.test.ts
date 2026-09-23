@@ -2,7 +2,6 @@ import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { blindResourceId } from "../../../worker/db/blind.ts";
-import { aadFor, seal } from "../../../worker/db/crypto.ts";
 
 import {
   OTHER_DATA_KEY,
@@ -441,33 +440,5 @@ describe("what fhir_cache stores", () => {
     expect(plan.results.map((step) => step.detail).join("\n")).toMatch(
       /USING INDEX sqlite_autoindex_fhir_cache_1/u,
     );
-  });
-
-  it("still reads a row written before 0007, under its old id and AAD", async () => {
-    const repos = testRepos();
-    const providerId = await seedProvider(repos);
-    const legacy = JSON.stringify(encounter("legacy-1"));
-    await env.DB.prepare(
-      `INSERT INTO fhir_cache
-         (provider_id, resource_type, resource_id, payload_enc, content_hash,
-          last_updated, fetched_at, expires_at)
-       VALUES (?, 'Encounter', 'legacy-1', ?, ?, NULL, ?, ?)`,
-    )
-      .bind(
-        providerId,
-        await seal(
-          repos.ctx.env,
-          legacy,
-          aadFor("fhir_cache", "payload", `${providerId}:Encounter:legacy-1`),
-        ),
-        await sha256Hex(legacy),
-        T0,
-        T0 + 86_400,
-      )
-      .run();
-
-    await expect(repos.fhirCache.get(providerId, "Encounter", "legacy-1")).resolves.toMatchObject({
-      resourceId: "legacy-1",
-    });
   });
 });

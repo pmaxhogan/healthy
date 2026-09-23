@@ -23,10 +23,8 @@
  *     an unchanged visit from an updated one without re-sealing every row every
  *     hour. Keyed, because a plain sha256 of a guessable visit is a confirmation
  *     oracle.
- *   - `start_at` is written as 0. The visit's start is in the payload, and every
- *     reader here already opens the payload; the column survives only until the
- *     migration that drops it (SQLite cannot drop a NOT NULL column with an index
- *     on it in place, and the rename migration rebuilds the table anyway).
+ *   - There is no start column (0008 dropped it): the visit's start is in the
+ *     payload, and every reader here already opens the payload.
  *   - `expires_at` is coarsened to a `EXPIRY_BUCKET_SECONDS` boundary. It is a
  *     year after the visit, so to the second it *was* the visit's start time;
  *     rounded up to a 30-day boundary it only drives the purge, which does not
@@ -39,7 +37,7 @@
  * start of each visit that was *not* returned, so exactly those rows are opened.
  */
 
-import { blindCsn, blinderFor, isBlinded } from "../blind.ts";
+import { blindCsn, blinderFor } from "../blind.ts";
 import { BATCH_CHUNK, all, batch, chunk, run } from "../client.ts";
 import { aadFor, open, seal } from "../crypto.ts";
 
@@ -58,15 +56,12 @@ const PORTAL_VISIT_RETENTION_SECONDS = 365 * 24 * 3600;
  */
 export const EXPIRY_BUCKET_SECONDS = 30 * 24 * 3600;
 
-/** `start_at`'s placeholder: the real start is in the payload only. See the module comment. */
-const SEALED_START_AT = 0;
-
 /** The AAD for one stored visit, by the id the row is stored under. */
-export const portalVisitAad = (providerId: string, storedCsn: string): string =>
+const portalVisitAad = (providerId: string, storedCsn: string): string =>
   aadFor("portal_visits", "payload_enc", `${providerId}:${storedCsn}`);
 
 /** The stored digest of one plaintext payload. */
-export function portalVisitDigest(
+function portalVisitDigest(
   blinder: Blinder,
   providerId: string,
   plaintext: string,
@@ -135,8 +130,7 @@ export function makePortalVisitsRepo(ctx: Ctx) {
     const visit = await openPayload(row);
     return {
       providerId: row.provider_id,
-      // A row the backfill has not reached still stores the real number.
-      csn: isBlinded(row.csn) ? visit.csn : row.csn,
+      csn: visit.csn,
       visit,
       state: row.state,
       missingSince: row.missing_since,
@@ -222,29 +216,19 @@ export function makePortalVisitsRepo(ctx: Ctx) {
           ctx.db
             .prepare(
               `INSERT INTO portal_visits
-                 (provider_id, csn, payload_enc, content_hash, start_at, status, state,
+                 (provider_id, csn, payload_enc, content_hash, status, state,
                   missing_since, fetched_at, expires_at)
-               VALUES (?, ?, ?, ?, ?, ?, 'active', NULL, ?, ?)
+               VALUES (?, ?, ?, ?, ?, 'active', NULL, ?, ?)
                ON CONFLICT (provider_id, csn) DO UPDATE SET
                  payload_enc = excluded.payload_enc,
                  content_hash = excluded.content_hash,
-                 start_at = excluded.start_at,
                  status = excluded.status,
                  state = 'active',
                  missing_since = NULL,
                  fetched_at = excluded.fetched_at,
                  expires_at = excluded.expires_at`,
             )
-            .bind(
-              providerId,
-              storedCsn,
-              payloadEnc,
-              hash,
-              SEALED_START_AT,
-              visit.status,
-              now,
-              expiresAt,
-            ),
+            .bind(providerId, storedCsn, payloadEnc, hash, visit.status, now, expiresAt),
         );
       }
 

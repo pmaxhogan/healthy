@@ -248,13 +248,3 @@ export async function sealShort(
 ): Promise<string> {
   return seal(source, plaintext, aad, { pad: true });
 }
-
-/**
- * Open a column that may predate its sealing: a sealed value is opened, anything
- * else is returned as it is. For the columns 0007 started sealing in place
- * (settings, health-system identity, portal location) until the backfill has
- * rewritten every row -- after which the plaintext branch is dead.
- */
-export async function openLegacy(source: KeySource, value: string, aad: string): Promise<string> {
-  return isSealed(value) ? open(source, value, aad) : value;
-}

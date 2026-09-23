@@ -19,12 +19,11 @@
  * `portal_api_base_path` (a portal deployment's path, which names the
  * organisation). No query filters or orders on a setting's value, so sealing
  * costs one decrypt per sealed key per read -- `getAllSettings` is one query and
- * at most four decrypts per run or request. A row written before 0007 is still
- * plain JSON until the backfill seals it, and reads either way.
+ * at most four decrypts per run or request.
  */
 
 import { all, batch, one, run } from "./client.ts";
-import { aadFor, openLegacy, sealShort } from "./crypto.ts";
+import { aadFor, open, sealShort } from "./crypto.ts";
 import {
   SETTING_DEFAULTS,
   SETTING_KEYS,
@@ -52,14 +51,14 @@ export function resetTimezoneWarning(): void {
 }
 
 /** The keys whose stored value is sealed. See the module comment. */
-export const SEALED_SETTING_KEYS: ReadonlySet<SettingKey> = new Set<SettingKey>([
+const SEALED_SETTING_KEYS: ReadonlySet<SettingKey> = new Set<SettingKey>([
   "calendar_id",
   "timezone",
   "mail_sender_allowlist",
   "portal_api_base_path",
 ]);
 
-export const settingAad = (key: string): string => aadFor("settings", "value_json", key);
+const settingAad = (key: string): string => aadFor("settings", "value_json", key);
 
 /** `value_json` as stored: sealed for a sealed key, plain JSON otherwise. */
 async function storedSettingValue<K extends SettingKey>(
@@ -71,13 +70,14 @@ async function storedSettingValue<K extends SettingKey>(
   return SEALED_SETTING_KEYS.has(key) ? sealShort(ctx.env, json, settingAad(key)) : json;
 }
 
-/** The inverse: opens a sealed value (or passes a pre-0007 plain one) and parses it. */
+/** The inverse: opens a sealed key's value and parses it. */
 async function readStored<K extends SettingKey>(
   ctx: Pick<Ctx, "env">,
   key: K,
   stored: string,
 ): Promise<Settings[K]> {
-  return parseSetting(key, await openLegacy(ctx.env, stored, settingAad(key)));
+  const json = SEALED_SETTING_KEYS.has(key) ? await open(ctx.env, stored, settingAad(key)) : stored;
+  return parseSetting(key, json);
 }
 
 export async function getSetting<K extends SettingKey>(ctx: Ctx, key: K): Promise<Settings[K]> {

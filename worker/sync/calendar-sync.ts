@@ -57,7 +57,6 @@
  * our own rows, counts, resource type names, HTTP statuses and Epic codes only.
  */
 
-import { runBlindBackfill } from "../db/backfill.ts";
 import { blinderFor } from "../db/blind.ts";
 import { makeRepos } from "../db/index.ts";
 import { clearSyncBackoff, getAllSettings, getTimezone, setSyncBackoff } from "../db/settings.ts";
@@ -179,18 +178,6 @@ export async function runCalendarSync(
   }
 
   const outcome = await record(ctx, options.trigger ?? "calendar", async (state) => {
-    // The 0007 backfill first, and nothing else until it has finished: a row or
-    // a Google event still carrying a pre-blinding key would not pair with the
-    // blinded key this run computes, and an unpaired upcoming visit is
-    // re-inserted -- a duplicate on the owner's calendar. See `db/backfill.ts`.
-    const backfill = await runBlindBackfill(ctx, {
-      calendar: () => getGoogleCalendarFor(ctx, deps),
-    });
-    if (!backfill.complete) {
-      state.summary.errors.push({ providerId: "backfill", code: backfill.errorCode ?? "busy" });
-      ctx.log.warn("sync.backfill_pending", { errorCode: backfill.errorCode ?? null });
-      return;
-    }
     await syncAllProviders(ctx, repos, settings, state, options, deps);
   });
   return outcome.summary;

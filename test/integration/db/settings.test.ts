@@ -251,16 +251,6 @@ describe("sealed settings", () => {
 
     expect(short).toHaveLength(longer.length);
   });
-
-  it("still reads a value stored as plain JSON before 0007", async () => {
-    const ctx = testCtx();
-    await ctx.db
-      .prepare("INSERT INTO settings (key, value_json, updated_at) VALUES ('timezone', ?, 0)")
-      .bind(JSON.stringify("Etc/GMT-2"))
-      .run();
-
-    expect(await getSetting(ctx, "timezone")).toBe("Etc/GMT-2");
-  });
 });
 
 async function rawSetting(ctx: ReturnType<typeof testCtx>, key: string): Promise<string> {

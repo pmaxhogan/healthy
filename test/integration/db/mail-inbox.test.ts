@@ -49,17 +49,17 @@ function boundTo(expectedSender: string, since: number, now: number) {
 }
 
 /**
- * A pre-0005 row: plaintext sender, no TTL at all.
+ * A row with no TTL at all, as every kind could have before 0005.
  *
- * The one shape the repo can no longer write, and exactly what the purge's age
- * ceiling and the sealed-column fallbacks exist for.
+ * A shape the repo can no longer write, and exactly what the purge's age
+ * ceiling exists for.
  */
 async function seedLegacyRowWithoutTtl(id: string, receivedAt: number): Promise<void> {
   await env.DB.prepare(
-    `INSERT INTO mail_inbox (id, received_at, from_addr, subject, kind, expires_at, raw_size)
-     VALUES (?, ?, ?, ?, 'other', NULL, 10)`,
+    `INSERT INTO mail_inbox (id, received_at, kind, expires_at, raw_size)
+     VALUES (?, ?, 'other', NULL, 10)`,
   )
-    .bind(id, receivedAt, PORTAL_SENDER, "legacy")
+    .bind(id, receivedAt)
     .run();
 }
 
@@ -106,7 +106,7 @@ describe("mailInbox.insert", () => {
     expect(raw).not.toContain("482913");
   });
 
-  it("seals the sender and the subject, writing the legacy plaintext columns empty", async () => {
+  it("seals the sender and the subject, and has no plaintext column for either", async () => {
     const repos = testRepos();
 
     const entry = await repos.mailInbox.insert({
@@ -127,10 +127,13 @@ describe("mailInbox.insert", () => {
     expect(sealedSubject ?? "").toMatch(/^v2:/u);
     expect(sealedSubject).not.toContain("security code");
 
-    // 0005 keeps the two old columns (from_addr is NOT NULL) and writes them
-    // empty, so nothing about the message is legible without DATA_KEY.
-    expect(await rawColumn("mail_inbox", "from_addr", "id = ?", entry.id)).toBe("");
-    expect(await rawColumn("mail_inbox", "subject", "id = ?", entry.id)).toBe("");
+    // 0008 dropped the pre-0005 plaintext pair outright.
+    const columns = await env.DB.prepare("SELECT name FROM pragma_table_info('mail_inbox')").all<{
+      name: string;
+    }>();
+    const names = columns.results.map((column) => column.name);
+    expect(names).not.toContain("from_addr");
+    expect(names).not.toContain("subject");
   });
 
   it("stores a forward_verify code and url together, sealed as one column", async () => {

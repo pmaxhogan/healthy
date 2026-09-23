@@ -21,14 +21,10 @@
  * plain sha256, which would be a confirmation oracle for anyone who can guess a
  * resource, and bound to the health system, so the same document under two
  * organisations does not link them.
- *
- * A row written before 0007 still has the upstream id and a hex sha256 here; the
- * backfill (`worker/sync/backfill.ts`) rewrites it. Until then `decode` opens it
- * under its old AAD and `get` finds it by its old id.
  */
 
-import { blindResourceId, blinderFor, isBlinded } from "../blind.ts";
-import { BATCH_CHUNK, all, batch, chunk, run, ttlSeconds } from "../client.ts";
+import { blindResourceId, blinderFor } from "../blind.ts";
+import { BATCH_CHUNK, all, batch, chunk, one, run, ttlSeconds } from "../client.ts";
 import { aadFor, open, seal } from "../crypto.ts";
 
 import type { Blinder } from "../blind.ts";
@@ -63,15 +59,11 @@ export interface CachedResource {
  * would make every row already in the cache fail to open. If it is ever worth
  * fixing it has to be a migration that re-seals, not an edit here.
  */
-export const fhirCacheAad = (providerId: string, resourceType: string, storedId: string): string =>
+const fhirCacheAad = (providerId: string, resourceType: string, storedId: string): string =>
   aadFor("fhir_cache", "payload", `${providerId}:${resourceType}:${storedId}`);
 
 /** The stored digest of one plaintext payload. */
-export function fhirCacheDigest(
-  blinder: Blinder,
-  providerId: string,
-  plaintext: string,
-): Promise<string> {
+function fhirCacheDigest(blinder: Blinder, providerId: string, plaintext: string): Promise<string> {
   return blinder.digest("fhir_cache.content_hash", `${providerId}\u{0}${plaintext}`);
 }
 
@@ -93,8 +85,6 @@ export function makeFhirCacheRepo(ctx: Ctx) {
     blindResourceId(blinder, providerId, resourceType, resourceId);
 
   const decode = async (row: FhirCacheRow): Promise<CachedResource> => {
-    // Both shapes open under the id the row is stored by: the blind for a row
-    // written since 0007, the upstream id for one the backfill has not reached.
     const resource: unknown = JSON.parse(
       await open(
         ctx.env,
@@ -102,7 +92,7 @@ export function makeFhirCacheRepo(ctx: Ctx) {
         fhirCacheAad(row.provider_id, row.resource_type, row.resource_id),
       ),
     );
-    const realId = payloadId(resource) ?? (isBlinded(row.resource_id) ? "" : row.resource_id);
+    const realId = payloadId(resource) ?? "";
     return {
       providerId: row.provider_id,
       resourceType: row.resource_type,
@@ -116,21 +106,17 @@ export function makeFhirCacheRepo(ctx: Ctx) {
   const getStored = async (
     providerId: string,
     resourceType: string,
-    storedIds: readonly string[],
+    storedId: string,
   ): Promise<CachedResource | null> => {
-    const placeholders = storedIds.map(() => "?").join(", ");
-    const rows = await all<FhirCacheRow>(
+    const row = await one<FhirCacheRow>(
       ctx.db
         .prepare(
           `SELECT * FROM fhir_cache
-            WHERE provider_id = ? AND resource_type = ? AND resource_id IN (${placeholders})
-              AND expires_at > ?`,
+            WHERE provider_id = ? AND resource_type = ? AND resource_id = ? AND expires_at > ?`,
         )
-        .bind(providerId, resourceType, ...storedIds, ctx.now()),
+        .bind(providerId, resourceType, storedId, ctx.now()),
     );
-    // The blinded row wins while the backfill has not yet removed a legacy twin.
-    const row = rows.find((candidate) => isBlinded(candidate.resource_id)) ?? rows[0];
-    return row === undefined ? null : decode(row);
+    return row === null ? null : decode(row);
   };
 
   return {
@@ -227,8 +213,6 @@ export function makeFhirCacheRepo(ctx: Ctx) {
      * One resource by its upstream id, or null when it is absent or past its
      * expiry. The id is blinded here, on the way in -- which is how an MCP tool
      * that takes an id finds it -- and the caller never sees the stored form.
-     * The upstream id is looked up as well, for a row the 0007 backfill has not
-     * rewritten yet: a query parameter, never stored.
      */
     async get(
       providerId: string,
@@ -236,7 +220,7 @@ export function makeFhirCacheRepo(ctx: Ctx) {
       resourceId: string,
     ): Promise<CachedResource | null> {
       const storedId = await blindId(providerId, resourceType, resourceId);
-      return getStored(providerId, resourceType, [storedId, resourceId]);
+      return getStored(providerId, resourceType, storedId);
     },
 
     /**
@@ -248,7 +232,7 @@ export function makeFhirCacheRepo(ctx: Ctx) {
       resourceType: string,
       storedId: string,
     ): Promise<CachedResource | null> {
-      return getStored(providerId, resourceType, [storedId]);
+      return getStored(providerId, resourceType, storedId);
     },
 
     /**

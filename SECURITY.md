@@ -84,7 +84,7 @@ listed rather than left to be inferred:
 - **`mail_inbox.kind`, `received_at`, `consumed_at`, `expires_at` and
   `raw_size`**: a classification, three timestamps and a byte count. The legacy
   plaintext `from_addr` / `subject` columns were blanked by migration 0007 and
-  are dropped by a later one.
+  dropped by 0008.
 - **`mcp_audit`, `run_log`**: that a tool ran, by which client, how many rows
   came back, and each sync run's counts and error codes. The owner's activity
   times and clinical counts (for example a tool's `result_count`) are visible
@@ -95,7 +95,8 @@ listed rather than left to be inferred:
   configuration. A title template is only placeholders unless the owner types
   a name into it; one that does should go into a health system's config, which
   is sealed.
-- **`data_migrations`**: which one-shot backfill ran, when, and counts.
+- **`data_migrations`**: which one-shot backfill ran, when, and counts (the 0007
+  backfill has run and its code is gone; the row is its record).
 - The two Durable Objects (`FULL_REFRESH`, `PORTAL_SIGNIN`) hold a provider
   id, a step name, counts and stable codes. Never a credential, never an
   emailed code, never a byte of a portal's HTML. `PORTAL_SIGNIN` additionally
@@ -113,7 +114,7 @@ used to read it plaintext was decided on its own:
   health system's rows by `provider_id` (indexed) and narrowed them to the
   window in memory, so the start moved into the sealed `detail_enc` with no new
   query and no new round trip: `list` opens each row it reads anyway. No
-  plaintext bucket is kept; the old `start_at` index is dropped.
+  plaintext bucket is kept; the old `start_at` column is dropped (0008).
 - **Ordering** (`calendar_events.list`, `portal_visits.list`): applied after
   the rows are opened. A health system has tens of rows, not thousands.
 - **"Is this visit over yet"** (`portal_visits.record`): only the rows the

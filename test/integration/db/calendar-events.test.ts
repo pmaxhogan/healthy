@@ -354,7 +354,7 @@ describe("what calendar_events stores", () => {
     expect(dump).not.toContain("csn-secret");
     expect(dump).not.toContain("owner@example.test");
     expect(dump).not.toContain(String(START));
-    expect(raw?.start_at).toBeNull();
+    expect(raw).not.toHaveProperty("start_at");
     expect(raw?.calendar_id).toBe(await blindCalendarId(blinder, "owner@example.test"));
     expect(String(raw?.detail_enc).startsWith("v2:")).toBe(true);
   });

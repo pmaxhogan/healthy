@@ -236,7 +236,13 @@ describe("what providers stores", () => {
       .bind(created.id)
       .first();
     expect(JSON.stringify(raw)).not.toContain("distinctive");
-    for (const column of ["display_name", "fhir_base_url", "brand_key", "portal_url"]) {
+    for (const column of [
+      "display_name_enc",
+      "fhir_base_url_enc",
+      "brand_key_enc",
+      "portal_url_enc",
+      "config_enc",
+    ]) {
       expect(String(raw?.[column]), column).toMatch(/^v2:/u);
     }
 
