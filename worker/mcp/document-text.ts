@@ -50,14 +50,38 @@ function tidy(value: string): string {
     .trim();
 }
 
-/** Flatten HTML to readable text: block ends become newlines, tags go. */
+/**
+ * Remove every tag, repeating until nothing changes.
+ *
+ * One pass is not enough: removing the inner tag of `<scr<b>ipt>` joins the
+ * pieces either side into a new `<script>`. Every pass that changes the text
+ * shortens it, so the loop ends, and ordinary markup settles in one or two.
+ */
+function stripTags(html: string): string {
+  let previous: string;
+  let text = html;
+  do {
+    previous = text;
+    text = text.replaceAll(/<[^<>]*>/gu, "");
+  } while (text !== previous);
+  return text;
+}
+
+/**
+ * Flatten HTML to readable text: block ends become newlines, tags go.
+ *
+ * A closing script or style tag may carry whitespace or junk before its `>`
+ * (`</script >`, `</script foo>`), and browsers still honour it, so the close
+ * patterns accept anything up to the `>` rather than only the bare form.
+ */
 export function htmlToText(html: string): string {
-  let text = html
-    .replaceAll(/<script\b[^>]*>[\s\S]*?<\/script>/giu, " ")
-    .replaceAll(/<style\b[^>]*>[\s\S]*?<\/style>/giu, " ")
-    .replaceAll(/<br\s*\/?>/giu, "\n")
-    .replaceAll(/<\/(?:p|div|tr|li|h[1-6]|table|section)\s*>/giu, "\n")
-    .replaceAll(/<[^<>]*>/gu, "");
+  let text = stripTags(
+    html
+      .replaceAll(/<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/giu, " ")
+      .replaceAll(/<style\b[^>]*>[\s\S]*?<\/style\b[^>]*>/giu, " ")
+      .replaceAll(/<br\s*\/?>/giu, "\n")
+      .replaceAll(/<\/(?:p|div|tr|li|h[1-6]|table|section)\s*>/giu, "\n"),
+  );
   // A function replacement, so nothing in the table can be read as a `$1`-style
   // substitution pattern.
   for (const [pattern, replacement] of ENTITIES) {

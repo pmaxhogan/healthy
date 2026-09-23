@@ -101,8 +101,12 @@ const MAX_HTML_CHARS = MAX_CLASSIFY_CHARS;
  * the *nearest* matching close tag rather than the last one in the message;
  * combined with the `MAX_HTML_CHARS` cap above, this is a single quantifier
  * per alternative, not a nested one, so it cannot backtrack catastrophically.
+ *
+ * The close tag accepts anything up to its `>` (`</script >`, `</style\n>`),
+ * as browsers do; matching only the bare form would let such a block's
+ * contents -- digits included -- through to `classify()`.
  */
-const HIDDEN_BLOCK = /<(script|style|head)\b[^>]*>[\s\S]*?<\/\1>/gi;
+const HIDDEN_BLOCK = /<(script|style|head)\b[^>]*>[\s\S]*?<\/\1\b[^>]*>/gi;
 
 /** Tags whose closing (or, for `<br>`, own) tag marks a line break a reader would see. */
 const LINE_BREAK_TAG = /<br\b[^<>]*>/gi;
@@ -187,6 +191,14 @@ function htmlToText(html: string): string {
   const withLineBreaks = withoutHiddenBlocks
     .replaceAll(LINE_BREAK_TAG, "\n")
     .replaceAll(LINE_BREAK_CLOSE_TAG, "\n");
-  const stripped = withLineBreaks.replaceAll(ANY_TAG, "");
+  // Repeated until nothing changes: removing the inner tag of `<scr<b>ipt>`
+  // joins its neighbours into a new `<script>`. Every pass that changes the
+  // text shortens it, so the loop ends.
+  let stripped = withLineBreaks;
+  let previous: string;
+  do {
+    previous = stripped;
+    stripped = stripped.replaceAll(ANY_TAG, "");
+  } while (stripped !== previous);
   return collapseWhitespace(decodeEntities(stripped));
 }

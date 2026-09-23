@@ -199,5 +199,23 @@ describe("parseInboundEmail", () => {
       expect(result.kind).toBe("otp");
       expect(result.code).toBe("507218");
     });
+
+    it("ends a hidden block at a closing tag with junk before its >", async () => {
+      const raw = HIDDEN_BLOCK_HTML_EMAIL.replace("</script>", "</script >").replace(
+        "</style>",
+        "</style\n>",
+      );
+      const parsed = await parseInboundEmail(raw, raw.length, 1000);
+      expect(parsed.text).not.toContain("222222");
+      expect(parsed.text).not.toContain("333333");
+      expect(classify(parsed).code).toBe("507218");
+    });
+
+    it("does not let stripping one tag join its neighbours into another", async () => {
+      const raw = HTML_EMAIL.replace("<b>507218</b>", "<scr<i>ipt>507218");
+      const parsed = await parseInboundEmail(raw, raw.length, 1000);
+      expect(parsed.text).not.toMatch(/<\/?script/i);
+      expect(parsed.text).toContain("507218");
+    });
   });
 });

@@ -57,6 +57,20 @@ describe("htmlToText", () => {
     expect(text).not.toContain("alert");
   });
 
+  it("ends a script block at a closing tag with junk before its >", () => {
+    const text = htmlToText("<script>var hidden = 1;</script >Shown.<style>.x{}</style\n>Too.");
+
+    expect(text).toBe("Shown. Too.");
+    expect(text).not.toContain("hidden");
+  });
+
+  it("does not let stripping one tag join its neighbours into another", () => {
+    const text = htmlToText("<scr<b>ipt>alert(1)</scr<b>ipt><p>Visible.</p>");
+
+    expect(text).not.toMatch(/<\/?script/iu);
+    expect(text).toContain("Visible.");
+  });
+
   it("decodes the entities a note actually contains, ampersand last", () => {
     expect(htmlToText("<p>A&nbsp;&amp;&nbsp;B &lt;tag&gt; &quot;q&quot; &#39;s&#39;</p>")).toBe(
       "A & B <tag> \"q\" 's'",
