@@ -86,5 +86,8 @@
     "vue-eslint-parser": "^10.4.1",
     "vue-tsc": "^3.3.11",
     "wrangler": "^4.136.1"
+  },
+  "overrides": {
+    "sharp": "^0.35.4"
   }
 }
