@@ -53,6 +53,23 @@ sign-in attempts.
    of signing in again. Never copy those captures into tracked files.
 4. Only then add synthetic-fixture tests, run `npm run check`, commit and push.
 
+## Never cap what is fetched or stored
+
+Paginate every upstream read to the end and cache every page, however unlikely
+a large result looks (more than 100 appointments in a month, medications,
+conditions, allergies — it does not matter). No `MAX_*` ceiling on what is
+fetched, parsed or stored, and no silent truncation anywhere. An MCP tool
+returns everything the caller asked for, even if that is megabytes of JSON; a
+`limit` is only ever applied when the caller passes one, and the response says
+so. Honest and noisy beats quietly incomplete.
+
+## Naming: "health system", not "provider"
+
+In a medical app "provider" naturally means a clinician (doctor, nurse, NP).
+Do not use it for a connected organisation. Call that a **health system**
+(`healthSystem`, `health_system_id`, …) in new code, docs and UI text; a
+clinician is a **practitioner**. Existing `provider` names are being migrated.
+
 ## Where secrets live
 
 - **Worker secrets** (`wrangler secret put`): the full list is in the README's
