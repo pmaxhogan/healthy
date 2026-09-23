@@ -201,4 +201,39 @@ describe("MailView: sender allowlist", () => {
     });
     expect(toasts.map((toast) => toast.text)).toContain("Sender allowlist saved.");
   });
+
+  it("says which entry the Worker rejected, not just that the save failed", async () => {
+    // The first call is the mount's GET, the second the PUT, the third the reload.
+    const seen = { calls: 0 };
+    install({
+      settingsDto: mailSettings({ allowlist: ["google.com"] }),
+      onSettingsPut: () => {
+        seen.calls += 1;
+        return fakeResponse(
+          seen.calls === 2
+            ? {
+                status: 400,
+                body: {
+                  error: "bad_request",
+                  message: "the request body is not valid",
+                  details: { issues: ["allowlist.1: must be a domain with at least two labels"] },
+                },
+              }
+            : { body: mailSettings({ allowlist: ["google.com"] }) },
+        );
+      },
+    });
+    const wrapper = await mountView();
+
+    await wrapper.find("textarea").setValue("google.com, localhost");
+    const saveButton = wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Save allowlist"));
+    await saveButton?.trigger("click");
+    await flushPromises();
+
+    expect(toasts.map((toast) => toast.text)).toContain(
+      "the request body is not valid: allowlist entry 2 must be a domain with at least two labels",
+    );
+  });
 });

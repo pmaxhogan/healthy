@@ -84,9 +84,22 @@ export function afterResponse(
   c.executionCtx.waitUntil(run());
 }
 
-/** zod issues, reduced to paths and codes. The offending value never travels. */
+/**
+ * zod issues, reduced to paths and codes. The offending value never travels.
+ *
+ * A `custom` issue is the one exception to "code only": its message is a
+ * `.refine(..., { error: "..." })` string written in `worker/api/schemas.ts`,
+ * not anything derived from the request, and "allowlist.1: custom" tells the
+ * owner nothing a sentence like "must be a domain with at least two labels"
+ * does not. zod's built-in messages stay out, because not every one of them is
+ * guaranteed value-free.
+ */
 function issuesOf(error: z.ZodError): { issues: string[] } {
-  return { issues: error.issues.map((issue) => `${issue.path.join(".")}: ${issue.code}`) };
+  return {
+    issues: error.issues.map(
+      (issue) => `${issue.path.join(".")}: ${issue.code === "custom" ? issue.message : issue.code}`,
+    ),
+  };
 }
 
 /**

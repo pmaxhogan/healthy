@@ -156,6 +156,21 @@ describe("PUT /api/mail/settings", () => {
     expect(body.error).toBe("bad_request");
   });
 
+  it("names the rejected entry by position and rule, never by value", async () => {
+    // The admin UI renders `details.issues` in its toast, so each one has to say
+    // which entry and why -- and must not echo what was typed.
+    const response = await owner().send("PUT", "/api/mail/settings", {
+      allowlist: ["google.com", "localhost"],
+    });
+
+    expect(response.status).toBe(400);
+    const body = await json<ApiError>(response);
+    expect(body.details).toStrictEqual({
+      issues: ["allowlist.1: must be a domain with at least two labels"],
+    });
+    expect(JSON.stringify(body)).not.toContain("localhost");
+  });
+
   it("rejects an empty allowlist", async () => {
     const response = await owner().send("PUT", "/api/mail/settings", { allowlist: [] });
 

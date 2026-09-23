@@ -144,6 +144,48 @@ describe("api client", () => {
     expect(calls[0]?.init?.signal).toBe(controller.signal);
   });
 
+  it("spells out a 400's validation issues instead of a generic sentence", async () => {
+    stub(
+      fakeResponse({
+        status: 400,
+        body: {
+          error: "bad_request",
+          message: "the request body is not valid",
+          details: {
+            issues: ["allowlist.1: must be a domain with at least two labels", "name: too_small"],
+          },
+        },
+      }),
+    );
+    const failure = await failureOf(api.put("/api/mail/settings", { allowlist: [] }));
+
+    expect(errorMessage(failure)).toBe(
+      "the request body is not valid: allowlist entry 2 must be a domain with at least two labels; name too small",
+    );
+  });
+
+  it("lists only the first few issues", async () => {
+    const issues = ["a: too_small", "b: too_small", "c: too_small", "d: too_small", "e: x"];
+    stub(fakeResponse({ status: 400, body: { error: "bad_request", details: { issues } } }));
+    const failure = await failureOf(api.put("/api/settings", {}));
+
+    expect(errorMessage(failure)).toBe(
+      "That request was not valid. Check the values and try again: a too small; b too small; c too small; and 2 more",
+    );
+  });
+
+  it("ignores details that are not a list of issue strings", async () => {
+    stub(
+      fakeResponse({
+        status: 400,
+        body: { error: "bad_request", message: "nope", details: { issues: "x", other: [1] } },
+      }),
+    );
+    const failure = await failureOf(api.put("/api/settings", {}));
+
+    expect(errorMessage(failure)).toBe("nope");
+  });
+
   it("maps a bare 5xx error code to a short human sentence", async () => {
     stub(fakeResponse({ status: 502, body: { error: "upstream_auth" } }));
     const failure = (await failureOf(api.post("/api/alerts/test"))) as ApiRequestError;

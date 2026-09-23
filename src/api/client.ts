@@ -236,12 +236,53 @@ export function errorMessage(error: unknown): string {
     // but the bare code -- every 5xx, by `worker/api/http.ts`'s design -- does
     // this reach for a mapped sentence, falling back to the code itself,
     // space-separated, for one this list does not know about.
-    return error.message === error.code ? codeMessage(error.code) : error.message;
+    const base = error.message === error.code ? codeMessage(error.code) : error.message;
+    const issues = validationIssues(error.details);
+    return issues.length === 0 ? base : `${base.replace(/\.$/, "")}: ${issues.join("; ")}`;
   }
   // Not `error instanceof Error`: an aborted fetch rejects with a DOMException,
   // which does not inherit from Error in a browser, so the instanceof check would
   // quietly report every cancellation as a failure.
   return isNamed(error, "AbortError") ? "cancelled" : "request failed";
+}
+
+/** More than this many issues is one mistake repeated; the toast lists the first few. */
+const MAX_SHOWN_ISSUES = 3;
+
+/**
+ * The `details.issues` a 400 carries (`worker/api/http.ts`'s `issuesOf`), made
+ * readable. Each is `path: rule`, built by the Worker from the schema -- a field
+ * path and either a zod code or a message written in this repository, never the
+ * value that was sent -- so showing them does not break the "no response body
+ * verbatim" rule above. A zod array index is 0-based; the owner counts from one,
+ * so `allowlist.1` reads as "allowlist entry 2".
+ *
+ * Anything that is not an array of strings is ignored rather than trusted.
+ */
+function validationIssues(details: Record<string, unknown> | undefined): string[] {
+  const issues = details?.issues;
+  if (!Array.isArray(issues)) return [];
+  const strings = issues.filter((issue): issue is string => typeof issue === "string");
+  const shown = strings.slice(0, MAX_SHOWN_ISSUES).map((issue) => readableIssue(issue));
+  if (strings.length > MAX_SHOWN_ISSUES) {
+    shown.push(`and ${String(strings.length - MAX_SHOWN_ISSUES)} more`);
+  }
+  return shown;
+}
+
+const ISSUE_PATTERN = /^(?<path>[^:]*): (?<rule>.+)$/;
+
+function readableIssue(issue: string): string {
+  const match = ISSUE_PATTERN.exec(issue);
+  if (!match?.groups) return issue;
+  const path = match.groups.path ?? "";
+  const rule = (match.groups.rule ?? "").replaceAll("_", " ");
+  const where = path
+    .split(".")
+    .map((segment) => (/^\d+$/.test(segment) ? `entry ${String(Number(segment) + 1)}` : segment))
+    .join(" ")
+    .trim();
+  return where === "" ? rule : `${where} ${rule}`;
 }
 
 function isNamed(error: unknown, name: string): boolean {
