@@ -192,7 +192,7 @@ export class PortalSignInRunner extends DurableObject<Env> {
   /** Look once for the emailed code, and submit it if it has arrived. */
   private async poll(dbCtx: Ctx, job: PortalJob, deps: PortalDeps): Promise<StepResult> {
     const sendCodeAt = job.sendCodeAt ?? job.startedAt;
-    const claimed = await claimCode(dbCtx, sendCodeAt);
+    const claimed = await claimCode(dbCtx, job.providerId, sendCodeAt);
     if (claimed === null) {
       const polls = job.polls + 1;
       if (polls >= MAX_POLLS) {
@@ -209,7 +209,7 @@ export class PortalSignInRunner extends DurableObject<Env> {
     // A fresh session, deliberately: this is a new invocation, and the jar the
     // login sealed is the only thing that carries the challenge page's cookies.
     const opened = await openPortalSession(dbCtx, job.providerId, deps);
-    await completeSignIn(dbCtx, job.providerId, opened.session, claimed.code);
+    await completeSignIn(dbCtx, job.providerId, opened.session, claimed);
     await this.setPhase(job, "signed_in", null);
     return { job: job.thenSync ? { ...job, step: "sync" } : null, delayMs: 0 };
   }

@@ -58,6 +58,50 @@ const timezone = z
   .max(100)
   .refine(isValidTimezone, { error: "must be an IANA time zone" });
 
+/**
+ * A sender domain: at least two labels, and nothing but a domain.
+ *
+ * Validated rather than free text because the matching rule is anchored now
+ * (`domainAllowed` in `worker/mail/classify.ts`), and a stored entry that is not
+ * domain-shaped is one nothing will ever match -- a silent "no mail is ever
+ * accepted" rather than a rejected save. It also closes the older failure in the
+ * other direction: with containment matching, a one-character entry like `"e"`
+ * allowlisted most of the internet, silently.
+ *
+ * Case-insensitive: entries are lower-cased on the way to storage, by
+ * `formatAllowlistCsv`.
+ */
+const DOMAIN_LABEL = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i;
+const MAX_DOMAIN_CHARS = 253;
+const MAX_LABEL_CHARS = 63;
+
+/**
+ * Whether `value`, trimmed, is a domain with at least two labels.
+ *
+ * Split-then-check-each-label rather than one regex for the whole domain: the
+ * obvious single pattern nests a quantified label group inside a quantified
+ * `(\.label)+`, which is exactly the shape that backtracks super-linearly on a
+ * near-miss. `DOMAIN_LABEL` has one unnested `*` between two anchors, so it is
+ * linear in the label, and the label count is bounded by the length cap above.
+ */
+function isSenderDomain(value: string): boolean {
+  const entry = value.trim();
+  if (entry.length === 0 || entry.length > MAX_DOMAIN_CHARS) return false;
+  const labels = entry.split(".");
+  return (
+    labels.length >= 2 &&
+    labels.every(
+      (label) => label.length > 0 && label.length <= MAX_LABEL_CHARS && DOMAIN_LABEL.test(label),
+    )
+  );
+}
+
+const senderDomain = z
+  .string()
+  .min(3)
+  .max(253)
+  .refine(isSenderDomain, { error: "must be a domain with at least two labels" });
+
 const shortText = z.string().min(1).max(200);
 
 /** A Google `colorId`: the palette is keyed "1".."11", but the list is Google's. */
@@ -164,9 +208,10 @@ export const portalAccountSchema: z.ZodType<PutPortalAccountRequest> = z.strictO
   baseUrl: httpsUrl.optional(),
   mountHint: z.string().min(1).max(200).optional(),
   mfaContact: z.email().max(320).optional(),
+  otpSenderDomain: senderDomain.optional(),
 });
 
 /** `PUT /api/mail/settings`. Replaces the whole allowlist -- there is only one field. */
 export const mailAllowlistSchema = z.strictObject({
-  allowlist: z.array(z.string().min(1).max(200)).min(1).max(50),
+  allowlist: z.array(senderDomain).min(1).max(50),
 });

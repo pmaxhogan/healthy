@@ -139,8 +139,10 @@ function kindLabel(kind: MailKind): string {
     <section class="card">
       <h2>Sender allowlist</h2>
       <p class="muted">
-        Comma-separated domains (or fragments, like <code>mychart.</code>) that the inbound email
-        handler accepts mail from. Anything else is rejected before it is even parsed.
+        Comma-separated sender domains the inbound email handler accepts mail from. Anything else is
+        rejected before it is even parsed. Each entry is a whole domain of at least two labels, and
+        it matches that domain or a subdomain of it — never a partial word, so
+        <code>example.org</code> allows <code>mail.example.org</code> and nothing else.
       </p>
       <StateBlock
         :loading="mailSettings.loading.value"
@@ -149,7 +151,11 @@ function kindLabel(kind: MailKind): string {
       >
         <div class="field">
           <span>Allowed sender domains</span>
-          <textarea v-model="allowlistText" rows="2" placeholder="mychart., google.com"></textarea>
+          <textarea
+            v-model="allowlistText"
+            rows="2"
+            placeholder="portal.example.org, google.com"
+          ></textarea>
         </div>
         <div class="row">
           <button

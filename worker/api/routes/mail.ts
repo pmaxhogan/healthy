@@ -10,7 +10,7 @@
 import { Hono } from "hono";
 
 import { getSetting, setSetting } from "../../db/settings.ts";
-import { formatAllowlistCsv } from "../../mail/classify.ts";
+import { formatAllowlistCsv, mailTtlSeconds } from "../../mail/classify.ts";
 import { toMailInboxEntryDto, toMailSettingsDto } from "../dto.ts";
 import { NO_STORE, apiContext, limitQuerySchema, readJson, readQuery } from "../http.ts";
 import { mailAllowlistSchema } from "../schemas.ts";
@@ -65,7 +65,9 @@ mailRouter.post("/test", async (c) => {
     code: null,
     url: null,
     receivedAt: api.ctx.now(),
-    expiresAt: null,
+    // The same TTL a real 'other' row gets: a test row is a row, and one kept
+    // for ever is one more thing holding a sender nobody chose.
+    expiresAt: api.ctx.now() + mailTtlSeconds("other"),
     rawSize: 0,
   });
   return c.json<MailInboxEntryDto>(toMailInboxEntryDto(entry), 201, NO_STORE);

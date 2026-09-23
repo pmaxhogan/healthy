@@ -193,9 +193,27 @@ export interface LoginAttemptRow {
 
 export interface MailInboxRow {
   id: string;
-  received_at: number;
+  /**
+   * Legacy plaintext sender, superseded by `from_addr_enc` (0005).
+   *
+   * NOT NULL in the schema and not dropped yet, so a row written since 0005
+   * carries an empty string here and the real value in the sealed column. Read
+   * only as the fallback for a row written before it.
+   */
   from_addr: string;
+  /** Legacy plaintext subject, superseded by `subject_enc` (0005). Empty since. */
   subject: string | null;
+  received_at: number;
+  /**
+   * The sender address, sealed against `mail_inbox.from_addr_enc.<id>` (0005).
+   *
+   * For a forwarded portal message this is the health system's own sending
+   * address -- an organisation identity, and a value the sender chose. NULL on
+   * a row written before 0005.
+   */
+  from_addr_enc: string | null;
+  /** The subject, sealed against `mail_inbox.subject_enc.<id>` (0005). */
+  subject_enc: string | null;
   kind: MailKind;
   code_enc: string | null;
   consumed_at: number | null;
@@ -233,6 +251,16 @@ export interface PortalAccountRow {
    * response does not say (0004). NULL for every account that never needed it.
    */
   mfa_contact_enc: string | null;
+  /**
+   * The domain this account's emailed verification codes come from (0005).
+   *
+   * What binds a `mail_inbox` claim to the provider that asked for the code:
+   * with it set, no other sender's row is eligible as this account's OTP. Set
+   * by the owner, or learned the first time a code is accepted by the portal.
+   * Sealed because a sending domain names the health system. NULL until either
+   * happens.
+   */
+  otp_sender_enc: string | null;
   cookie_jar_enc: string | null;
   session_state: PortalSessionState;
   last_login_at: number | null;

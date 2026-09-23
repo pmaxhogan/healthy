@@ -241,7 +241,7 @@ export function mailInboxEntry(overrides: Partial<MailInboxEntryDto> = {}): Mail
 
 export function mailSettings(overrides: Partial<MailSettingsDto> = {}): MailSettingsDto {
   return {
-    allowlist: ["mychart.", "google.com"],
+    allowlist: ["mychart.example.test", "google.com"],
     ...overrides,
   };
 }
@@ -256,6 +256,7 @@ export function portalAccount(
     hasCredentials: true,
     hasSession: true,
     hasMfaContact: false,
+    hasOtpSender: false,
     state: "active",
     lastLoginAt: "2026-09-21T06:00:00.000Z",
     lastOkAt: "2026-09-21T11:07:00.000Z",

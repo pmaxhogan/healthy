@@ -21,7 +21,7 @@
  */
 
 import { toIso } from "../lib/time.ts";
-import { domainOf, parseAllowlistCsv } from "../mail/classify.ts";
+import { parseAllowlistCsv } from "../mail/classify.ts";
 import { buildRules } from "../policy/rules.ts";
 
 import type { AlertRow, ConnectionRow, MailKind, McpPolicyRow, ProviderRow } from "../db/rows.ts";
@@ -412,15 +412,16 @@ export function toPolicyRuleDto(row: McpPolicyRow): PolicyRuleDto {
  * The decoded `mail_inbox` entry `worker/db/repos/mail-inbox.ts` returns.
  *
  * Mirrored rather than imported, for the same reason as `RunEntryLike` above.
- * `fromAddr` is the plaintext address (the repo never returns the sealed
- * column); this projection is what reduces it to a domain before it reaches
- * the SPA. `pendingCode`/`pendingUrl` are already the repo's own "never an
- * otp row's code" answer -- this function does not re-decide that.
+ * `senderDomain` is already only the domain: the repo opens `from_addr_enc`
+ * and drops the local part, so the full address never reaches this layer.
+ * `subject` is likewise already null for every kind but `forward_verify`, and
+ * `pendingCode`/`pendingUrl` are the repo's own "never an otp row's code"
+ * answer -- this function re-decides none of that.
  */
 export interface MailInboxEntryLike {
   id: string;
   receivedAt: number;
-  fromAddr: string;
+  senderDomain: string;
   subject: string | null;
   kind: MailKind;
   consumedAt: number | null;
@@ -434,7 +435,7 @@ export function toMailInboxEntryDto(entry: MailInboxEntryLike): MailInboxEntryDt
   return {
     id: entry.id,
     receivedAt: toIso(entry.receivedAt),
-    fromDomain: domainOf(entry.fromAddr),
+    fromDomain: entry.senderDomain,
     subject: entry.subject,
     kind: entry.kind,
     consumedAt: isoOrNull(entry.consumedAt),

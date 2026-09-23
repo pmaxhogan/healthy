@@ -9,9 +9,11 @@ import {
   DEFAULT_MAIL_SENDER_ALLOWLIST_CSV,
   GMAIL_FORWARD_VERIFY_SENDER,
   classify,
+  domainAllowed,
   domainOf,
   formatAllowlistCsv,
   isAllowedSender,
+  mailTtlSeconds,
   parseAllowlistCsv,
 } from "../../../worker/mail/classify.ts";
 
@@ -27,11 +29,16 @@ describe("domainOf", () => {
 
 describe("parseAllowlistCsv / formatAllowlistCsv", () => {
   it("splits, trims and lower-cases", () => {
-    expect(parseAllowlistCsv(" MyChart. , Google.com ,,")).toEqual(["mychart.", "google.com"]);
+    expect(parseAllowlistCsv(" MyChart.Example.ORG , Google.com ,,")).toEqual([
+      "mychart.example.org",
+      "google.com",
+    ]);
   });
 
   it("round-trips through formatAllowlistCsv", () => {
-    expect(formatAllowlistCsv([" MyChart. ", "Google.com"])).toBe("mychart.,google.com");
+    expect(formatAllowlistCsv([" MyChart.Example.ORG ", "Google.com"])).toBe(
+      "mychart.example.org,google.com",
+    );
   });
 
   it("ships with the documented default", () => {
@@ -39,18 +46,37 @@ describe("parseAllowlistCsv / formatAllowlistCsv", () => {
       ...DEFAULT_MAIL_SENDER_ALLOWLIST,
     ]);
   });
+
+  it("ships no fragment and no health system, only Gmail's own sender", () => {
+    // The old default carried `"mychart."`, matched by containment, which
+    // allowlisted every domain on the internet whose own label contained it.
+    expect([...DEFAULT_MAIL_SENDER_ALLOWLIST]).toEqual(["google.com"]);
+  });
 });
 
-describe("isAllowedSender", () => {
-  const allowlist = parseAllowlistCsv(DEFAULT_MAIL_SENDER_ALLOWLIST_CSV);
+describe("isAllowedSender / domainAllowed", () => {
+  const allowlist = ["mychart.example.org", "google.com"];
 
-  it("matches a domain that contains the generic 'mychart.' fragment", () => {
+  it("matches the entry exactly, and a subdomain of it", () => {
     expect(isAllowedSender("noreply@mychart.example.org", allowlist)).toBe(true);
-    expect(isAllowedSender("noreply@some-org.mychart.example.net", allowlist)).toBe(true);
+    expect(isAllowedSender("noreply@some-org.mychart.example.org", allowlist)).toBe(true);
   });
 
   it("matches the exact google.com entry, for Gmail's own sender", () => {
     expect(isAllowedSender(GMAIL_FORWARD_VERIFY_SENDER, allowlist)).toBe(true);
+  });
+
+  it.each([
+    "noreply@mychart.attacker.example",
+    "noreply@mychart.example.org.attacker.example",
+    "noreply@notmychart.example.org",
+    "x@google.com.attacker.example",
+    "x@evilgoogle.com",
+  ])("rejects %s: containment is not a match", (from) => {
+    // The whole of vuln 1's gate: an attacker registers a domain whose own label
+    // contains an allowlist entry, publishes SPF/DKIM, and sends verification
+    // codes of their choosing to the inbound address.
+    expect(isAllowedSender(from, allowlist)).toBe(false);
   });
 
   it("rejects a sender not on the list", () => {
@@ -61,10 +87,25 @@ describe("isAllowedSender", () => {
     expect(isAllowedSender("not-an-address", allowlist)).toBe(false);
   });
 
-  it("matches a full domain the owner pasted in exactly", () => {
-    expect(
-      isAllowedSender("noreply@myhealthsystem.example.org", ["myhealthsystem.example.org"]),
-    ).toBe(true);
+  it("compares case-insensitively on both sides", () => {
+    expect(isAllowedSender("NoReply@MyChart.Example.ORG", ["mychart.example.org"])).toBe(true);
+    expect(isAllowedSender("noreply@mychart.example.org", ["MyChart.Example.ORG"])).toBe(true);
+  });
+
+  it("ignores an empty entry rather than matching everything with it", () => {
+    expect(domainAllowed("anything.example.net", ["", "  "])).toBe(false);
+  });
+
+  it("never matches an empty domain", () => {
+    expect(domainAllowed("", ["example.org"])).toBe(false);
+  });
+});
+
+describe("mailTtlSeconds", () => {
+  it("gives every kind a TTL, shortest for a login code", () => {
+    expect(mailTtlSeconds("otp")).toBe(600);
+    expect(mailTtlSeconds("forward_verify")).toBe(6 * 60 * 60);
+    expect(mailTtlSeconds("other")).toBe(24 * 60 * 60);
   });
 });
 
@@ -146,6 +187,27 @@ describe("classify", () => {
       subject: "Gmail Forwarding Confirmation",
       text: "See data:text/html,<script>alert(1)</script> for details. Confirmation code: 123456789",
     });
+    expect(result.url).toBeNull();
+  });
+
+  it.each([
+    ["Google's own open redirector", "https://www.google.com/url?q=https://attacker.example/x"],
+    ["the confirmation host with a q param", "https://mail-settings.google.com/mail/vf?q=x"],
+    ["the confirmation host with a url param", "https://mail-settings.google.com/mail/vf?url=x"],
+    [
+      "the confirmation host with a continue param",
+      "https://mail-settings.google.com/mail/vf?continue=x",
+    ],
+  ])("drops %s", (_label, url) => {
+    // A `*.google.com` host check also admitted Google's own redirector, which
+    // would have rendered a clickable link on the Mail page that bounces the
+    // owner wherever the message chose.
+    const result = classify({
+      from: GMAIL_FORWARD_VERIFY_SENDER,
+      subject: "Gmail Forwarding Confirmation",
+      text: `Confirm here: ${url}\nConfirmation code: 123456789`,
+    });
+    expect(result.kind).toBe("forward_verify");
     expect(result.url).toBeNull();
   });
 

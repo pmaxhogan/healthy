@@ -18,6 +18,25 @@ beforeEach(resetDb);
 const DATA_KEY = randomDataKey();
 const ENV = handlerEnv(DATA_KEY);
 
+/**
+ * The tenant's own sending domain, added to the allowlist by the tests that
+ * need it.
+ *
+ * Not a default any more: the shipped allowlist is Gmail's own
+ * forwarding-verification sender and nothing else, because the generic entry it
+ * used to carry was matched by containment and so allowlisted every domain on
+ * the internet whose own label happened to contain it.
+ */
+const TENANT_DOMAIN = "mychart.example.org";
+
+async function allowTenantDomain(): Promise<void> {
+  await setSetting(
+    testCtx({ dataKey: DATA_KEY }),
+    "mail_sender_allowlist",
+    TENANT_DOMAIN + ",google.com",
+  );
+}
+
 const OTP_EMAIL = [
   "From: MyChart <noreply@mychart.example.org>",
   "To: 2fa@healthy.example.test",
@@ -42,6 +61,11 @@ const GMAIL_VERIFY_EMAIL = [
   "Confirmation Code: 123456789",
 ].join("\r\n");
 
+/** `OTP_EMAIL` with a different `From:`, built rather than string-replaced. */
+function otpEmailFrom(from: string): string {
+  return [`From: X <${from}>`, ...OTP_EMAIL.split("\r\n").slice(1)].join("\r\n");
+}
+
 const SPAM_EMAIL = [
   "From: Prizes <prizes@not-allowed.example.net>",
   "To: 2fa@healthy.example.test",
@@ -58,7 +82,8 @@ async function run(message: ForwardableEmailMessage): Promise<void> {
 }
 
 describe("handleInboundEmail: accepted mail", () => {
-  it("accepts an OTP email from the default MyChart-style allowlist and seals its code", async () => {
+  it("accepts an OTP email from an allowlisted tenant domain and seals its code", async () => {
+    await allowTenantDomain();
     const { message, rejections } = fakeEmail(OTP_EMAIL, {
       from: "noreply@mychart.example.org",
     });
@@ -75,8 +100,23 @@ describe("handleInboundEmail: accepted mail", () => {
     const claimed = await repos.mailInbox.takeFreshOtp({
       since: 0,
       now: entries[0]?.receivedAt ?? 0,
+      expectedSender: null,
+      allowlist: [TENANT_DOMAIN, "google.com"],
     });
     expect(claimed?.code).toBe("482913");
+  });
+
+  it("gives every kind a TTL, not just an otp", async () => {
+    const { message } = fakeEmail(GMAIL_VERIFY_EMAIL, {
+      from: "forwarding-noreply@google.com",
+    });
+
+    await run(message);
+
+    const entries = await testRepos({ dataKey: DATA_KEY }).mailInbox.listRecent(10);
+    // Before this, every kind but 'otp' was stored with no expiry and the purge
+    // only ever deleted rows that had one -- so they were retained for ever.
+    expect(entries[0]?.expiresAt).not.toBeNull();
   });
 
   it("accepts Gmail's own forwarding-verification email and stores the code and link", async () => {
@@ -125,9 +165,9 @@ describe("handleInboundEmail: rejected mail", () => {
   });
 
   it("rejects a tenant domain the owner has not yet added, even though it looks like an OTP", async () => {
-    // The default allowlist is generic ("mychart.", "google.com"); an
-    // organisation whose sending domain does not contain that fragment is
-    // rejected until the owner adds it from the Mail settings page.
+    // The shipped allowlist is Gmail's forwarding-verification sender only;
+    // every health system's own domain is the owner's to add from the Mail
+    // settings page.
     const raw = OTP_EMAIL.replace("mychart.example.org", "unlisted-health.example.org");
     const { message, rejections } = fakeEmail(raw, { from: "noreply@unlisted-health.example.org" });
 
@@ -137,7 +177,25 @@ describe("handleInboundEmail: rejected mail", () => {
     expect(await testRepos({ dataKey: DATA_KEY }).mailInbox.listRecent(10)).toStrictEqual([]);
   });
 
+  it.each([
+    [
+      "a domain whose own first label starts with the entry",
+      "noreply@mychart.example.org.evil.test",
+    ],
+    ["a domain that merely contains the entry", "noreply@notmychart.example.org"],
+    ["a domain that merely starts with google.com", "noreply@google.com.evil.test"],
+  ])("rejects %s, which containment matching used to allow", async (_label, from) => {
+    await allowTenantDomain();
+    const { message, rejections } = fakeEmail(otpEmailFrom(from), { from });
+
+    await run(message);
+
+    expect(rejections).toEqual(["not allowed"]);
+    expect(await testRepos({ dataKey: DATA_KEY }).mailInbox.listRecent(10)).toStrictEqual([]);
+  });
+
   it("rejects an oversized message before ever parsing it", async () => {
+    await allowTenantDomain();
     const { message, rejections } = fakeEmail(OTP_EMAIL, {
       from: "noreply@mychart.example.org",
       rawSizeOverride: 2 * 1024 * 1024,
@@ -182,6 +240,7 @@ describe("handleInboundEmail: logging", () => {
   }
 
   it("names only the kind, sender domain, size and id for an accepted message", async () => {
+    await allowTenantDomain();
     const { message } = fakeEmail(OTP_EMAIL, { from: "noreply@mychart.example.org" });
 
     await run(message);

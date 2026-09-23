@@ -227,6 +227,40 @@ describe("PortalAccountCard: credentials", () => {
     });
   });
 
+  it("includes otpSenderDomain when filled, and says whether one is stored", async () => {
+    const { wrapper, api } = await mountLoaded({
+      get: () => portalAccount({ baseUrl: null, hasOtpSender: false }),
+    });
+
+    expect(wrapper.text()).toContain("Sender of your verification-code emails");
+
+    await wrapper.find("input[autocomplete='username']").setValue("alice");
+    await wrapper.find('input[type="password"]').setValue("hunter2");
+    await wrapper.find('input[name="otpSenderDomain"]').setValue("mail.example.test");
+    const saveButton = wrapper.findAll("button").find((b) => b.text() === "Save");
+    await saveButton?.trigger("click");
+    await flushPromises();
+
+    const put = api.calls.find((call) => call.url === PORTAL_PATH && call.method === "PUT");
+    expect(JSON.parse(put?.body ?? "null")).toEqual({
+      username: "alice",
+      password: "hunter2",
+      otpSenderDomain: "mail.example.test",
+    });
+  });
+
+  it("never shows the stored sender domain back, only that one is stored", async () => {
+    // A sending domain names the health system, so the DTO reports a boolean and
+    // the field stays blank -- exactly like the MFA contact beside it.
+    const { wrapper } = await mountLoaded({
+      get: () => portalAccount({ hasOtpSender: true }),
+    });
+
+    const input = wrapper.find('input[name="otpSenderDomain"]');
+    expect((input.element as HTMLInputElement).value).toBe("");
+    expect(wrapper.text()).toContain("stored");
+  });
+
   it("omits mfaContact from the payload when it is left blank", async () => {
     const { wrapper, api } = await mountLoaded({ get: () => portalAccount({ baseUrl: null }) });
 

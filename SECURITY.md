@@ -24,7 +24,31 @@ surface, and the MCP surface.
 | Admin password                        | Worker secret  | PBKDF2-SHA256, 100k iterations, per-hash salt    |
 | Encryption key, API credentials       | Worker secrets | Cloudflare-managed                               |
 | Configuration (calendar, templates)   | D1 `settings`  | Plaintext (non-sensitive by construction)        |
+| Patient-portal login and cookie jar   | D1             | AES-GCM-256, application layer                   |
+| Portal verification-code sender       | D1             | AES-GCM-256, application layer                   |
+| Inbound mail: code, sender, subject   | D1             | AES-GCM-256, application layer                   |
 | Full-refresh progress                 | Durable Object | Plaintext: provider ids, a run id, counts, codes |
+| Portal sign-in progress               | Durable Object | Plaintext: a provider id, a step, counts, codes  |
+
+Three tables hold values that are **plaintext on purpose**, and it is worth
+saying which and why rather than leaving it to be inferred:
+
+- `portal_accounts.base_url`, `mount_path` and `endpoint_json`, and the
+  `portal_api_base_path` setting. Each names the organisation, which is the
+  category this repository is otherwise strictest about — but they are also
+  what the sign-in reads on every hop to build a URL, and sealing them would
+  put a decrypt in the path of every request without changing who can read a
+  D1 snapshot that already contains the sealed columns' ciphertext. The
+  credentials, the cookie jar, the MFA contact and the expected code sender in
+  the same row are all sealed.
+- `mail_inbox.kind`, `received_at`, `consumed_at`, `expires_at` and
+  `raw_size`: a classification, three timestamps and a byte count, none of
+  which names anyone. The sender, the subject and the code are sealed. The
+  legacy `from_addr` / `subject` columns are kept only until a migration can
+  drop them and are written empty.
+- The two Durable Objects (`FULL_REFRESH`, `PORTAL_SIGNIN`) hold a provider
+  id, a step name, counts and stable codes. Never a credential, never an
+  emailed code, never a byte of a portal's HTML.
 
 **Encryption at rest is applied by the application, not just by the platform.**
 Every sensitive column is sealed before it reaches D1 as

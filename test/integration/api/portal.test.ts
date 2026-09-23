@@ -172,6 +172,7 @@ describe("GET /api/providers/:id/portal", () => {
       hasCredentials: false,
       hasSession: false,
       hasMfaContact: false,
+      hasOtpSender: false,
       state: "none",
       lastLoginAt: null,
       lastOkAt: null,

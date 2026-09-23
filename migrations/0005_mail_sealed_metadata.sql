@@ -1,0 +1,51 @@
+-- Healthy: bind an emailed verification code to the provider that asked for it,
+-- and stop keeping inbound-mail metadata in plaintext.
+--
+-- Apply with `npm run migrate:local` (Miniflare) or `npm run migrate:remote`
+-- (production) BEFORE deploying code that depends on it.
+--
+-- Additive only: three nullable columns, no row rewritten and nothing dropped.
+-- A row written before this migration keeps whatever its old plaintext columns
+-- hold and is read through the same fallback the code uses for them.
+--
+-- ---------------------------------------------------------------------------
+-- Which sender's mail may be claimed as this provider's verification code.
+--
+-- Before this, any `mail_inbox` row of kind 'otp' was eligible for any
+-- provider's sign-in: the only floor was "arrived after SendCode". Anyone who
+-- can reach the inbound address could therefore have a code of their own
+-- choosing submitted to the owner's real portal. Recording the domain the
+-- portal's codes actually come from is what ties a claim to the account that
+-- asked for it.
+--
+-- Sealed rather than plaintext, with the AAD bound to
+-- `portal_accounts.otp_sender_enc.<providerId>`, because a sending domain names
+-- the health system -- exactly what `mfa_contact_enc` is sealed for.
+--
+-- Nullable, with no default: the value names an organisation, so it cannot have
+-- one in source. It is either set by the owner (the admin UI's portal card or
+-- `npm run set-portal-credentials -- --otp-sender`) or learned the first time a
+-- code from some sender is accepted by the portal itself.
+-- ---------------------------------------------------------------------------
+ALTER TABLE portal_accounts ADD COLUMN otp_sender_enc TEXT;
+
+-- ---------------------------------------------------------------------------
+-- The inbound message's sender and subject, sealed.
+--
+-- `mail_inbox.from_addr` and `subject` were plaintext. For a forwarded portal
+-- message the first is the health system's own sending address and the second
+-- its own subject line -- an organisation identity and message content, both of
+-- which every other column of this kind in the schema seals. Worse, both are
+-- chosen by whoever sent the message.
+--
+-- AAD bound to `mail_inbox.from_addr_enc.<id>` and `mail_inbox.subject_enc.<id>`
+-- like every other sealed column.
+--
+-- The old plaintext columns stay for now: `from_addr` is NOT NULL and SQLite
+-- cannot drop a column in place on an older engine, so new rows write an empty
+-- string there and the real values only ever land in the sealed pair. Dropping
+-- the two columns is a later migration, once no row predating this one is left
+-- (every row expires within 7 days -- see `purgeExpired`).
+-- ---------------------------------------------------------------------------
+ALTER TABLE mail_inbox ADD COLUMN from_addr_enc TEXT;
+ALTER TABLE mail_inbox ADD COLUMN subject_enc TEXT;

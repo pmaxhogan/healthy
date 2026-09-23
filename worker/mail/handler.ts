@@ -20,7 +20,13 @@ import { reposFor } from "../db/index.ts";
 import { getSetting } from "../db/settings.ts";
 import { errorFields, makeLogger } from "../lib/log.ts";
 
-import { classify, domainOf, isAllowedSender, parseAllowlistCsv } from "./classify.ts";
+import {
+  classify,
+  domainOf,
+  isAllowedSender,
+  mailTtlSeconds,
+  parseAllowlistCsv,
+} from "./classify.ts";
 import { parseInboundEmail } from "./parse.ts";
 
 import type { Env } from "../env.ts";
@@ -31,7 +37,6 @@ import type { ParsedMail } from "./parse.ts";
  * a message over it is refused before postal-mime ever reads it.
  */
 const MAX_RAW_SIZE_BYTES = 1_048_576;
-const OTP_TTL_SECONDS = 600;
 const MAX_SUBJECT_CHARS = 500;
 
 export async function handleInboundEmail(
@@ -81,7 +86,8 @@ export async function handleInboundEmail(
       code: classification.code,
       url: classification.url,
       receivedAt: now,
-      expiresAt: classification.kind === "otp" ? now + OTP_TTL_SECONDS : null,
+      // Every kind gets one, not just 'otp': see `mailTtlSeconds`.
+      expiresAt: now + mailTtlSeconds(classification.kind),
       rawSize: parsed.rawSize,
     });
     log.info("mail.accepted", {

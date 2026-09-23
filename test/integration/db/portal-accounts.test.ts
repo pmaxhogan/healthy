@@ -371,6 +371,7 @@ describe("portalAccounts.dto", () => {
       hasCredentials: true,
       hasSession: true,
       hasMfaContact: true,
+      hasOtpSender: false,
       state: "active",
       lastLoginAt: "2026-01-01T00:00:00.000Z",
       lastOkAt: "2026-01-01T00:00:00.000Z",
@@ -381,6 +382,63 @@ describe("portalAccounts.dto", () => {
     });
     expect(JSON.stringify(dto)).not.toContain("portal-password");
     expect(JSON.stringify(dto)).not.toContain(MFA_CONTACT);
+  });
+
+  it("seals the expected OTP sender when supplied, and reports only that it exists", async () => {
+    const repos = testRepos();
+    const providerId = await seedProvider(repos);
+
+    await repos.portalAccounts.setCredentials(providerId, {
+      ...CREDENTIALS,
+      otpSenderDomain: "Mail.Portal.Example.ORG",
+    });
+
+    // Normalised on the way in: it is compared against a domain read out of a
+    // `From:` header, which may arrive in any case.
+    await expect(repos.portalAccounts.getOtpSender(providerId)).resolves.toBe(
+      "mail.portal.example.org",
+    );
+    await expect(repos.portalAccounts.dto(providerId)).resolves.toMatchObject({
+      hasOtpSender: true,
+    });
+    const raw = await rawColumn("portal_accounts", "otp_sender_enc", "provider_id = ?", providerId);
+    expect(raw?.startsWith("v1:")).toBe(true);
+    // A sending domain names the health system, so it is sealed like the rest.
+    expect(raw).not.toContain("portal.example.org");
+    // Never in the DTO: the UI learns that the binding exists, not what it is.
+    expect(JSON.stringify(await repos.portalAccounts.dto(providerId))).not.toContain(
+      "mail.portal.example.org",
+    );
+  });
+
+  it("learns the expected OTP sender once, and never overwrites a stored one", async () => {
+    const repos = testRepos();
+    const providerId = await seedProvider(repos);
+    await repos.portalAccounts.setCredentials(providerId, CREDENTIALS);
+
+    // Nothing stored yet, so the first accepted code's sender is recorded.
+    await expect(repos.portalAccounts.learnOtpSender(providerId, "Mail.Example.ORG")).resolves.toBe(
+      true,
+    );
+    await expect(repos.portalAccounts.getOtpSender(providerId)).resolves.toBe("mail.example.org");
+
+    // A later success from somewhere else must not re-bind the account: that
+    // would undo the binding one accepted code at a time.
+    await expect(
+      repos.portalAccounts.learnOtpSender(providerId, "other.example.net"),
+    ).resolves.toBe(false);
+    await expect(repos.portalAccounts.getOtpSender(providerId)).resolves.toBe("mail.example.org");
+  });
+
+  it("learns nothing from a blank sender", async () => {
+    const repos = testRepos();
+    const providerId = await seedProvider(repos);
+    await repos.portalAccounts.setCredentials(providerId, CREDENTIALS);
+
+    await expect(repos.portalAccounts.learnOtpSender(providerId, " ".repeat(3))).resolves.toBe(
+      false,
+    );
+    await expect(repos.portalAccounts.getOtpSender(providerId)).resolves.toBeNull();
   });
 
   it("reports yesterday's attempt count as zero", async () => {

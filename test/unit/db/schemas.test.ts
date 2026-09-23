@@ -47,7 +47,11 @@ describe("the settings catalogue", () => {
       default_arrival_offset_min: 0,
       sync_backoff_until: null,
       mcp_enabled: true,
-      mail_sender_allowlist: "mychart.,google.com",
+      // Gmail's own forwarding-verification sender and nothing else: a health
+      // system's sending domain names an organisation, so it has no default in
+      // source, and the generic fragment this used to ship was matched by
+      // containment.
+      mail_sender_allowlist: "google.com",
       // Three, chosen against the portal's own lockout rather than against our
       // convenience. A setting so live QA can raise it for an afternoon.
       portal_login_attempt_limit: 3,

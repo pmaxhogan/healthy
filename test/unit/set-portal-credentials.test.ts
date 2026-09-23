@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseArgs,
   portalMfaContactAad,
+  portalOtpSenderAad,
   portalPasswordAad,
   portalUsernameAad,
   sealPortalCredentials,
@@ -35,6 +36,9 @@ describe("portal credential AADs", () => {
       aadFor("portal_accounts", "password_enc", PROVIDER_ID),
     );
     expect(portalUsernameAad(PROVIDER_ID)).toBe(`portal_accounts.username_enc.${PROVIDER_ID}`);
+    expect(portalOtpSenderAad(PROVIDER_ID)).toBe(
+      aadFor("portal_accounts", "otp_sender_enc", PROVIDER_ID),
+    );
     expect(portalMfaContactAad(PROVIDER_ID)).toBe(
       aadFor("portal_accounts", "mfa_contact_enc", PROVIDER_ID),
     );
@@ -44,6 +48,8 @@ describe("portal credential AADs", () => {
     expect(portalUsernameAad(PROVIDER_ID)).not.toBe(portalPasswordAad(PROVIDER_ID));
     expect(portalUsernameAad(PROVIDER_ID)).not.toBe(portalMfaContactAad(PROVIDER_ID));
     expect(portalPasswordAad(PROVIDER_ID)).not.toBe(portalMfaContactAad(PROVIDER_ID));
+    expect(portalOtpSenderAad(PROVIDER_ID)).not.toBe(portalMfaContactAad(PROVIDER_ID));
+    expect(portalOtpSenderAad(PROVIDER_ID)).not.toBe(portalPasswordAad(PROVIDER_ID));
   });
 });
 
@@ -125,11 +131,13 @@ describe("parseArgs", () => {
       providerId: PROVIDER_ID,
       target: "--remote",
       mfaContact: false,
+      otpSender: false,
     });
     expect(parseArgs(["--provider", PROVIDER_ID, "--local"])).toEqual({
       providerId: PROVIDER_ID,
       target: "--local",
       mfaContact: false,
+      otpSender: false,
     });
   });
 
@@ -138,6 +146,16 @@ describe("parseArgs", () => {
       providerId: PROVIDER_ID,
       target: "--remote",
       mfaContact: true,
+      otpSender: false,
+    });
+  });
+
+  it("sets otpSender when --otp-sender is given", () => {
+    expect(parseArgs(["--provider", PROVIDER_ID, "--remote", "--otp-sender"])).toEqual({
+      providerId: PROVIDER_ID,
+      target: "--remote",
+      mfaContact: false,
+      otpSender: true,
     });
   });
 

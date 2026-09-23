@@ -76,6 +76,11 @@ const aad = (column: string, providerId: string): string =>
 /** A nullable unix-second column as a nullable ISO instant. */
 const iso = (value: number | null): string | null => (value === null ? null : toIso(value));
 
+/** A sender domain as it is compared and stored: trimmed and lower-cased. */
+function normaliseDomain(value: string): string {
+  return value.trim().toLowerCase();
+}
+
 /** Whole UTC days since the epoch. What the attempt counter is keyed on. */
 export function utcDay(unixSeconds: number): number {
   return Math.floor(unixSeconds / DAY_SECONDS);
@@ -96,6 +101,7 @@ function toPortalAccountDto(row: PortalAccountRow, now: number): PortalAccountDt
     hasCredentials: row.username_enc !== null && row.password_enc !== null,
     hasSession: row.cookie_jar_enc !== null,
     hasMfaContact: row.mfa_contact_enc !== null,
+    hasOtpSender: row.otp_sender_enc !== null,
     state: row.session_state,
     lastLoginAt: iso(row.last_login_at),
     lastOkAt: iso(row.last_ok_at),
@@ -243,6 +249,17 @@ export function makePortalAccountsRepo(ctx: Ctx) {
           aad("mfa_contact_enc", providerId),
         );
       }
+      // Same rule as the contact above: undefined leaves whatever is stored
+      // alone. Unlike the contact, this one is also *learned* -- see
+      // `learnOtpSender` -- so overwriting it on every password change would
+      // throw away the binding that makes an OTP claim safe.
+      if (input.otpSenderDomain !== undefined) {
+        columns.otp_sender_enc = await seal(
+          ctx.env,
+          normaliseDomain(input.otpSenderDomain),
+          aad("otp_sender_enc", providerId),
+        );
+      }
       await patch(providerId, columns);
       ctx.log.info("portal_accounts.credentials_set", { providerId });
       return require_(providerId);
@@ -262,6 +279,41 @@ export function makePortalAccountsRepo(ctx: Ctx) {
           aad("mfa_contact_enc", providerId),
         ),
       };
+    },
+
+    /**
+     * The domain this account's verification codes are expected to come from.
+     *
+     * Null when nothing has set or learned one yet, which is what lets a first
+     * sign-in fall back to the sender allowlist. Read on every code poll, so it
+     * opens one column rather than going through `getSecrets`.
+     */
+    async getOtpSender(providerId: string): Promise<string | null> {
+      const row = await byProvider(providerId);
+      return row === null
+        ? null
+        : openOrNull(ctx.env, row.otp_sender_enc, aad("otp_sender_enc", providerId));
+    },
+
+    /**
+     * Record the sender of a code the portal actually accepted.
+     *
+     * Only when there is nothing stored: an owner-set value is theirs, and a
+     * learned one must not drift to whatever sent the most recent accepted code
+     * -- that would undo the binding one successful sign-in at a time. Returns
+     * whether it wrote.
+     */
+    async learnOtpSender(providerId: string, senderDomain: string): Promise<boolean> {
+      const domain = normaliseDomain(senderDomain);
+      if (domain === "") return false;
+      const row = await byProvider(providerId);
+      // eslint-disable-next-line @typescript-eslint/prefer-optional-chain -- not equivalent: `row?.otp_sender_enc !== null` is `true` when `row` itself is null, which would report "already set" for an account that does not exist.
+      if (row === null || row.otp_sender_enc !== null) return false;
+      await patch(providerId, {
+        otp_sender_enc: await seal(ctx.env, domain, aad("otp_sender_enc", providerId)),
+      });
+      ctx.log.info("portal_accounts.otp_sender_learned", { providerId });
+      return true;
     },
 
     /**

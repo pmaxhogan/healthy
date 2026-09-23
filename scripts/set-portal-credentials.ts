@@ -10,6 +10,13 @@
 // login response does not say. Optional, and left alone unless the flag is
 // given -- most accounts never need it.
 //
+// `--otp-sender` sets the domain (from PORTAL_OTP_SENDER) the portal's
+// verification-code emails come from. That is what binds a `mail_inbox` row to
+// this account: with it set, no other sender's code is eligible for this
+// provider's sign-in. Optional -- the sender of the first code the portal
+// accepts is learned when it is unset -- but setting it up front means even the
+// first sign-in cannot be fed someone else's code.
+//
 // Why this exists: the admin UI's portal card is how this is normally set, but
 // that path needs a browser session, and a portal password -- which is a login
 // to a whole medical record, not an API credential -- should not be typed into
@@ -57,6 +64,8 @@ interface CliArgs {
   target: Target;
   /** Also write `mfa_contact_enc` from `PORTAL_MFA_CONTACT`. */
   mfaContact: boolean;
+  /** Also write `otp_sender_enc` from `PORTAL_OTP_SENDER`. */
+  otpSender: boolean;
 }
 
 function printUsage(): void {
@@ -73,11 +82,16 @@ function printUsage(): void {
       "  --mfa-contact     Also set the address (from PORTAL_MFA_CONTACT) the portal",
       "                    should email a verification code to. Optional; omit to",
       "                    leave whatever is already stored unchanged.",
+      "  --otp-sender      Also set the domain (from PORTAL_OTP_SENDER) the portal's",
+      "                    verification-code emails come from, which is what binds a",
+      "                    claimed code to this account. Optional; omit to leave",
+      "                    whatever is already stored (or learned) unchanged.",
       "",
       "The username is read from PORTAL_USERNAME, or the first line of stdin.",
       "The password is read from PORTAL_PASSWORD, or the remaining lines of stdin.",
-      "Neither is ever a command-line argument. Same for --mfa-contact's address,",
-      "which comes only from PORTAL_MFA_CONTACT.",
+      "Neither is ever a command-line argument. Same for --mfa-contact's address and",
+      "--otp-sender's domain, which come only from PORTAL_MFA_CONTACT and",
+      "PORTAL_OTP_SENDER.",
     ].join("\n"),
   );
 }
@@ -101,6 +115,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   let remote = false;
   let local = false;
   let mfaContact = false;
+  let otpSender = false;
 
   const remaining = [...argv];
   for (let flag = remaining.shift(); flag !== undefined; flag = remaining.shift()) {
@@ -121,6 +136,10 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         mfaContact = true;
         continue;
       }
+      case "--otp-sender": {
+        otpSender = true;
+        continue;
+      }
       default: {
         throw new Error(`unrecognized argument: ${flag}`);
       }
@@ -135,7 +154,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     // this always writes to a real database, so the target is never inferred.
     throw new Error("exactly one of --remote or --local is required");
   }
-  return { providerId, target: remote ? "--remote" : "--local", mfaContact };
+  return { providerId, target: remote ? "--remote" : "--local", mfaContact, otpSender };
 }
 
 /** Drains stdin to EOF and returns it as text, with no encoding surprises. */
@@ -278,6 +297,10 @@ export function portalMfaContactAad(providerId: string): string {
   return aadFor("portal_accounts", "mfa_contact_enc", providerId);
 }
 
+export function portalOtpSenderAad(providerId: string): string {
+  return aadFor("portal_accounts", "otp_sender_enc", providerId);
+}
+
 function checkEnvelope(sealed: string): string {
   if (!SEALED_ENVELOPE_PATTERN.test(sealed)) {
     // Unreachable in practice, but this value is about to be interpolated into
@@ -315,20 +338,30 @@ export async function sealPortalCredentials(
  * local D1 only ever reports `meta.duration` for a write, so checking that field
  * would make this refuse every local write it just made.
  *
- * `mfaContactEnc` is omitted from the statement entirely when null -- not set to
- * SQL `NULL` -- so a run without `--mfa-contact` leaves an already-stored value
- * alone instead of wiping it on every credential rotation.
+ * Each optional sealed column is omitted from the statement entirely when null --
+ * not set to SQL `NULL` -- so a run without its flag leaves an already-stored
+ * value alone instead of wiping it on every credential rotation.
  */
 function writeCredentials(
   id: string,
   sealed: { username: string; password: string },
-  mfaContactEnc: string | null,
+  optional: { mfaContactEnc: string | null; otpSenderEnc: string | null },
   updatedAt: number,
   target: Target,
 ): void {
-  const mfaColumn = mfaContactEnc === null ? "" : ", mfa_contact_enc";
-  const mfaValue = mfaContactEnc === null ? "" : `, '${mfaContactEnc}'`;
-  const mfaSet = mfaContactEnc === null ? "" : ", mfa_contact_enc = excluded.mfa_contact_enc";
+  // Every value here has been through `checkEnvelope`, which is what makes
+  // interpolating it into SQL text safe -- see that function's own comment.
+  const extra: { column: string; value: string }[] = [
+    ...(optional.mfaContactEnc === null
+      ? []
+      : [{ column: "mfa_contact_enc", value: optional.mfaContactEnc }]),
+    ...(optional.otpSenderEnc === null
+      ? []
+      : [{ column: "otp_sender_enc", value: optional.otpSenderEnc }]),
+  ];
+  const extraColumns = extra.map((one) => `, ${one.column}`).join("");
+  const extraValues = extra.map((one) => `, '${one.value}'`).join("");
+  const extraSets = extra.map((one) => `, ${one.column} = excluded.${one.column}`).join("");
 
   runWrangler([
     "d1",
@@ -338,8 +371,8 @@ function writeCredentials(
     "--json",
     "--command",
     `INSERT INTO portal_accounts
-       (provider_id, username_enc, password_enc, session_state, updated_at${mfaColumn})
-     VALUES ('${id}', '${sealed.username}', '${sealed.password}', 'none', ${String(updatedAt)}${mfaValue})
+       (provider_id, username_enc, password_enc, session_state, updated_at${extraColumns})
+     VALUES ('${id}', '${sealed.username}', '${sealed.password}', 'none', ${String(updatedAt)}${extraValues})
      ON CONFLICT (provider_id) DO UPDATE SET
        username_enc = excluded.username_enc,
        password_enc = excluded.password_enc,
@@ -347,7 +380,7 @@ function writeCredentials(
        session_state = 'none',
        last_error_code = NULL,
        needs_reauth_since = NULL,
-       updated_at = excluded.updated_at${mfaSet}`,
+       updated_at = excluded.updated_at${extraSets}`,
   ]);
 
   const stdout = runWrangler([
@@ -357,7 +390,7 @@ function writeCredentials(
     target,
     "--json",
     "--command",
-    `SELECT username_enc, password_enc, mfa_contact_enc, updated_at FROM portal_accounts WHERE provider_id = '${id}'`,
+    `SELECT username_enc, password_enc, mfa_contact_enc, otp_sender_enc, updated_at FROM portal_accounts WHERE provider_id = '${id}'`,
   ]);
   const row = rowsFromD1Json(stdout)[0];
   const wroteExpectedValue =
@@ -365,7 +398,8 @@ function writeCredentials(
     row.username_enc === sealed.username &&
     row.password_enc === sealed.password &&
     row.updated_at === updatedAt &&
-    (mfaContactEnc === null || row.mfa_contact_enc === mfaContactEnc);
+    (optional.mfaContactEnc === null || row.mfa_contact_enc === optional.mfaContactEnc) &&
+    (optional.otpSenderEnc === null || row.otp_sender_enc === optional.otpSenderEnc);
   if (!wroteExpectedValue) {
     throw new Error("write did not take effect: the row does not read back what was written");
   }
@@ -394,12 +428,29 @@ async function main(): Promise<void> {
     );
   }
 
+  let sealedOtpSender: string | null = null;
+  if (args.otpSender) {
+    // Trimmed and lower-cased to match `portalAccounts.setCredentials`: the
+    // stored value is compared against a sender domain read out of a header.
+    const sender = (process.env.PORTAL_OTP_SENDER ?? "").trim().toLowerCase();
+    if (sender === "") throw new Error("--otp-sender requires PORTAL_OTP_SENDER to be set");
+    sealedOtpSender = checkEnvelope(
+      await seal(dataKey, sender, portalOtpSenderAad(args.providerId)),
+    );
+  }
+
   const targetLabel = args.target === "--remote" ? "remote" : "local";
   if (!providerExists(args.providerId, args.target)) {
     throw new Error(`no provider with id ${args.providerId} in the ${targetLabel} database`);
   }
 
-  writeCredentials(args.providerId, sealed, sealedMfaContact, nowSeconds(), args.target);
+  writeCredentials(
+    args.providerId,
+    sealed,
+    { mfaContactEnc: sealedMfaContact, otpSenderEnc: sealedOtpSender },
+    nowSeconds(),
+    args.target,
+  );
 
   console.log(`${args.providerId} updated`);
 }

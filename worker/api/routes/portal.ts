@@ -82,6 +82,7 @@ function emptyAccount(providerId: string): PortalAccountDto {
     hasCredentials: false,
     hasSession: false,
     hasMfaContact: false,
+    hasOtpSender: false,
     state: "none",
     lastLoginAt: null,
     lastOkAt: null,
@@ -234,6 +235,7 @@ portalRouter.put("/:id/portal", async (c) => {
     username: body.username,
     password: body.password,
     ...(body.mfaContact !== undefined && { mfaContact: body.mfaContact }),
+    ...(body.otpSenderDomain !== undefined && { otpSenderDomain: body.otpSenderDomain }),
   });
   return c.json(await portalStatus(api, row.id), 200, NO_STORE);
 });

@@ -18,6 +18,7 @@ import { setSetting } from "../../../worker/db/settings.ts";
 import { AppError } from "../../../worker/lib/errors.ts";
 import { runCalendarSync } from "../../../worker/sync/calendar-sync.ts";
 import {
+  OTP_SENDER_DOMAIN,
   PORTAL_ORIGIN,
   fakePortal,
   portalVisit,
@@ -319,8 +320,77 @@ describe("portal sessions", () => {
     expect(account?.session_state).toBe("active");
     expect(account?.login_attempts_today).toBe(1);
     // The code is single use: nothing may claim it twice.
-    const again = await syncRepos(fix.ctx).mailInbox.takeFreshOtp({ since: 0, now: T0 });
+    const again = await syncRepos(fix.ctx).mailInbox.takeFreshOtp({
+      since: 0,
+      now: T0,
+      expectedSender: OTP_SENDER_DOMAIN,
+      allowlist: [],
+    });
     expect(again).toBeNull();
+  });
+
+  it("never submits a code from a sender the account does not expect", async () => {
+    // Vuln 1's exploit, end to end: a stranger who can reach the inbound mail
+    // address floods it with codes of their own choosing. The account's expected
+    // sender is what makes every one of those rows ineligible, so the sign-in
+    // waits for the portal's own code rather than submitting theirs.
+    const fix = await fixture({
+      portal: {
+        alive: false,
+        loginStatus: "awaiting_code",
+        visits: [portalVisit({ csn: "csn-1" })],
+      },
+    });
+    await seedOtp(fix.ctx, "000000", { fromAddr: "attacker@mail.example.test.evil.test" });
+
+    const summary = await portalRun(fix);
+
+    expect(fix.portal.submitted).toStrictEqual([]);
+    expect(summary.portalErrors).toStrictEqual(["portal_2fa_required"]);
+    const account = await syncRepos(fix.ctx).portalAccounts.get(fix.provider.providerId);
+    expect(account?.session_state).toBe("needs_reauth");
+  });
+
+  it("prefers the OLDEST eligible code, so a flood cannot outrun the portal's own", async () => {
+    const fix = await fixture({
+      portal: { alive: false, loginStatus: "awaiting_code", visits: [] },
+    });
+    // The portal's code lands first; the attacker keeps sending after it.
+    await seedOtp(fix.ctx, "111111", { receivedAt: T0 + 10 });
+    await seedOtp(fix.ctx, "222222", { receivedAt: T0 + 20 });
+
+    await portalRun(fix);
+
+    expect(fix.portal.submitted).toStrictEqual(["111111"]);
+  });
+
+  it("learns the sender of the first accepted code, binding later claims to it", async () => {
+    const ctx = syncCtx();
+    const provider = await seedConnectedProvider(ctx, { host: HOST });
+    await seedGoogle(ctx);
+    await seedSettings(ctx);
+    // No expected sender yet -- the very first sign-in, where the allowlist is
+    // the only gate.
+    await seedPortalAccount(ctx, provider.providerId, { otpSenderDomain: null });
+    await setSetting(ctx, "mail_sender_allowlist", `${OTP_SENDER_DOMAIN},google.com`);
+    const repos = syncRepos(ctx);
+    await expect(repos.portalAccounts.getOtpSender(provider.providerId)).resolves.toBeNull();
+    const portal = fakePortal({ alive: false, loginStatus: "awaiting_code", visits: [] });
+    await seedOtp(ctx, "246810");
+    const upstreams = stubUpstreams({ [HOST]: fhirServer({ patientId: provider.patientId }) });
+
+    await runCalendarSync(ctx, {
+      trigger: "manual",
+      portalOnly: true,
+      deps: { ...upstreams.deps, portalAdapter: portal.adapter },
+    });
+
+    expect(portal.submitted).toStrictEqual(["246810"]);
+    // The portal itself confirmed the code, which makes its sender the
+    // authoritative answer to "where do this account's codes come from".
+    await expect(repos.portalAccounts.getOtpSender(provider.providerId)).resolves.toBe(
+      OTP_SENDER_DOMAIN,
+    );
   });
 
   it("passes the shell API base and the MFA contact to the adapter when signing in", async () => {

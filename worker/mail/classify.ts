@@ -23,14 +23,19 @@ export const GMAIL_FORWARD_VERIFY_SENDER = "forwarding-noreply@google.com";
  * The allowlist this repository ships with, before the owner edits it from
  * the admin UI's Mail settings page.
  *
- * Deliberately generic: `"mychart."` matches any sender domain that contains
- * it -- whatever hostname a given Epic organisation's own MyChart instance
- * happens to send from -- so no specific health system's domain has to be
- * written down here (see CLAUDE.md's privacy rule). `"google.com"` is for
- * Gmail's forwarding-verification email. The owner adds their own tenant's
- * exact sending domain once they see real mail arrive.
+ * One entry, and it is not a health system: `"google.com"` is Gmail's own
+ * forwarding-verification email, which is the one message that has to be
+ * accepted before the owner has anything else to add. Their tenant's exact
+ * sending domain is theirs to paste in once real mail arrives -- it names the
+ * organisation, so it can have no default in source (see CLAUDE.md).
+ *
+ * It used to also ship `"mychart."`, a *fragment*, matched by containment. That
+ * allowlisted every domain on the internet whose own label happened to contain
+ * it (`mychart.attacker.example`), which let an unauthenticated stranger post
+ * verification codes of their choosing into `mail_inbox`. Entries are full
+ * domains now and matching is anchored -- see `domainAllowed`.
  */
-export const DEFAULT_MAIL_SENDER_ALLOWLIST = ["mychart.", "google.com"] as const;
+export const DEFAULT_MAIL_SENDER_ALLOWLIST = ["google.com"] as const;
 
 export const DEFAULT_MAIL_SENDER_ALLOWLIST_CSV = DEFAULT_MAIL_SENDER_ALLOWLIST.join(",");
 
@@ -59,17 +64,52 @@ export function domainOf(address: string): string {
 }
 
 /**
- * Whether `from`'s domain is on the allowlist.
+ * Whether `domain` is allowed by one of `allowlist`'s entries.
  *
- * Substring containment, not exact match: an entry like `"mychart."` matches
- * any domain that contains it, and a full domain the owner pastes in matches
- * exactly (a domain always contains itself). That is what lets one generic
- * default entry stand in for every Epic organisation's own MyChart hostname
- * without naming one.
+ * Exact match, or a match anchored at a label boundary: an entry of
+ * `example.org` allows `example.org` and `mychart.example.org`, and nothing
+ * else. Never containment -- that is what let `mychart.attacker.example` past
+ * an entry of `mychart.`, and `google.com.attacker.example` past `google.com`.
+ * Both sides are lower-cased, so a mixed-case header or a mixed-case stored
+ * entry compares the same way.
+ *
+ * Entries are expected to be domain-shaped with at least two labels
+ * (`mailAllowlistSchema` enforces it on the way in); an entry that is not is
+ * simply one nothing will ever equal or end with.
  */
+export function domainAllowed(domain: string, allowlist: readonly string[]): boolean {
+  const host = domain.trim().toLowerCase();
+  if (host === "") return false;
+  return allowlist.some((raw) => {
+    const entry = raw.trim().toLowerCase();
+    return entry !== "" && (host === entry || host.endsWith(`.${entry}`));
+  });
+}
+
+/** Whether `from`'s domain is on the allowlist. See `domainAllowed`. */
 export function isAllowedSender(from: string, allowlist: readonly string[]): boolean {
-  const domain = domainOf(from);
-  return domain !== "" && allowlist.some((entry) => domain.includes(entry));
+  return domainAllowed(domainOf(from), allowlist);
+}
+
+/**
+ * How long a row of each kind is kept.
+ *
+ * Every kind has one. Before this, only `otp` did, and the purge only ever
+ * deleted rows that had an `expires_at` -- so a `forward_verify` row, an
+ * `other` row and every `POST /api/mail/test` row were retained for ever,
+ * carrying a sender the owner never chose. A login code is useful for minutes;
+ * Gmail's forwarding confirmation for as long as the owner takes to notice it;
+ * an `other` row only long enough to answer "did that message arrive".
+ */
+const MAIL_TTL_SECONDS: Record<MailKind, number> = {
+  otp: 600,
+  forward_verify: 6 * 60 * 60,
+  other: 24 * 60 * 60,
+};
+
+export function mailTtlSeconds(kind: MailKind): number {
+  // A closed union indexing a const map, not a dynamic key.
+  return MAIL_TTL_SECONDS[kind];
 }
 
 export interface Classification {
@@ -98,8 +138,35 @@ const OTP_DIGITS = /\b\d{4,8}\b/g;
 const FORWARD_VERIFY_DIGITS = /\b\d{6,12}\b/g;
 const NEAR_WORDS = /\b(?:code|confirmation)\b/gi;
 const URL_PATTERN = /https?:\/\/[^\s<>"')]+/i;
-/** The only host a `forward_verify` link may point at: Gmail's own confirmation link. */
-const GOOGLE_URL_HOST_SUFFIX = ".google.com";
+/**
+ * The only host a `forward_verify` link may point at.
+ *
+ * The exact host Gmail's forwarding-confirmation link uses, not `*.google.com`:
+ * that wider rule also admitted Google's own open redirector
+ * (`https://www.google.com/url?q=…`), which would have put a link on the Mail
+ * page that bounces the owner anywhere the message chose.
+ */
+const GMAIL_FORWARD_VERIFY_HOST = "mail-settings.google.com";
+/**
+ * Query parameters that turn a URL into a redirector.
+ *
+ * Belt and braces next to the host pin: the confirmation link carries none of
+ * these, so a link that does is not the one this is for.
+ */
+const REDIRECTOR_PARAMS = ["q", "url", "continue"] as const;
+
+/**
+ * The most message text `classify` will look at.
+ *
+ * `MAX_RAW_SIZE_BYTES` in `worker/mail/handler.ts` allows a full megabyte, and
+ * `pickNearestCandidate` is O(candidates x anchors) with both derived from the
+ * body -- ~1 MB of `"1234 code "` is on the order of 10^10 iterations, which
+ * hits the CPU limit and throws *before* the row is stored, so the message
+ * tempfails and the sender retries it for ever. No real verification email is
+ * anywhere near this, and a code that is past it is a code the portal did not
+ * send.
+ */
+const MAX_CLASSIFY_CHARS = 65_536;
 
 /**
  * Strong OTP keywords, checked in priority order so that a message matching
@@ -293,10 +360,11 @@ function extractOtp(text: string): { code: string; reason: string } | null {
  * could embed `https://attacker.example/…` right next to the real
  * confirmation code, and without this check that link would be sealed,
  * returned by the API, and rendered as a real `<a href>` in `MailView.vue`.
- * Restricting both the scheme (`https:` only, blocking `javascript:`,
- * `data:` and everything else) and the host (Google's own domain, since this
- * is only ever Gmail's forwarding-confirmation link) means a spoofed link
- * never survives classification, regardless of what the SPA does with it.
+ * Restricting the scheme (`https:` only, blocking `javascript:`, `data:` and
+ * everything else), the host (the exact host Gmail's forwarding-confirmation
+ * link uses -- not `*.google.com`, which also admits Google's own open
+ * redirector) and any redirector parameter means a spoofed link never survives
+ * classification, regardless of what the SPA does with it.
  */
 function isSafeForwardVerifyUrl(candidate: string): boolean {
   let url: URL;
@@ -307,7 +375,8 @@ function isSafeForwardVerifyUrl(candidate: string): boolean {
   }
   return (
     url.protocol === "https:" &&
-    (url.hostname === "google.com" || url.hostname.endsWith(GOOGLE_URL_HOST_SUFFIX))
+    url.hostname.toLowerCase() === GMAIL_FORWARD_VERIFY_HOST &&
+    REDIRECTOR_PARAMS.every((param) => !url.searchParams.has(param))
   );
 }
 
@@ -326,7 +395,8 @@ function extractUrl(text: string): string | null {
  */
 export function classify(mail: { from: string; subject: string; text: string }): Classification {
   const from = mail.from.trim().toLowerCase();
-  const combined = `${mail.subject}\n${mail.text}`;
+  // Capped before any scanning: see `MAX_CLASSIFY_CHARS`.
+  const combined = `${mail.subject}\n${mail.text}`.slice(0, MAX_CLASSIFY_CHARS);
 
   if (from === GMAIL_FORWARD_VERIFY_SENDER) {
     return {

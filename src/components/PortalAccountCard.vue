@@ -37,9 +37,16 @@ interface Draft {
   username: string;
   password: string;
   mfaContact: string;
+  otpSenderDomain: string;
 }
 
-const draft = reactive<Draft>({ baseUrl: "", username: "", password: "", mfaContact: "" });
+const draft = reactive<Draft>({
+  baseUrl: "",
+  username: "",
+  password: "",
+  mfaContact: "",
+  otpSenderDomain: "",
+});
 const seeded = ref(false);
 
 // Seeds the base URL once the account has loaded, from whatever it already has
@@ -69,6 +76,7 @@ const confirmingRemove = ref(false);
 const hasCredentials = computed(() => portal.account.data.value?.hasCredentials ?? false);
 const hasSession = computed(() => portal.account.data.value?.hasSession ?? false);
 const hasMfaContact = computed(() => portal.account.data.value?.hasMfaContact ?? false);
+const hasOtpSender = computed(() => portal.account.data.value?.hasOtpSender ?? false);
 const state = computed(() => portal.account.data.value?.state ?? "none");
 // `data.value` can be null (nothing has loaded yet); once it is not, `signIn`
 // is always present -- `GET .../portal` synthesizes a default rather than
@@ -112,12 +120,14 @@ async function onSave(): Promise<void> {
   const username = draft.username;
   const password = draft.password;
   const mfaContact = draft.mfaContact.trim();
+  const otpSenderDomain = draft.otpSenderDomain.trim();
   const ok = await save.run(async () => {
     const saved = await endpoints.savePortalAccount(props.providerId, {
       username,
       password,
       ...(baseUrl !== "" && { baseUrl }),
       ...(mfaContact !== "" && { mfaContact }),
+      ...(otpSenderDomain !== "" && { otpSenderDomain }),
     });
     portal.account.set(saved);
     toastSuccess("Portal login saved.");
@@ -132,6 +142,7 @@ async function onSave(): Promise<void> {
   draft.username = "";
   draft.password = "";
   draft.mfaContact = "";
+  draft.otpSenderDomain = "";
 }
 
 async function onSignIn(): Promise<void> {
@@ -211,6 +222,16 @@ async function onRemove(): Promise<void> {
             type="email"
             autocomplete="off"
             placeholder="optional"
+          />
+        </label>
+        <label class="field">
+          Sender of your verification-code emails, e.g. the domain part
+          <span class="muted">{{ hasOtpSender ? "stored" : "not set" }}</span>
+          <input
+            v-model="draft.otpSenderDomain"
+            name="otpSenderDomain"
+            autocomplete="off"
+            placeholder="optional — learned after the first successful code"
           />
         </label>
       </div>

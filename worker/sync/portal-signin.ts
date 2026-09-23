@@ -45,6 +45,13 @@
  * cannot both submit the same code -- the second finds nothing and waits for the
  * next email, which is the correct behaviour rather than a mysterious rejection.
  *
+ * **A claim is bound to the provider that asked for the code.** `claimCode`
+ * passes the account's expected sender domain, and only that sender's rows are
+ * eligible; where there is none yet, the sender allowlist stands in and the
+ * sender of the code the portal accepts is stored as the expected one. Without
+ * that, anyone who can reach the inbound mail address could have a code of
+ * their own choosing POSTed to the owner's real health-system account.
+ *
  * Log lines carry the provider id, the phase, stable codes and counts. Never a
  * username, never the code, never a byte of portal markup.
  */
@@ -53,12 +60,14 @@ import { makeRepos } from "../db/index.ts";
 import { getSetting } from "../db/settings.ts";
 import { AppError, isAppError } from "../lib/errors.ts";
 import { errorFields } from "../lib/log.ts";
+import { parseAllowlistCsv } from "../mail/classify.ts";
 import { CookieJar, createMyChartAdapter } from "../providers/mychart/index.ts";
 
 import { openReconnectAlert } from "./alerts.ts";
 
 import type { SyncDeps } from "./deps.ts";
 import type { Ctx } from "../db/client.ts";
+import type { ClaimedOtp } from "../db/repos/mail-inbox.ts";
 import type {
   PortalClient,
   PortalCustomSettings,
@@ -283,13 +292,37 @@ export async function startSignIn(
   return { sendCodeAt };
 }
 
-/** Step two: claim the newest unconsumed code that arrived after `sendCodeAt`. */
+/**
+ * Step two: claim the oldest unconsumed *eligible* code that arrived after
+ * `sendCodeAt`.
+ *
+ * Eligible means "from a sender this provider's codes come from". That binding
+ * is the point of this step, and it has two states.
+ *
+ *   - The account has an expected sender (the owner set it, or an earlier
+ *     success learned it): only that domain's rows are eligible, so nobody
+ *     else's message can be submitted to this portal, whatever they send or how
+ *     often.
+ *   - It has none yet: the sender allowlist is the gate, which is exactly the
+ *     first-sign-in case the learning step in `completeSignIn` exists to end.
+ *
+ * Scoped to a provider, not global, so two configured portals cannot claim each
+ * other's code either.
+ */
 export async function claimCode(
   ctx: Ctx,
+  providerId: string,
   sendCodeAt: number,
-): Promise<{ id: string; code: string } | null> {
+): Promise<ClaimedOtp | null> {
   const repos = makeRepos(ctx);
-  return repos.mailInbox.takeFreshOtp({ since: sendCodeAt, now: ctx.now() });
+  const expectedSender = await repos.portalAccounts.getOtpSender(providerId);
+  const allowlist = parseAllowlistCsv(await getSetting(ctx, "mail_sender_allowlist"));
+  return repos.mailInbox.takeFreshOtp({
+    since: sendCodeAt,
+    now: ctx.now(),
+    expectedSender,
+    allowlist,
+  });
 }
 
 /**
@@ -303,12 +336,18 @@ export async function completeSignIn(
   ctx: Ctx,
   providerId: string,
   session: PortalSession,
-  code: string,
+  claimed: ClaimedOtp,
 ): Promise<void> {
-  await session.client.secondaryValidation.validate(code, true);
+  await session.client.secondaryValidation.validate(claimed.code, true);
   await session.persistJar();
-  await makeRepos(ctx).portalAccounts.markActive(providerId);
-  ctx.log.info("portal.signin.done", { providerId, viaCode: true });
+  const repos = makeRepos(ctx);
+  await repos.portalAccounts.markActive(providerId);
+  // The learning step. The portal itself has just confirmed this code was the
+  // one it sent, which makes its sender the authoritative answer to "where do
+  // this account's codes come from" -- and from here on the only eligible one.
+  // Records nothing when a sender is already stored: see `learnOtpSender`.
+  const learned = await repos.portalAccounts.learnOtpSender(providerId, claimed.senderDomain);
+  ctx.log.info("portal.signin.done", { providerId, viaCode: true, learnedSender: learned });
 }
 
 /**
@@ -361,9 +400,9 @@ export async function signInAndWait(
     const polls = Math.ceil(waitSeconds / OTP_POLL_SECONDS);
     for (let poll = 0; poll < polls; poll += 1) {
       await deps.sleep(OTP_POLL_SECONDS * 1000);
-      const claimed = await claimCode(ctx, sendCodeAt);
+      const claimed = await claimCode(ctx, providerId, sendCodeAt);
       if (claimed === null) continue;
-      await completeSignIn(ctx, providerId, session, claimed.code);
+      await completeSignIn(ctx, providerId, session, claimed);
       return OK;
     }
     ctx.log.warn("portal.signin.code_timeout", { providerId, waitSeconds });

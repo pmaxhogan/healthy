@@ -369,6 +369,14 @@ export interface PortalAccountDto {
   hasSession: boolean;
   /** True when an address to email a verification code to is stored. */
   hasMfaContact: boolean;
+  /**
+   * True when the domain this account's verification codes come from is known.
+   *
+   * The domain itself is never reported -- it names the health system. What the
+   * card shows is that the binding exists: until it does, a code from any
+   * allowlisted sender is eligible for this account's sign-in.
+   */
+  hasOtpSender: boolean;
   state: PortalSessionState;
   lastLoginAt: string | null;
   lastOkAt: string | null;
@@ -398,6 +406,13 @@ export interface SetPortalCredentialsRequest {
    * there is no way to clear it once set except storing a new value.
    */
   mfaContact?: string | undefined;
+  /**
+   * The domain the portal's verification-code emails come from.
+   *
+   * Narrows which `mail_inbox` row may be claimed as this account's code.
+   * Omitted leaves whatever is already stored (or learned) alone.
+   */
+  otpSenderDomain?: string | undefined;
 }
 
 /**
@@ -419,6 +434,15 @@ export interface PutPortalAccountRequest {
    * deployments never need it.
    */
   mfaContact?: string | undefined;
+  /**
+   * The domain the portal's verification-code emails come from, e.g. the part
+   * after the `@` of the sender.
+   *
+   * Optional: left alone when omitted, and learned from the first code the
+   * portal accepts when it has never been set. Setting it is what stops any
+   * other allowlisted sender's code from being claimed for this account.
+   */
+  otpSenderDomain?: string | undefined;
 }
 
 /**

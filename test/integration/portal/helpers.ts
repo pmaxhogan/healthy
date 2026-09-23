@@ -32,6 +32,18 @@ export const PORTAL_MOUNT = "/MyChart/";
 export const PORTAL_USERNAME = "portal-user";
 export const PORTAL_PASSWORD = "portal-password";
 
+/**
+ * The domain the invented portal's verification codes arrive from.
+ *
+ * `seedPortalAccount` stores it as the account's expected OTP sender and
+ * `seedOtp` sends from it, because a claim is bound to a sender now: a code from
+ * anywhere else is not eligible for this provider. A test that wants the
+ * *unbound* path (a first-ever sign-in, where the allowlist stands in and the
+ * sender is then learned) passes `otpSenderDomain: null`.
+ */
+export const OTP_SENDER_DOMAIN = "mail.example.test";
+const OTP_SENDER = `no-reply@${OTP_SENDER_DOMAIN}`;
+
 /** What the fake portal will do, and what it recorded. All of it mutable. */
 export interface FakePortal {
   adapter: PortalAdapter;
@@ -159,7 +171,13 @@ export function portalVisit(overrides: Partial<PortalVisit> & { csn: string }): 
 export async function seedPortalAccount(
   ctx: Ctx,
   providerId: string,
-  options: { active?: boolean; mfaContact?: string; apiBasePath?: string } = {},
+  options: {
+    active?: boolean;
+    mfaContact?: string;
+    apiBasePath?: string;
+    /** Null leaves the account with no expected sender at all. */
+    otpSenderDomain?: string | null;
+  } = {},
 ): Promise<void> {
   const repos = makeRepos(ctx);
   await repos.portalAccounts.setEndpoint(providerId, {
@@ -173,10 +191,13 @@ export async function seedPortalAccount(
       ...(options.apiBasePath !== undefined && { apiBasePath: options.apiBasePath }),
     },
   });
+  const otpSenderDomain =
+    options.otpSenderDomain === undefined ? OTP_SENDER_DOMAIN : options.otpSenderDomain;
   await repos.portalAccounts.setCredentials(providerId, {
     username: PORTAL_USERNAME,
     password: PORTAL_PASSWORD,
     ...(options.mfaContact !== undefined && { mfaContact: options.mfaContact }),
+    ...(otpSenderDomain !== null && { otpSenderDomain }),
   });
   await repos.portalAccounts.saveCookieJar(providerId, JSON.stringify({ v: 1, cookies: [] }));
   if (options.active !== false) await repos.portalAccounts.markActive(providerId);
@@ -185,23 +206,29 @@ export async function seedPortalAccount(
 /**
  * An unconsumed verification code in the inbox.
  *
- * `receivedAt` defaults to one second ahead of the clock, because `takeFreshOtp`
+ * `receivedAt` defaults to a minute ahead of the clock, because `takeFreshOtp`
  * only claims a code that arrived strictly after the `SendCode` call -- a code from
  * before it belongs to an earlier attempt, and submitting it would fail and burn
- * this one too.
+ * this one too. A minute rather than a second so a suite running against the real
+ * wall clock (rather than a frozen one) cannot spend that second on the requests
+ * between seeding the code and asking for one.
+ *
+ * `fromAddr` defaults to `OTP_SENDER`, which is what `seedPortalAccount` stores
+ * as the account's expected sender: a code from anywhere else is deliberately
+ * not eligible for that provider.
  */
 export async function seedOtp(
   ctx: Ctx,
   code: string,
-  options: { receivedAt?: number; expiresAt?: number } = {},
+  options: { receivedAt?: number; expiresAt?: number; fromAddr?: string } = {},
 ): Promise<void> {
   await makeRepos(ctx).mailInbox.insert({
-    fromAddr: "no-reply@mail.example.test",
+    fromAddr: options.fromAddr ?? OTP_SENDER,
     subject: "Your verification code",
     kind: "otp",
     code,
     url: null,
-    receivedAt: options.receivedAt ?? ctx.now() + 1,
+    receivedAt: options.receivedAt ?? ctx.now() + 60,
     expiresAt: options.expiresAt ?? ctx.now() + 600,
     rawSize: 512,
   });

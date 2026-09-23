@@ -35,7 +35,7 @@ describe("GET /api/mail/inbox", () => {
       code: "123456789",
       url: "https://mail-settings.google.com/mail/vf-abc",
       receivedAt: 2000,
-      expiresAt: null,
+      expiresAt: 2000 + 6 * 60 * 60,
       rawSize: 700,
     });
 
@@ -66,7 +66,7 @@ describe("GET /api/mail/inbox", () => {
       code: "123456789",
       url: "https://mail-settings.google.com/mail/vf-abc",
       receivedAt: 2000,
-      expiresAt: null,
+      expiresAt: 2000 + 6 * 60 * 60,
       rawSize: 700,
     });
 
@@ -92,7 +92,7 @@ describe("GET /api/mail/inbox", () => {
         code: null,
         url: null,
         receivedAt,
-        expiresAt: null,
+        expiresAt: receivedAt + 24 * 60 * 60,
         rawSize: 10,
       });
     }
@@ -132,11 +132,28 @@ describe("PUT /api/mail/settings", () => {
 
   it("normalises case and whitespace", async () => {
     const response = await owner().send("PUT", "/api/mail/settings", {
-      allowlist: ["  MyChart. ", "Google.COM"],
+      allowlist: ["  MyChart.Example.ORG ", "Google.COM"],
     });
 
     const dto = await json<MailSettingsDto>(response);
-    expect(dto.allowlist).toEqual(["mychart.", "google.com"]);
+    expect(dto.allowlist).toEqual(["mychart.example.org", "google.com"]);
+  });
+
+  it.each([
+    ["a bare fragment", "mychart."],
+    ["a single label", "localhost"],
+    ["one character", "e"],
+    ["a whole URL", "https://portal.example.org/"],
+    ["an address", "noreply@portal.example.org"],
+  ])("rejects %s as an allowlist entry", async (_label, entry) => {
+    // Containment matching is gone, so an entry has to be a domain of at least
+    // two labels: a fragment would silently match nothing, and a one-character
+    // entry used to match most of the internet.
+    const response = await owner().send("PUT", "/api/mail/settings", { allowlist: [entry] });
+
+    expect(response.status).toBe(400);
+    const body = await json<ApiError>(response);
+    expect(body.error).toBe("bad_request");
   });
 
   it("rejects an empty allowlist", async () => {
@@ -169,5 +186,11 @@ describe("POST /api/mail/test", () => {
     const listed = await json<MailInboxEntryDto[]>(await owner().get("/api/mail/inbox"));
     expect(listed).toHaveLength(1);
     expect(listed[0]?.id).toBe(entry.id);
+  });
+
+  it("gives the synthetic entry a TTL, so a test row is not retained for ever", async () => {
+    const entry = await json<MailInboxEntryDto>(await owner().send("POST", "/api/mail/test"));
+
+    expect(entry.expiresAt).not.toBeNull();
   });
 });
