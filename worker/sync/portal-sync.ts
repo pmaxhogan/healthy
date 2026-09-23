@@ -70,7 +70,6 @@ import { buildEventBody } from "../google/calendar.ts";
 import { isAppError } from "../lib/errors.ts";
 import { errorFields } from "../lib/log.ts";
 import { fromIso, toIso } from "../lib/time.ts";
-import { MAX_PARSED_VISITS } from "../providers/mychart/index.ts";
 
 import { resolveReconnectAlert } from "./alerts.ts";
 import { buildCalendarModel, ghostModel } from "./mapping.ts";
@@ -105,9 +104,6 @@ import type { CalendarEventRow, ProviderRow } from "../db/rows.ts";
 import type { CalendarClient } from "../google/calendar.ts";
 import type { CalendarEventModel, EventRecord } from "../google/types.ts";
 import type { PortalVisit } from "../providers/mychart/index.ts";
-
-/** Portal rows per provider the diff will consider. Far above any real schedule. */
-const MAX_PORTAL_ROWS = 500;
 
 /**
  * What the FHIR pass saw for one provider, as the dedupe needs it.
@@ -231,17 +227,6 @@ async function loadPortalVisits(
   await repos.portalAccounts.saveCookieJar(providerId, session.client.jar.serialise());
   input.state.summary.portalVisits += visits.length;
   ctx.log.info("portal.upcoming", { providerId, visits: visits.length });
-  // The parse stops at `MAX_PARSED_VISITS` (see `visits.ts`), so a malicious or
-  // broken payload cannot drive an unbounded number of calendar inserts into the
-  // owner's primary calendar. Reported as a warning code rather than swallowed,
-  // because "your schedule was truncated" is something the Runs page has to say.
-  // A real schedule that happens to be exactly at the cap reads as truncated too,
-  // which is the right way round to be wrong about it.
-  if (visits.length >= MAX_PARSED_VISITS) {
-    ctx.log.warn("portal.visits_truncated", { providerId, visits: visits.length });
-    input.state.warningCodes.add("portal_visits_truncated");
-    input.state.summary.warnings += 1;
-  }
 
   if ((await repos.providers.get(providerId)) === null) return null;
   await recordVisits(input, providerId, visits);
@@ -259,11 +244,7 @@ async function syncPortalCalendar(
   if (provider === null) return;
 
   const builds = await buildPortalCandidates(input, provider, visits);
-  const stored = await repos.calendarEvents.list({
-    providerId,
-    source: "portal",
-    limit: MAX_PORTAL_ROWS,
-  });
+  const stored = await repos.calendarEvents.list({ providerId, source: "portal" });
   // Narrowed to the window before the diff sees them, exactly as the FHIR pass
   // narrows its own: a row older than the window would be ghosted for being old.
   const rows = stored.filter(
@@ -318,9 +299,11 @@ async function syncPortalCalendar(
  *
  * `get_appointments` reads upcoming visits from `portal_visits`, not from the
  * calendar, so this is what makes a visit the portal knows about answerable at
- * all. A truncated list is stored but proves nothing about absence, so nothing is
- * marked missing from it. A failure here costs the MCP one run's freshness and is
- * logged; it must not cost the owner their calendar, so it does not throw.
+ * all. The parse never truncates, so every visit `LoadUpcoming` returned is here
+ * and absence from it is a real signal -- `complete: true` is what lets a future
+ * visit that stopped coming back be marked missing. A failure here costs the MCP
+ * one run's freshness and is logged; it must not cost the owner their calendar,
+ * so it does not throw.
  */
 async function recordVisits(
   input: PortalPassInput,
@@ -328,9 +311,7 @@ async function recordVisits(
   visits: readonly PortalVisit[],
 ): Promise<void> {
   try {
-    await input.repos.portalVisits.record(providerId, visits, {
-      complete: visits.length < MAX_PARSED_VISITS,
-    });
+    await input.repos.portalVisits.record(providerId, visits, { complete: true });
   } catch (error) {
     input.ctx.log.warn("portal.visits_store_failed", { providerId, ...errorFields(error) });
   }
@@ -418,7 +399,6 @@ async function buildPortalCandidates(
   const fhirRows = await input.repos.calendarEvents.list({
     providerId: provider.id,
     source: "fhir",
-    limit: MAX_PORTAL_ROWS,
   });
   const starts = [
     ...(seen?.starts ?? []),

@@ -16,7 +16,6 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { setSetting } from "../../../worker/db/settings.ts";
 import { AppError } from "../../../worker/lib/errors.ts";
-import { MAX_PARSED_VISITS } from "../../../worker/providers/mychart/index.ts";
 import { runCalendarSync } from "../../../worker/sync/calendar-sync.ts";
 import { acquirePortalSignIn, releasePortalSignIn } from "../../../worker/sync/portal-gate.ts";
 import { RECENT_SESSION_SECONDS, recentSessionAge } from "../../../worker/sync/portal-signin.ts";
@@ -679,21 +678,23 @@ describe("portal sessions", () => {
     expect(fix.portal.submitted).toStrictEqual(["424242"]);
   });
 
-  it("reports a payload at the visit cap as truncated rather than silently trimming it", async () => {
-    // The candidates come straight from the portal's own response, so without a
-    // cap a broken or malicious payload drives an unbounded number of inserts into
-    // the owner's primary calendar.
-    const visits = Array.from({ length: MAX_PARSED_VISITS }, (_, index) =>
+  it("has no cap on a large payload: every visit the portal reports is seen and stored", async () => {
+    // There is no ceiling here any more, however unlikely a large schedule looks:
+    // an owner with an unusually long list of upcoming visits gets every one of
+    // them, not a silently trimmed page.
+    const many = 300;
+    const visits = Array.from({ length: many }, (_, index) =>
       portalVisit({ csn: `csn-${String(index)}` }),
     );
     const fix = await fixture({ portal: { visits } });
 
     const summary = await portalRun(fix);
 
-    expect(summary.portalVisits).toBe(MAX_PARSED_VISITS);
-    expect(summary.warnings).toBeGreaterThanOrEqual(1);
+    expect(summary.portalVisits).toBe(many);
+    const stored = await syncRepos(fix.ctx).portalVisits.list(fix.provider.providerId);
+    expect(stored).toHaveLength(many);
     const runs = await syncRepos(fix.ctx).runLog.listRecent({ limit: 1 });
-    expect(runs[0]?.summary.warnings).toContain("portal_visits_truncated");
+    expect(runs[0]?.summary.warnings).not.toContain("portal_visits_truncated");
   });
 
   it("passes the shell API base and the MFA contact to the adapter when signing in", async () => {

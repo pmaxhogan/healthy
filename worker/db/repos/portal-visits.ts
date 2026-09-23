@@ -31,9 +31,6 @@ import type { PortalVisitRow, PortalVisitState } from "../rows.ts";
 /** How long a visit is kept after it happens (or after it was last seen, if later). */
 const PORTAL_VISIT_RETENTION_SECONDS = 365 * 24 * 3600;
 
-/** Rows one `list` reads. Far above any real schedule, like `MAX_PORTAL_ROWS`. */
-const LIST_LIMIT = 500;
-
 const aad = (providerId: string, csn: string): string =>
   aadFor("portal_visits", "payload_enc", `${providerId}:${csn}`);
 
@@ -56,9 +53,10 @@ export interface RecordVisitsReport {
 
 export interface RecordVisitsOptions {
   /**
-   * False when the list is known to be incomplete -- the parse stopped at
-   * `MAX_PARSED_VISITS` -- so absence from it proves nothing and no row is
-   * marked missing.
+   * False when the caller knows this list is not everything `LoadUpcoming`
+   * would have returned, so absence from it proves nothing and no row is
+   * marked missing. The portal pass always passes `true`: the parse itself
+   * never truncates, so every call it makes has the whole answer.
    */
   complete: boolean;
 }
@@ -182,9 +180,9 @@ export function makePortalVisitsRepo(ctx: Ctx) {
         ctx.db
           .prepare(
             `SELECT * FROM portal_visits WHERE provider_id = ? AND expires_at > ?
-              ORDER BY start_at, csn LIMIT ?`,
+              ORDER BY start_at, csn`,
           )
-          .bind(providerId, ctx.now(), LIST_LIMIT),
+          .bind(providerId, ctx.now()),
       );
       return Promise.all(rows.map((row) => decode(row)));
     },
@@ -199,9 +197,9 @@ export function makePortalVisitsRepo(ctx: Ctx) {
         ctx.db
           .prepare(
             `SELECT * FROM portal_visits WHERE provider_id <> ? AND expires_at > ?
-              ORDER BY start_at, provider_id, csn LIMIT ?`,
+              ORDER BY start_at, provider_id, csn`,
           )
-          .bind(providerId, ctx.now(), LIST_LIMIT),
+          .bind(providerId, ctx.now()),
       );
       return Promise.all(rows.map((row) => decode(row)));
     },

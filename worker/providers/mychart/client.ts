@@ -746,7 +746,6 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
     logger.info("portal.upcoming", {
       visits: parsed.visits.length,
       unparsed: parsed.unparsed,
-      truncated: parsed.truncated,
     });
     return parsed.visits;
   };

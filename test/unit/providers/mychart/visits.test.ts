@@ -6,7 +6,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  MAX_PARSED_VISITS,
   formatAddress,
   isVideoVisit,
   parsePast,
@@ -221,23 +220,18 @@ describe("parseUpcoming", () => {
       OWNER_ZONE,
     );
 
-    expect(parsed).toStrictEqual({ visits: [], unparsed: 0, truncated: false });
+    expect(parsed).toStrictEqual({ visits: [], unparsed: 0 });
   });
 
-  it("stops at the cap and says so, so a huge payload cannot flood the calendar", () => {
-    // `MAX_PORTAL_ROWS` bounds only the rows read back from D1; these come
-    // straight from the portal's own response, and without a cap a broken or
-    // malicious payload drives an unbounded number of calendar inserts.
-    const parsed = parseUpcoming({ NextNDaysVisits: manyRows(MAX_PARSED_VISITS + 50) }, OWNER_ZONE);
+  it("has no cap: an unusually large payload is parsed in full, not cut off", () => {
+    // Whatever the portal actually reports is what the owner's calendar and
+    // `get_appointments` should show -- there is no ceiling on a real schedule,
+    // however unlikely a large one looks.
+    const many = 400;
+    const parsed = parseUpcoming({ NextNDaysVisits: manyRows(many) }, OWNER_ZONE);
 
-    expect(parsed.visits).toHaveLength(MAX_PARSED_VISITS);
-    expect(parsed.truncated).toBe(true);
-  });
-
-  it("does not report truncation for a payload that fits", () => {
-    const parsed = parseUpcoming({ NextNDaysVisits: manyRows(3) }, OWNER_ZONE);
-
-    expect(parsed.truncated).toBe(false);
+    expect(parsed.visits).toHaveLength(many);
+    expect(parsed.unparsed).toBe(0);
   });
 
   it("fails rather than reporting an empty day when nothing in a full payload parses", () => {
@@ -391,7 +385,6 @@ describe("parsePast", () => {
     expect(parsePast({ List: { [ORG_TOKEN]: { List: [] } } }, OWNER_ZONE)).toStrictEqual({
       visits: [],
       unparsed: 0,
-      truncated: false,
     });
   });
 

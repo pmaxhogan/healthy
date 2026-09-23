@@ -77,21 +77,7 @@ export interface ParsedUpcoming {
   visits: PortalVisit[];
   /** Rows that carried no usable identifier or instant. Logged as a count. */
   unparsed: number;
-  /** True when the payload had more rows than `MAX_PARSED_VISITS` and was cut. */
-  truncated: boolean;
 }
-
-/**
- * The most visits one payload may yield.
- *
- * `MAX_PORTAL_ROWS` in `worker/sync/portal-sync.ts` bounds only the rows read
- * back from D1; the candidates come straight from the portal's own response, so
- * without a cap here a malicious or broken payload drives an unbounded number of
- * Google Calendar inserts into the owner's primary calendar. Far above any real
- * schedule -- the caller reports the overflow as `portal_visits_truncated` rather
- * than hiding it.
- */
-export const MAX_PARSED_VISITS = 200;
 
 /**
  * `/Date(1758000000000)/` or `/Date(1758000000000-0500)/` as a unix second.
@@ -419,15 +405,8 @@ function collect(
 ): ParsedUpcoming {
   const visits: PortalVisit[] = [];
   let seen = 0;
-  let truncated = false;
   for (const record of rows) {
     if (typeof record !== "object" || record === null) continue;
-    if (visits.length >= MAX_PARSED_VISITS) {
-      // Stop parsing, rather than parse everything and slice: the point of the cap
-      // is to bound the work as well as the result.
-      truncated = true;
-      break;
-    }
     seen++;
     const visit = toVisit(record, fallbackTimeZone);
     if (visit !== null) visits.push(visit);
@@ -437,5 +416,5 @@ function collect(
       rows: seen,
     });
   }
-  return { visits, unparsed: seen - visits.length, truncated };
+  return { visits, unparsed: seen - visits.length };
 }
