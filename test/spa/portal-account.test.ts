@@ -534,6 +534,7 @@ describe("portal error codes: human messages", () => {
     ["portal_2fa_required", "emailed verification code"],
     ["portal_2fa_rejected", "wrong, expired, or already used"],
     ["portal_locked", "locked or disabled"],
+    ["portal_captcha_required", "asking for a captcha"],
     ["portal_bot_blocked", "automated traffic"],
     ["portal_session_expired", "signed this session out"],
     ["portal_parse_failed", "not in a shape"],

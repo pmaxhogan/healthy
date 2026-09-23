@@ -23,12 +23,14 @@ import {
   json,
   HOME_PAGE_WITH_INNOCENT_MARKERS,
   LOGIN_LOCKED_PAGE,
+  LOGIN_PAGE_CAPTCHA_REQUIRED,
   LOGIN_PAGE_ENCODED_TOKEN,
   LOGIN_PAGE_WITH_INNOCENT_MARKERS,
   LOGIN_REJECTED_PAGE,
   LOGIN_REJECTED_WITH_INNOCENT_MARKERS,
   loginPageNew,
   loginPageOld,
+  loginPageWithLoginField,
   MOUNT,
   OPENID_STUB_PAGE,
   pastPayload,
@@ -129,6 +131,51 @@ describe("login", () => {
     const form = bodyOf(find(stub, "POST", "/DoLogin"));
     expect(form.get("Username")).toBe(CREDENTIALS.username);
     expect(form.get("LoginIdentifier")).toBeNull();
+  });
+
+  it("recognises the third username field, Login, and posts it as Login=", async () => {
+    const stub = routed({
+      "GET /MyChart/Authentication/Login": () => html(loginPageWithLoginField()),
+      "POST /MyChart/Authentication/Login/DoLogin": () => redirect(`${HOST}/MyChart/Home/Index`),
+      "GET /MyChart/Home/Index": () => html(HOME_PAGE),
+    });
+
+    await client(stub).login(CREDENTIALS);
+
+    const form = bodyOf(find(stub, "POST", "/DoLogin"));
+    expect(form.get("Login")).toBe(CREDENTIALS.username);
+    expect(form.get("LoginIdentifier")).toBeNull();
+    expect(form.get("Username")).toBeNull();
+  });
+
+  it("sends jsenabled as a JS-enabled browser would, not the page's own default", async () => {
+    const stub = routed({
+      "GET /MyChart/Authentication/Login": () => html(loginPageWithLoginField()),
+      "POST /MyChart/Authentication/Login/DoLogin": () => redirect(`${HOST}/MyChart/Home/Index`),
+      "GET /MyChart/Home/Index": () => html(HOME_PAGE),
+    });
+
+    await client(stub).login(CREDENTIALS);
+
+    // The fixture's own value is "0"; a JS-enabled browser would have flipped it.
+    expect(bodyOf(find(stub, "POST", "/DoLogin")).get("jsenabled")).toBe("1");
+  });
+
+  it("does not invent a jsenabled field on a page that never rendered one", async () => {
+    const stub = signedInPortal();
+
+    await client(stub).login(CREDENTIALS);
+
+    expect(bodyOf(find(stub, "POST", "/DoLogin")).get("jsenabled")).toBeNull();
+  });
+
+  it("reports portal_captcha_required, not portal_login_failed, when the portal asks for a captcha", async () => {
+    const stub = routed({
+      "GET /MyChart/Authentication/Login": () => html(loginPageWithLoginField()),
+      "POST /MyChart/Authentication/Login/DoLogin": () => html(LOGIN_PAGE_CAPTCHA_REQUIRED),
+    });
+
+    await expect(codeOf(client(stub).login(CREDENTIALS))).resolves.toBe("portal_captcha_required");
   });
 
   it("decodes an entity-escaped token before echoing it back", async () => {

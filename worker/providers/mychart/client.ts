@@ -38,6 +38,7 @@ import {
   ANTIFORGERY_FIELD_NAMES,
   ANTIFORGERY_HEADER,
   FIELDS,
+  JS_ENABLED_VALUE,
   KEEP_ALIVE_COUNT_PARAM,
   LOAD_PAST_QUERY,
   LOAD_UPCOMING_QUERY,
@@ -47,6 +48,7 @@ import {
   PATHS,
   REMEMBER_ME_VALUE,
   SEND_CODE_VARIANTS,
+  USERNAME_FIELD_NAMES,
   XHR_HEADER,
 } from "./wire.ts";
 
@@ -167,9 +169,17 @@ function assertSession(response: PortalResponse, endpoint: string): void {
   }
 }
 
-/** A locked account and a wrong password both land on the login page. */
+/**
+ * A locked account, a captcha challenge and a wrong password all land back on
+ * the login page. The captcha check runs first: it is the one case where
+ * retrying with the same credentials cannot possibly work and the owner has to
+ * do something a script cannot, same as a lockout.
+ */
 function loginFailure(response: PortalResponse, endpoint: string): AppError {
   const details = { endpoint, status: response.status };
+  if (bodyMentions(response.body, MARKERS.captchaRequired)) {
+    return new AppError("portal_captcha_required", "the portal is asking for a captcha", details);
+  }
   return bodyMentions(response.body, MARKERS.locked)
     ? new AppError("portal_locked", "the portal locked the account", details)
     : new AppError("portal_login_failed", "the portal rejected the credentials", details);
@@ -201,8 +211,10 @@ function echoedFields(html: string, exclude: readonly string[]): Map<string, str
 /** The username field this page actually renders, or the discovered fallback. */
 function usernameFieldOn(html: string, fallback: UsernameField): UsernameField {
   const fields = inputFields(html);
-  if (fields.has("LoginIdentifier")) return "LoginIdentifier";
-  return fields.has("Username") ? "Username" : fallback;
+  for (const name of USERNAME_FIELD_NAMES) {
+    if (fields.has(name)) return name;
+  }
+  return fallback;
 }
 
 /**
@@ -305,6 +317,10 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
     // Trust the page over the stored discovery result: a release can rename the
     // field between the probe and the first sign-in.
     const usernameField = usernameFieldOn(page.response.body, endpoint.usernameField);
+    // Whether this page has a `jsenabled` field at all -- not every deployment
+    // does, and sending one it never rendered is a field a real browser never
+    // would have.
+    const hasJsEnabled = inputFields(page.response.body).has(FIELDS.jsEnabled);
 
     const response = await portalFetch(http, {
       url: url(PATHS.doLogin),
@@ -314,12 +330,17 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
       followBodyRedirects: true,
       // `Object.fromEntries` at the boundary, so the page's own attribute names
       // only ever live in a Map -- see `echoedFields`. The caller's own fields are
-      // spread after, and so always win.
+      // spread after, and so always win. `jsEnabled` is excluded from the echo
+      // and set explicitly below: the page's own default value for it is not
+      // what a JS-enabled browser would submit.
       form: {
-        ...Object.fromEntries(echoedFields(page.response.body, [usernameField, FIELDS.password])),
+        ...Object.fromEntries(
+          echoedFields(page.response.body, [usernameField, FIELDS.password, FIELDS.jsEnabled]),
+        ),
         [page.name]: page.value,
         [usernameField]: credentials.username,
         [FIELDS.password]: credentials.password,
+        ...(hasJsEnabled && { [FIELDS.jsEnabled]: JS_ENABLED_VALUE }),
       },
     });
 

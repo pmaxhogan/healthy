@@ -24,7 +24,23 @@
  */
 
 /** Which name the login form gives the username field. Varies by release. */
-export type UsernameField = "LoginIdentifier" | "Username";
+export type UsernameField = "LoginIdentifier" | "Username" | "Login";
+
+/**
+ * [confirmed] Order to prefer when a login page's markup could match more than
+ * one name.
+ *
+ * `LoginIdentifier` is the newest shape and `Username` the classic MVC one;
+ * both were already recognised. `Login` is a third, plainer name a live,
+ * unauthenticated fetch of a real deployment's login page carried -- it is
+ * tried last because a bare word like this is the one most likely to collide
+ * with something unrelated on a page this list has not seen yet.
+ */
+export const USERNAME_FIELD_NAMES: readonly UsernameField[] = [
+  "LoginIdentifier",
+  "Username",
+  "Login",
+];
 
 /**
  * Which login application a deployment puts in front of the classic pages.
@@ -91,10 +107,29 @@ export const FIELDS = {
   twoFactorCode: "TwoFactorCode",
   /** [documented] Sent as the literal string below, not "true". */
   rememberMe: "RememberMe",
+  /**
+   * [confirmed] A hidden field a live login page carries, presumably flipped
+   * by the page's own script before a real browser submits it. See
+   * `JS_ENABLED_VALUE` for what it is set to.
+   */
+  jsEnabled: "jsenabled",
 } as const;
 
 /** [documented] What `RememberMe` is set to, as an HTML checkbox would send it. */
 export const REMEMBER_ME_VALUE = "checked";
+
+/**
+ * [assumption] What a JS-enabled browser sets `jsenabled` to before submitting
+ * `DoLogin`.
+ *
+ * The field's presence is confirmed (a live, unauthenticated fetch carried it
+ * as a hidden input); what a real browser's script writes into it before
+ * submit is not -- that would need a captured submit body, not just a GET of
+ * the form. `"1"` is the ordinary convention for this kind of boolean hidden
+ * field. Live QA against a captured `DoLogin` request should confirm the exact
+ * value and delete this note.
+ */
+export const JS_ENABLED_VALUE = "1";
 
 /**
  * [convention] Hidden-input names that hold the antiforgery token.
@@ -383,6 +418,8 @@ export const MARKERS = {
     "name='loginidentifier'",
     'name="username"',
     "name='username'",
+    'name="login"',
+    "name='login'",
   ],
   /**
    * The page is the two-step challenge: signed in as far as the password goes.
@@ -433,6 +470,26 @@ export const MARKERS = {
   ],
   /** The emailed code was wrong or stale. */
   badCode: ["code you entered", "invalid code", "incorrect code", "expired"],
+  /**
+   * The portal is asking for a captcha before it will accept another attempt.
+   *
+   * [guess] A live, unauthenticated fetch of a real deployment's login page
+   * carried a conditionally-rendered captcha container and a `captchaRequired`
+   * flag alongside the ordinary form fields, but not a capture of either one
+   * actually toggled on -- so what a *triggered* response looks like is
+   * unconfirmed. Matched as distinctive attribute/key pairs, never the bare
+   * word "captcha", for the same reason `MARKERS.challenge` avoids it: a login
+   * page can load a captcha script and render nothing live (see
+   * `LOGIN_PAGE_WITH_INNOCENT_MARKERS`) without ever being a real challenge.
+   * Live QA against a captured challenge should replace these with the exact
+   * shape and delete this note.
+   */
+  captchaRequired: [
+    'id="captchacontainer"',
+    "id='captchacontainer'",
+    '"captcharequired":true',
+    "captcharequired: true",
+  ],
   /**
    * A WAF or bot wall answered instead of the application.
    *

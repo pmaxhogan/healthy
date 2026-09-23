@@ -128,6 +128,9 @@ const OK: SignInOutcome = { phase: "signed_in", code: null };
 const ALERTING_CODES: ReadonlySet<string> = new Set([
   "portal_bot_blocked",
   "portal_locked",
+  // A script cannot solve a captcha; only the owner signing in once themselves
+  // can, so this is the same "stop and tell the owner" shape as a lockout.
+  "portal_captcha_required",
   // Not a portal failure at all, but the one state the owner has to be told about
   // out of band: the sync has given up for the day and will not try again until
   // the counter rolls over, so nothing else would surface it before tomorrow.

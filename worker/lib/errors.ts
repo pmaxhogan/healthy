@@ -26,6 +26,7 @@ export type ErrorCode =
   | "portal_2fa_required" // the portal wants an emailed code before it will answer
   | "portal_2fa_rejected" // the code was wrong, stale, or already used
   | "portal_locked" // the portal locked or disabled the account
+  | "portal_captcha_required" // the portal wants a captcha solved before another attempt
   | "portal_bot_blocked" // 403/429 or a challenge page: a WAF, not a credential problem
   | "portal_session_expired" // an authenticated call bounced to the login page
   | "portal_parse_failed" // the response was not the shape this client can read
@@ -65,6 +66,9 @@ const STATUS: Record<ErrorCode, number> = {
   portal_2fa_required: 409,
   portal_2fa_rejected: 409,
   portal_locked: 409,
+  // Same rationale as portal_locked: a script cannot solve it, only the owner
+  // signing in once themselves can.
+  portal_captcha_required: 409,
   portal_bot_blocked: 503,
   portal_session_expired: 409,
   portal_parse_failed: 502,

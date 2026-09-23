@@ -122,6 +122,41 @@ export function loginPageOld(token = TOKEN): string {
 }
 
 /**
+ * A third login form shape: the username field is the plain `Login`, and the
+ * page also carries the `jsenabled` hidden field a JS-enabled browser's own
+ * script is presumed to flip before submit.
+ *
+ * `jsenabled` starts at `"0"`, the shape a script-toggled hidden field would
+ * have before the toggle runs, so a test can tell "echoed as found" apart from
+ * "the client set it".
+ */
+export function loginPageWithLoginField(token = TOKEN): string {
+  return `<!doctype html><html><body>
+    <form action="/MyChart/Authentication/Login/DoLogin" method="post">
+      <input type="hidden" name="__RequestVerificationToken" value="${token}" />
+      <input type="hidden" name="jsenabled" value="0" />
+      <input type="text" name="Login" value="" />
+      <input type="password" name="Password" value="" />
+      <input type="submit" name="submit" value="Sign In" />
+    </form>
+  </body></html>`;
+}
+
+/**
+ * The same page re-rendered with a captcha challenge: the container id and the
+ * flag `MARKERS.captchaRequired` looks for, both synthetic.
+ */
+export const LOGIN_PAGE_CAPTCHA_REQUIRED = `<!doctype html><html><body>
+  <div id="CaptchaContainer">"captchaRequired":true</div>
+  <form action="/MyChart/Authentication/Login/DoLogin" method="post">
+    <input type="hidden" name="__RequestVerificationToken" value="${TOKEN}" />
+    <input type="hidden" name="jsenabled" value="0" />
+    <input type="text" name="Login" value="" />
+    <input type="password" name="Password" value="" />
+  </form>
+</body></html>`;
+
+/**
  * A login form whose token is entity-encoded, as a template engine emits one.
  *
  * `&#x2B;` is a `+`: base64 tokens contain them, and a token echoed back still

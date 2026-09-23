@@ -20,6 +20,7 @@ import {
   HOST,
   loginPageNew,
   loginPageOld,
+  loginPageWithLoginField,
   metaRedirectPage,
   NOT_A_LOGIN_PAGE,
   openIdStubWithBodyRedirect,
@@ -122,6 +123,19 @@ describe("discoverPortal", () => {
 
     await expect(discoverPortal(HOST, deps(stub))).resolves.toMatchObject({
       usernameField: "LoginIdentifier",
+    });
+  });
+
+  it("finds a third-style form, whose username field is the plain Login", async () => {
+    const stub = routed({
+      [`GET /MyChart/Authentication/Login`]: () => html(loginPageWithLoginField()),
+    });
+
+    await expect(discoverPortal(HOST, deps(stub))).resolves.toMatchObject({
+      mountPath: "/MyChart/",
+      usernameField: "Login",
+      antiforgeryFieldName: "__RequestVerificationToken",
+      flavor: "classic",
     });
   });
 

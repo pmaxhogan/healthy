@@ -25,6 +25,7 @@ describe("AppError", () => {
       ["portal_2fa_required", 409],
       ["portal_2fa_rejected", 409],
       ["portal_locked", 409],
+      ["portal_captcha_required", 409],
       ["portal_bot_blocked", 503],
       ["portal_session_expired", 409],
       ["portal_parse_failed", 502],

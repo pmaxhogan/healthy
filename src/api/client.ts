@@ -191,6 +191,8 @@ const CODE_MESSAGES: Record<string, string> = {
   portal_2fa_rejected: "That verification code was wrong, expired, or already used.",
   portal_locked:
     "The portal has locked or disabled this account. Sign in on the portal's own site to clear it, then try again here.",
+  portal_captcha_required:
+    "The portal is asking for a captcha. Sign in once yourself in a browser, then try again.",
   portal_bot_blocked: "The portal blocked this as automated traffic. Try again later.",
   portal_session_expired: "The portal signed this session out. Sign in again.",
   portal_parse_failed:

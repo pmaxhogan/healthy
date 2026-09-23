@@ -40,7 +40,13 @@ import {
   portalFetch,
   requireHttps,
 } from "./http.ts";
-import { ANTIFORGERY_FIELD_NAMES, CANDIDATE_MOUNTS, FIELDS, PATHS } from "./wire.ts";
+import {
+  ANTIFORGERY_FIELD_NAMES,
+  CANDIDATE_MOUNTS,
+  FIELDS,
+  PATHS,
+  USERNAME_FIELD_NAMES,
+} from "./wire.ts";
 
 import type { PortalHttpDeps } from "./http.ts";
 import type { PortalFlavor, UsernameField } from "./wire.ts";
@@ -147,8 +153,10 @@ function mountBefore(landedUrl: string, markers: readonly string[], fallback: st
 
 /** The username field this page uses, or null when it is not a login form. */
 function usernameFieldOf(fields: ReadonlyMap<string, string>): UsernameField | null {
-  if (fields.has("LoginIdentifier")) return "LoginIdentifier";
-  return fields.has("Username") ? "Username" : null;
+  for (const name of USERNAME_FIELD_NAMES) {
+    if (fields.has(name)) return name;
+  }
+  return null;
 }
 
 interface Probe {
