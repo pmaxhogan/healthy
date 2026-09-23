@@ -16,7 +16,7 @@
 import { collectAppointments } from "../appointment-items.ts";
 import { WINDOW_ARGS, toolArgs } from "../args.ts";
 import { collect, effectiveLimit, selectProviders, spec } from "../collect.ts";
-import { BINARY_TEXT_TYPE, MAX_LIMIT } from "../deps.ts";
+import { BINARY_TEXT_TYPE } from "../deps.ts";
 import { LABORATORY, hasCategory } from "../match.ts";
 import { respond } from "../respond.ts";
 
@@ -71,6 +71,7 @@ async function nearestAppointments(
   deps: ToolDeps,
   providers: readonly ProviderInfo[],
   now: number,
+  perSection: number,
 ): Promise<TaggedItem[]> {
   const { items } = await collectAppointments(deps, providers, { order: "asc" });
   const nowMs = now * 1000;
@@ -83,20 +84,34 @@ async function nearestAppointments(
     if (isUpcoming(item)) upcoming.push(item);
     else past.unshift(item);
   }
-  return [...upcoming, ...past].slice(0, RECENT_PER_SECTION);
+  return [...upcoming, ...past].slice(0, perSection);
+}
+
+/**
+ * How many items each section carries.
+ *
+ * {@link RECENT_PER_SECTION} by default -- this tool is a fast overview, not a
+ * full read, and every section has its own tool (`get_appointments`,
+ * `get_conditions`, ...) for the complete list. But it is not a hidden ceiling:
+ * a caller that passes its own `limit` gets that many per section instead, so
+ * asking for more here is always honoured rather than silently capped at five.
+ */
+function perSectionLimit(limit: number | undefined): number {
+  return limit ?? RECENT_PER_SECTION;
 }
 
 async function recentItems(
   deps: ToolDeps,
   providers: readonly ProviderInfo[],
   now: number,
+  perSection: number,
 ): Promise<TaggedItem[]> {
   const out: TaggedItem[] = [];
-  const appointments = await nearestAppointments(deps, providers, now);
+  const appointments = await nearestAppointments(deps, providers, now, perSection);
   out.push(...appointments.map((item) => ({ ...item, kind: "recent", section: "appointments" })));
   for (const entry of SECTIONS) {
     const collected = await collect(deps, providers, { specs: entry.specs() });
-    for (const item of collected.items.slice(0, RECENT_PER_SECTION)) {
+    for (const item of collected.items.slice(0, perSection)) {
       out.push({ ...item, kind: "recent", section: entry.section });
     }
   }
@@ -114,7 +129,10 @@ export function registerSummaryTool(server: McpServer, deps: ToolDeps): void {
         "has cached (items with kind `count`), plus the five appointments nearest " +
         "to now (upcoming first, patient-portal visits included) and the five most " +
         "recent conditions, medications and lab results across all of them " +
-        "(kind `recent`, labelled by `section`).",
+        "(kind `recent`, labelled by `section`). Five is a default for a fast " +
+        "overview, not a ceiling: pass `limit` to get that many per section " +
+        "instead, or call the section's own tool (`get_appointments`, " +
+        "`get_conditions`, ...) for the complete list.",
       schema: toolArgs(WINDOW_ARGS),
     },
     async (args, run) => {
@@ -136,13 +154,13 @@ export function registerSummaryTool(server: McpServer, deps: ToolDeps): void {
           count: count.count,
         });
       }
-      items.push(...(await recentItems(deps, providers, run.now)));
+      items.push(...(await recentItems(deps, providers, run.now, perSectionLimit(args.limit))));
 
       return respond({
         tool: "get_health_summary",
         rules: run.rules,
         items,
-        limit: effectiveLimit(args.limit ?? MAX_LIMIT),
+        limit: effectiveLimit(args.limit),
         providerIds: providers.map((provider) => provider.id),
         now: run.now,
       });

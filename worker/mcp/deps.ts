@@ -20,15 +20,6 @@ import type { Logger } from "../lib/log.ts";
 import type { PolicyRules } from "../policy/rules.ts";
 import type { PortalVisit } from "../providers/mychart/index.ts";
 
-/** How many cached rows one tool may scan per provider per resource type. */
-export const CACHE_SCAN_LIMIT = 500;
-
-/** Default number of items a tool returns. */
-export const DEFAULT_LIMIT = 50;
-
-/** Ceiling on `limit`, enforced by the input schema as well as here. */
-export const MAX_LIMIT = 200;
-
 /** Resource type the decoded text of a clinical document is cached under. */
 export const BINARY_TEXT_TYPE = "_binary_text";
 

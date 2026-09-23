@@ -9,11 +9,18 @@
  *
  * The envelope is fixed:
  *
- *   { items, warnings, truncated, generatedAt }      (+ raw, when asked for)
+ *   { items, total, warnings, truncated, generatedAt }      (+ raw, when asked for)
  *
  * `truncated` is decided AFTER filtering, deliberately. Slicing to `limit` first
  * would let a deny rule turn a full page into a short one and the caller would
  * have no way to tell a filtered page from the end of the data.
+ *
+ * `limit` is optional and there is no default and no ceiling: an absent `limit`
+ * means every matching item comes back, however many there are. `truncated` is
+ * therefore only ever true when the caller passed a `limit` and it actually cut
+ * something -- it is never how a tool quietly caps its own answer. `total` is
+ * the count before that cut, so "10 of 340" is always answerable from the
+ * response alone.
  *
  * Errors are `isError` content carrying a stable code and a fixed sentence. Never
  * a stack, never an upstream body, never a resource: an upstream error message
@@ -102,7 +109,8 @@ export interface RespondInput {
   items: readonly unknown[];
   /** The raw FHIR behind `items`, in the same order. Omitted unless requested. */
   rawItems?: readonly RawEntry[] | undefined;
-  limit: number;
+  /** Omitted (or undefined) means no limit: every matching item is returned. */
+  limit?: number | undefined;
   /** Provider ids read from, for the audit row. */
   providerIds: string[];
   /** Notes the tool itself wants to pass on (cache staleness, sync warnings). */
@@ -130,14 +138,17 @@ export function respond(input: RespondInput): ToolOutcome {
     return toolError("policy_denied", { providerIds: input.providerIds });
   }
 
-  const limit = Math.max(0, Math.trunc(input.limit));
-  const items = filtered.items.slice(0, limit);
-  const truncated = filtered.items.length > items.length;
+  const limit = input.limit === undefined ? undefined : Math.max(0, Math.trunc(input.limit));
+  const items = limit === undefined ? filtered.items : filtered.items.slice(0, limit);
+  const truncated = limit !== undefined && filtered.items.length > items.length;
   const warnings = sortedWarnings([...(input.warnings ?? []), ...filtered.warnings]);
 
   const payload: Record<string, unknown> = {
     items,
-    ...(input.rawItems !== undefined && { raw: filtered.rawItems.slice(0, limit) }),
+    total: filtered.items.length,
+    ...(input.rawItems !== undefined && {
+      raw: limit === undefined ? filtered.rawItems : filtered.rawItems.slice(0, limit),
+    }),
     warnings,
     truncated,
     generatedAt: toIso(input.now),

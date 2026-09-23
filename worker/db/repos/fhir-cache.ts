@@ -181,7 +181,11 @@ export function makeFhirCacheRepo(ctx: Ctx) {
      *
      * `providerId: null` is how a cross-provider MCP tool asks for all of them.
      * `since` filters on the org's own `meta.lastUpdated` where it gave one,
-     * falling back to when we fetched it.
+     * falling back to when we fetched it. `limit` is omitted by every caller in
+     * this codebase -- an MCP tool's own `limit` argument is applied later, in
+     * `respond()`, after the policy filter -- so there is no `LIMIT` clause at
+     * all unless a caller actually wants one: the owner's whole record is what
+     * "every live resource of one type" means.
      */
     async listByType(
       providerId: string | null,
@@ -198,15 +202,15 @@ export function makeFhirCacheRepo(ctx: Ctx) {
         clauses.push("COALESCE(last_updated, fetched_at) >= ?");
         values.push(options.since);
       }
-      const limit = options.limit ?? 500;
+      const limitClause = options.limit === undefined ? "" : " LIMIT ?";
+      if (options.limit !== undefined) values.push(options.limit);
       const rows = await all<FhirCacheRow>(
         ctx.db
           .prepare(
             `SELECT * FROM fhir_cache WHERE ${clauses.join(" AND ")}
-              ORDER BY COALESCE(last_updated, fetched_at) DESC, resource_id
-              LIMIT ?`,
+              ORDER BY COALESCE(last_updated, fetched_at) DESC, resource_id${limitClause}`,
           )
-          .bind(...values, limit),
+          .bind(...values),
       );
       return Promise.all(rows.map((row) => decode(row)));
     },

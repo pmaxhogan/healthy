@@ -164,6 +164,8 @@ interface Answer {
   text: string;
   isError: boolean;
   items: Record<string, unknown>[];
+  total?: number;
+  truncated?: boolean;
   error?: string;
 }
 
@@ -180,6 +182,8 @@ async function call(
     text,
     isError: result.isError === true,
     items: (parsed.items ?? []) as Record<string, unknown>[],
+    ...(typeof parsed.total === "number" && { total: parsed.total }),
+    ...(typeof parsed.truncated === "boolean" && { truncated: parsed.truncated }),
     ...(typeof parsed.error === "string" && { error: parsed.error }),
   };
 }
@@ -490,6 +494,35 @@ describe("portal visits through the MCP", () => {
       "enc-a",
       "csn-4",
     ]);
+  });
+});
+
+describe("no cap on how much comes back", () => {
+  it("returns more than 200 cached resources when the caller passes no limit", async () => {
+    const day = 24 * 3600 * 1000;
+    await repos().fhirCache.upsertMany(
+      world.seeded.providerA,
+      Array.from({ length: 250 }, (_, index) => ({
+        resourceType: "Encounter",
+        id: `gen-enc-${String(index)}`,
+        status: "finished",
+        class: { code: "AMB", display: "ambulatory" },
+        period: { start: `2026-01-${String((index % 28) + 1).padStart(2, "0")}T09:00:00Z` },
+      })),
+      8 * day,
+    );
+
+    const everything = await call(world.client, "get_encounters");
+    const limited = await call(world.client, "get_encounters", { limit: 10 });
+
+    // enc-a from `seed()` plus the 250 generated here.
+    expect(everything.items).toHaveLength(251);
+    expect(everything.total).toBe(251);
+    expect(everything.truncated).toBe(false);
+
+    expect(limited.items).toHaveLength(10);
+    expect(limited.total).toBe(251);
+    expect(limited.truncated).toBe(true);
   });
 });
 

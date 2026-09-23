@@ -23,7 +23,6 @@ import { buildRules } from "../policy/rules.ts";
 
 import { documentText } from "./binary.ts";
 import { REFERENCE_TYPES } from "./collect.ts";
-import { CACHE_SCAN_LIMIT } from "./deps.ts";
 
 import type {
   AuditRecord,
@@ -107,9 +106,7 @@ async function loadRows(
   providerId: string,
   resourceType: string,
 ): Promise<CachedRow[]> {
-  const rows = await repos.fhirCache.listByType(providerId, resourceType, {
-    limit: CACHE_SCAN_LIMIT,
-  });
+  const rows = await repos.fhirCache.listByType(providerId, resourceType);
   return rows.map((row) => ({
     resource: row.resource,
     lastUpdated: row.lastUpdated,
@@ -120,9 +117,7 @@ async function loadRows(
 /** Everything one provider's references can resolve against, in one pool. */
 async function loadReferencePool(repos: Repos, providerId: string): Promise<unknown[]> {
   const groups = await Promise.all(
-    REFERENCE_TYPES.map((resourceType) =>
-      repos.fhirCache.listByType(providerId, resourceType, { limit: CACHE_SCAN_LIMIT }),
-    ),
+    REFERENCE_TYPES.map((resourceType) => repos.fhirCache.listByType(providerId, resourceType)),
   );
   return groups.flat().map((row) => row.resource);
 }

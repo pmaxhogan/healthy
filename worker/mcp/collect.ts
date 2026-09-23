@@ -22,8 +22,6 @@
 import { mapResolver, normalizeResource } from "../fhir/normalize/index.ts";
 import { isProviderDenied } from "../policy/rules.ts";
 
-import { DEFAULT_LIMIT, MAX_LIMIT } from "./deps.ts";
-
 import type { CachedRow, ProviderInfo, ToolDeps } from "./deps.ts";
 import type { NormalizeCtx, NormalizedResource } from "../fhir/normalize/index.ts";
 import type { RawEntry } from "../policy/filter.ts";
@@ -136,9 +134,17 @@ export function selectProviders(
   );
 }
 
-/** Clamp a caller's `limit` to the documented range. */
-export function effectiveLimit(limit: number | undefined): number {
-  return limit === undefined ? DEFAULT_LIMIT : Math.min(MAX_LIMIT, Math.max(1, Math.trunc(limit)));
+/**
+ * A caller's `limit`, made safe to slice with -- or `undefined` for "no limit
+ * at all", which is what an absent `limit` means.
+ *
+ * There is no ceiling: a tool answers everything it found unless the caller
+ * asked to see less of it. An explicit `limit` is still floored at 1 and
+ * truncated to an integer, because "give me the top -5" and "the top 3.7" are
+ * not requests `respond()`'s `slice` can act on.
+ */
+export function effectiveLimit(limit: number | undefined): number | undefined {
+  return limit === undefined ? undefined : Math.max(1, Math.trunc(limit));
 }
 
 function isResource(value: unknown): value is fhir4.FhirResource {

@@ -13,7 +13,6 @@
 import { toIso } from "../../lib/time.ts";
 import { sharedOnlyArgs } from "../args.ts";
 import { effectiveLimit, selectProviders } from "../collect.ts";
-import { MAX_LIMIT } from "../deps.ts";
 import { respond } from "../respond.ts";
 
 import { readTool } from "./register.ts";
@@ -60,7 +59,7 @@ export function registerProviderTools(server: McpServer, deps: ToolDeps): void {
         tool: "list_providers",
         rules: run.rules,
         items: providers.map((provider) => providerItem(provider)),
-        limit: effectiveLimit(args.limit ?? MAX_LIMIT),
+        limit: effectiveLimit(args.limit),
         providerIds: providers.map((provider) => provider.id),
         now: run.now,
       });
@@ -106,7 +105,7 @@ export function registerProviderTools(server: McpServer, deps: ToolDeps): void {
         tool: "get_sync_status",
         rules: run.rules,
         items,
-        limit: effectiveLimit(args.limit ?? MAX_LIMIT),
+        limit: effectiveLimit(args.limit),
         providerIds: providers.map((provider) => provider.id),
         now: run.now,
       });

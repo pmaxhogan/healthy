@@ -4,7 +4,6 @@
 import { describe, expect, it } from "vitest";
 
 import { effectiveLimit, selectProviders } from "../../../worker/mcp/collect.ts";
-import { DEFAULT_LIMIT, MAX_LIMIT } from "../../../worker/mcp/deps.ts";
 import { EMPTY_RULES, buildRules } from "../../../worker/policy/rules.ts";
 
 import type { ProviderInfo } from "../../../worker/mcp/deps.ts";
@@ -71,10 +70,10 @@ describe("selectProviders", () => {
 });
 
 describe("effectiveLimit", () => {
-  it("defaults, clamps to the ceiling, and refuses less than one", () => {
-    expect(effectiveLimit(undefined)).toBe(DEFAULT_LIMIT);
+  it("is undefined (no limit at all) when the caller passes none, with no ceiling otherwise", () => {
+    expect(effectiveLimit(undefined)).toBeUndefined();
     expect(effectiveLimit(10)).toBe(10);
-    expect(effectiveLimit(MAX_LIMIT + 1000)).toBe(MAX_LIMIT);
+    expect(effectiveLimit(50_000)).toBe(50_000);
     expect(effectiveLimit(0)).toBe(1);
     expect(effectiveLimit(-5)).toBe(1);
     expect(effectiveLimit(7.9)).toBe(7);

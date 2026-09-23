@@ -376,6 +376,8 @@ export interface ToolAnswer {
   items: Record<string, unknown>[];
   warnings: string[];
   truncated: boolean;
+  /** How many items matched before `limit` (if any) was applied. */
+  total: number;
   raw?: { resource: Record<string, unknown> }[];
   /** Present on an error answer. */
   error?: string;
@@ -416,6 +418,7 @@ export async function callTool(
     items: (parsed.items ?? []) as Record<string, unknown>[],
     warnings: (parsed.warnings ?? []) as string[],
     truncated: parsed.truncated === true,
+    total: typeof parsed.total === "number" ? parsed.total : 0,
     ...(parsed.raw !== undefined && { raw: parsed.raw as { resource: Record<string, unknown> }[] }),
     ...(typeof parsed.error === "string" && { error: parsed.error }),
   };

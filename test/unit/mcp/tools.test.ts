@@ -74,13 +74,14 @@ describe("the registered surface", () => {
 });
 
 describe("the envelope", () => {
-  it("carries items, warnings, truncated and generatedAt", async () => {
+  it("carries items, total, warnings, truncated and generatedAt", async () => {
     const answer = await callTool(world.client, "get_conditions");
     const parsed = JSON.parse(answer.text) as Record<string, unknown>;
 
     expect(Object.keys(parsed).toSorted((a, b) => a.localeCompare(b))).toStrictEqual([
       "generatedAt",
       "items",
+      "total",
       "truncated",
       "warnings",
     ]);
@@ -111,6 +112,14 @@ describe("the envelope", () => {
 
     expect(answer.items).toHaveLength(1);
     expect(answer.truncated).toBe(true);
+    expect(answer.total).toBeGreaterThan(1);
+  });
+
+  it("returns everything and reports no truncation when `limit` is omitted", async () => {
+    const answer = await callTool(world.client, "get_conditions");
+
+    expect(answer.items).toHaveLength(answer.total);
+    expect(answer.truncated).toBe(false);
   });
 
   it("orders newest first across providers", async () => {
@@ -160,7 +169,9 @@ describe("strict inputs", () => {
     // The whole reason the schemas are strict: a model that invents an argument
     // must be told, not quietly served an unfiltered list.
     ["get_conditions", { patient: "me" }],
-    ["get_conditions", { limit: 5000 }],
+    // No ceiling on `limit` any more -- 5000 is a valid request for "everything,
+    // and I mean it", not a schema violation. Zero is still refused: it is not a
+    // meaningful count of items to return.
     ["get_conditions", { limit: 0 }],
     ["get_conditions", { providers: "prov_a" }],
     ["get_conditions", { raw: "yes" }],

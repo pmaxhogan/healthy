@@ -10,8 +10,6 @@
 
 import { z } from "zod";
 
-import { MAX_LIMIT } from "./deps.ts";
-
 /** An ISO-8601 date (`2026-01-31`) or instant (`2026-01-31T09:00:00Z`). */
 const instant = z
   .string()
@@ -46,9 +44,13 @@ const SHARED_ARGS = {
     .number()
     .int()
     .min(1)
-    .max(MAX_LIMIT)
     .optional()
-    .describe(`Maximum items to return. Default 50, maximum ${String(MAX_LIMIT)}.`),
+    .describe(
+      "Maximum items to return. There is no default and no maximum: omit this " +
+        "to get every matching item, however many there are. The response's " +
+        "`total` says how many matched and `truncated` says whether this limit " +
+        "cut any off.",
+    ),
 } as const;
 
 /** A date window, on the tools that have one. */
