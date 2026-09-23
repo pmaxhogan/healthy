@@ -35,7 +35,7 @@ export function normalizeCareTeam(resource: fhir4.CareTeam, ctx: NormalizeCtx): 
   return {
     resourceType: "CareTeam",
     id: resource.id ?? "",
-    provider: ctx.provider,
+    healthSystem: ctx.healthSystem,
     ...(resource.meta?.lastUpdated && { lastUpdated: resource.meta.lastUpdated }),
     ...(resource.name && { name: resource.name }),
     ...(resource.status && { status: resource.status }),

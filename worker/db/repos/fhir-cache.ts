@@ -2,7 +2,7 @@
  * The read cache of FHIR resources that the MCP serves from.
  *
  * This is the PHI-bearing table, so `payload_enc` is sealed against
- * `fhir_cache.payload.<providerId>:<type>:<resource_id>` -- the composite row id,
+ * `fhir_cache.payload.<healthSystemId>:<type>:<resource_id>` -- the composite row id,
  * because the primary key is composite. A payload lifted from one patient's row
  * to another's fails to open.
  *
@@ -41,7 +41,7 @@ export interface CacheableResource {
 
 /** A resource read back out of the cache. */
 export interface CachedResource {
-  providerId: string;
+  healthSystemId: string;
   resourceType: string;
   resourceId: string;
   /** Unix second from `meta.lastUpdated`, when the org supplied one. */
@@ -59,12 +59,16 @@ export interface CachedResource {
  * would make every row already in the cache fail to open. If it is ever worth
  * fixing it has to be a migration that re-seals, not an edit here.
  */
-const fhirCacheAad = (providerId: string, resourceType: string, storedId: string): string =>
-  aadFor("fhir_cache", "payload", `${providerId}:${resourceType}:${storedId}`);
+const fhirCacheAad = (healthSystemId: string, resourceType: string, storedId: string): string =>
+  aadFor("fhir_cache", "payload", `${healthSystemId}:${resourceType}:${storedId}`);
 
 /** The stored digest of one plaintext payload. */
-function fhirCacheDigest(blinder: Blinder, providerId: string, plaintext: string): Promise<string> {
-  return blinder.digest("fhir_cache.content_hash", `${providerId}\u{0}${plaintext}`);
+function fhirCacheDigest(
+  blinder: Blinder,
+  healthSystemId: string,
+  plaintext: string,
+): Promise<string> {
+  return blinder.digest("fhir_cache.content_hash", `${healthSystemId}\u{0}${plaintext}`);
 }
 
 /** The payload's own `id`, which is the real upstream id. */
@@ -81,20 +85,20 @@ export interface UpsertReport {
 
 export function makeFhirCacheRepo(ctx: Ctx) {
   const blinder = blinderFor(ctx.env);
-  const blindId = (providerId: string, resourceType: string, resourceId: string) =>
-    blindResourceId(blinder, providerId, resourceType, resourceId);
+  const blindId = (healthSystemId: string, resourceType: string, resourceId: string) =>
+    blindResourceId(blinder, healthSystemId, resourceType, resourceId);
 
   const decode = async (row: FhirCacheRow): Promise<CachedResource> => {
     const resource: unknown = JSON.parse(
       await open(
         ctx.env,
         row.payload_enc,
-        fhirCacheAad(row.provider_id, row.resource_type, row.resource_id),
+        fhirCacheAad(row.health_system_id, row.resource_type, row.resource_id),
       ),
     );
     const realId = payloadId(resource) ?? "";
     return {
-      providerId: row.provider_id,
+      healthSystemId: row.health_system_id,
       resourceType: row.resource_type,
       resourceId: realId,
       lastUpdated: row.last_updated,
@@ -104,7 +108,7 @@ export function makeFhirCacheRepo(ctx: Ctx) {
   };
 
   const getStored = async (
-    providerId: string,
+    healthSystemId: string,
     resourceType: string,
     storedId: string,
   ): Promise<CachedResource | null> => {
@@ -112,9 +116,9 @@ export function makeFhirCacheRepo(ctx: Ctx) {
       ctx.db
         .prepare(
           `SELECT * FROM fhir_cache
-            WHERE provider_id = ? AND resource_type = ? AND resource_id = ? AND expires_at > ?`,
+            WHERE health_system_id = ? AND resource_type = ? AND resource_id = ? AND expires_at > ?`,
         )
-        .bind(providerId, resourceType, storedId, ctx.now()),
+        .bind(healthSystemId, resourceType, storedId, ctx.now()),
     );
     return row === null ? null : decode(row);
   };
@@ -128,7 +132,7 @@ export function makeFhirCacheRepo(ctx: Ctx) {
      * resources at once and D1 caps a batch.
      */
     async upsertMany(
-      providerId: string,
+      healthSystemId: string,
       resources: readonly CacheableResource[],
       ttlMs: number,
     ): Promise<UpsertReport> {
@@ -140,9 +144,9 @@ export function makeFhirCacheRepo(ctx: Ctx) {
       const known = await all<Pick<FhirCacheRow, "resource_type" | "resource_id" | "content_hash">>(
         ctx.db
           .prepare(
-            "SELECT resource_type, resource_id, content_hash FROM fhir_cache WHERE provider_id = ?",
+            "SELECT resource_type, resource_id, content_hash FROM fhir_cache WHERE health_system_id = ?",
           )
-          .bind(providerId),
+          .bind(healthSystemId),
       );
       const existing = new Map<string, string>();
       for (const row of known) {
@@ -152,8 +156,8 @@ export function makeFhirCacheRepo(ctx: Ctx) {
       const statements: D1PreparedStatement[] = [];
       for (const resource of resources) {
         const plaintext = JSON.stringify(resource);
-        const hash = await fhirCacheDigest(blinder, providerId, plaintext);
-        const storedId = await blindId(providerId, resource.resourceType, resource.id);
+        const hash = await fhirCacheDigest(blinder, healthSystemId, plaintext);
+        const storedId = await blindId(healthSystemId, resource.resourceType, resource.id);
         const lastUpdated = parseLastUpdated(resource.meta?.lastUpdated);
 
         // security/detect-possible-timing-attacks warns because the variable is
@@ -164,9 +168,9 @@ export function makeFhirCacheRepo(ctx: Ctx) {
             ctx.db
               .prepare(
                 `UPDATE fhir_cache SET fetched_at = ?, expires_at = ?
-                  WHERE provider_id = ? AND resource_type = ? AND resource_id = ?`,
+                  WHERE health_system_id = ? AND resource_type = ? AND resource_id = ?`,
               )
-              .bind(fetchedAt, expiresAt, providerId, resource.resourceType, storedId),
+              .bind(fetchedAt, expiresAt, healthSystemId, resource.resourceType, storedId),
           );
           continue;
         }
@@ -175,16 +179,16 @@ export function makeFhirCacheRepo(ctx: Ctx) {
         const payloadEnc = await seal(
           ctx.env,
           plaintext,
-          fhirCacheAad(providerId, resource.resourceType, storedId),
+          fhirCacheAad(healthSystemId, resource.resourceType, storedId),
         );
         statements.push(
           ctx.db
             .prepare(
               `INSERT INTO fhir_cache
-                 (provider_id, resource_type, resource_id, payload_enc, content_hash,
+                 (health_system_id, resource_type, resource_id, payload_enc, content_hash,
                   last_updated, fetched_at, expires_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT (provider_id, resource_type, resource_id) DO UPDATE SET
+               ON CONFLICT (health_system_id, resource_type, resource_id) DO UPDATE SET
                  payload_enc = excluded.payload_enc,
                  content_hash = excluded.content_hash,
                  last_updated = excluded.last_updated,
@@ -192,7 +196,7 @@ export function makeFhirCacheRepo(ctx: Ctx) {
                  expires_at = excluded.expires_at`,
             )
             .bind(
-              providerId,
+              healthSystemId,
               resource.resourceType,
               storedId,
               payloadEnc,
@@ -205,7 +209,7 @@ export function makeFhirCacheRepo(ctx: Ctx) {
       }
 
       for (const page of chunk(statements, BATCH_CHUNK)) await batch(ctx.db, page);
-      ctx.log.info("fhir_cache.upserted", { providerId, ...report });
+      ctx.log.info("fhir_cache.upserted", { healthSystemId, ...report });
       return report;
     },
 
@@ -215,12 +219,12 @@ export function makeFhirCacheRepo(ctx: Ctx) {
      * that takes an id finds it -- and the caller never sees the stored form.
      */
     async get(
-      providerId: string,
+      healthSystemId: string,
       resourceType: string,
       resourceId: string,
     ): Promise<CachedResource | null> {
-      const storedId = await blindId(providerId, resourceType, resourceId);
-      return getStored(providerId, resourceType, storedId);
+      const storedId = await blindId(healthSystemId, resourceType, resourceId);
+      return getStored(healthSystemId, resourceType, storedId);
     },
 
     /**
@@ -228,17 +232,17 @@ export function makeFhirCacheRepo(ctx: Ctx) {
      * which is the same blind this table keys the Encounter by.
      */
     async getByStoredId(
-      providerId: string,
+      healthSystemId: string,
       resourceType: string,
       storedId: string,
     ): Promise<CachedResource | null> {
-      return getStored(providerId, resourceType, storedId);
+      return getStored(healthSystemId, resourceType, storedId);
     },
 
     /**
-     * Every live resource of one type, optionally for a single provider.
+     * Every live resource of one type, optionally for a single health system.
      *
-     * `providerId: null` is how a cross-provider MCP tool asks for all of them.
+     * `healthSystemId: null` is how a cross-health system MCP tool asks for all of them.
      * `since` filters on the org's own `meta.lastUpdated` where it gave one,
      * falling back to when we fetched it. `limit` is omitted by every caller in
      * this codebase -- an MCP tool's own `limit` argument is applied later, in
@@ -247,15 +251,15 @@ export function makeFhirCacheRepo(ctx: Ctx) {
      * "every live resource of one type" means.
      */
     async listByType(
-      providerId: string | null,
+      healthSystemId: string | null,
       resourceType: string,
       options: { since?: number; limit?: number } = {},
     ): Promise<CachedResource[]> {
       const clauses = ["resource_type = ?", "expires_at > ?"];
       const values: unknown[] = [resourceType, ctx.now()];
-      if (providerId !== null) {
-        clauses.push("provider_id = ?");
-        values.push(providerId);
+      if (healthSystemId !== null) {
+        clauses.push("health_system_id = ?");
+        values.push(healthSystemId);
       }
       if (options.since !== undefined) {
         clauses.push("COALESCE(last_updated, fetched_at) >= ?");
@@ -282,29 +286,31 @@ export function makeFhirCacheRepo(ctx: Ctx) {
       return changes;
     },
 
-    /** Live row counts per provider and type. Feeds the overview and get_health_summary. */
-    async countsByType(): Promise<{ providerId: string; resourceType: string; count: number }[]> {
-      const rows = await all<{ provider_id: string; resource_type: string; n: number }>(
+    /** Live row counts per health system and type. Feeds the overview and get_health_summary. */
+    async countsByType(): Promise<
+      { healthSystemId: string; resourceType: string; count: number }[]
+    > {
+      const rows = await all<{ health_system_id: string; resource_type: string; n: number }>(
         ctx.db
           .prepare(
-            `SELECT provider_id, resource_type, COUNT(*) AS n FROM fhir_cache
+            `SELECT health_system_id, resource_type, COUNT(*) AS n FROM fhir_cache
               WHERE expires_at > ?
-              GROUP BY provider_id, resource_type
-              ORDER BY provider_id, resource_type`,
+              GROUP BY health_system_id, resource_type
+              ORDER BY health_system_id, resource_type`,
           )
           .bind(ctx.now()),
       );
       return rows.map((row) => ({
-        providerId: row.provider_id,
+        healthSystemId: row.health_system_id,
         resourceType: row.resource_type,
         count: row.n,
       }));
     },
 
-    /** Forget everything cached for one provider, e.g. on disconnect. */
-    async clearProvider(providerId: string): Promise<number> {
+    /** Forget everything cached for one health system, e.g. on disconnect. */
+    async clearHealthSystem(healthSystemId: string): Promise<number> {
       const { changes } = await run(
-        ctx.db.prepare("DELETE FROM fhir_cache WHERE provider_id = ?").bind(providerId),
+        ctx.db.prepare("DELETE FROM fhir_cache WHERE health_system_id = ?").bind(healthSystemId),
       );
       return changes;
     },

@@ -39,7 +39,7 @@ export function normalizeAllergy(
   return {
     resourceType: "AllergyIntolerance",
     id: resource.id ?? "",
-    provider: ctx.provider,
+    healthSystem: ctx.healthSystem,
     ...(resource.meta?.lastUpdated && { lastUpdated: resource.meta.lastUpdated }),
     ...(substance && { substance }),
     reactions: (resource.reaction ?? []).map((reaction) => normalizedReaction(reaction)),

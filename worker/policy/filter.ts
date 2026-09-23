@@ -13,7 +13,7 @@
  *
  *  1. Removal is total. A denied field is deep-deleted from the normalized item
  *     AND from the raw resource behind it, including inside arrays. A denied
- *     resource type or provider takes every item with it.
+ *     resource type or health system takes every item with it.
  *  2. Removal is immutable. Nothing here mutates its input: each item is rebuilt
  *     without the denied parts, so a cached object cannot be left damaged for
  *     the next caller and a half-applied filter cannot leave a field behind.
@@ -29,17 +29,17 @@ import { expandPath } from "./aliases.ts";
 import {
   ARRAY_SEGMENT,
   fieldRulesFor,
-  isProviderDenied,
+  isHealthSystemDenied,
   isSensitiveAllowed,
   isToolDenied,
   type PolicyRules,
 } from "./rules.ts";
 
-/** A raw FHIR resource as a tool hands it over, tagged with its provider. */
+/** A raw FHIR resource as a tool hands it over, tagged with its health system. */
 export interface RawEntry {
-  /** Provider display name, matching the normalized item's `provider`. */
-  provider: string;
-  providerId: string;
+  /** Health system display name, matching the normalized item's `health_system`. */
+  healthSystem: string;
+  healthSystemId: string;
   /** The resource exactly as it came out of the cache. */
   resource: unknown;
 }
@@ -316,21 +316,21 @@ function collectSensitive(rules: PolicyRules, items: readonly unknown[]): Map<st
   return byType;
 }
 
-/** Whole-item denials: the resource type, or the provider it came from. */
+/** Whole-item denials: the resource type, or the health system it came from. */
 function itemDenied(
   rules: PolicyRules,
   resourceType: string,
-  providerId: string,
+  healthSystemId: string,
   warnings: Set<string>,
 ): boolean {
   if (rules.resources.has(resourceType)) {
     warnings.add(`policy_resource_denied:${resourceType}`);
     return true;
   }
-  if (providerId !== "" && isProviderDenied(rules, providerId)) {
-    // No provider id in the warning: the deny-list is the owner's business, and a
+  if (healthSystemId !== "" && isHealthSystemDenied(rules, healthSystemId)) {
+    // No health system id in the warning: the deny-list is the owner's business, and a
     // tool's answer is read by a third-party model.
-    warnings.add("policy_provider_denied");
+    warnings.add("policy_health_system_denied");
     return true;
   }
   return false;
@@ -339,7 +339,7 @@ function itemDenied(
 /**
  * Filter one tool's output.
  *
- * Order matters and is fixed: tool deny short-circuits everything; then provider
+ * Order matters and is fixed: tool deny short-circuits everything; then health system
  * and resource-type denies drop whole items (no point filtering fields off
  * something that is leaving); then field rules; then the sensitive default. The
  * sensitive field names are collected from the normalized items BEFORE they are
@@ -373,7 +373,7 @@ function filterItems(
   const items: unknown[] = [];
   for (const item of input) {
     // Anything that is not a record cannot be filtered: it carries no
-    // `resourceType` to judge, no `providerId` to check and no `sensitive` list to
+    // `resourceType` to judge, no `healthSystemId` to check and no `sensitive` list to
     // honour. No tool produces one today, and the choke point's contract is that
     // nothing leaves unfiltered -- so it is dropped rather than passed through.
     if (!isRecord(item)) {
@@ -381,7 +381,7 @@ function filterItems(
       continue;
     }
     const resourceType = stringField(item, "resourceType");
-    if (itemDenied(rules, resourceType, stringField(item, "providerId"), warnings)) continue;
+    if (itemDenied(rules, resourceType, stringField(item, "healthSystemId"), warnings)) continue;
     const filtered = applyFieldRules(rules, resourceType, "normalized", item, warnings);
     items.push(
       isRecord(filtered) ? stripSensitive(rules, resourceType, filtered, warnings) : filtered,
@@ -400,7 +400,7 @@ function filterRaw(
   const rawItems: RawEntry[] = [];
   for (const entry of input) {
     const resourceType = stringField(entry.resource, "resourceType");
-    if (itemDenied(rules, resourceType, entry.providerId, warnings)) continue;
+    if (itemDenied(rules, resourceType, entry.healthSystemId, warnings)) continue;
     const filtered = applyFieldRules(rules, resourceType, "raw", entry.resource, warnings);
     const resource = stripSensitiveRaw(
       resourceType,
@@ -408,7 +408,11 @@ function filterRaw(
       filtered,
       warnings,
     );
-    rawItems.push({ provider: entry.provider, providerId: entry.providerId, resource });
+    rawItems.push({
+      healthSystem: entry.healthSystem,
+      healthSystemId: entry.healthSystemId,
+      resource,
+    });
   }
   return rawItems;
 }

@@ -37,7 +37,7 @@ export const PORTAL_PASSWORD = "portal-password";
  *
  * `seedPortalAccount` stores it as the account's expected OTP sender and
  * `seedOtp` sends from it, because a claim is bound to a sender now: a code from
- * anywhere else is not eligible for this provider. A test that wants the
+ * anywhere else is not eligible for this health system. A test that wants the
  * *unbound* path (a first-ever sign-in, where the allowlist stands in and the
  * sender is then learned) passes `otpSenderDomain: null`.
  */
@@ -170,7 +170,7 @@ export function portalVisit(overrides: Partial<PortalVisit> & { csn: string }): 
  */
 export async function seedPortalAccount(
   ctx: Ctx,
-  providerId: string,
+  healthSystemId: string,
   options: {
     active?: boolean;
     mfaContact?: string;
@@ -180,7 +180,7 @@ export async function seedPortalAccount(
   } = {},
 ): Promise<void> {
   const repos = makeRepos(ctx);
-  await repos.portalAccounts.setEndpoint(providerId, {
+  await repos.portalAccounts.setEndpoint(healthSystemId, {
     baseUrl: PORTAL_ORIGIN,
     mountPath: PORTAL_MOUNT,
     endpoint: {
@@ -193,14 +193,14 @@ export async function seedPortalAccount(
   });
   const otpSenderDomain =
     options.otpSenderDomain === undefined ? OTP_SENDER_DOMAIN : options.otpSenderDomain;
-  await repos.portalAccounts.setCredentials(providerId, {
+  await repos.portalAccounts.setCredentials(healthSystemId, {
     username: PORTAL_USERNAME,
     password: PORTAL_PASSWORD,
     ...(options.mfaContact !== undefined && { mfaContact: options.mfaContact }),
     ...(otpSenderDomain !== null && { otpSenderDomain }),
   });
-  await repos.portalAccounts.saveCookieJar(providerId, JSON.stringify({ v: 1, cookies: [] }));
-  if (options.active !== false) await repos.portalAccounts.markActive(providerId);
+  await repos.portalAccounts.saveCookieJar(healthSystemId, JSON.stringify({ v: 1, cookies: [] }));
+  if (options.active !== false) await repos.portalAccounts.markActive(healthSystemId);
 }
 
 /**
@@ -215,7 +215,7 @@ export async function seedPortalAccount(
  *
  * `fromAddr` defaults to `OTP_SENDER`, which is what `seedPortalAccount` stores
  * as the account's expected sender: a code from anywhere else is deliberately
- * not eligible for that provider.
+ * not eligible for that health system.
  */
 export async function seedOtp(
   ctx: Ctx,
@@ -235,9 +235,13 @@ export async function seedOtp(
 }
 
 /** Spend `count` sign-in attempts, so the budget check has something to refuse. */
-export async function spendAttempts(ctx: Ctx, providerId: string, count: number): Promise<void> {
+export async function spendAttempts(
+  ctx: Ctx,
+  healthSystemId: string,
+  count: number,
+): Promise<void> {
   const repos = makeRepos(ctx);
   for (let attempt = 0; attempt < count; attempt += 1) {
-    await repos.portalAccounts.recordLoginAttempt(providerId);
+    await repos.portalAccounts.recordLoginAttempt(healthSystemId);
   }
 }

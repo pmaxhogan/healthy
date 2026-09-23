@@ -7,7 +7,7 @@ describe("buildArgsSkeleton", () => {
     expect(
       buildArgsSkeleton({
         type: "object",
-        properties: { providers: { type: "array" }, limit: { type: "integer" } },
+        properties: { healthSystems: { type: "array" }, limit: { type: "integer" } },
       }),
     ).toStrictEqual({});
   });
@@ -16,14 +16,14 @@ describe("buildArgsSkeleton", () => {
     const skeleton = buildArgsSkeleton({
       type: "object",
       properties: {
-        provider: { type: "string" },
+        healthSystem: { type: "string" },
         id: { type: "string" },
         limit: { type: "integer" },
       },
-      required: ["provider", "id"],
+      required: ["healthSystem", "id"],
     });
 
-    expect(skeleton).toStrictEqual({ provider: "", id: "" });
+    expect(skeleton).toStrictEqual({ healthSystem: "", id: "" });
   });
 
   it("picks a placeholder for every JSON Schema type", () => {

@@ -100,7 +100,7 @@ describe("the policy CRUD", () => {
   });
 
   it("accepts all four rule types and refuses a fifth", async () => {
-    for (const ruleType of ["tool", "resource", "field", "provider"]) {
+    for (const ruleType of ["tool", "resource", "field", "health_system"]) {
       const response = await owner().send("POST", "/api/mcp/policy", { ruleType, target: "x" });
       expect(response.status, ruleType).toBe(201);
     }
@@ -255,7 +255,7 @@ describe("GET /api/mcp/audit", () => {
     await repos.mcpAudit.insert({
       tool: "get_appointments",
       clientId: "client-1",
-      providers: ["PROV1"],
+      healthSystems: ["PROV1"],
       resultCount: 3,
       durationMs: 42,
     });
@@ -313,13 +313,13 @@ describe("GET /api/mcp/tools/schema", () => {
       expect(tool.inputSchema.type, tool.name).toBe("object");
     }
     const documentText = tools.find((tool) => tool.name === "get_document_text");
-    expect(documentText?.inputSchema.required).toStrictEqual(["provider", "id"]);
+    expect(documentText?.inputSchema.required).toStrictEqual(["healthSystem", "id"]);
   });
 });
 
 describe("POST /api/mcp/tools/:name/call", () => {
   it("requires a session", async () => {
-    const response = await call("/api/mcp/tools/list_providers/call", {
+    const response = await call("/api/mcp/tools/list_health_systems/call", {
       method: "POST",
       headers: { origin: ORIGIN, ...CSRF, "content-type": "application/json" },
       body: JSON.stringify({}),
@@ -351,17 +351,21 @@ describe("POST /api/mcp/tools/:name/call", () => {
   });
 
   it("400s a body that is not a JSON object", async () => {
-    const response = await owner().send("POST", "/api/mcp/tools/list_providers/call", [1, 2, 3]);
+    const response = await owner().send(
+      "POST",
+      "/api/mcp/tools/list_health_systems/call",
+      [1, 2, 3],
+    );
 
     expect(response.status).toBe(400);
   });
 
-  it("runs a real tool with no providers connected, and echoes the exact request sent", async () => {
-    const response = await owner().send("POST", "/api/mcp/tools/list_providers/call", {});
+  it("runs a real tool with no health systems connected, and echoes the exact request sent", async () => {
+    const response = await owner().send("POST", "/api/mcp/tools/list_health_systems/call", {});
     const body = await json<McpToolCallResponse>(response);
 
     expect(response.status).toBe(200);
-    expect(body.request).toStrictEqual({ name: "list_providers", arguments: {} });
+    expect(body.request).toStrictEqual({ name: "list_health_systems", arguments: {} });
     expect(body.result.isError).toBe(false);
     expect(body.result.data).toMatchObject({ items: [] });
     expect(typeof body.durationMs).toBe("number");

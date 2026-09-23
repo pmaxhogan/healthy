@@ -13,7 +13,7 @@
 import { registerAppointmentTools } from "./appointments.ts";
 import { registerClinicalTools } from "./clinical.ts";
 import { registerDocumentTools } from "./documents.ts";
-import { registerProviderTools } from "./providers.ts";
+import { registerHealthSystemTools } from "./health-systems.ts";
 import { registerSummaryTool } from "./summary.ts";
 
 import type { ToolDeps } from "../deps.ts";
@@ -22,7 +22,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 /** Every tool this server registers, in the order a caller would meet them. */
 export const TOOL_NAMES = [
   "get_health_summary",
-  "list_providers",
+  "list_health_systems",
   "get_sync_status",
   "get_patient_profile",
   "get_appointments",
@@ -49,7 +49,7 @@ export const TOOL_NAMES = [
 
 export function registerTools(server: McpServer, deps: ToolDeps): void {
   registerSummaryTool(server, deps);
-  registerProviderTools(server, deps);
+  registerHealthSystemTools(server, deps);
   registerAppointmentTools(server, deps);
   registerClinicalTools(server, deps);
   registerDocumentTools(server, deps);

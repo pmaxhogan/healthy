@@ -5,7 +5,7 @@
  *
  *  - `readTool` registers a hand-written body. It is the one that stamps the
  *    read-only annotations, so no tool can be registered without them.
- *  - `collectionTool` registers the common shape: pick providers, read the cache,
+ *  - `collectionTool` registers the common shape: pick health systems, read the cache,
  *    normalize, window, filter, respond. Nineteen of the tools are nothing but a
  *    description and a `CollectSpec`, and writing each of them out longhand would
  *    be nineteen chances to forget the policy call.
@@ -16,7 +16,7 @@
  */
 
 import { withAudit } from "../audit.ts";
-import { collect, effectiveLimit, selectProviders } from "../collect.ts";
+import { collect, effectiveLimit, selectHealthSystems } from "../collect.ts";
 import { respond } from "../respond.ts";
 
 import type { SharedArgs, WindowArgs } from "../args.ts";
@@ -99,8 +99,12 @@ export function collectionTool<S extends z.ZodType<SharedArgs & WindowArgs>>(
     const shared: SharedArgs = args;
     const window: WindowArgs = args;
 
-    const providers = selectProviders(await deps.providers(), run.rules, shared.providers);
-    const collected = await collect(deps, providers, {
+    const healthSystems = selectHealthSystems(
+      await deps.healthSystems(),
+      run.rules,
+      shared.healthSystems,
+    );
+    const collected = await collect(deps, healthSystems, {
       specs: options.specs(args),
       from: window.from,
       to: window.to,
@@ -113,7 +117,7 @@ export function collectionTool<S extends z.ZodType<SharedArgs & WindowArgs>>(
       items: collected.items,
       ...(shared.raw === true && { rawItems: collected.rawItems }),
       limit: effectiveLimit(shared.limit),
-      providerIds: collected.providerIds,
+      healthSystemIds: collected.healthSystemIds,
       warnings: options.notes?.(args),
       now: run.now,
     });

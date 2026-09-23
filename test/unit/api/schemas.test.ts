@@ -11,11 +11,11 @@ import {
   isHttpsUrl,
   isValidTimezone,
   policyRuleSchema,
-  providerCreateSchema,
-  providerSecretSchema,
+  healthSystemCreateSchema,
+  healthSystemSecretSchema,
   settingsPatchSchema,
   syncRequestSchema,
-  updateProviderSchema,
+  updateHealthSystemSchema,
 } from "../../../worker/api/schemas.ts";
 
 describe("isValidTimezone", () => {
@@ -99,15 +99,15 @@ describe("settingsPatchSchema", () => {
   });
 });
 
-describe("providerCreateSchema", () => {
+describe("healthSystemCreateSchema", () => {
   const base = { displayName: "Example Health", environment: "sandbox" as const };
 
   it("accepts a brand id", () => {
-    expect(providerCreateSchema.safeParse({ ...base, brandId: "brand-1" }).success).toBe(true);
+    expect(healthSystemCreateSchema.safeParse({ ...base, brandId: "brand-1" }).success).toBe(true);
   });
 
   it("accepts a manual https FHIR base", () => {
-    const result = providerCreateSchema.safeParse({
+    const result = healthSystemCreateSchema.safeParse({
       ...base,
       fhirBaseUrl: "https://fhir.example.test/R4",
     });
@@ -116,7 +116,7 @@ describe("providerCreateSchema", () => {
   });
 
   it("refuses a non-https FHIR base at the schema, before any request is made", () => {
-    const result = providerCreateSchema.safeParse({
+    const result = healthSystemCreateSchema.safeParse({
       ...base,
       // eslint-disable-next-line unicorn/prefer-https -- the assertion IS that http is refused.
       fhirBaseUrl: "http://fhir.example.test/R4",
@@ -126,24 +126,25 @@ describe("providerCreateSchema", () => {
   });
 
   it("requires a display name and a known environment", () => {
-    expect(providerCreateSchema.safeParse({ ...base, displayName: "" }).success).toBe(false);
+    expect(healthSystemCreateSchema.safeParse({ ...base, displayName: "" }).success).toBe(false);
     expect(
-      providerCreateSchema.safeParse({ ...base, environment: "staging", brandId: "b" }).success,
+      healthSystemCreateSchema.safeParse({ ...base, environment: "staging", brandId: "b" }).success,
     ).toBe(false);
   });
 
   it("rejects an unknown key", () => {
     expect(
-      providerCreateSchema.safeParse({ ...base, brandId: "b", vendor: "oracle" }).success,
+      healthSystemCreateSchema.safeParse({ ...base, brandId: "b", vendor: "oracle" }).success,
     ).toBe(false);
   });
 
   it("accepts a config, and rejects one with an unknown field", () => {
     expect(
-      providerCreateSchema.safeParse({ ...base, brandId: "b", config: { orgShort: "EX" } }).success,
+      healthSystemCreateSchema.safeParse({ ...base, brandId: "b", config: { orgShort: "EX" } })
+        .success,
     ).toBe(true);
     expect(
-      providerCreateSchema.safeParse({ ...base, brandId: "b", config: { org_short: "EX" } })
+      healthSystemCreateSchema.safeParse({ ...base, brandId: "b", config: { org_short: "EX" } })
         .success,
     ).toBe(false);
   });
@@ -151,28 +152,28 @@ describe("providerCreateSchema", () => {
 
 describe("the remaining schemas", () => {
   it("lets PATCH clear a portal URL with null but not with a bare string", () => {
-    expect(updateProviderSchema.safeParse({ portalUrl: null }).success).toBe(true);
-    expect(updateProviderSchema.safeParse({ portalUrl: "portal.example.test" }).success).toBe(
+    expect(updateHealthSystemSchema.safeParse({ portalUrl: null }).success).toBe(true);
+    expect(updateHealthSystemSchema.safeParse({ portalUrl: "portal.example.test" }).success).toBe(
       false,
     );
   });
 
   it("requires a non-empty client secret", () => {
-    expect(providerSecretSchema.safeParse({ clientSecret: "" }).success).toBe(false);
-    expect(providerSecretSchema.safeParse({ clientSecret: "s3cret" }).success).toBe(true);
+    expect(healthSystemSecretSchema.safeParse({ clientSecret: "" }).success).toBe(false);
+    expect(healthSystemSecretSchema.safeParse({ clientSecret: "s3cret" }).success).toBe(true);
   });
 
   it("closes the policy rule type to the four the column allows", () => {
-    for (const ruleType of ["tool", "resource", "field", "provider"]) {
+    for (const ruleType of ["tool", "resource", "field", "health_system"]) {
       expect(policyRuleSchema.safeParse({ ruleType, target: "x" }).success, ruleType).toBe(true);
     }
     expect(policyRuleSchema.safeParse({ ruleType: "everything", target: "x" }).success).toBe(false);
   });
 
-  it("accepts an empty sync request, which means 'every provider'", () => {
+  it("accepts an empty sync request, which means 'every health system'", () => {
     expect(syncRequestSchema.safeParse({}).success).toBe(true);
-    expect(syncRequestSchema.safeParse({ providerIds: ["PROV1"] }).success).toBe(true);
-    expect(syncRequestSchema.safeParse({ providerIds: "PROV1" }).success).toBe(false);
+    expect(syncRequestSchema.safeParse({ healthSystemIds: ["PROV1"] }).success).toBe(true);
+    expect(syncRequestSchema.safeParse({ healthSystemIds: "PROV1" }).success).toBe(false);
   });
 
   it("treats a missing brand query as absent rather than invalid", () => {

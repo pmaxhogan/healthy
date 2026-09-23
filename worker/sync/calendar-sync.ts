@@ -1,9 +1,9 @@
 /**
  * The hourly appointment sync.
  *
- * One pass, per provider, isolated: `Encounter?patient=…&date=ge…` -> resolve the
+ * One pass, per health system, isolated: `Encounter?patient=…&date=ge…` -> resolve the
  * references -> map to calendar events -> diff against `calendar_events` and
- * Google -> insert, patch, ghost or restore. A provider that fails is recorded on
+ * Google -> insert, patch, ghost or restore. A health system that fails is recorded on
  * the run summary and the run carries on with the next one, because one
  * organisation's outage must not cost the owner the other's appointments.
  *
@@ -17,8 +17,8 @@
  * event just outside the window is still recognised rather than orphaned.
  *
  * **Google is listed once, then partitioned.** `listSyncedEvents` returns every
- * event carrying `healthy=1`, across every provider. Each provider's slice is
- * taken by the `providerId:` prefix on the event key; without that, provider A
+ * event carrying `healthy=1`, across every health system. Each health system's slice is
+ * taken by the `healthSystemId:` prefix on the event key; without that, health system A
  * would see B's events as orphans.
  *
  * **A vanished appointment is rebuilt from the cache.** Ghosting needs the
@@ -28,12 +28,12 @@
  * forgotten, the row is marked ghost with no Google write and the event is left as
  * it is -- better a stale event than one whose details we invented.
  *
- * **Epic 4119 suppresses ghosting for that provider.** The organisation has
+ * **Epic 4119 suppresses ghosting for that health system.** The organisation has
  * admitted the patient-facing view filtered results, so absence proves nothing:
  * inserts and patches proceed, ghosts wait for a run that saw everything.
  *
  * **Any 429 stops the whole run.** `sync_backoff_until` is set to
- * `now + max(Retry-After, 2h)` and the remaining providers are not attempted --
+ * `now + max(Retry-After, 2h)` and the remaining health systems are not attempted --
  * hammering a second organisation while the first is throttling us is how an app
  * gets its access reviewed.
  *
@@ -119,8 +119,8 @@ const ENCOUNTER_TTL_MS = 8 * 24 * 60 * 60 * 1000;
 const GOOGLE_WINDOW_MARGIN_DAYS = 30;
 
 export interface CalendarSyncOptions {
-  /** Narrow the run to these providers. The admin "sync now" button's argument. */
-  providerIds?: string[];
+  /** Narrow the run to these health systems. The admin "sync now" button's argument. */
+  healthSystemIds?: string[];
   /** The `run_log.kind` to record. "calendar" for cron, "manual" for a button. */
   trigger?: RunKind;
   /** Ignore (and clear) an active backoff. Only ever set by a human action. */
@@ -128,7 +128,7 @@ export interface CalendarSyncOptions {
   /**
    * Run only the patient-portal pass, skipping every FHIR search.
    *
-   * What `POST /api/providers/:id/portal/sync` asks for, through the Durable
+   * What `POST /api/health-systems/:id/portal/sync` asks for, through the Durable
    * Object in `portal-runner.ts`. It is the same run row, the same Google listing
    * and the same writer -- only the upstream that is not consulted differs -- so
    * the Runs page reports it exactly like any other manual run.
@@ -150,7 +150,7 @@ export interface CalendarSyncOptions {
 }
 
 /**
- * Sync every eligible provider's appointments to the calendar.
+ * Sync every eligible health system's appointments to the calendar.
  *
  * Writes one `run_log` row and resolves with its summary. Does not throw: a
  * caller in a request handler is expected to `ectx.waitUntil(...)` this.
@@ -178,12 +178,12 @@ export async function runCalendarSync(
   }
 
   const outcome = await record(ctx, options.trigger ?? "calendar", async (state) => {
-    await syncAllProviders(ctx, repos, settings, state, options, deps);
+    await syncAllHealthSystems(ctx, repos, settings, state, options, deps);
   });
   return outcome.summary;
 }
 
-/** Shared per-run context, so the per-provider functions take one argument. */
+/** Shared per-run context, so the per-health system functions take one argument. */
 interface RunContext {
   ctx: Ctx;
   repos: Repos;
@@ -202,10 +202,10 @@ interface RunContext {
   /** Blinds event keys and keys fingerprints; see `worker/db/blind.ts`. */
   blinder: Blinder;
   /**
-   * What the FHIR pass mapped, per provider, for the portal pass to dedupe
+   * What the FHIR pass mapped, per health system, for the portal pass to dedupe
    * against.
    *
-   * Filled in as each provider is synced and read once at the end. It carries the
+   * Filled in as each health system is synced and read once at the end. It carries the
    * Encounters' CSNs, which `calendar_events` does not store and which are the one
    * exact way to tell that a portal visit and an Encounter are the same
    * appointment.
@@ -213,7 +213,7 @@ interface RunContext {
   fhirSeen: Map<string, FhirSighting>;
 }
 
-async function syncAllProviders(
+async function syncAllHealthSystems(
   ctx: Ctx,
   repos: Repos,
   settings: Settings,
@@ -221,21 +221,21 @@ async function syncAllProviders(
   options: CalendarSyncOptions,
   deps: SyncDeps,
 ): Promise<void> {
-  const targets = await syncTargets(repos, options.providerIds);
-  state.summary.providers = targets.length;
+  const targets = await syncTargets(repos, options.healthSystemIds);
+  state.summary.healthSystems = targets.length;
   if (targets.length === 0) {
     ctx.log.info("sync.no_targets");
     return;
   }
 
-  // Resolved before the provider loop: without a calendar there is nothing to do
+  // Resolved before the health system loop: without a calendar there is nothing to do
   // with any appointment, and failing N times identically is just noise.
   let calendar: CalendarClient;
   try {
     calendar = await getGoogleCalendarFor(ctx, deps);
   } catch (error) {
     ctx.log.error("sync.google_unavailable", errorFields(error));
-    state.summary.errors.push({ providerId: "google", code: codeOf(error) });
+    state.summary.errors.push({ healthSystemId: "google", code: codeOf(error) });
     return;
   }
 
@@ -254,7 +254,7 @@ async function syncAllProviders(
     });
   } catch (error) {
     ctx.log.error("sync.google_list_failed", errorFields(error));
-    state.summary.errors.push({ providerId: "google", code: codeOf(error) });
+    state.summary.errors.push({ healthSystemId: "google", code: codeOf(error) });
     return;
   }
 
@@ -286,13 +286,13 @@ async function syncAllProviders(
   const fhirTargets = options.portalOnly === true ? [] : targets;
   for (const target of fhirTargets) {
     try {
-      await syncProvider(run, target);
+      await syncHealthSystem(run, target);
       await repos.connections.recordSync(target.connection.id, "calendar");
     } catch (error) {
       const limit = rateLimitOf(error);
-      state.summary.errors.push({ providerId: target.provider.id, code: codeOf(error) });
-      ctx.log.error("sync.provider_failed", {
-        providerId: target.provider.id,
+      state.summary.errors.push({ healthSystemId: target.healthSystem.id, code: codeOf(error) });
+      ctx.log.error("sync.health_system_failed", {
+        healthSystemId: target.healthSystem.id,
         ...errorFields(error),
       });
       if (limit === null) continue;
@@ -307,7 +307,7 @@ async function syncAllProviders(
     }
   }
 
-  // Last, and after every provider: the portal pass needs to know what the FHIR
+  // Last, and after every health system: the portal pass needs to know what the FHIR
   // pass mapped before it decides which of its visits are already calendared.
   await runPortalPass(portalInput(run, options));
 }
@@ -328,7 +328,7 @@ function portalInput(run: RunContext, options: CalendarSyncOptions): PortalPassI
     deps: run.deps,
     blinder: run.blinder,
     fhirSeen: run.fhirSeen,
-    ...(options.providerIds !== undefined && { providerIds: options.providerIds }),
+    ...(options.healthSystemIds !== undefined && { healthSystemIds: options.healthSystemIds }),
     ...(options.signInWaitSeconds !== undefined && {
       signInWaitSeconds: options.signInWaitSeconds,
     }),
@@ -338,11 +338,11 @@ function portalInput(run: RunContext, options: CalendarSyncOptions): PortalPassI
   };
 }
 
-/** One provider, from search to calendar writes. */
-async function syncProvider(run: RunContext, target: SyncTarget): Promise<void> {
+/** One health system, from search to calendar writes. */
+async function syncHealthSystem(run: RunContext, target: SyncTarget): Promise<void> {
   const { ctx, repos } = run;
-  const providerId = target.provider.id;
-  const session = await getFhirClientFor(ctx, providerId, run.deps);
+  const healthSystemId = target.healthSystem.id;
+  const session = await getFhirClientFor(ctx, healthSystemId, run.deps);
 
   // `status` is sent only where the organisation advertises it; the client-side
   // pass in `statusFilter.apply` runs either way, because Epic's support for the
@@ -350,7 +350,7 @@ async function syncProvider(run: RunContext, target: SyncTarget): Promise<void> 
   const capabilities = await getCapabilityIndex(
     ctx,
     repos,
-    target.provider,
+    target.healthSystem,
     session.adapter,
     await session.getAccessToken(),
   );
@@ -370,7 +370,7 @@ async function syncProvider(run: RunContext, target: SyncTarget): Promise<void> 
   run.state.summary.encountersSeen += encounters.length;
 
   const references = collectEncounterReferences(encounters);
-  const resolved = await resolveReferences(ctx, repos, providerId, references, session.client);
+  const resolved = await resolveReferences(ctx, repos, healthSystemId, references, session.client);
   run.state.summary.resourcesCached += resolved.resources.length;
   // Not lost: recomputed and retried from next hour's encounters. But visible on
   // the Runs page rather than only in the logs -- see `references.ts`.
@@ -380,13 +380,15 @@ async function syncProvider(run: RunContext, target: SyncTarget): Promise<void> 
   }
 
   const mappings = await mapAppointments(run, target, encounters, resolved.resources);
-  recordSightings(run, providerId, mappings);
-  await cacheEncounters(run, providerId, encounters);
+  recordSightings(run, healthSystemId, mappings);
+  await cacheEncounters(run, healthSystemId, encounters);
 
-  const windowed = await windowRows(run, providerId);
-  const followedEvents = await followCalendarMoves(run, providerId, windowed);
+  const windowed = await windowRows(run, healthSystemId);
+  const followedEvents = await followCalendarMoves(run, healthSystemId, windowed);
   const listed = [
-    ...run.googleEvents.filter((event) => (eventKeyOf(event) ?? "").startsWith(`${providerId}:`)),
+    ...run.googleEvents.filter((event) =>
+      (eventKeyOf(event) ?? "").startsWith(`${healthSystemId}:`),
+    ),
     ...followedEvents,
   ];
 
@@ -396,7 +398,7 @@ async function syncProvider(run: RunContext, target: SyncTarget): Promise<void> 
   const adopted = await adoptPortalRows({
     ctx,
     repos,
-    providerId,
+    healthSystemId,
     mappings,
     rows: windowed,
     events: listed,
@@ -410,15 +412,15 @@ async function syncProvider(run: RunContext, target: SyncTarget): Promise<void> 
   // just renamed carries a FHIR key and so survives both filters, which is the
   // point of doing this after it rather than before.
   const rows = adopted.rows.filter((row) => row.source !== "portal");
-  const portalPrefix = portalKeyPrefix(providerId);
-  const providerEvents = adopted.events.filter(
+  const portalPrefix = portalKeyPrefix(healthSystemId);
+  const healthSystemEvents = adopted.events.filter(
     (event) => !(eventKeyOf(event) ?? "").startsWith(portalPrefix),
   );
 
   const { candidates, models, ghosts } = await buildCandidates(run, target, mappings, rows);
-  const plan = planChanges(rows, providerEvents, candidates, { suppressGhosting: filtered });
+  const plan = planChanges(rows, healthSystemEvents, candidates, { suppressGhosting: filtered });
   ctx.log.info("sync.plan", {
-    providerId,
+    healthSystemId,
     inserts: plan.inserts.length,
     patches: plan.patches.length,
     ghosts: plan.ghosts.length,
@@ -430,12 +432,12 @@ async function syncProvider(run: RunContext, target: SyncTarget): Promise<void> 
   if (plan.orphans.length > 0) {
     // Ours by marker, unknown by key. Counted and left alone: guessing at its
     // content would be worse than reporting it.
-    ctx.log.warn("sync.orphans", { providerId, count: plan.orphans.length });
+    ctx.log.warn("sync.orphans", { healthSystemId, count: plan.orphans.length });
   }
 
   run.state.unchanged += plan.unchanged.length;
   for (const entry of plan.entries) {
-    await applyEntry(run, providerId, entry, models, ghosts, rows);
+    await applyEntry(run, healthSystemId, entry, models, ghosts, rows);
   }
   await repos.connections.markConnected(target.connection.id);
   // A whole sync completed against this organisation, so whatever the alert was
@@ -444,11 +446,11 @@ async function syncProvider(run: RunContext, target: SyncTarget): Promise<void> 
   // connection" true: after the owner reconnects, the stored token is fresh for an
   // hour, so the next run succeeds *without* refreshing and would otherwise leave
   // the card open. One SELECT when nothing is open.
-  await resolveReconnectAlert(ctx, { providerId }, run.deps);
+  await resolveReconnectAlert(ctx, { healthSystemId }, run.deps);
 }
 
 /**
- * Remember what this provider's appointments look like, for the portal pass.
+ * Remember what this health system's appointments look like, for the portal pass.
  *
  * The shifted start rather than the reported one, because that is what
  * `calendar_events.start_at` holds and what the portal's own mapping produces: the
@@ -457,7 +459,7 @@ async function syncProvider(run: RunContext, target: SyncTarget): Promise<void> 
  */
 function recordSightings(
   run: RunContext,
-  providerId: string,
+  healthSystemId: string,
   mappings: ReadonlyMap<string, CalendarMapping>,
 ): void {
   const csns = new Set<string>();
@@ -467,13 +469,13 @@ function recordSightings(
     if (mapping.csn !== undefined) csns.add(mapping.csn);
     starts.push(fromIso(mapping.model.start));
     sightings.push({
-      providerId,
+      healthSystemId,
       start: fromIso(mapping.reportedStart),
       csn: mapping.csn,
       rank: RANK_FHIR,
     });
   }
-  run.fhirSeen.set(providerId, { csns, starts, sightings });
+  run.fhirSeen.set(healthSystemId, { csns, starts, sightings });
 }
 
 /** Tally warnings on the run and report whether the view was filtered. */
@@ -496,7 +498,7 @@ async function mapAppointments(
   references: readonly Resource[],
 ): Promise<Map<string, CalendarMapping>> {
   const resolver = mapResolver([...encounters, ...references]);
-  const normalizeCtx = { provider: target.provider.id, refs: resolver };
+  const normalizeCtx = { healthSystem: target.healthSystem.id, refs: resolver };
   const out = new Map<string, CalendarMapping>();
   for (const encounter of encounters) {
     const view = appointmentView(encounter, normalizeCtx);
@@ -507,16 +509,16 @@ async function mapAppointments(
   return out;
 }
 
-/** The mapping's inputs for one provider. Built per call; it is three fields. */
+/** The mapping's inputs for one health system. Built per call; it is three fields. */
 function mappingInput(
   run: RunContext,
   target: SyncTarget,
 ): Parameters<typeof buildCalendarModel>[1] {
   return {
-    provider: {
-      id: target.provider.id,
-      displayName: target.provider.display_name,
-      portalUrl: target.provider.portal_url,
+    healthSystem: {
+      id: target.healthSystem.id,
+      displayName: target.healthSystem.display_name,
+      portalUrl: target.healthSystem.portal_url,
       config: target.config,
     },
     settings: run.settings,
@@ -528,7 +530,7 @@ function mappingInput(
 /** Normalize one Encounter into the calendar-facing view, or null if it is not one. */
 function appointmentView(
   encounter: Encounter,
-  normalizeCtx: { provider: string; refs: ReturnType<typeof mapResolver> },
+  normalizeCtx: { healthSystem: string; refs: ReturnType<typeof mapResolver> },
 ): NormalizedAppointmentView | null {
   const normalized = normalizeResource(encounter, normalizeCtx);
   // `in` rather than a `resourceType` comparison: the generic fallback shape has
@@ -541,12 +543,12 @@ function appointmentView(
 /** Write the Encounters this run saw into the cache, for the MCP and for ghosting. */
 async function cacheEncounters(
   run: RunContext,
-  providerId: string,
+  healthSystemId: string,
   encounters: readonly Encounter[],
 ): Promise<void> {
   if (encounters.length === 0) return;
   const report = await run.repos.fhirCache.upsertMany(
-    providerId,
+    healthSystemId,
     encounters.map((encounter) => ({
       ...encounter,
       resourceType: "Encounter",
@@ -558,14 +560,14 @@ async function cacheEncounters(
 }
 
 /**
- * The provider's rows that the diff may consider.
+ * The health system's rows that the diff may consider.
  *
  * Narrowed to the window, plus rows with no start at all -- those were written
  * from an Encounter whose period was unusable, and dropping them would leave a
  * row nothing ever reconciles.
  */
-async function windowRows(run: RunContext, providerId: string): Promise<CalendarEventRow[]> {
-  const rows = await run.repos.calendarEvents.list({ providerId });
+async function windowRows(run: RunContext, healthSystemId: string): Promise<CalendarEventRow[]> {
+  const rows = await run.repos.calendarEvents.list({ healthSystemId });
   return rows.filter((row) => row.start_at === null || row.start_at >= run.windowStartSeconds);
 }
 
@@ -574,7 +576,7 @@ async function windowRows(run: RunContext, providerId: string): Promise<Calendar
  * moved the target since the row was written.
  *
  * `run.googleEvents` is listed once per run, from `run.calendarId`, before any
- * provider is touched -- so a row whose `calendar_id` is stale is invisible to
+ * health system is touched -- so a row whose `calendar_id` is stale is invisible to
  * `eventByKey` no matter what the plan does with it: its event id was never
  * valid anywhere but the calendar it was created on. Left alone, the plan sees
  * "no matching event" and does the same thing it does for one the owner deleted
@@ -585,7 +587,7 @@ async function windowRows(run: RunContext, providerId: string): Promise<Calendar
  * Calling Google's `events.move` here, before the diff runs, turns a stale row
  * back into an ordinary one: the moved event (same id, same
  * `extendedProperties`, now on `run.calendarId`) is folded into this
- * provider's event set below, so the rest of this run treats it exactly as if
+ * health system's event set below, so the rest of this run treats it exactly as if
  * it had always lived there. A row whose event has *also* vanished from the old
  * calendar (`moveEvent` -> `null`) is left untouched -- that is genuinely the
  * owner deleting it, and the plan's existing handling for a missing event is
@@ -593,7 +595,7 @@ async function windowRows(run: RunContext, providerId: string): Promise<Calendar
  */
 async function followCalendarMoves(
   run: RunContext,
-  providerId: string,
+  healthSystemId: string,
   rows: readonly CalendarEventRow[],
 ): Promise<EventRecord[]> {
   const stale = rows.filter((row) => row.calendar_id !== run.calendarId);
@@ -614,7 +616,7 @@ async function followCalendarMoves(
     await run.repos.calendarEvents.moveCalendar(row.event_key, run.calendarId);
     moved.push(event);
   }
-  run.ctx.log.info("sync.calendar_move", { providerId, moved: moved.length, gone });
+  run.ctx.log.info("sync.calendar_move", { healthSystemId, moved: moved.length, gone });
   return moved;
 }
 
@@ -723,7 +725,7 @@ async function mappingFromCache(
 ): Promise<CalendarMapping | null> {
   if (row.encounter_id === "" || row.source !== "fhir") return null;
   const cached = await run.repos.fhirCache.getByStoredId(
-    target.provider.id,
+    target.healthSystem.id,
     "Encounter",
     row.encounter_id,
   );
@@ -735,14 +737,14 @@ async function mappingFromCache(
   const pool: Resource[] = [encounter];
   for (const reference of references) {
     const row = await run.repos.fhirCache.get(
-      target.provider.id,
+      target.healthSystem.id,
       reference.resourceType,
       reference.id,
     );
     if (row !== null) pool.push(row.resource as Resource);
   }
   const view = appointmentView(encounter, {
-    provider: target.provider.id,
+    healthSystem: target.healthSystem.id,
     refs: mapResolver(pool),
   });
   if (view === null) return null;
@@ -750,7 +752,7 @@ async function mappingFromCache(
     return await buildCalendarModel(view, mappingInput(run, target));
   } catch (error) {
     run.ctx.log.warn("sync.ghost.remap_failed", {
-      providerId: target.provider.id,
+      healthSystemId: target.healthSystem.id,
       ...errorFields(error),
     });
     return null;
@@ -760,7 +762,7 @@ async function mappingFromCache(
 /** Carry out one planned change. */
 async function applyEntry(
   run: RunContext,
-  providerId: string,
+  healthSystemId: string,
   entry: PlanEntry,
   models: ReadonlyMap<string, CalendarEventModel>,
   ghosts: ReadonlyMap<string, CalendarEventModel>,
@@ -768,12 +770,12 @@ async function applyEntry(
 ): Promise<void> {
   switch (entry.action) {
     case "insert": {
-      await writeInsert(run, providerId, entry, models);
+      await writeInsert(run, healthSystemId, entry, models);
       return;
     }
     case "patch":
     case "restore": {
-      await writePatch(run, providerId, entry, models);
+      await writePatch(run, healthSystemId, entry, models);
       return;
     }
     case "ghost": {
@@ -781,7 +783,7 @@ async function applyEntry(
       return;
     }
     case "ghost-row-only": {
-      await writeGhostRow(run, providerId, entry, rows);
+      await writeGhostRow(run, healthSystemId, entry, rows);
       return;
     }
     default: {
@@ -795,20 +797,20 @@ async function applyEntry(
 
 async function writeInsert(
   run: RunContext,
-  providerId: string,
+  healthSystemId: string,
   entry: PlanEntry,
   models: ReadonlyMap<string, CalendarEventModel>,
 ): Promise<void> {
   const model = models.get(entry.key);
   if (model === undefined) return;
   const created = await run.calendar.insertEvent(run.calendarId, buildEventBody(model));
-  await persistRow(run, providerId, entry.key, created.id, model);
+  await persistRow(run, healthSystemId, entry.key, created.id, model);
   run.state.summary.eventsInserted += 1;
 }
 
 async function writePatch(
   run: RunContext,
-  providerId: string,
+  healthSystemId: string,
   entry: PlanEntry,
   models: ReadonlyMap<string, CalendarEventModel>,
 ): Promise<void> {
@@ -825,11 +827,11 @@ async function writePatch(
     // The event went away between the list and the patch. Re-inserting is the
     // same decision the plan would have made had it known.
     const created = await run.calendar.insertEvent(run.calendarId, buildEventBody(model));
-    await persistRow(run, providerId, entry.key, created.id, model, restore);
+    await persistRow(run, healthSystemId, entry.key, created.id, model, restore);
     run.state.summary.eventsInserted += 1;
     return;
   }
-  await persistRow(run, providerId, entry.key, patched.id, model, restore);
+  await persistRow(run, healthSystemId, entry.key, patched.id, model, restore);
   if (restore) run.state.summary.eventsRestored += 1;
   else run.state.summary.eventsPatched += 1;
 }
@@ -858,7 +860,7 @@ async function writeGhostPatch(
 
 async function writeGhostRow(
   run: RunContext,
-  providerId: string,
+  healthSystemId: string,
   entry: PlanEntry,
   rows: readonly CalendarEventRow[],
 ): Promise<void> {
@@ -867,7 +869,7 @@ async function writeGhostRow(
   // `calendar-events.ts`'s `logSafeKey`, which this mirrors).
   const keyDigest = await sha256Hex(entry.key);
   run.ctx.log.info("sync.ghost.row_only", {
-    providerId,
+    healthSystemId,
     eventKeyHash: keyDigest.slice(0, 12),
     reasonCode: entry.reason,
   });
@@ -886,7 +888,7 @@ function ghostedAtFor(key: string, rows: readonly CalendarEventRow[], now: numbe
 
 async function persistRow(
   run: RunContext,
-  providerId: string,
+  healthSystemId: string,
   key: string,
   googleEventId: string,
   model: CalendarEventModel,
@@ -894,7 +896,7 @@ async function persistRow(
 ): Promise<void> {
   await run.repos.calendarEvents.upsert({
     eventKey: key,
-    providerId,
+    healthSystemId,
     encounterId: model.encounterId,
     calendarId: run.calendarId,
     googleEventId,

@@ -99,8 +99,8 @@ describe("redactString", () => {
   it("leaves a URL's host and a request path readable", () => {
     // `/` and `:` terminate a run, so the parts of a path stay short enough to
     // survive -- a redactor that ate the path would make a 500 undebuggable.
-    expect(redactString("/api/providers/01JRQ8ZVME000000000000000Z/refresh-token")).toBe(
-      "/api/providers/01JRQ8ZVME000000000000000Z/refresh-token",
+    expect(redactString("/api/health-systems/01JRQ8ZVME000000000000000Z/refresh-token")).toBe(
+      "/api/health-systems/01JRQ8ZVME000000000000000Z/refresh-token",
     );
     expect(redactString("GET https://fhir.example.test/api/FHIR/R4/Encounter failed")).toBe(
       "GET https://fhir.example.test/api/FHIR/R4/Encounter failed",
@@ -137,14 +137,14 @@ describe("redactValue", () => {
 
   it("redacts a patient or FHIR identifier by key, whatever its shape", () => {
     // A 24-character Epic id is far below the opaque threshold, so only the key
-    // rule catches it. `providerId` is one of ours and stays readable.
+    // rule catches it. `healthSystemId` is one of ours and stays readable.
     // Invented, not read from any record; it is base64url-shaped enough that the
     // secret scanner takes it for a key, hence the allow.
     const epicShapedId = "eXY3NzY0NTIzNDU2Nzg5MD"; // gitleaks:allow -- synthetic fixture, not a credential
     for (const key of ["patientId", "patient_fhir_id", "fhirPatientId", "fhirResourceId"]) {
       expect(redactValue(key, epicShapedId), key).toBe("[redacted]");
     }
-    expect(redactValue("providerId", "01JRQ8ZVME000000000000000Z")).toBe(
+    expect(redactValue("healthSystemId", "01JRQ8ZVME000000000000000Z")).toBe(
       "01JRQ8ZVME000000000000000Z",
     );
     expect(redactValue("email", "owner")).toBe("[redacted]");
@@ -243,14 +243,14 @@ describe("makeLogger", () => {
     const at = new Date("2026-01-01T00:00:00.000Z");
     const { log, lines, levels } = collector({}, { now: () => at });
 
-    log.info("sync.start", { providerCount: 2 });
+    log.info("sync.start", { healthSystemCount: 2 });
 
     expect(levels).toStrictEqual(["info"]);
     expect(lines[0]).toStrictEqual({
       level: "info",
       event: "sync.start",
       t: "2026-01-01T00:00:00.000Z",
-      providerCount: 2,
+      healthSystemCount: 2,
     });
   });
 
@@ -281,11 +281,11 @@ describe("makeLogger", () => {
   it("lets a child add fields without touching its parent", () => {
     const { log, lines } = collector({ run: "abc" });
 
-    log.child({ providerId: "p1" }).info("provider.start");
+    log.child({ healthSystemId: "p1" }).info("health_system.start");
     log.info("run.start");
 
-    expect(lines[0]).toMatchObject({ run: "abc", providerId: "p1" });
-    expect(lines[1]).not.toHaveProperty("providerId");
+    expect(lines[0]).toMatchObject({ run: "abc", healthSystemId: "p1" });
+    expect(lines[1]).not.toHaveProperty("healthSystemId");
   });
 
   it("times a successful operation and reports what the caller asks it to", async () => {

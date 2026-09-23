@@ -11,7 +11,7 @@ import { useRoute } from "vue-router";
 
 import { endpoints } from "../api/endpoints.ts";
 import AlertsList from "../components/AlertsList.vue";
-import ProviderStatusCard from "../components/ProviderStatusCard.vue";
+import HealthSystemStatusCard from "../components/HealthSystemStatusCard.vue";
 import RunsTable from "../components/RunsTable.vue";
 import StateBlock from "../components/StateBlock.vue";
 import StatusPill from "../components/StatusPill.vue";
@@ -25,21 +25,21 @@ const overview = useLoad((signal) => endpoints.overview(signal));
 const sync = useAction();
 
 const timezone = computed(() => overview.data.value?.settings.timezone ?? null);
-const providers = computed(() => overview.data.value?.providers ?? []);
-const providerNames = computed(() =>
-  Object.fromEntries(providers.value.map((p) => [p.id, p.displayName])),
+const healthSystems = computed(() => overview.data.value?.healthSystems ?? []);
+const healthSystemNames = computed(() =>
+  Object.fromEntries(healthSystems.value.map((p) => [p.id, p.displayName])),
 );
 
-/** Resource types that any provider has something cached for, alphabetically. */
+/** Resource types that any health system has something cached for, alphabetically. */
 const cacheRows = computed(() => {
   const counts = overview.data.value?.cacheCounts ?? [];
   const types = [...new Set(counts.map((c) => c.resourceType))].toSorted((a, b) =>
     a.localeCompare(b),
   );
-  const byKey = new Map(counts.map((c) => [`${c.providerId}\u{0}${c.resourceType}`, c.count]));
+  const byKey = new Map(counts.map((c) => [`${c.healthSystemId}\u{0}${c.resourceType}`, c.count]));
   return types.map((resourceType) => ({
     resourceType,
-    cells: providers.value.map((p) => byKey.get(`${p.id}\u{0}${resourceType}`) ?? 0),
+    cells: healthSystems.value.map((p) => byKey.get(`${p.id}\u{0}${resourceType}`) ?? 0),
   }));
 });
 
@@ -50,7 +50,7 @@ onMounted(() => {
   const connected = route.query.connected;
   const google = route.query.google;
   if (typeof connected === "string" && connected !== "") {
-    toastSuccess("Provider connected.");
+    toastSuccess("Health system connected.");
   } else if (google === "connected") {
     toastSuccess("Google Calendar connected.");
   }
@@ -76,20 +76,20 @@ async function runSyncNow(): Promise<void> {
       <template v-if="overview.data.value">
         <section class="card">
           <div class="row">
-            <h2>Providers</h2>
+            <h2>Health systems</h2>
             <button class="small spacer" :disabled="sync.busy.value" @click="runSyncNow">
               {{ sync.busy.value ? "Syncing…" : "Sync all now" }}
             </button>
           </div>
-          <p v-if="providers.length === 0" class="muted">
-            No providers yet. Add one on the
-            <RouterLink to="/providers">Providers</RouterLink> page.
+          <p v-if="healthSystems.length === 0" class="muted">
+            No health systems yet. Add one on the
+            <RouterLink to="/health-systems">Health systems</RouterLink> page.
           </p>
           <div v-else class="cards">
-            <ProviderStatusCard
-              v-for="provider in providers"
-              :key="provider.id"
-              :provider="provider"
+            <HealthSystemStatusCard
+              v-for="healthSystem in healthSystems"
+              :key="healthSystem.id"
+              :health-system="healthSystem"
             />
           </div>
         </section>
@@ -141,7 +141,7 @@ async function runSyncNow(): Promise<void> {
             v-else
             :alerts="overview.data.value.openAlerts"
             :timezone="timezone"
-            :provider-names="providerNames"
+            :health-system-names="healthSystemNames"
           />
         </section>
 
@@ -164,8 +164,8 @@ async function runSyncNow(): Promise<void> {
               <thead>
                 <tr>
                   <th>Resource</th>
-                  <th v-for="provider in providers" :key="provider.id" class="num">
-                    {{ provider.displayName }}
+                  <th v-for="healthSystem in healthSystems" :key="healthSystem.id" class="num">
+                    {{ healthSystem.displayName }}
                   </th>
                 </tr>
               </thead>

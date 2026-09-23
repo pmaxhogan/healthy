@@ -200,7 +200,7 @@ export function normalizeEncounter(
   return {
     resourceType: "Encounter",
     id: resource.id ?? "",
-    provider: ctx.provider,
+    healthSystem: ctx.healthSystem,
     ...(resource.meta?.lastUpdated && { lastUpdated: resource.meta.lastUpdated }),
     status: resource.status,
     ...(encounterClass && { class: encounterClass }),

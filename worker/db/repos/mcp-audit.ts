@@ -12,7 +12,7 @@
 import { newId } from "../../lib/ids.ts";
 import { DAY_SECONDS } from "../../lib/time.ts";
 import { all, one, run } from "../client.ts";
-import { parseJsonColumn, providerIdsSchema } from "../schemas.ts";
+import { parseJsonColumn, healthSystemIdsSchema } from "../schemas.ts";
 
 import type { Ctx } from "../client.ts";
 import type { McpAuditRow } from "../rows.ts";
@@ -21,8 +21,8 @@ interface AuditInput {
   tool: string;
   clientId?: string | null;
   grantId?: string | null;
-  /** Which providers the call touched. Ids, never names. */
-  providers?: readonly string[];
+  /** Which health systems the call touched. Ids, never names. */
+  healthSystems?: readonly string[];
   resultCount?: number;
   ok?: boolean;
   errorCode?: string | null;
@@ -35,7 +35,7 @@ export interface AuditEntry {
   clientId: string | null;
   grantId: string | null;
   tool: string;
-  providers: string[];
+  healthSystems: string[];
   resultCount: number;
   ok: boolean;
   errorCode: string | null;
@@ -52,10 +52,10 @@ function decode(row: McpAuditRow): AuditEntry {
     clientId: row.client_id,
     grantId: row.grant_id,
     tool: row.tool,
-    providers: parseJsonColumn(
-      providerIdsSchema,
-      row.providers_json,
-      `mcp_audit.providers_json.${row.id}`,
+    healthSystems: parseJsonColumn(
+      healthSystemIdsSchema,
+      row.health_systems_json,
+      `mcp_audit.health_systems_json.${row.id}`,
     ),
     resultCount: row.result_count,
     ok: row.ok === 1,
@@ -73,7 +73,7 @@ export function makeMcpAuditRepo(ctx: Ctx) {
         ctx.db
           .prepare(
             `INSERT INTO mcp_audit
-               (id, ts, client_id, grant_id, tool, providers_json, result_count, ok, error_code, duration_ms)
+               (id, ts, client_id, grant_id, tool, health_systems_json, result_count, ok, error_code, duration_ms)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .bind(
@@ -82,7 +82,7 @@ export function makeMcpAuditRepo(ctx: Ctx) {
             input.clientId ?? null,
             input.grantId ?? null,
             input.tool,
-            JSON.stringify(input.providers ?? []),
+            JSON.stringify(input.healthSystems ?? []),
             Math.max(0, input.resultCount ?? 0),
             (input.ok ?? true) ? 1 : 0,
             input.errorCode ?? null,

@@ -6,16 +6,16 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import ProviderEditor from "../../src/components/ProviderEditor.vue";
+import HealthSystemEditor from "../../src/components/HealthSystemEditor.vue";
 
-import { fakeResponse, installFakeApi, portalAccount, provider, settings } from "./helpers.ts";
+import { fakeResponse, installFakeApi, portalAccount, healthSystem, settings } from "./helpers.ts";
 
 import type { FakeFetch } from "./helpers.ts";
-import type { ProviderDto } from "@shared/types.ts";
+import type { HealthSystemDto } from "@shared/types.ts";
 
-function mountEditor(dto: ProviderDto = provider()): ReturnType<typeof mount> {
-  return mount(ProviderEditor, {
-    props: { provider: dto, colors: [], settings: settings() },
+function mountEditor(dto: HealthSystemDto = healthSystem()): ReturnType<typeof mount> {
+  return mount(HealthSystemEditor, {
+    props: { healthSystem: dto, colors: [], settings: settings() },
     global: { stubs: { RouterLink: true } },
   });
 }
@@ -32,18 +32,18 @@ function lastMutation(api: FakeFetch): { url: string; method: string; body: unkn
     : undefined;
 }
 
-describe("ProviderEditor", () => {
+describe("HealthSystemEditor", () => {
   let api: FakeFetch;
 
   beforeEach(() => {
-    // ProviderEditor embeds PortalAccountCard, which loads
-    // `GET /api/providers/prov-1/portal` on mount. An exact key beats the
+    // HealthSystemEditor embeds PortalAccountCard, which loads
+    // `GET /api/health-systems/prov-1/portal` on mount. An exact key beats the
     // wildcard below (installFakeApi checks it first), so that load gets a
-    // real `PortalAccountStatusDto` rather than a `ProviderDto` from the
+    // real `PortalAccountStatusDto` rather than a `HealthSystemDto` from the
     // wildcard -- which would leave `.signIn` undefined and throw.
     api = installFakeApi({
-      "/api/providers*": () => fakeResponse({ body: provider() }),
-      "/api/providers/prov-1/portal": () => fakeResponse({ body: portalAccount() }),
+      "/api/health-systems*": () => fakeResponse({ body: healthSystem() }),
+      "/api/health-systems/prov-1/portal": () => fakeResponse({ body: portalAccount() }),
     });
   });
 
@@ -61,17 +61,17 @@ describe("ProviderEditor", () => {
   });
 
   it("renders Connect as a real anchor at the epic start route when there is no connection yet", () => {
-    const wrapper = mountEditor(provider({ connection: null }));
+    const wrapper = mountEditor(healthSystem({ connection: null }));
     const link = wrapper.find('a[href^="/oauth/epic/start"]');
     expect(link.exists()).toBe(true);
-    expect(link.attributes("href")).toBe("/oauth/epic/start?provider=prov-1");
+    expect(link.attributes("href")).toBe("/oauth/epic/start?healthSystem=prov-1");
     expect(link.text()).toBe("Connect");
   });
 
   it("saves with PATCH, not PUT", async () => {
     await save(mountEditor());
     expect(lastMutation(api)?.method).toBe("PATCH");
-    expect(lastMutation(api)?.url).toBe("/api/providers/prov-1");
+    expect(lastMutation(api)?.url).toBe("/api/health-systems/prov-1");
   });
 
   it("sends the CSRF header on the save", async () => {
@@ -105,7 +105,7 @@ describe("ProviderEditor", () => {
   });
 
   it("omits a blank org short label", async () => {
-    await save(mountEditor(provider({ config: { orgShort: "", enabled: true } })));
+    await save(mountEditor(healthSystem({ config: { orgShort: "", enabled: true } })));
     const config = (lastMutation(api)?.body as { config: Record<string, unknown> }).config;
     expect(config).not.toHaveProperty("orgShort");
   });
@@ -117,23 +117,25 @@ describe("ProviderEditor", () => {
     expect((lastMutation(api)?.body as { portalUrl: unknown }).portalUrl).toBeNull();
   });
 
-  it("carries the arrival offset only when one is set on this provider", async () => {
-    await save(mountEditor(provider({ config: { arrivalOffsetMin: 30, enabled: true } })));
+  it("carries the arrival offset only when one is set on this health system", async () => {
+    await save(mountEditor(healthSystem({ config: { arrivalOffsetMin: 30, enabled: true } })));
     const first = (lastMutation(api)?.body as { config: Record<string, unknown> }).config;
     expect(first.arrivalOffsetMin).toBe(30);
 
     api = installFakeApi({
-      "/api/providers*": () => fakeResponse({ body: provider() }),
-      "/api/providers/prov-1/portal": () => fakeResponse({ body: portalAccount() }),
+      "/api/health-systems*": () => fakeResponse({ body: healthSystem() }),
+      "/api/health-systems/prov-1/portal": () => fakeResponse({ body: portalAccount() }),
     });
-    await save(mountEditor(provider({ config: { enabled: true } })));
+    await save(mountEditor(healthSystem({ config: { enabled: true } })));
     const second = (lastMutation(api)?.body as { config: Record<string, unknown> }).config;
     expect(second).not.toHaveProperty("arrivalOffsetMin");
   });
 
   it("reports whether a client secret is on file", () => {
     expect(mountEditor().text()).toContain("secret set");
-    expect(mountEditor(provider({ hasClientSecret: false })).text()).toContain("no client secret");
+    expect(mountEditor(healthSystem({ hasClientSecret: false })).text()).toContain(
+      "no client secret",
+    );
   });
 
   it("posts a new client secret to its own endpoint", async () => {
@@ -150,13 +152,13 @@ describe("ProviderEditor", () => {
     await flushPromises();
 
     expect(lastMutation(api)).toEqual({
-      url: "/api/providers/prov-1/secret",
+      url: "/api/health-systems/prov-1/secret",
       method: "POST",
       body: { clientSecret: "a-secret" },
     });
   });
 
-  it("asks for the provider name before removing it, with no window.confirm", async () => {
+  it("asks for the health system name before removing it, with no window.confirm", async () => {
     const wrapper = mountEditor();
     await wrapper
       .findAll("button")
@@ -175,19 +177,19 @@ describe("ProviderEditor", () => {
     await flushPromises();
 
     expect(lastMutation(api)).toEqual({
-      url: "/api/providers/prov-1",
+      url: "/api/health-systems/prov-1",
       method: "DELETE",
       body: null,
     });
     expect(wrapper.emitted("removed")).toHaveLength(1);
   });
 
-  it("runs each per-provider operation against its own route", async () => {
+  it("runs each per-health system operation against its own route", async () => {
     const wrapper = mountEditor();
     for (const [label, path] of [
-      ["Sync now", "/api/providers/prov-1/sync"],
-      ["Refresh token", "/api/providers/prov-1/refresh-token"],
-      ["Full refresh", "/api/providers/prov-1/full-refresh"],
+      ["Sync now", "/api/health-systems/prov-1/sync"],
+      ["Refresh token", "/api/health-systems/prov-1/refresh-token"],
+      ["Full refresh", "/api/health-systems/prov-1/full-refresh"],
     ] as const) {
       await wrapper
         .findAll("button")

@@ -13,7 +13,14 @@ import { withAudit } from "../../../worker/mcp/audit.ts";
 import { toolError } from "../../../worker/mcp/respond.ts";
 import { buildRules } from "../../../worker/policy/rules.ts";
 
-import { PROVIDER_A, PROVIDER_B, callTool, connectTools, fakeDeps, fakeState } from "./helpers.ts";
+import {
+  HEALTH_SYSTEM_A,
+  HEALTH_SYSTEM_B,
+  callTool,
+  connectTools,
+  fakeDeps,
+  fakeState,
+} from "./helpers.ts";
 
 import type { FakeState } from "./helpers.ts";
 import type { ToolOutcome } from "../../../worker/mcp/respond.ts";
@@ -50,7 +57,7 @@ describe("what a row contains", () => {
       tool: "get_conditions",
       clientId: "client-under-test",
       grantId: "grant-under-test",
-      providerIds: [PROVIDER_A, PROVIDER_B],
+      healthSystemIds: [HEALTH_SYSTEM_A, HEALTH_SYSTEM_B],
       resultCount: 3,
       ok: true,
       errorCode: null,
@@ -83,19 +90,19 @@ describe("what a row contains", () => {
         "durationMs",
         "errorCode",
         "grantId",
+        "healthSystemIds",
         "ok",
-        "providerIds",
         "resultCount",
         "tool",
       ]);
     }
   });
 
-  it("records provider ids, never provider display names", async () => {
+  it("records health system ids, never health system display names", async () => {
     await callTool(world.client, "get_conditions");
 
     const serialised = JSON.stringify(world.state.audits);
-    expect(serialised).toContain(PROVIDER_A);
+    expect(serialised).toContain(HEALTH_SYSTEM_A);
     expect(serialised).not.toContain("Example Health");
     expect(serialised).not.toContain("Other Clinic");
   });
@@ -113,20 +120,20 @@ describe("what a row contains", () => {
   it("records the disabled case too, so the switch being on is auditable", async () => {
     world.state.enabled = false;
 
-    await callTool(world.client, "list_providers");
+    await callTool(world.client, "list_health_systems");
 
     expect(world.state.audits[0]).toMatchObject({
-      tool: "list_providers",
+      tool: "list_health_systems",
       errorCode: "mcp_disabled",
     });
   });
 
   it("counts what was returned after the policy filtered, not before", async () => {
-    world.state.rules = buildRules([{ rule_type: "provider", target: PROVIDER_B }]);
+    world.state.rules = buildRules([{ rule_type: "health_system", target: HEALTH_SYSTEM_B }]);
 
     await callTool(world.client, "get_conditions");
 
-    // Two of the three conditions are provider A's.
+    // Two of the three conditions are health system A's.
     expect(world.state.audits[0]?.resultCount).toBe(2);
   });
 });
@@ -182,7 +189,7 @@ describe("error handling", () => {
       ...fakeDeps(fakeState()),
       recordAudit: () => Promise.reject(new Error("D1 unavailable")),
     };
-    const handler = withAudit(broken, "list_providers", () =>
+    const handler = withAudit(broken, "list_health_systems", () =>
       Promise.resolve(toolError("not_found")),
     );
 
@@ -200,14 +207,14 @@ describe("retention", () => {
       array[0] = 0;
       return array;
     }) as typeof crypto.getRandomValues);
-    await callTool(world.client, "list_providers");
+    await callTool(world.client, "list_health_systems");
     expect(world.state.prunes).toBe(1);
 
     bytes.mockImplementation(((array: Uint8Array) => {
       array[0] = 200;
       return array;
     }) as typeof crypto.getRandomValues);
-    await callTool(world.client, "list_providers");
+    await callTool(world.client, "list_health_systems");
     expect(world.state.prunes).toBe(1);
 
     bytes.mockRestore();

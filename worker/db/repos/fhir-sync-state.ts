@@ -1,5 +1,5 @@
 /**
- * Per (provider, resource type) health of the daily full refresh.
+ * Per (health system, resource type) health of the daily full refresh.
  *
  * Kept separate from `run_log` because the useful question is not "how did last
  * night go" but "which resource types has this org never returned anything for" --
@@ -18,7 +18,7 @@ import type { FhirSyncStateRow } from "../rows.ts";
 import type { SyncWarning } from "../schemas.ts";
 
 export interface SyncState {
-  providerId: string;
+  healthSystemId: string;
   resourceType: string;
   lastFullAt: number | null;
   lastOk: boolean;
@@ -34,7 +34,7 @@ interface RecordInput {
 
 function decode(row: FhirSyncStateRow): SyncState {
   return {
-    providerId: row.provider_id,
+    healthSystemId: row.health_system_id,
     resourceType: row.resource_type,
     lastFullAt: row.last_full_at,
     lastOk: row.last_ok === 1,
@@ -42,29 +42,29 @@ function decode(row: FhirSyncStateRow): SyncState {
     warnings: parseJsonColumn(
       syncWarningsSchema,
       row.warnings_json,
-      `fhir_sync_state.warnings_json.${row.provider_id}:${row.resource_type}`,
+      `fhir_sync_state.warnings_json.${row.health_system_id}:${row.resource_type}`,
     ),
   };
 }
 
 export function makeFhirSyncStateRepo(ctx: Ctx) {
   return {
-    /** Record the outcome of one (provider, resource type) pass. */
-    async record(providerId: string, resourceType: string, input: RecordInput): Promise<void> {
+    /** Record the outcome of one (health system, resource type) pass. */
+    async record(healthSystemId: string, resourceType: string, input: RecordInput): Promise<void> {
       await run(
         ctx.db
           .prepare(
             `INSERT INTO fhir_sync_state
-               (provider_id, resource_type, last_full_at, last_ok, last_error_code, warnings_json)
+               (health_system_id, resource_type, last_full_at, last_ok, last_error_code, warnings_json)
              VALUES (?, ?, ?, ?, ?, ?)
-             ON CONFLICT (provider_id, resource_type) DO UPDATE SET
+             ON CONFLICT (health_system_id, resource_type) DO UPDATE SET
                last_full_at = excluded.last_full_at,
                last_ok = excluded.last_ok,
                last_error_code = excluded.last_error_code,
                warnings_json = excluded.warnings_json`,
           )
           .bind(
-            providerId,
+            healthSystemId,
             resourceType,
             ctx.now(),
             input.ok ? 1 : 0,
@@ -74,20 +74,22 @@ export function makeFhirSyncStateRepo(ctx: Ctx) {
       );
     },
 
-    async get(providerId: string, resourceType: string): Promise<SyncState | null> {
+    async get(healthSystemId: string, resourceType: string): Promise<SyncState | null> {
       const row = await one<FhirSyncStateRow>(
         ctx.db
-          .prepare("SELECT * FROM fhir_sync_state WHERE provider_id = ? AND resource_type = ?")
-          .bind(providerId, resourceType),
+          .prepare("SELECT * FROM fhir_sync_state WHERE health_system_id = ? AND resource_type = ?")
+          .bind(healthSystemId, resourceType),
       );
       return row === null ? null : decode(row);
     },
 
-    async listByProvider(providerId: string): Promise<SyncState[]> {
+    async listByHealthSystem(healthSystemId: string): Promise<SyncState[]> {
       const rows = await all<FhirSyncStateRow>(
         ctx.db
-          .prepare("SELECT * FROM fhir_sync_state WHERE provider_id = ? ORDER BY resource_type")
-          .bind(providerId),
+          .prepare(
+            "SELECT * FROM fhir_sync_state WHERE health_system_id = ? ORDER BY resource_type",
+          )
+          .bind(healthSystemId),
       );
       return rows.map((row) => decode(row));
     },
@@ -95,7 +97,7 @@ export function makeFhirSyncStateRepo(ctx: Ctx) {
     /** Everything, for the admin overview. */
     async list(): Promise<SyncState[]> {
       const rows = await all<FhirSyncStateRow>(
-        ctx.db.prepare("SELECT * FROM fhir_sync_state ORDER BY provider_id, resource_type"),
+        ctx.db.prepare("SELECT * FROM fhir_sync_state ORDER BY health_system_id, resource_type"),
       );
       return rows.map((row) => decode(row));
     },

@@ -42,7 +42,7 @@ const DOCUMENT_CAP_CODE = "4135";
  * If that contract changes, this one line is the compile error -- not a diagnostic
  * buried inside a tool.
  */
-type FhirClientResolver = (ctx: Ctx, providerId: string) => Promise<{ client: FhirClient }>;
+type FhirClientResolver = (ctx: Ctx, healthSystemId: string) => Promise<{ client: FhirClient }>;
 
 const resolveFhirClient: FhirClientResolver = getFhirClientFor;
 
@@ -102,10 +102,10 @@ function isDocumentCap(error: unknown): boolean {
 /** The cached plain text for one attachment, if it is still live. */
 async function cachedText(
   deps: BinaryTextDeps,
-  providerId: string,
+  healthSystemId: string,
   key: string,
 ): Promise<string | null> {
-  const row = await deps.repos.fhirCache.get(providerId, BINARY_TEXT_TYPE, key);
+  const row = await deps.repos.fhirCache.get(healthSystemId, BINARY_TEXT_TYPE, key);
   if (row === null) return null;
   const { text } = row.resource as { text?: unknown };
   return typeof text === "string" ? text : null;
@@ -114,20 +114,20 @@ async function cachedText(
 /** Read the Binary behind an attachment, mapping every failure to a reason. */
 async function fetchBinary(
   deps: BinaryTextDeps,
-  providerId: string,
+  healthSystemId: string,
   binaryId: string,
 ): Promise<{ ok: true; binary: fhir4.Binary } | { ok: false; reason: "cap_reached" | "upstream" }> {
   try {
-    const { client } = await resolveFhirClient(deps.repos.ctx, providerId);
+    const { client } = await resolveFhirClient(deps.repos.ctx, healthSystemId);
     const binary = await client.read<fhir4.Binary>("Binary", binaryId);
     return binary === null ? { ok: false, reason: "upstream" } : { ok: true, binary };
   } catch (error) {
     if (isDocumentCap(error)) {
-      deps.log.warn("mcp.document_cap_reached", { providerId });
+      deps.log.warn("mcp.document_cap_reached", { healthSystemId });
       return { ok: false, reason: "cap_reached" };
     }
     deps.log.warn("mcp.document_fetch_failed", {
-      providerId,
+      healthSystemId,
       errorCode: isAppError(error) ? error.code : "unknown",
     });
     return { ok: false, reason: "upstream" };
@@ -143,11 +143,11 @@ async function fetchBinary(
  */
 export async function documentText(
   deps: BinaryTextDeps,
-  providerId: string,
+  healthSystemId: string,
   documentId: string,
 ): Promise<DocumentTextResult> {
   const cachedDocument = await deps.repos.fhirCache.get(
-    providerId,
+    healthSystemId,
     "DocumentReference",
     documentId,
   );
@@ -162,7 +162,7 @@ export async function documentText(
   // attachment: two DocumentReferences can point at the same Binary, and keying
   // on the Binary is what makes the second one free.
   const cacheKey = attachment.binaryId ?? `doc:${documentId}`;
-  const fromCache = await cachedText(deps, providerId, cacheKey);
+  const fromCache = await cachedText(deps, healthSystemId, cacheKey);
   if (fromCache !== null) {
     return {
       ok: true,
@@ -178,7 +178,7 @@ export async function documentText(
   if (encoded === undefined) {
     const { binaryId } = attachment;
     if (binaryId === undefined) return { ok: false, reason: "unsupported" };
-    const fetched = await fetchBinary(deps, providerId, binaryId);
+    const fetched = await fetchBinary(deps, healthSystemId, binaryId);
     if (!fetched.ok) return { ok: false, reason: fetched.reason };
     if (typeof fetched.binary.data !== "string") return { ok: false, reason: "unsupported" };
     encoded = fetched.binary.data;
@@ -198,7 +198,7 @@ export async function documentText(
   if (text === null) return { ok: false, reason: "unsupported" };
 
   await deps.repos.fhirCache.upsertMany(
-    providerId,
+    healthSystemId,
     [{ resourceType: BINARY_TEXT_TYPE, id: cacheKey, text, contentType, documentId }],
     BINARY_TEXT_TTL_MS,
   );

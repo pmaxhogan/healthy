@@ -20,7 +20,7 @@ export function normalizeGoal(resource: fhir4.Goal, ctx: NormalizeCtx): Normaliz
   return {
     resourceType: "Goal",
     id: resource.id ?? "",
-    provider: ctx.provider,
+    healthSystem: ctx.healthSystem,
     ...(resource.meta?.lastUpdated && { lastUpdated: resource.meta.lastUpdated }),
     ...(description && { description }),
     lifecycleStatus: resource.lifecycleStatus,

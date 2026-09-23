@@ -10,7 +10,7 @@ import { TOOL_CATALOG } from "../../../worker/api/tool-catalog.ts";
 
 /** The locked list from the build spec. A rename here is a UI/MCP mismatch. */
 const EXPECTED_NAMES = [
-  "list_providers",
+  "list_health_systems",
   "get_sync_status",
   "get_patient_profile",
   "get_appointments",
@@ -67,7 +67,7 @@ describe("TOOL_CATALOG", () => {
   });
 
   it("gives the three cross-cutting tools no resource types", () => {
-    const crossCutting = new Set(["list_providers", "get_sync_status", "get_health_summary"]);
+    const crossCutting = new Set(["list_health_systems", "get_sync_status", "get_health_summary"]);
     const summaries = TOOL_CATALOG.filter((tool) => crossCutting.has(tool.name));
     const perResource = TOOL_CATALOG.filter((tool) => !crossCutting.has(tool.name));
 

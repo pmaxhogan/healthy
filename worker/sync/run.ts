@@ -3,21 +3,21 @@
  *
  * There are genuinely two here. `RunSummary` in `shared/types.ts` is the sync
  * engine's own working shape, built up while a run is in flight: camelCase, with
- * `filteredView` and `backedOff` flags and errors as `{providerId, code}` pairs --
- * the provider id is what lets a caller (and a test) say *which* connection
+ * `filteredView` and `backedOff` flags and errors as `{healthSystemId, code}` pairs --
+ * the health system id is what lets a caller (and a test) say *which* connection
  * failed. `runSummarySchema` in `worker/db/schemas.ts` is what `run_log.summary_json`
  * stores: shorter names, warnings as both a count and the distinct codes, errors
  * as plain strings, and an `unchanged` count the working shape has no field for.
  * `toStoredSummary` is the one place that translates, and every field the working
  * shape has now survives the round trip -- a run that reports no changes is
  * explained by `filteredView` or `backedOff` or by nothing, and reading the row
- * back has to be able to say which. `providerId` is dropped on the way in --
- * the run log is the table an operator reads casually, and a provider id there is
+ * back has to be able to say which. `healthSystemId` is dropped on the way in --
+ * the run log is the table an operator reads casually, and a health system id there is
  * one join away from naming a health system.
  *
  * A third shape, `RunSummaryDto` (also `shared/types.ts`), is what actually
  * reaches the admin UI: built by `worker/api/dto.ts` from the *stored* row, so its
- * `errors` and `warningCodes` are the bare codes above, never a provider id --
+ * `errors` and `warningCodes` are the bare codes above, never a health system id --
  * there was never one to reconstruct.
  *
  * A run row is opened before any work and closed after it, so a run cut off
@@ -72,7 +72,7 @@ const STALE_RUN_SECONDS = 30 * 60;
 /** A zeroed DTO summary. Every run starts from one and counts upward. */
 export function emptySummary(): RunSummary {
   return {
-    providers: 0,
+    healthSystems: 0,
     encountersSeen: 0,
     eventsInserted: 0,
     eventsPatched: 0,
@@ -162,14 +162,14 @@ function restoreRunState(snapshot: RunStateSnapshot | null | undefined): RunStat
 function toStoredSummary(state: RunState): RunSummaryInput {
   const { summary } = state;
   return {
-    providers: summary.providers,
+    healthSystems: summary.healthSystems,
     inserted: summary.eventsInserted,
     patched: summary.eventsPatched,
     ghosted: summary.eventsGhosted,
     restored: summary.eventsRestored,
     unchanged: state.unchanged,
     resources: summary.resourcesCached,
-    // Codes only: a provider id here would identify an organisation.
+    // Codes only: a health system id here would identify an organisation.
     errors: summary.errors.map((error) => error.code),
     // eslint-disable-next-line unicorn/no-array-sort -- `toSorted` is ES2023 and the Worker compiles against the ES2022 lib; the array is a fresh one from the spread, so sorting in place mutates nothing shared.
     warnings: [...state.warningCodes].sort((a, b) => a.localeCompare(b)),
@@ -179,7 +179,7 @@ function toStoredSummary(state: RunState): RunSummaryInput {
     backedOff: summary.backedOff,
     portalVisits: summary.portalVisits,
     portalSkipped: summary.portalSkipped,
-    // Already bare codes: the portal pass never puts a provider id in here.
+    // Already bare codes: the portal pass never puts a health system id in here.
     portalErrors: [...summary.portalErrors],
   };
 }
@@ -226,7 +226,7 @@ export async function record(
     await work(state);
   } catch (error) {
     ctx.log.error("sync.run_failed", { runId, kind, ...errorFields(error) });
-    state.summary.errors.push({ providerId: "", code: codeOf(error) });
+    state.summary.errors.push({ healthSystemId: "", code: codeOf(error) });
     // A run that threw is a finished run, whatever it had asked for before.
     state.unfinished = false;
   } finally {
@@ -261,7 +261,7 @@ export async function abandon(
 ): Promise<void> {
   const repos = makeRepos(ctx);
   const state = restoreRunState(snapshot);
-  state.summary.errors.push({ providerId: "", code });
+  state.summary.errors.push({ healthSystemId: "", code });
   await repos.runLog.finish(runId, { ok: false, summary: toStoredSummary(state) });
 }
 

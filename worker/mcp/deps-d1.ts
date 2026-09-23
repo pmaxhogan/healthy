@@ -15,7 +15,7 @@
  */
 
 import { reposFor } from "../db/index.ts";
-import { parseJsonColumn, providerConfigSchema } from "../db/schemas.ts";
+import { parseJsonColumn, healthSystemConfigSchema } from "../db/schemas.ts";
 import { getSetting } from "../db/settings.ts";
 import { makeLogger } from "../lib/log.ts";
 import { nowSeconds } from "../lib/time.ts";
@@ -32,12 +32,12 @@ import type {
   DocumentTextRequest,
   DocumentTextResult,
   PortalVisitRecord,
-  ProviderInfo,
+  HealthSystemInfo,
   SyncStatusEntry,
   ToolDeps,
 } from "./deps.ts";
 import type { Repos } from "../db/index.ts";
-import type { ConnectionRow, ProviderRow } from "../db/rows.ts";
+import type { ConnectionRow, HealthSystemRow } from "../db/rows.ts";
 import type { Env } from "../env.ts";
 import type { Logger } from "../lib/log.ts";
 import type { PolicyRules } from "../policy/rules.ts";
@@ -55,7 +55,7 @@ export interface ToolDepsOptions {
 interface CallCache {
   enabled: Promise<boolean> | null;
   rules: Promise<PolicyRules> | null;
-  providers: Promise<ProviderInfo[]> | null;
+  healthSystems: Promise<HealthSystemInfo[]> | null;
   counts: Promise<CacheCount[]> | null;
   syncStatus: Promise<SyncStatusEntry[]> | null;
   pools: Map<string, Promise<unknown[]>>;
@@ -67,7 +67,7 @@ function emptyCache(): CallCache {
   return {
     enabled: null,
     rules: null,
-    providers: null,
+    healthSystems: null,
     counts: null,
     syncStatus: null,
     pools: new Map(),
@@ -76,11 +76,14 @@ function emptyCache(): CallCache {
   };
 }
 
-function providerInfo(row: ProviderRow, connection: ConnectionRow | undefined): ProviderInfo {
+function healthSystemInfo(
+  row: HealthSystemRow,
+  connection: ConnectionRow | undefined,
+): HealthSystemInfo {
   const config = parseJsonColumn(
-    providerConfigSchema,
+    healthSystemConfigSchema,
     row.config_json,
-    `providers.config_json.${row.id}`,
+    `health_systems.config_json.${row.id}`,
   );
   return {
     id: row.id,
@@ -100,13 +103,13 @@ async function loadRules(repos: Repos): Promise<PolicyRules> {
   return buildRules(await repos.mcpPolicy.list());
 }
 
-/** One resource type for one provider, projected to what the tools read. */
+/** One resource type for one health system, projected to what the tools read. */
 async function loadRows(
   repos: Repos,
-  providerId: string,
+  healthSystemId: string,
   resourceType: string,
 ): Promise<CachedRow[]> {
-  const rows = await repos.fhirCache.listByType(providerId, resourceType);
+  const rows = await repos.fhirCache.listByType(healthSystemId, resourceType);
   return rows.map((row) => ({
     resource: row.resource,
     lastUpdated: row.lastUpdated,
@@ -114,17 +117,20 @@ async function loadRows(
   }));
 }
 
-/** Everything one provider's references can resolve against, in one pool. */
-async function loadReferencePool(repos: Repos, providerId: string): Promise<unknown[]> {
+/** Everything one health system's references can resolve against, in one pool. */
+async function loadReferencePool(repos: Repos, healthSystemId: string): Promise<unknown[]> {
   const groups = await Promise.all(
-    REFERENCE_TYPES.map((resourceType) => repos.fhirCache.listByType(providerId, resourceType)),
+    REFERENCE_TYPES.map((resourceType) => repos.fhirCache.listByType(healthSystemId, resourceType)),
   );
   return groups.flat().map((row) => row.resource);
 }
 
-/** One provider's stored portal visits, projected to what the tools read. */
-async function loadPortalVisits(repos: Repos, providerId: string): Promise<PortalVisitRecord[]> {
-  const rows = await repos.portalVisits.list(providerId);
+/** One health system's stored portal visits, projected to what the tools read. */
+async function loadPortalVisits(
+  repos: Repos,
+  healthSystemId: string,
+): Promise<PortalVisitRecord[]> {
+  const rows = await repos.portalVisits.list(healthSystemId);
   return rows.map((row) => ({
     visit: row.visit,
     missing: row.state === "missing",
@@ -132,10 +138,13 @@ async function loadPortalVisits(repos: Repos, providerId: string): Promise<Porta
   }));
 }
 
-async function loadProviders(repos: Repos): Promise<ProviderInfo[]> {
-  const [rows, connections] = await Promise.all([repos.providers.list(), repos.connections.list()]);
-  const byProvider = new Map(connections.map((row) => [row.provider_id, row]));
-  return rows.map((row) => providerInfo(row, byProvider.get(row.id)));
+async function loadHealthSystems(repos: Repos): Promise<HealthSystemInfo[]> {
+  const [rows, connections] = await Promise.all([
+    repos.healthSystems.list(),
+    repos.connections.list(),
+  ]);
+  const byHealthSystem = new Map(connections.map((row) => [row.health_system_id, row]));
+  return rows.map((row) => healthSystemInfo(row, byHealthSystem.get(row.id)));
 }
 
 export function makeToolDeps(options: ToolDepsOptions): ToolDeps {
@@ -164,35 +173,35 @@ export function makeToolDeps(options: ToolDepsOptions): ToolDeps {
       return cache.rules;
     },
 
-    providers(): Promise<ProviderInfo[]> {
-      cache.providers ??= loadProviders(repos);
-      return cache.providers;
+    healthSystems(): Promise<HealthSystemInfo[]> {
+      cache.healthSystems ??= loadHealthSystems(repos);
+      return cache.healthSystems;
     },
 
-    resources(providerId: string, resourceType: string): Promise<CachedRow[]> {
-      const key = `${providerId}:${resourceType}`;
+    resources(healthSystemId: string, resourceType: string): Promise<CachedRow[]> {
+      const key = `${healthSystemId}:${resourceType}`;
       let pending = cache.resources.get(key);
       if (pending === undefined) {
-        pending = loadRows(repos, providerId, resourceType);
+        pending = loadRows(repos, healthSystemId, resourceType);
         cache.resources.set(key, pending);
       }
       return pending;
     },
 
-    referencePool(providerId: string): Promise<unknown[]> {
-      let pending = cache.pools.get(providerId);
+    referencePool(healthSystemId: string): Promise<unknown[]> {
+      let pending = cache.pools.get(healthSystemId);
       if (pending === undefined) {
-        pending = loadReferencePool(repos, providerId);
-        cache.pools.set(providerId, pending);
+        pending = loadReferencePool(repos, healthSystemId);
+        cache.pools.set(healthSystemId, pending);
       }
       return pending;
     },
 
-    portalVisits(providerId: string): Promise<PortalVisitRecord[]> {
-      let pending = cache.visits.get(providerId);
+    portalVisits(healthSystemId: string): Promise<PortalVisitRecord[]> {
+      let pending = cache.visits.get(healthSystemId);
       if (pending === undefined) {
-        pending = loadPortalVisits(repos, providerId);
-        cache.visits.set(providerId, pending);
+        pending = loadPortalVisits(repos, healthSystemId);
+        cache.visits.set(healthSystemId, pending);
       }
       return pending;
     },
@@ -208,7 +217,7 @@ export function makeToolDeps(options: ToolDepsOptions): ToolDeps {
     },
 
     documentText(input: DocumentTextRequest): Promise<DocumentTextResult> {
-      return documentText({ repos, log }, input.providerId, input.documentId);
+      return documentText({ repos, log }, input.healthSystemId, input.documentId);
     },
 
     async recordAudit(entry: AuditRecord): Promise<void> {
@@ -216,7 +225,7 @@ export function makeToolDeps(options: ToolDepsOptions): ToolDeps {
         tool: entry.tool,
         clientId: entry.clientId,
         grantId: entry.grantId,
-        providers: entry.providerIds,
+        healthSystems: entry.healthSystemIds,
         resultCount: entry.resultCount,
         ok: entry.ok,
         errorCode: entry.errorCode,

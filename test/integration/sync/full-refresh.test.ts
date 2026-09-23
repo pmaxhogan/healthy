@@ -20,7 +20,7 @@ import {
   referencePool,
   resetSyncDb,
   searchBundle,
-  seedConnectedProvider,
+  seedConnectedHealthSystem,
   seedSettings,
   stubUpstreams,
   syncCtx,
@@ -125,7 +125,7 @@ interface Harness {
   time: ReturnType<typeof clock>;
   server: FhirServer;
   upstreams: Upstreams;
-  providerId: string;
+  healthSystemId: string;
   lines: string[];
 }
 
@@ -133,7 +133,7 @@ async function setup(): Promise<Harness> {
   const time = clock();
   const { log, lines } = recordingLog();
   const ctx = syncCtx({ now: time.now, log });
-  const seeded = await seedConnectedProvider(ctx, { host: HOST });
+  const seeded = await seedConnectedHealthSystem(ctx, { host: HOST });
   await seedSettings(ctx);
 
   const server = fhirServer({ resources: referencePool() });
@@ -158,7 +158,7 @@ async function setup(): Promise<Harness> {
   server.searches.set("Immunization", searchBundle([immunization("imm-1")]));
 
   const upstreams = stubUpstreams({ [HOST]: server });
-  return { ctx, time, server, upstreams, lines, providerId: seeded.providerId };
+  return { ctx, time, server, upstreams, lines, healthSystemId: seeded.healthSystemId };
 }
 
 describe("runFullRefresh", () => {
@@ -167,7 +167,7 @@ describe("runFullRefresh", () => {
 
     const summary = await runFullRefresh(h.ctx, { deps: h.upstreams.deps });
 
-    expect(summary.providers).toBe(1);
+    expect(summary.healthSystems).toBe(1);
     expect(summary.errors).toStrictEqual([]);
     expect(summary.resourcesCached).toBeGreaterThanOrEqual(6);
 
@@ -185,7 +185,7 @@ describe("runFullRefresh", () => {
 
     await runFullRefresh(h.ctx, { deps: h.upstreams.deps });
 
-    const states = await syncRepos(h.ctx).fhirSyncState.listByProvider(h.providerId);
+    const states = await syncRepos(h.ctx).fhirSyncState.listByHealthSystem(h.healthSystemId);
     const byType = new Map(states.map((state) => [state.resourceType, state]));
     expect(byType.get("Condition")).toMatchObject({ lastOk: true, lastFullAt: T0 });
     expect(byType.get("Observation")?.lastOk).toBe(true);
@@ -199,7 +199,7 @@ describe("runFullRefresh", () => {
 
     await runFullRefresh(h.ctx, { deps: h.upstreams.deps });
 
-    const states = await syncRepos(h.ctx).fhirSyncState.listByProvider(h.providerId);
+    const states = await syncRepos(h.ctx).fhirSyncState.listByHealthSystem(h.healthSystemId);
     const types = new Set(states.map((state) => state.resourceType));
     expect(types.has("Coverage")).toBe(false);
     expect(types.has("MedicationRequest")).toBe(false);
@@ -244,7 +244,7 @@ describe("runFullRefresh", () => {
 
     // The run itself is a success: one resource type is not the record.
     expect(summary.errors).toStrictEqual([]);
-    const states = await syncRepos(h.ctx).fhirSyncState.listByProvider(h.providerId);
+    const states = await syncRepos(h.ctx).fhirSyncState.listByHealthSystem(h.healthSystemId);
     const observation_ = states.find((state) => state.resourceType === "Observation");
     expect(observation_?.lastOk).toBe(false);
     expect(observation_?.lastErrorCode).toBe("upstream_auth:4118");
@@ -259,7 +259,7 @@ describe("runFullRefresh", () => {
 
     await runFullRefresh(h.ctx, { deps: h.upstreams.deps });
 
-    const states = await syncRepos(h.ctx).fhirSyncState.listByProvider(h.providerId);
+    const states = await syncRepos(h.ctx).fhirSyncState.listByHealthSystem(h.healthSystemId);
     const binary = states.find((state) => state.resourceType === "Binary");
     expect(binary).toMatchObject({ lastOk: false, lastErrorCode: "epic_4135" });
   });
@@ -291,7 +291,7 @@ describe("runFullRefresh", () => {
 
     await runFullRefresh(h.ctx, { deps: h.upstreams.deps });
 
-    const connection = await syncRepos(h.ctx).connections.getForProvider(h.providerId);
+    const connection = await syncRepos(h.ctx).connections.getForHealthSystem(h.healthSystemId);
     expect(connection?.last_full_refresh_at).toBe(T0);
   });
 
@@ -305,7 +305,7 @@ describe("runFullRefresh", () => {
     // Same count, and the TTL moved: `upsertMany` extends rather than rewrites
     // when the plaintext hash is unchanged.
     expect(second.resourcesCached).toBeGreaterThan(0);
-    const cached = await syncRepos(h.ctx).fhirCache.get(h.providerId, "Condition", "cond-1");
+    const cached = await syncRepos(h.ctx).fhirCache.get(h.healthSystemId, "Condition", "cond-1");
     expect(cached?.fetchedAt).toBe(T0 + 86_400);
   });
 
@@ -320,7 +320,7 @@ describe("runFullRefresh", () => {
     h.time.advance(86_400);
     await runFullRefresh(h.ctx, { deps: h.upstreams.deps });
 
-    const cached = await syncRepos(h.ctx).fhirCache.get(h.providerId, "Condition", "cond-1");
+    const cached = await syncRepos(h.ctx).fhirCache.get(h.healthSystemId, "Condition", "cond-1");
     expect((cached?.resource as fhir4.Condition).code?.text).toBe("Changed");
   });
 
@@ -331,7 +331,7 @@ describe("runFullRefresh", () => {
     const summary = await runFullRefresh(h.ctx, { deps: h.upstreams.deps });
 
     expect(summary.backedOff).toBe(true);
-    expect(summary.errors.map((error) => error.providerId)).toStrictEqual([h.providerId]);
+    expect(summary.errors.map((error) => error.healthSystemId)).toStrictEqual([h.healthSystemId]);
   });
 
   it("skips entirely while a backoff stands", async () => {
@@ -355,7 +355,7 @@ describe("runFullRefresh", () => {
 
     const summary = await runFullRefresh(h.ctx, { deps: h.upstreams.deps });
 
-    const states = await syncRepos(h.ctx).fhirSyncState.listByProvider(h.providerId);
+    const states = await syncRepos(h.ctx).fhirSyncState.listByHealthSystem(h.healthSystemId);
     expect(states.some((state) => state.resourceType === "MedicationRequest")).toBe(true);
     expect(summary.errors).toStrictEqual([]);
   });
@@ -412,22 +412,22 @@ describe("runFullRefreshChunk", () => {
     const result = await runFullRefreshChunk(h.ctx, {
       deps: oneTypePerChunk(h.upstreams),
       budgetMs: ONE_TYPE_BUDGET_MS,
-      job: { pending: [h.providerId], cycleStartedAt: T0, runId: null, state: null },
+      job: { pending: [h.healthSystemId], cycleStartedAt: T0, runId: null, state: null },
     });
 
-    expect(result.job?.pending).toStrictEqual([h.providerId]);
+    expect(result.job?.pending).toStrictEqual([h.healthSystemId]);
     const repos = syncRepos(h.ctx);
-    // Exactly one (provider, resource type) pass happened: a chunk always makes
+    // Exactly one (health system, resource type) pass happened: a chunk always makes
     // progress, and a spent budget stops it after the first.
-    const states = await repos.fhirSyncState.listByProvider(h.providerId);
+    const states = await repos.fhirSyncState.listByHealthSystem(h.healthSystemId);
     expect(states).toHaveLength(1);
     // The row is deliberately still open, and it is the one the job carries.
     const runs = await repos.runLog.listRecent({ kind: "full" });
     expect(runs).toHaveLength(1);
     expect(runs[0]?.finishedAt).toBeNull();
     expect(result.job?.runId).toBe(runs[0]?.id);
-    // And the provider is not stamped as refreshed, because it is not.
-    const connection = await repos.connections.getForProvider(h.providerId);
+    // And the health system is not stamped as refreshed, because it is not.
+    const connection = await repos.connections.getForHealthSystem(h.healthSystemId);
     expect(connection?.last_full_refresh_at).toBeNull();
   });
 
@@ -436,7 +436,7 @@ describe("runFullRefreshChunk", () => {
     const first = await runFullRefreshChunk(h.ctx, {
       deps: oneTypePerChunk(h.upstreams),
       budgetMs: ONE_TYPE_BUDGET_MS,
-      job: { pending: [h.providerId], cycleStartedAt: T0, runId: null, state: null },
+      job: { pending: [h.healthSystemId], cycleStartedAt: T0, runId: null, state: null },
     });
     const { job } = first;
     if (job === null) throw new Error("the budgeted first chunk should have deferred");
@@ -464,7 +464,7 @@ describe("runFullRefreshChunk", () => {
     const h = await setup();
     const unchunked = h.server.searchCalls;
     let job: RefreshJob = {
-      pending: [h.providerId],
+      pending: [h.healthSystemId],
       cycleStartedAt: T0,
       runId: null,
       state: null,
@@ -496,13 +496,13 @@ describe("runFullRefreshChunk", () => {
     expect(runs[0]?.ok).toBe(true);
     // Counts survived every chunk boundary rather than restarting at zero.
     expect(runs[0]?.summary.resources).toBe(result.summary.resourcesCached);
-    expect(result.summary.providers).toBe(1);
+    expect(result.summary.healthSystems).toBe(1);
     const cached = await repos.fhirCache.countsByType();
     const counts = new Map(cached.map((row) => [row.resourceType, row.count]));
     expect(counts.get("Condition")).toBe(2);
     expect(counts.get("Patient")).toBe(1);
-    // Only the chunk that finished the provider stamps its clock.
-    const connection = await repos.connections.getForProvider(h.providerId);
+    // Only the chunk that finished the health system stamps its clock.
+    const connection = await repos.connections.getForHealthSystem(h.healthSystemId);
     expect(connection?.last_full_refresh_at).toBe(T0);
   });
 });

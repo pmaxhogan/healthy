@@ -7,7 +7,7 @@
 // in place are written empty.
 //
 // **A claim is bound to a sender.** `takeFreshOtp` takes the expected sender for
-// the provider that asked for the code, and only that sender's rows are
+// the health system that asked for the code, and only that sender's rows are
 // eligible; without one, the sender allowlist stands in, narrowed to a sender on
 // the same site as the portal's own host -- so a second configured portal's own
 // allowlisted sender is not eligible either. Oldest eligible row first, so a
@@ -43,7 +43,7 @@ function unbound(since: number, now: number, portalHost: string | null = PORTAL_
   return { since, now, expectedSender: null, allowlist: ALLOWLIST, portalHost };
 }
 
-/** The filter a provider that already knows its sender passes. `portalHost` is unused here. */
+/** The filter a health system that already knows its sender passes. `portalHost` is unused here. */
 function boundTo(expectedSender: string, since: number, now: number) {
   return { since, now, expectedSender, allowlist: ALLOWLIST, portalHost: null };
 }
@@ -251,7 +251,7 @@ describe("mailInbox.takeFreshOtp", () => {
     expect(await repos.mailInbox.takeFreshOtp(unbound(500, 1100))).toBeNull();
   });
 
-  it("never claims a row from an unexpected sender when the provider has an expected one", async () => {
+  it("never claims a row from an unexpected sender when the health system has an expected one", async () => {
     // The binding that makes an OTP claim safe: whoever else can reach the
     // inbound address, their code is not eligible for this account.
     const repos = testRepos();

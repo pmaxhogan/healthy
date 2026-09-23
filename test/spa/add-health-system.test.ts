@@ -1,10 +1,10 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import AddProviderForm from "../../src/components/AddProviderForm.vue";
+import AddHealthSystemForm from "../../src/components/AddHealthSystemForm.vue";
 import { SEARCH_DEBOUNCE_MS } from "../../src/lib/debounce.ts";
 
-import { brand, fakeResponse, installFakeApi, provider } from "./helpers.ts";
+import { brand, fakeResponse, installFakeApi, healthSystem } from "./helpers.ts";
 
 import type { FakeFetch } from "./helpers.ts";
 import type { DOMWrapper } from "@vue/test-utils";
@@ -14,17 +14,17 @@ function searchCalls(api: FakeFetch): string[] {
 }
 
 function mountForm(): ReturnType<typeof mount> {
-  return mount(AddProviderForm);
+  return mount(AddHealthSystemForm);
 }
 
-describe("AddProviderForm", () => {
+describe("AddHealthSystemForm", () => {
   let api: FakeFetch;
 
   beforeEach(() => {
     vi.useFakeTimers();
     api = installFakeApi({
       "/api/brands": () => fakeResponse({ body: [brand()] }),
-      "/api/providers": () => fakeResponse({ body: provider() }),
+      "/api/health-systems": () => fakeResponse({ body: healthSystem() }),
     });
   });
 
@@ -111,7 +111,7 @@ describe("AddProviderForm", () => {
     await flushPromises();
 
     const created = api.calls.find((call) => call.method === "POST");
-    expect(created?.url).toBe("/api/providers");
+    expect(created?.url).toBe("/api/health-systems");
     expect(JSON.parse(created?.body ?? "null")).toEqual({
       displayName: "Example Health",
       brandId: "example-health",
@@ -157,7 +157,7 @@ describe("AddProviderForm", () => {
     expect(created?.headers.get("x-healthy-csrf")).toBe("1");
   });
 
-  it("emits the created provider and resets the form", async () => {
+  it("emits the created health system and resets the form", async () => {
     const wrapper = mountForm();
     await wrapper.find('input[type="search"]').setValue("Example");
     await vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS);
@@ -252,7 +252,7 @@ describe("AddProviderForm", () => {
       await flushPromises();
 
       const created = api.calls.find((call) => call.method === "POST");
-      expect(created?.url).toBe("/api/providers");
+      expect(created?.url).toBe("/api/health-systems");
       expect(JSON.parse(created?.body ?? "null")).toEqual({
         displayName: "Example Health",
         fhirBaseUrl: "https://fhir.example.test/api/FHIR/R4",
@@ -292,7 +292,7 @@ describe("AddProviderForm", () => {
       expect(created?.headers.get("x-healthy-csrf")).toBe("1");
     });
 
-    it("emits the created provider and resets the manual fields", async () => {
+    it("emits the created health system and resets the manual fields", async () => {
       const wrapper = mountForm();
       await toManualMode(wrapper);
       await fillRequired(wrapper);

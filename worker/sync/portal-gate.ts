@@ -5,12 +5,12 @@
  * (`portal-runner.ts`) and the hourly cron's inline `signInAndWait`
  * (`portal-sync.ts`) -- and only the first of them used to serialise anything.
  * `start()` deduplicated its own jobs, so pressing the button twice was a no-op,
- * but a cron pass was outside that: two overlapping sign-ins for one provider
+ * but a cron pass was outside that: two overlapping sign-ins for one health system
  * could each read `attemptsLeft` before either incremented it, overshoot the
  * daily budget meant to keep the portal from locking the account, and -- worse --
  * the second `SendCode` would invalidate the code the first one was waiting for.
  *
- * So the lock lives in the Durable Object, which is the one place per provider
+ * So the lock lives in the Durable Object, which is the one place per health system
  * that is guaranteed single-threaded, and both drivers take it. The DO's own job
  * holds it for the life of the job; cron takes it around `signInAndWait` and
  * releases it in a `finally`.
@@ -34,7 +34,7 @@ import type { Ctx } from "../db/client.ts";
 export const SIGN_IN_BUSY_CODE = "portal_signin_busy";
 
 /**
- * Take the sign-in gate for one provider.
+ * Take the sign-in gate for one health system.
  *
  * False means another driver holds it -- the owner pressed the button while the
  * hourly run was signing in, or the reverse. The correct answer for the loser is
@@ -42,14 +42,14 @@ export const SIGN_IN_BUSY_CODE = "portal_signin_busy";
  * next pass finds it alive) or fail and say so.
  *
  * A gate held by a driver that died is released by its own staleness timeout in
- * the Durable Object, so this can never wedge a provider permanently.
+ * the Durable Object, so this can never wedge a health system permanently.
  */
 export async function acquirePortalSignIn(
   ctx: Ctx,
-  providerId: string,
+  healthSystemId: string,
   holder: string,
 ): Promise<boolean> {
-  return ctx.env.PORTAL_SIGNIN.getByName(providerId).acquireSignIn(holder);
+  return ctx.env.PORTAL_SIGNIN.getByName(healthSystemId).acquireSignIn(holder);
 }
 
 /**
@@ -59,10 +59,10 @@ export async function acquirePortalSignIn(
  * about to report with a storage failure nobody can act on. The staleness timeout
  * is the backstop if this does not land.
  */
-export async function releasePortalSignIn(ctx: Ctx, providerId: string): Promise<void> {
+export async function releasePortalSignIn(ctx: Ctx, healthSystemId: string): Promise<void> {
   try {
-    await ctx.env.PORTAL_SIGNIN.getByName(providerId).releaseSignIn();
+    await ctx.env.PORTAL_SIGNIN.getByName(healthSystemId).releaseSignIn();
   } catch (error) {
-    ctx.log.warn("portal.signin_gate_release_failed", { providerId, ...errorFields(error) });
+    ctx.log.warn("portal.signin_gate_release_failed", { healthSystemId, ...errorFields(error) });
   }
 }

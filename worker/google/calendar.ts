@@ -284,7 +284,7 @@ export function buildEventBody(model: CalendarEventModel): CalendarEventBody {
         healthy: "1",
         key: model.key,
         fp: model.fingerprint,
-        provider: model.provider,
+        healthSystem: model.healthSystem,
       },
     },
     reminders: { useDefault: true },

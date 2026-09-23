@@ -3,14 +3,14 @@
  *
  * A tool describes *what* it wants -- one or more resource types, the date field
  * that kind of resource is filtered and ordered by, and any predicate of its own
- * -- and this module does the rest: pick the providers, resolve each provider's
- * references, normalize, window, merge across providers, order newest first.
+ * -- and this module does the rest: pick the health systems, resolve each health system's
+ * references, normalize, window, merge across health systems, order newest first.
  *
  * Two invariants it maintains that the layers above depend on:
  *
- *  - Each item carries `provider` (the display name, which is what a model should
- *    say back to a human) and `providerId` (the id, which is what the policy layer
- *    and the audit row key off). Nothing downstream has to look a provider up.
+ *  - Each item carries `health_system` (the display name, which is what a model should
+ *    say back to a human) and `healthSystemId` (the id, which is what the policy layer
+ *    and the audit row key off). Nothing downstream has to look a health system up.
  *  - The normalized item and the raw resource behind it stay index-aligned, so
  *    `applyPolicy` dropping one drops the other.
  *
@@ -20,9 +20,9 @@
  */
 
 import { mapResolver, normalizeResource } from "../fhir/normalize/index.ts";
-import { isProviderDenied } from "../policy/rules.ts";
+import { isHealthSystemDenied } from "../policy/rules.ts";
 
-import type { CachedRow, ProviderInfo, ToolDeps } from "./deps.ts";
+import type { CachedRow, HealthSystemInfo, ToolDeps } from "./deps.ts";
 import type { NormalizeCtx, NormalizedResource } from "../fhir/normalize/index.ts";
 import type { RawEntry } from "../policy/filter.ts";
 import type { PolicyRules } from "../policy/rules.ts";
@@ -37,7 +37,7 @@ export const REFERENCE_TYPES: readonly string[] = [
   "Medication",
 ];
 
-/** Any normalized shape, as a plain record, plus the provider tags. */
+/** Any normalized shape, as a plain record, plus the health system tags. */
 export type TaggedItem = Record<string, unknown>;
 
 /** One resource type a tool wants, and how to treat it. */
@@ -106,30 +106,31 @@ export interface Collected {
   items: TaggedItem[];
   /** Empty unless `raw` was asked for. Index-aligned with `items`. */
   rawItems: RawEntry[];
-  /** The providers actually read from, by id. For the audit row. */
-  providerIds: string[];
+  /** The health systems actually read from, by id. For the audit row. */
+  healthSystemIds: string[];
 }
 
 /**
- * Pick the providers a call applies to.
+ * Pick the health systems a call applies to.
  *
- * A denied provider is removed first and can never be named back in: the
- * `providers` argument narrows the allowed set, it does not choose from the full
- * one. An argument that matches nothing yields no providers -- and so an empty
+ * A denied health system is removed first and can never be named back in: the
+ * `health_systems` argument narrows the allowed set, it does not choose from the full
+ * one. An argument that matches nothing yields no health systems -- and so an empty
  * answer -- rather than silently falling back to all of them.
  */
-export function selectProviders(
-  all: readonly ProviderInfo[],
+export function selectHealthSystems(
+  all: readonly HealthSystemInfo[],
   rules: PolicyRules,
   requested: readonly string[] | undefined,
-): ProviderInfo[] {
-  const allowed = all.filter((provider) => !isProviderDenied(rules, provider.id));
+): HealthSystemInfo[] {
+  const allowed = all.filter((healthSystem) => !isHealthSystemDenied(rules, healthSystem.id));
   if (requested === undefined || requested.length === 0) return allowed;
   const needles = requested.map((value) => value.trim().toLowerCase()).filter((v) => v.length > 0);
-  return allowed.filter((provider) =>
+  return allowed.filter((healthSystem) =>
     needles.some(
       (needle) =>
-        provider.id.toLowerCase() === needle || provider.displayName.toLowerCase().includes(needle),
+        healthSystem.id.toLowerCase() === needle ||
+        healthSystem.displayName.toLowerCase().includes(needle),
     ),
   );
 }
@@ -212,9 +213,9 @@ export function withinWindow(
   return inWindow(Number.isNaN(ms) ? NO_DATE : ms, bound(from, false), bound(to, true));
 }
 
-/** Every entry one provider contributes for one spec. */
+/** Every entry one health system contributes for one spec. */
 function entriesFor(
-  provider: ProviderInfo,
+  healthSystem: HealthSystemInfo,
   ctx: NormalizeCtx,
   current: CollectSpec,
   rows: readonly CachedRow[],
@@ -222,7 +223,7 @@ function entriesFor(
   before: number | undefined,
 ): Entry[] {
   const out: Entry[] = [];
-  const tags = { provider: provider.displayName, providerId: provider.id };
+  const tags = { healthSystem: healthSystem.displayName, healthSystemId: healthSystem.id };
   for (const row of rows) {
     if (!isResource(row.resource)) continue;
     const normalized = normalizeResource(row.resource, ctx);
@@ -244,25 +245,25 @@ function entriesFor(
  *
  * Ordering is newest-first on the spec's own date, with items that have no date
  * last. That is the order a model wants for "what happened recently" and it is
- * stable across providers, which the cache's per-provider ordering is not.
+ * stable across health systems, which the cache's per-health system ordering is not.
  */
 export async function collect(
   deps: ToolDeps,
-  providers: readonly ProviderInfo[],
+  healthSystems: readonly HealthSystemInfo[],
   options: CollectOptions,
 ): Promise<Collected> {
   const after = bound(options.from, false);
   const before = bound(options.to, true);
   const entries: Entry[] = [];
 
-  for (const provider of providers) {
-    const pool = await deps.referencePool(provider.id);
+  for (const healthSystem of healthSystems) {
+    const pool = await deps.referencePool(healthSystem.id);
     const refs = mapResolver(pool.filter(isResource));
-    const ctx: NormalizeCtx = { provider: provider.displayName, refs };
+    const ctx: NormalizeCtx = { healthSystem: healthSystem.displayName, refs };
 
     for (const current of options.specs) {
-      const rows = await deps.resources(provider.id, current.resourceType);
-      entries.push(...entriesFor(provider, ctx, current, rows, after, before));
+      const rows = await deps.resources(healthSystem.id, current.resourceType);
+      entries.push(...entriesFor(healthSystem, ctx, current, rows, after, before));
     }
   }
 
@@ -271,6 +272,6 @@ export async function collect(
   return {
     items: entries.map((entry) => entry.item),
     rawItems: options.raw === true ? entries.map((entry) => entry.raw) : [],
-    providerIds: providers.map((provider) => provider.id),
+    healthSystemIds: healthSystems.map((healthSystem) => healthSystem.id),
   };
 }

@@ -20,7 +20,7 @@ export function normalizeCarePlan(resource: fhir4.CarePlan, ctx: NormalizeCtx): 
   return {
     resourceType: "CarePlan",
     id: resource.id ?? "",
-    provider: ctx.provider,
+    healthSystem: ctx.healthSystem,
     ...(resource.meta?.lastUpdated && { lastUpdated: resource.meta.lastUpdated }),
     ...(resource.title && { title: resource.title }),
     status: resource.status,

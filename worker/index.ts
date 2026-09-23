@@ -72,7 +72,7 @@ const honoHandler: HandlerWithFetch = {
   fetch: (request, env, ctx) => app.fetch(request, env, ctx),
 };
 
-const provider = new OAuthProvider<Env>({
+const healthSystem = new OAuthProvider<Env>({
   ...OAUTH_CORE,
   apiRoute: MCP_API_ROUTE,
   apiHandler: mcpApiHandler,
@@ -81,7 +81,7 @@ const provider = new OAuthProvider<Env>({
 
 export default {
   fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    return provider.fetch(request, env, ctx);
+    return healthSystem.fetch(request, env, ctx);
   },
 
   /**

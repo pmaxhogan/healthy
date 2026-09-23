@@ -9,7 +9,7 @@
  * Auth is Trello's REST convention: `key` and `token` as query params on
  * every request (see ../../trello-mcp/src/trello-client.ts). Those two values
  * -- and every other query param, since card creation puts the (user-data)
- * provider display name and description there too -- must never reach a log
+ * health system display name and description there too -- must never reach a log
  * line or an error message. `stripCredentials` is exported and tested for
  * callers that need to log a full URL, but this module's own logging never
  * does: it logs only the method and path, never the query string, and every
@@ -143,7 +143,7 @@ export function createTrelloAlerts(cfg: TrelloAlertsConfig): TrelloAlerts {
     } catch (error) {
       if (error instanceof PermanentError) {
         // Never log `params` or the URL here: for POST /cards they carry the
-        // (user-data) provider name and card description. `method`/`path`
+        // (user-data) health system name and card description. `method`/`path`
         // alone are enough to diagnose which call failed.
         logger.warn("alerts.trello.upstream_error", { method, path, status: error.status });
         throw new AppError(

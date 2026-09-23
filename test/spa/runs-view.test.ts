@@ -30,7 +30,7 @@ const FINISHED: RunDto = {
   finishedAt: "2026-09-21T11:07:04.000Z",
   ok: true,
   summary: {
-    providers: 1,
+    healthSystems: 1,
     encountersSeen: 1,
     eventsInserted: 1,
     eventsPatched: 0,

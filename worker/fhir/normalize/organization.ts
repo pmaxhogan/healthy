@@ -17,7 +17,7 @@ export function normalizeOrganization(
   return {
     resourceType: "Organization",
     id: resource.id ?? "",
-    provider: ctx.provider,
+    healthSystem: ctx.healthSystem,
     ...(resource.meta?.lastUpdated && { lastUpdated: resource.meta.lastUpdated }),
     ...(resource.name && { name: resource.name }),
     ...(type && { type }),

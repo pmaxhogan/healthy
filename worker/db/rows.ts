@@ -22,9 +22,9 @@ export type CalendarEventState = "active" | "ghost";
 /** Which cron or button produced a run. */
 export type RunKind = "calendar" | "full" | "refresh" | "manual";
 /** What an exposure rule denies. */
-export type PolicyRuleType = "tool" | "resource" | "field" | "provider";
-/** Which Epic environment a provider points at. */
-export type ProviderEnvironment = "prod" | "sandbox";
+export type PolicyRuleType = "tool" | "resource" | "field" | "health_system";
+/** Which Epic environment a health system points at. */
+export type HealthSystemEnvironment = "prod" | "sandbox";
 /** Which authorization flow an in-flight state belongs to. */
 export type OAuthStateKind = "epic" | "google";
 /** 'otp' | 'forward_verify' | 'other' (CHECK-constrained). */
@@ -45,16 +45,16 @@ export interface SettingRow {
 
 /**
  * A health system's row as the repo hands it out: the identity columns opened.
- * The stored row is `ProviderDbRow`, where each of them is an `_enc` column.
+ * The stored row is `HealthSystemDbRow`, where each of them is an `_enc` column.
  */
-export interface ProviderRow {
+export interface HealthSystemRow {
   id: string;
   vendor: string;
   display_name: string;
   brand_key: string | null;
   fhir_base_url: string;
   portal_url: string | null;
-  environment: ProviderEnvironment;
+  environment: HealthSystemEnvironment;
   client_secret_enc: string | null;
   config_json: string;
   created_at: number;
@@ -62,9 +62,9 @@ export interface ProviderRow {
   deleted_at: number | null;
 }
 
-/** The raw `providers` row (0008): the identity columns sealed in place. */
-export interface ProviderDbRow extends Omit<
-  ProviderRow,
+/** The raw `health_systems` row (0008): the identity columns sealed in place. */
+export interface HealthSystemDbRow extends Omit<
+  HealthSystemRow,
   "display_name" | "fhir_base_url" | "brand_key" | "portal_url" | "config_json"
 > {
   display_name_enc: string;
@@ -76,7 +76,7 @@ export interface ProviderDbRow extends Omit<
 
 export interface ConnectionRow {
   id: string;
-  provider_id: string;
+  health_system_id: string;
   patient_fhir_id_enc: string | null;
   access_token_enc: string | null;
   access_expires_at: number | null;
@@ -114,7 +114,7 @@ export interface GoogleAccountRow {
 export interface OAuthStateRow {
   state: string;
   kind: OAuthStateKind;
-  provider_id: string | null;
+  health_system_id: string | null;
   code_verifier_enc: string;
   redirect_after: string | null;
   created_at: number;
@@ -122,7 +122,7 @@ export interface OAuthStateRow {
 }
 
 export interface FhirCacheRow {
-  provider_id: string;
+  health_system_id: string;
   resource_type: string;
   resource_id: string;
   payload_enc: string;
@@ -133,7 +133,7 @@ export interface FhirCacheRow {
 }
 
 export interface FhirSyncStateRow {
-  provider_id: string;
+  health_system_id: string;
   resource_type: string;
   last_full_at: number | null;
   /** 0 or 1: SQLite has no boolean. */
@@ -154,13 +154,13 @@ export interface FhirSyncStateRow {
  * `worker/db/repos/calendar-events.ts`.
  */
 export interface CalendarEventRow {
-  /** `<providerId>:<blind>` or `<providerId>:csn:<blind>`. See `blindEventKey`. */
+  /** `<healthSystemId>:<blind>` or `<healthSystemId>:csn:<blind>`. See `blindEventKey`. */
   event_key: string;
-  provider_id: string;
+  health_system_id: string;
   /**
-   * The blinded upstream id: `blindResourceId(provider, "Encounter", id)` for a
+   * The blinded upstream id: `blindResourceId(health_system, "Encounter", id)` for a
    * FHIR row -- the same value `fhir_cache.resource_id` keys the Encounter by --
-   * or `blindCsn(provider, csn)` for a portal row.
+   * or `blindCsn(health_system, csn)` for a portal row.
    */
   encounter_id: string;
   /** The real calendar id, opened from `detail_enc`. */
@@ -176,7 +176,7 @@ export interface CalendarEventRow {
   updated_at: number;
   /** Added by 0002_portal.sql; every pre-existing row reads 'fhir'. */
   source: CalendarEventSource;
-  /** `blindCsn(provider, csn)`, set only when `source` is 'portal'. */
+  /** `blindCsn(health_system, csn)`, set only when `source` is 'portal'. */
   portal_csn: string | null;
 }
 
@@ -195,7 +195,7 @@ export interface CalendarEventDbRow extends Omit<CalendarEventRow, "calendar_id"
 export interface AlertRow {
   id: string;
   kind: "reconnect";
-  /** 'provider:<id>' or 'google'. */
+  /** 'health system:<id>' or 'google'. */
   subject: string;
   trello_card_id: string | null;
   opened_at: number;
@@ -208,7 +208,7 @@ export interface McpAuditRow {
   client_id: string | null;
   grant_id: string | null;
   tool: string;
-  providers_json: string;
+  health_systems_json: string;
   result_count: number;
   ok: number;
   error_code: string | null;
@@ -260,15 +260,15 @@ export interface MailInboxRow {
 }
 
 /**
- * One portal account per provider (0002_portal.sql).
+ * One portal account per health system (0002_portal.sql).
  *
- * Four sealed columns, all bound to `portal_accounts.<column>.<providerId>`.
+ * Four sealed columns, all bound to `portal_accounts.<column>.<healthSystemId>`.
  * `cookie_jar_enc` is a whole serialised cookie jar rather than one value: the
  * trust-this-device cookie inside it is what lets a later run skip the emailed
  * code, so it is exactly as sensitive as the password.
  */
 export interface PortalAccountRow {
-  provider_id: string;
+  health_system_id: string;
   /** Opened from `base_url_enc`. */
   base_url: string | null;
   mount_path: string | null;
@@ -293,7 +293,7 @@ export interface PortalAccountRow {
   /**
    * The domain this account's emailed verification codes come from (0005).
    *
-   * What binds a `mail_inbox` claim to the provider that asked for the code:
+   * What binds a `mail_inbox` claim to the health system that asked for the code:
    * with it set, no other sender's row is eligible as this account's OTP. Set
    * by the owner, or learned the first time a code is accepted by the portal.
    * Sealed because a sending domain names the health system. NULL until either
@@ -335,10 +335,10 @@ export interface PortalAccountDbRow extends Omit<
 export type PortalVisitState = "active" | "missing";
 
 export interface PortalVisitRow {
-  provider_id: string;
+  health_system_id: string;
   /** The portal's contact-serial number. Plaintext, like `calendar_events.portal_csn`. */
   csn: string;
-  /** The parsed visit as JSON, sealed against `portal_visits.payload_enc.<providerId>:<csn>`. */
+  /** The parsed visit as JSON, sealed against `portal_visits.payload_enc.<healthSystemId>:<csn>`. */
   payload_enc: string;
   content_hash: string;
   /** The portal's own status word, from the fixed `PortalVisitStatus` vocabulary. */

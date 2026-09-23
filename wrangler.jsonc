@@ -75,13 +75,13 @@
     ],
   },
   "observability": { "enabled": true },
-  // A full refresh walks every resource type for every connected provider. This is
+  // A full refresh walks every resource type for every connected health system. This is
   // the plan maximum and is not the binding constraint: a refresh is nearly all
   // waiting on an organisation, so it spends hundreds of milliseconds of CPU across
   // half a minute of wall clock. Wall clock is what limits it, which is why a
   // manual refresh runs from a Durable Object alarm -- see worker/sync/runner.ts.
   "limits": { "cpu_ms": 300000 },
-  // Deliberately the ONLY var. Every piece of real configuration -- provider
+  // Deliberately the ONLY var. Every piece of real configuration -- health-system
   // endpoints, credentials, calendar and timezone settings, alert routing --
   // lives in Worker secrets or the D1 `settings` table, never in this file or
   // in source, so the repository carries no personal data.

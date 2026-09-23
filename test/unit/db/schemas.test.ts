@@ -7,15 +7,15 @@ import {
   isSettingKey,
   parseJsonColumn,
   parseSetting,
-  providerConfigSchema,
-  providerIdsSchema,
+  healthSystemConfigSchema,
+  healthSystemIdsSchema,
   runSummarySchema,
   settingSchemas,
   syncWarningsSchema,
 } from "../../../worker/db/schemas.ts";
 import { AppError } from "../../../worker/lib/errors.ts";
 
-import type { ProviderConfig, SettingKey, Settings } from "../../../worker/db/schemas.ts";
+import type { HealthSystemConfig, SettingKey, Settings } from "../../../worker/db/schemas.ts";
 
 /** Run `fn`, which must throw, and hand back what it threw. */
 function thrownBy(fn: () => unknown): unknown {
@@ -134,9 +134,9 @@ describe("encodeSetting", () => {
   });
 });
 
-describe("providerConfigSchema", () => {
+describe("healthSystemConfigSchema", () => {
   it("fills in the two fields that have defaults and leaves the rest absent", () => {
-    expect(providerConfigSchema.parse({})).toStrictEqual<ProviderConfig>({
+    expect(healthSystemConfigSchema.parse({})).toStrictEqual<HealthSystemConfig>({
       arrival_offsets_by_visit_type: {},
       enabled: true,
     });
@@ -144,7 +144,7 @@ describe("providerConfigSchema", () => {
 
   it("keeps the overrides it is given", () => {
     expect(
-      providerConfigSchema.parse({
+      healthSystemConfigSchema.parse({
         title_template: "{visitType} at {orgShort}",
         color_id: "5",
         arrival_offset_min: 20,
@@ -152,7 +152,7 @@ describe("providerConfigSchema", () => {
         org_short: "EH",
         enabled: false,
       }),
-    ).toStrictEqual<ProviderConfig>({
+    ).toStrictEqual<HealthSystemConfig>({
       title_template: "{visitType} at {orgShort}",
       color_id: "5",
       arrival_offset_min: 20,
@@ -165,21 +165,21 @@ describe("providerConfigSchema", () => {
   it("rejects an offset that is negative, fractional, or more than a day", () => {
     for (const arrival_offset_min of [-1, 0.5, 1441]) {
       expect(
-        providerConfigSchema.safeParse({ arrival_offset_min }).success,
+        healthSystemConfigSchema.safeParse({ arrival_offset_min }).success,
         String(arrival_offset_min),
       ).toBe(false);
     }
   });
 
   it("drops a key it does not know rather than storing it", () => {
-    expect(providerConfigSchema.parse({ colour_id: "5" })).not.toHaveProperty("colour_id");
+    expect(healthSystemConfigSchema.parse({ colour_id: "5" })).not.toHaveProperty("colour_id");
   });
 });
 
 describe("runSummarySchema", () => {
   it("defaults every counter to zero and every list to empty", () => {
     expect(runSummarySchema.parse({})).toStrictEqual({
-      providers: 0,
+      healthSystems: 0,
       inserted: 0,
       patched: 0,
       ghosted: 0,
@@ -199,7 +199,7 @@ describe("runSummarySchema", () => {
 
   it("keeps counts and codes", () => {
     const parsed = runSummarySchema.parse({
-      providers: 2,
+      healthSystems: 2,
       inserted: 3,
       ghosted: 1,
       errors: ["needs_reauth"],
@@ -232,25 +232,25 @@ describe("runSummarySchema", () => {
   });
 });
 
-describe("syncWarningsSchema and providerIdsSchema", () => {
+describe("syncWarningsSchema and healthSystemIdsSchema", () => {
   it("parse the shapes their columns hold", () => {
     expect(syncWarningsSchema.parse([{ code: "4119", count: 2 }])).toStrictEqual([
       { code: "4119", count: 2 },
     ]);
     expect(syncWarningsSchema.safeParse([{ code: "4119" }]).success).toBe(false);
-    expect(providerIdsSchema.parse(["p1", "p2"])).toStrictEqual(["p1", "p2"]);
-    expect(providerIdsSchema.safeParse([1]).success).toBe(false);
+    expect(healthSystemIdsSchema.parse(["p1", "p2"])).toStrictEqual(["p1", "p2"]);
+    expect(healthSystemIdsSchema.safeParse([1]).success).toBe(false);
   });
 });
 
 describe("parseJsonColumn", () => {
   it("names the column in both failure modes", () => {
-    expect(() => parseJsonColumn(providerIdsSchema, "{", "mcp_audit.providers_json.x")).toThrow(
-      /mcp_audit\.providers_json\.x is not valid JSON/,
-    );
-    expect(() => parseJsonColumn(providerIdsSchema, "{}", "mcp_audit.providers_json.x")).toThrow(
-      /mcp_audit\.providers_json\.x failed validation/,
-    );
+    expect(() =>
+      parseJsonColumn(healthSystemIdsSchema, "{", "mcp_audit.health_systems_json.x"),
+    ).toThrow(/mcp_audit\.health_systems_json\.x is not valid JSON/);
+    expect(() =>
+      parseJsonColumn(healthSystemIdsSchema, "{}", "mcp_audit.health_systems_json.x"),
+    ).toThrow(/mcp_audit\.health_systems_json\.x failed validation/);
   });
 
   it("reports issues as paths and codes, with no values", () => {
@@ -265,7 +265,7 @@ describe("parseJsonColumn", () => {
 
   it("treats a corrupt stored column as an internal failure, not a bad request", () => {
     // Nobody sent it: it is already in the database, so it is our problem.
-    expect(thrownBy(() => parseJsonColumn(providerIdsSchema, "{}", "x"))).toMatchObject({
+    expect(thrownBy(() => parseJsonColumn(healthSystemIdsSchema, "{}", "x"))).toMatchObject({
       code: "internal",
     });
   });

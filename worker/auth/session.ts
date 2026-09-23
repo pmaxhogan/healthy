@@ -34,7 +34,7 @@ export const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
  *   HttpOnly         -- script cannot read it, so an XSS cannot exfiltrate it
  *   Secure           -- never sent over plaintext
  *   SameSite=Lax     -- carried on top-level GET navigations only, which is what
- *                       the OAuth redirect back from a provider is; never on a
+ *                       the OAuth redirect back from a health system is; never on a
  *                       cross-site POST or subresource request. Strict was
  *                       tried first and dropped the cookie on every
  *                       /oauth/callback, bouncing each connect through the

@@ -12,8 +12,8 @@
  *   `tool`      the tool name. A denied tool answers `policy_denied` and reads
  *               nothing at all.
  *   `resource`  a FHIR resource type. Items of that type are dropped from every
- *               tool's output, the raw projection and the cross-provider summary.
- *   `provider`  a provider id. The provider disappears everywhere, `list_providers`
+ *               tool's output, the raw projection and the cross-health system summary.
+ *   `health_system`  a health system id. The health system disappears everywhere, `list_health_systems`
  *               included, and is never even queried.
  *   `field`     a path, `ResourceType.path.to.field` or `*.field`. Deep-deleted
  *               from the normalized item and from the raw resource. A segment of
@@ -54,8 +54,8 @@ export interface PolicyRules {
   tools: ReadonlySet<string>;
   /** FHIR resource types that never appear in any output. */
   resources: ReadonlySet<string>;
-  /** Provider ids that are never read from and never listed. */
-  providers: ReadonlySet<string>;
+  /** Health system ids that are never read from and never listed. */
+  healthSystems: ReadonlySet<string>;
   /** Field paths deep-deleted from normalized items and raw resources. */
   fields: readonly FieldRule[];
   /**
@@ -71,7 +71,7 @@ export interface PolicyRules {
 export const EMPTY_RULES: PolicyRules = {
   tools: new Set(),
   resources: new Set(),
-  providers: new Set(),
+  healthSystems: new Set(),
   fields: [],
   allowedSensitive: new Set(),
   unparsed: [],
@@ -145,7 +145,7 @@ function parseAllowTarget(target: string): string | null {
 interface Buckets {
   tools: Set<string>;
   resources: Set<string>;
-  providers: Set<string>;
+  healthSystems: Set<string>;
   fields: FieldRule[];
   allowedSensitive: Set<string>;
   unparsed: string[];
@@ -182,8 +182,8 @@ function addRule(buckets: Buckets, ruleType: PolicyRuleType, target: string): vo
       buckets.resources.add(target);
       return;
     }
-    case "provider": {
-      buckets.providers.add(target);
+    case "health_system": {
+      buckets.healthSystems.add(target);
       return;
     }
     case "field": {
@@ -198,7 +198,7 @@ export function buildRules(rows: readonly PolicyRuleInput[]): PolicyRules {
   const buckets: Buckets = {
     tools: new Set(),
     resources: new Set(),
-    providers: new Set(),
+    healthSystems: new Set(),
     fields: [],
     allowedSensitive: new Set(),
     unparsed: [],
@@ -218,9 +218,9 @@ export function isToolDenied(rules: PolicyRules, tool: string): boolean {
   return rules.tools.has(tool);
 }
 
-/** True when this provider must not be read from, listed or mentioned. */
-export function isProviderDenied(rules: PolicyRules, providerId: string): boolean {
-  return rules.providers.has(providerId);
+/** True when this health system must not be read from, listed or mentioned. */
+export function isHealthSystemDenied(rules: PolicyRules, healthSystemId: string): boolean {
+  return rules.healthSystems.has(healthSystemId);
 }
 
 /** True when a `sensitive` field has been explicitly put back by the owner. */

@@ -15,7 +15,7 @@
 import { describe, expect, it } from "vitest";
 
 import { blindEventKey, blinderFor } from "../../../worker/db/blind.ts";
-import { providerConfigSchema } from "../../../worker/db/schemas.ts";
+import { healthSystemConfigSchema } from "../../../worker/db/schemas.ts";
 import { buildCalendarModel } from "../../../worker/sync/mapping.ts";
 import {
   DEDUPE_WINDOW_SECONDS,
@@ -32,7 +32,7 @@ import type {
   MappingSettings,
 } from "../../../worker/sync/mapping.ts";
 
-const PROVIDER_ID = "prov-1";
+const HEALTH_SYSTEM_ID = "prov-1";
 const NOW = "2026-09-30T12:00:00Z";
 const PORTAL_URL = "https://portal.example.test/mychart";
 
@@ -52,11 +52,11 @@ function input(
   overrides: { settings?: Partial<MappingSettings>; config?: Record<string, unknown> } = {},
 ): MappingInput {
   return {
-    provider: {
-      id: PROVIDER_ID,
+    healthSystem: {
+      id: HEALTH_SYSTEM_ID,
       displayName: "Example Health",
       portalUrl: PORTAL_URL,
-      config: providerConfigSchema.parse(overrides.config ?? {}),
+      config: healthSystemConfigSchema.parse(overrides.config ?? {}),
     },
     settings: { ...SETTINGS, ...overrides.settings },
     nowIso: NOW,
@@ -96,11 +96,11 @@ async function map(
   overrides: VisitOverrides = {},
   mappingInput: MappingInput = input(),
 ): Promise<CalendarMapping> {
-  return buildCalendarModel(portalVisitView(PROVIDER_ID, visit(overrides)), mappingInput);
+  return buildCalendarModel(portalVisitView(HEALTH_SYSTEM_ID, visit(overrides)), mappingInput);
 }
 
 describe("the portal event key", () => {
-  it("is the provider, the csn: marker and a blind of the contact-serial number", async () => {
+  it("is the health system, the csn: marker and a blind of the contact-serial number", async () => {
     const mapping = await map({ csn: "1234567" });
     expect(mapping.model.key).toBe(await blindEventKey(BLINDER, "prov-1:csn:1234567"));
     expect(mapping.model.key.startsWith("prov-1:csn:~")).toBe(true);

@@ -13,7 +13,7 @@
  *  3. Turns any thrown error into an `isError` answer with a stable code. A
  *     health system's error body can quote the record that caused it, so no
  *     upstream message and no stack ever reaches the client.
- *  4. Writes exactly one `mcp_audit` row per call: which tool, which providers by
+ *  4. Writes exactly one `mcp_audit` row per call: which tool, which health systems by
  *     id, how many items, whether it worked, how long it took. The row has
  *     nowhere to put content and this function never offers it any.
  *
@@ -121,7 +121,7 @@ async function writeAudit(
       tool,
       clientId: deps.caller.clientId,
       grantId: deps.caller.grantId,
-      providerIds: outcome.providerIds,
+      healthSystemIds: outcome.healthSystemIds,
       resultCount: outcome.resultCount,
       ok: outcome.errorCode === null,
       errorCode: outcome.errorCode,

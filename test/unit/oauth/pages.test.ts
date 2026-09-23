@@ -77,13 +77,17 @@ describe("invalidStatePage", () => {
 });
 
 describe("providerRefusedPage", () => {
-  it("reports the provider's error code and offers a retry", async () => {
-    const response = providerRefusedPage(NONCE, "access_denied", "/oauth/epic/start?provider=P1");
+  it("reports the health system's error code and offers a retry", async () => {
+    const response = providerRefusedPage(
+      NONCE,
+      "access_denied",
+      "/oauth/epic/start?healthSystem=P1",
+    );
     const html = await bodyOf(response);
 
     expect(response.status).toBe(400);
     expect(html).toContain("access_denied");
-    expect(html).toContain("/oauth/epic/start?provider=P1");
+    expect(html).toContain("/oauth/epic/start?healthSystem=P1");
   });
 
   it("never names the organisation", async () => {

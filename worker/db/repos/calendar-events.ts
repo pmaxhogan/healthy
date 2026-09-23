@@ -8,10 +8,10 @@
  *
  * ### What is stored how (0007)
  *
- *   - `event_key` is `blindEventKey(...)`: `<providerId>:<blind>` or
- *     `<providerId>:csn:<blind>`. The same string is the Google event's
+ *   - `event_key` is `blindEventKey(...)`: `<healthSystemId>:<blind>` or
+ *     `<healthSystemId>:csn:<blind>`. The same string is the Google event's
  *     `extendedProperties.private.key`, so pairing a row with its event is still
- *     an exact match, and the `<providerId>:` / `:csn:` structure the sync
+ *     an exact match, and the `<healthSystemId>:` / `:csn:` structure the sync
  *     partitions on is kept. The upstream id it was built from is not in it.
  *   - `encounter_id` is the blinded upstream id -- for a FHIR row the very value
  *     `fhir_cache.resource_id` keys the Encounter by, which is how a vanished
@@ -70,16 +70,18 @@ const LOG_HASH_CHARS = 12;
 const CSN_PREFIX = "csn:";
 
 /**
- * `providerId` plus a short digest of the full key, for the log lines below.
+ * `healthSystemId` plus a short digest of the full key, for the log lines below.
  *
  * The key is blinded, so it no longer carries an upstream id; the digest is kept
  * so that a log line never carries a value that is also a lookup key in D1.
  */
-async function logSafeKey(eventKey: string): Promise<{ providerId: string; eventKeyHash: string }> {
+async function logSafeKey(
+  eventKey: string,
+): Promise<{ healthSystemId: string; eventKeyHash: string }> {
   const separator = eventKey.indexOf(":");
-  const providerId = separator > 0 ? eventKey.slice(0, separator) : eventKey;
+  const healthSystemId = separator > 0 ? eventKey.slice(0, separator) : eventKey;
   const digest = await sha256Hex(eventKey);
-  return { providerId, eventKeyHash: digest.slice(0, LOG_HASH_CHARS) };
+  return { healthSystemId, eventKeyHash: digest.slice(0, LOG_HASH_CHARS) };
 }
 
 /** What `detail_enc` holds. */
@@ -97,12 +99,12 @@ const calendarDetailAad = (googleEventId: string): string =>
  */
 export function encounterRef(
   blinder: Blinder,
-  providerId: string,
+  healthSystemId: string,
   encounterId: string,
 ): Promise<string> {
   return encounterId.startsWith(CSN_PREFIX)
-    ? blindCsn(blinder, providerId, encounterId.slice(CSN_PREFIX.length))
-    : blindResourceId(blinder, providerId, "Encounter", encounterId);
+    ? blindCsn(blinder, healthSystemId, encounterId.slice(CSN_PREFIX.length))
+    : blindResourceId(blinder, healthSystemId, "Encounter", encounterId);
 }
 
 /** Refuse a key that still carries an upstream id. */
@@ -115,7 +117,7 @@ function requireBlindedKey(eventKey: string): void {
 interface UpsertEvent {
   /** `blindEventKey(...)`; mirrored into extendedProperties.private.key. */
   eventKey: string;
-  providerId: string;
+  healthSystemId: string;
   /** The *logical* upstream id: an Encounter id, or `csn:<csn>`. Blinded here. */
   encounterId: string;
   /** The real target calendar. Blinded into the column, sealed into the detail. */
@@ -197,12 +199,12 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
       const portalCsn =
         input.portalCsn === undefined || input.portalCsn === null
           ? null
-          : await blindCsn(blinder, input.providerId, input.portalCsn);
+          : await blindCsn(blinder, input.healthSystemId, input.portalCsn);
       await run(
         ctx.db
           .prepare(
             `INSERT INTO calendar_events
-               (event_key, provider_id, encounter_id, calendar_id, google_event_id, fingerprint,
+               (event_key, health_system_id, encounter_id, calendar_id, google_event_id, fingerprint,
                 state, first_seen_at, last_seen_at, ghosted_at, updated_at,
                 source, portal_csn, detail_enc)
              VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, NULL, ?, ?, ?, ?)
@@ -226,8 +228,8 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
           )
           .bind(
             input.eventKey,
-            input.providerId,
-            await encounterRef(blinder, input.providerId, input.encounterId),
+            input.healthSystemId,
+            await encounterRef(blinder, input.healthSystemId, input.encounterId),
             await blindCalendarId(blinder, input.calendarId),
             input.googleEventId,
             input.fingerprint,
@@ -250,13 +252,13 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
 
     /**
      * Rows, earliest first. Every filter that narrows in SQL is on a plaintext
-     * column (`provider_id`, `source`, `state`), so it uses the index; the start
+     * column (`health_system_id`, `source`, `state`), so it uses the index; the start
      * is sealed, so `startsAfter` and the ordering are applied after the rows are
      * opened. That costs nothing extra: every caller opens every row it reads.
      */
     async list(
       options: {
-        providerId?: string;
+        healthSystemId?: string;
         state?: CalendarEventState;
         source?: CalendarEventSource;
         startsAfter?: number;
@@ -265,9 +267,9 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
     ): Promise<CalendarEventRow[]> {
       const clauses: string[] = [];
       const values: unknown[] = [];
-      if (options.providerId !== undefined) {
-        clauses.push("provider_id = ?");
-        values.push(options.providerId);
+      if (options.healthSystemId !== undefined) {
+        clauses.push("health_system_id = ?");
+        values.push(options.healthSystemId);
       }
       if (options.source !== undefined) {
         clauses.push("source = ?");
@@ -382,7 +384,7 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
       );
       if (existing !== null) return false;
       const separator = toKey.indexOf(":");
-      const providerId = toKey.slice(0, separator);
+      const healthSystemId = toKey.slice(0, separator);
       const { changes } = await run(
         ctx.db
           .prepare(
@@ -393,7 +395,7 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
           )
           .bind(
             toKey,
-            await encounterRef(blinder, providerId, input.encounterId),
+            await encounterRef(blinder, healthSystemId, input.encounterId),
             input.source,
             ctx.now(),
             ctx.now(),
@@ -422,9 +424,9 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
       return changes > 0;
     },
 
-    /** How many of one provider's rows came from one pass and are in one state. */
+    /** How many of one health system's rows came from one pass and are in one state. */
     async countBySource(
-      providerId: string,
+      healthSystemId: string,
       source: CalendarEventSource,
       state: CalendarEventState,
     ): Promise<number> {
@@ -432,9 +434,9 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
         ctx.db
           .prepare(
             `SELECT COUNT(*) AS n FROM calendar_events
-              WHERE provider_id = ? AND source = ? AND state = ?`,
+              WHERE health_system_id = ? AND source = ? AND state = ?`,
           )
-          .bind(providerId, source, state),
+          .bind(healthSystemId, source, state),
       );
       return row?.n ?? 0;
     },

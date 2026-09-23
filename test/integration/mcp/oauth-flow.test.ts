@@ -34,7 +34,7 @@ const ORIGIN = "https://healthy.example";
 const PASSWORD = "the-owners-password";
 /** The address claude.ai always comes back to. */
 const REDIRECT_URI = "https://claude.ai/api/mcp/auth_callback";
-const PROVIDER_NAME = "Example Health";
+const HEALTH_SYSTEM_NAME = "Example Health";
 
 const GATED_ENV = {
   ...env,
@@ -246,7 +246,7 @@ async function callOverBearer(token: string, tool: string): Promise<void> {
   );
   const content =
     (called.result?.result as { content?: { text?: string }[] } | undefined)?.content ?? [];
-  expect(content[0]?.text).toContain(PROVIDER_NAME);
+  expect(content[0]?.text).toContain(HEALTH_SYSTEM_NAME);
 }
 
 /** One JSON-RPC message over Streamable HTTP, with the SSE framing unwrapped. */
@@ -296,9 +296,9 @@ const INITIALIZE = {
  * read path is covered in `tools.test.ts`, which builds its own env and its own key.
  */
 beforeAll(async () => {
-  await repos().providers.create({
+  await repos().healthSystems.create({
     vendor: "epic",
-    displayName: PROVIDER_NAME,
+    displayName: HEALTH_SYSTEM_NAME,
     fhirBaseUrl: "https://a.fhir.example.test/R4",
     environment: "sandbox",
   });
@@ -466,18 +466,18 @@ describe("a real MCP session over the issued bearer", () => {
         jsonrpc: "2.0",
         id: 3,
         method: "tools/call",
-        params: { name: "list_providers", arguments: {} },
+        params: { name: "list_health_systems", arguments: {} },
       },
       sessionId,
     );
     const content =
       (called.result?.result as { content?: { text?: string }[] } | undefined)?.content ?? [];
-    expect(content[0]?.text).toContain(PROVIDER_NAME);
+    expect(content[0]?.text).toContain(HEALTH_SYSTEM_NAME);
 
     // The point of the whole file: the audit row names the client and the grant
     // that were actually issued, which only the token-exchange callback can supply.
     const rows = await repos().mcpAudit.listRecent(20);
-    const row = rows.find((entry) => entry.tool === "list_providers");
+    const row = rows.find((entry) => entry.tool === "list_health_systems");
     expect(row?.clientId).toBe(approved.clientId);
     expect(row?.grantId).not.toBeNull();
     expect(row?.ok).toBe(true);
@@ -496,11 +496,11 @@ describe("a real MCP session over the issued bearer", () => {
     expect(second.access_token ?? "").not.toBe("");
     expect(second.access_token).not.toBe(first.access_token);
 
-    await callOverBearer(second.access_token ?? "", "list_providers");
+    await callOverBearer(second.access_token ?? "", "list_health_systems");
 
     const rows = await repos().mcpAudit.listRecent(50);
     const row = rows.find(
-      (entry) => entry.tool === "list_providers" && entry.clientId === approved.clientId,
+      (entry) => entry.tool === "list_health_systems" && entry.clientId === approved.clientId,
     );
     expect(row?.clientId).toBe(approved.clientId);
     expect(row?.grantId).not.toBeNull();
@@ -553,7 +553,7 @@ describe("the grant helpers the admin API calls", () => {
         jsonrpc: "2.0",
         id: 4,
         method: "tools/call",
-        params: { name: "list_providers", arguments: {} },
+        params: { name: "list_health_systems", arguments: {} },
       },
       sessionId,
     );

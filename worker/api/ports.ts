@@ -42,7 +42,7 @@ import type { CalendarClient } from "../google/calendar.ts";
 import type { McpGrantDto, PortalSignInState } from "@shared/types.ts";
 
 /** Which connection a reconnect alert is about. */
-type ReconnectSubject = "google" | { providerId: string };
+type ReconnectSubject = "google" | { healthSystemId: string };
 
 /**
  * The sync engine's public surface, as the admin API uses it.
@@ -56,16 +56,20 @@ type ReconnectSubject = "google" | { providerId: string };
  * `startFullRefresh` is the one that is *not* fire-and-forget, and it is the one
  * port method whose answer the API reads. A refresh outlives a `waitUntil`, so it is
  * queued on a Durable Object instead; the call is a storage write, it is awaited,
- * and `started: false` means one was already running for that provider.
+ * and `started: false` means one was already running for that health system.
  */
 interface SyncPort {
   runCalendarSync(
     ctx: Ctx,
-    options: { providerIds?: string[]; trigger: "manual" },
+    options: { healthSystemIds?: string[]; trigger: "manual" },
   ): Promise<unknown>;
-  startFullRefresh(ctx: Ctx, options: { providerId: string }): Promise<{ started: boolean }>;
+  startFullRefresh(ctx: Ctx, options: { healthSystemId: string }): Promise<{ started: boolean }>;
   /** Forces a token refresh even when the current one has not expired. */
-  refreshConnectionToken(ctx: Ctx, providerId: string, options: { force: true }): Promise<unknown>;
+  refreshConnectionToken(
+    ctx: Ctx,
+    healthSystemId: string,
+    options: { force: true },
+  ): Promise<unknown>;
   /** A calendar client wired to the stored Google tokens, refresh included. */
   getGoogleCalendarFor(ctx: Ctx): Promise<CalendarClient>;
   /** Closes the open reconnect alert for a subject, Trello card and all. */
@@ -76,7 +80,7 @@ interface SyncPort {
  * One MCP grant as the store hands it over.
  *
  * `id` is the only field required. Everything else is optional because the shape
- * ultimately comes from `@cloudflare/workers-oauth-provider`, which owns it and has
+ * ultimately comes from `@cloudflare/workers-oauth-health_system`, which owns it and has
  * changed it between releases -- so the projection in `routes/mcp.ts` fills the gaps
  * rather than trusting them to be there. A full `McpGrantDto` satisfies this, which
  * is what the live implementation returns.
@@ -86,18 +90,18 @@ export type GrantLike = { id: string } & Partial<Omit<McpGrantDto, "id">>;
 /**
  * The patient-portal runner, as the admin API uses it.
  *
- * All three methods reach the same per-provider Durable Object, and that is the
+ * All three methods reach the same per-health system Durable Object, and that is the
  * reason this is a port rather than a direct call: a sign-in waits for a code the
  * portal emails, so it cannot happen inside the request that asked for it, and a
  * test has to be able to stand in for the whole alarm loop rather than for a
  * transport. `started: false` from either starter means one was already in flight
- * for that provider -- still a 202, because what the owner asked for is happening.
+ * for that health system -- still a 202, because what the owner asked for is happening.
  */
 interface PortalPort {
-  startSignIn(ctx: Ctx, options: { providerId: string }): Promise<{ started: boolean }>;
-  startSync(ctx: Ctx, options: { providerId: string }): Promise<{ started: boolean }>;
+  startSignIn(ctx: Ctx, options: { healthSystemId: string }): Promise<{ started: boolean }>;
+  startSync(ctx: Ctx, options: { healthSystemId: string }): Promise<{ started: boolean }>;
   /** Progress for the card the admin UI polls. Never the emailed code. */
-  signInState(ctx: Ctx, options: { providerId: string }): Promise<PortalSignInState>;
+  signInState(ctx: Ctx, options: { healthSystemId: string }): Promise<PortalSignInState>;
 }
 
 interface GrantsPort {

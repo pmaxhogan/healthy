@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import PolicyRuleForm from "../../src/components/PolicyRuleForm.vue";
 import { RESOURCE_TYPES } from "../../src/lib/fhir-resources.ts";
 
-import { provider } from "./helpers.ts";
+import { healthSystem } from "./helpers.ts";
 
 import type { McpToolInfoDto } from "@shared/types.ts";
 
@@ -14,7 +14,7 @@ const tools: McpToolInfoDto[] = [
 ];
 
 function mountForm(): ReturnType<typeof mount> {
-  return mount(PolicyRuleForm, { props: { tools, providers: [provider()] } });
+  return mount(PolicyRuleForm, { props: { tools, healthSystems: [healthSystem()] } });
 }
 
 async function fill(
@@ -47,7 +47,7 @@ describe("PolicyRuleForm", () => {
 
   it("leaves the note key out when it is blank", async () => {
     const wrapper = mountForm();
-    await fill(wrapper, "provider", "prov-1", " ".repeat(3));
+    await fill(wrapper, "health_system", "prov-1", " ".repeat(3));
     const emitted = wrapper.emitted("submit")?.[0]?.[0] as Record<string, unknown>;
     expect(Object.keys(emitted).toSorted((a, b) => a.localeCompare(b))).toEqual([
       "ruleType",
@@ -98,9 +98,9 @@ describe("PolicyRuleForm", () => {
     expect(options).toEqual([...RESOURCE_TYPES]);
   });
 
-  it("suggests provider ids for a provider rule", async () => {
+  it("suggests health system ids for a health system rule", async () => {
     const wrapper = mountForm();
-    await wrapper.find("select").setValue("provider");
+    await wrapper.find("select").setValue("health_system");
     const options = wrapper.findAll("datalist option").map((o) => o.attributes("value"));
     expect(options).toEqual(["prov-1"]);
   });
@@ -114,7 +114,7 @@ describe("PolicyRuleForm", () => {
 
   it("disables submitting while a previous rule is in flight", async () => {
     const wrapper = mount(PolicyRuleForm, {
-      props: { tools, providers: [provider()], busy: true },
+      props: { tools, healthSystems: [healthSystem()], busy: true },
     });
     await wrapper.findAll("input")[0]?.setValue("get_vitals");
     expect(wrapper.find("button[type='submit']").attributes("disabled")).toBeDefined();

@@ -29,52 +29,52 @@ Three treatments, and every column is in exactly one of them:
   a digest). See `worker/db/blind.ts`.
 - **Plaintext**: listed below, each with the reason.
 
-| Asset                                                                                       | Store          | At rest                                                  |
-| ------------------------------------------------------------------------------------------- | -------------- | -------------------------------------------------------- |
-| Health-system and Google OAuth tokens                                                       | D1             | Sealed                                                   |
-| Per-organisation client secrets                                                             | D1             | Sealed, padded                                           |
-| Health-system identity: name, FHIR base URL, brand, portal URL, config                      | D1 `providers` | Sealed in place, padded                                  |
-| Patient FHIR id on the connection                                                           | D1             | Sealed, padded                                           |
-| Cached FHIR resources (including the Patient)                                               | D1             | Payload sealed; resource id blinded; content hash keyed  |
-| Patient-portal upcoming visits                                                              | D1             | Payload sealed; visit number blinded; content hash keyed |
-| Calendar bookkeeping: event key, encounter, visit number, calendar id                       | D1             | Blinded; fingerprint keyed                               |
-| Calendar bookkeeping: a row's start and real calendar id                                    | D1             | Sealed together, padded (`calendar_events.detail_enc`)   |
-| Google event marker (`extendedProperties.private.key`, `fp`)                                | Google         | The blinded event key and the keyed fingerprint          |
-| Settings that name the owner: calendar id, timezone, mail sender allowlist, portal API path | D1 `settings`  | Sealed in place, padded                                  |
-| Other settings: templates, colour ids, window, offsets, limits, backoff, MCP switch         | D1 `settings`  | Plaintext (names no one; see below)                      |
-| Patient-portal login, MFA contact, expected code sender                                     | D1             | Sealed, padded                                           |
-| Patient-portal cookie jar                                                                   | D1             | Sealed                                                   |
-| Patient-portal location: base URL, mount path, discovered endpoint                          | D1             | Sealed in place, padded                                  |
-| Inbound mail: code, sender, subject                                                         | D1             | Sealed, padded                                           |
-| Login rate-limit key                                                                        | D1             | Keyed digest of the client IP                            |
-| MCP access and refresh tokens                                                               | Workers KV     | Managed by `@cloudflare/workers-oauth-provider`          |
-| Admin password                                                                              | Worker secret  | PBKDF2-SHA256, 100k iterations, per-hash salt            |
-| Encryption key, API credentials                                                             | Worker secrets | Cloudflare-managed                                       |
-| Full-refresh progress                                                                       | Durable Object | Plaintext: provider ids, a run id, counts, codes         |
-| Portal sign-in progress                                                                     | Durable Object | Plaintext: a provider id, a step, counts, codes          |
+| Asset                                                                                       | Store               | At rest                                                  |
+| ------------------------------------------------------------------------------------------- | ------------------- | -------------------------------------------------------- |
+| Health-system and Google OAuth tokens                                                       | D1                  | Sealed                                                   |
+| Per-organisation client secrets                                                             | D1                  | Sealed, padded                                           |
+| Health-system identity: name, FHIR base URL, brand, portal URL, config                      | D1 `health_systems` | Sealed in place, padded                                  |
+| Patient FHIR id on the connection                                                           | D1                  | Sealed, padded                                           |
+| Cached FHIR resources (including the Patient)                                               | D1                  | Payload sealed; resource id blinded; content hash keyed  |
+| Patient-portal upcoming visits                                                              | D1                  | Payload sealed; visit number blinded; content hash keyed |
+| Calendar bookkeeping: event key, encounter, visit number, calendar id                       | D1                  | Blinded; fingerprint keyed                               |
+| Calendar bookkeeping: a row's start and real calendar id                                    | D1                  | Sealed together, padded (`calendar_events.detail_enc`)   |
+| Google event marker (`extendedProperties.private.key`, `fp`)                                | Google              | The blinded event key and the keyed fingerprint          |
+| Settings that name the owner: calendar id, timezone, mail sender allowlist, portal API path | D1 `settings`       | Sealed in place, padded                                  |
+| Other settings: templates, colour ids, window, offsets, limits, backoff, MCP switch         | D1 `settings`       | Plaintext (names no one; see below)                      |
+| Patient-portal login, MFA contact, expected code sender                                     | D1                  | Sealed, padded                                           |
+| Patient-portal cookie jar                                                                   | D1                  | Sealed                                                   |
+| Patient-portal location: base URL, mount path, discovered endpoint                          | D1                  | Sealed in place, padded                                  |
+| Inbound mail: code, sender, subject                                                         | D1                  | Sealed, padded                                           |
+| Login rate-limit key                                                                        | D1                  | Keyed digest of the client IP                            |
+| MCP access and refresh tokens                                                               | Workers KV          | Managed by `@cloudflare/workers-oauth-health_system`     |
+| Admin password                                                                              | Worker secret       | PBKDF2-SHA256, 100k iterations, per-hash salt            |
+| Encryption key, API credentials                                                             | Worker secrets      | Cloudflare-managed                                       |
+| Full-refresh progress                                                                       | Durable Object      | Plaintext: health system ids, a run id, counts, codes    |
+| Portal sign-in progress                                                                     | Durable Object      | Plaintext: a health system id, a step, counts, codes     |
 
 What is **plaintext on purpose**, table by table. None of it names a person, a
 health system, a practitioner, a place or a visit; what it does disclose is
 listed rather than left to be inferred:
 
-- **Row ids and foreign keys** everywhere (`providers.id`, `provider_id`,
+- **Row ids and foreign keys** everywhere (`health_systems.id`, `health_system_id`,
   `connections.id`, ULIDs): this app's own random ids. A ULID's first ten
   characters are its creation time, which duplicates a timestamp column next
   to it.
-- **`providers.vendor`, `environment`, `created_at`, `updated_at`,
+- **`health_systems.vendor`, `environment`, `created_at`, `updated_at`,
   `deleted_at`**: "epic", "prod" or "sandbox", and bookkeeping.
 - **`connections.scope`, `status`, the lease and failure columns and the
   timestamps**: the SMART scope string is the same list of US Core categories
   for every organisation. `google_account.scope` and `status` likewise.
-- **`fhir_cache.provider_id`, `resource_type`, `last_updated`, `fetched_at`,
+- **`fhir_cache.health_system_id`, `resource_type`, `last_updated`, `fetched_at`,
   `expires_at`**, and **`fhir_sync_state`**: which types of record exist and
   how many, and each type's refresh health. Row counts per type and the size
   class of a sealed payload are accepted leaks (see Known limits).
-- **`calendar_events.provider_id`, `state`, `source`, `first_seen_at`,
+- **`calendar_events.health_system_id`, `state`, `source`, `first_seen_at`,
   `last_seen_at`, `ghosted_at`, `updated_at`**: whether a row is live or a
   ghost, which pass wrote it, and when this app saw it. Not when the
   appointment is.
-- **`portal_visits.provider_id`, `status`, `state`, `missing_since`,
+- **`portal_visits.health_system_id`, `status`, `state`, `missing_since`,
   `fetched_at`, `expires_at`**: a word from a fixed status vocabulary and
   bookkeeping. `expires_at` is rounded up to a 30-day boundary, so it does not
   date the visit (see "The visit timeline" below).
@@ -97,10 +97,10 @@ listed rather than left to be inferred:
   is sealed.
 - **`data_migrations`**: which one-shot backfill ran, when, and counts (the 0007
   backfill has run and its code is gone; the row is its record).
-- The two Durable Objects (`FULL_REFRESH`, `PORTAL_SIGNIN`) hold a provider
+- The two Durable Objects (`FULL_REFRESH`, `PORTAL_SIGNIN`) hold a health system
   id, a step name, counts and stable codes. Never a credential, never an
   emailed code, never a byte of a portal's HTML. `PORTAL_SIGNIN` additionally
-  holds the sign-in gate: one lock per provider that both the admin button and
+  holds the sign-in gate: one lock per health system that both the admin button and
   the hourly cron take, so two sign-ins cannot each pass the daily attempt check
   before either increments it (and so the second `SendCode` cannot invalidate the
   code the first is waiting for).
@@ -111,7 +111,7 @@ An appointment's start is sealed wherever it is stored, and each query that
 used to read it plaintext was decided on its own:
 
 - **The calendar window** (`calendar_events`). Both passes already read a
-  health system's rows by `provider_id` (indexed) and narrowed them to the
+  health system's rows by `health_system_id` (indexed) and narrowed them to the
   window in memory, so the start moved into the sealed `detail_enc` with no new
   query and no new round trip: `list` opens each row it reads anyway. No
   plaintext bucket is kept; the old `start_at` column is dropped (0008).
@@ -159,7 +159,7 @@ callback — stays behind Access and the password.
 
 **Single exposure choke point.** Every MCP tool result passes through one
 server-side filter before serialisation, which applies the deny-list (by tool,
-resource type, field path, or provider) held in the `mcp_policy` table. Filtering
+resource type, field path, or health system) held in the `mcp_policy` table. Filtering
 happens on the server, never in the client or the prompt, and applies equally to
 normalised output and to raw FHIR passthrough. Tests assert that denied data does
 not appear in a response.
@@ -251,7 +251,7 @@ guarantee is two parts, and it is worth being precise about which is which:
 `test/unit/lib/log.test.ts` pins every rule above, including a JWT, a `ya29.`
 token, a callback URL carrying `?code=`, and a 24-character Epic patient id under
 a key that shape alone would not catch. The MCP audit trail records _that_ a tool
-ran, by whom, against which providers, and how many rows came back — never the
+ran, by whom, against which health systems, and how many rows came back — never the
 rows.
 
 **No personal data in the repository.** Endpoints, organisation identities, the

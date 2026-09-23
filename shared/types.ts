@@ -6,14 +6,14 @@
  */
 
 export type Vendor = "epic";
-export type ProviderEnvironment = "prod" | "sandbox";
+export type HealthSystemEnvironment = "prod" | "sandbox";
 export type ConnectionStatus = "connected" | "needs_reauth" | "error" | "disconnected";
 export type RunKind = "calendar" | "full" | "refresh" | "manual";
-export type PolicyRuleType = "tool" | "resource" | "field" | "provider";
+export type PolicyRuleType = "tool" | "resource" | "field" | "health_system";
 export type MailKind = "otp" | "forward_verify" | "other";
 
-/** Per-provider configuration, editable in the UI. */
-export interface ProviderConfig {
+/** Per-health system configuration, editable in the UI. */
+export interface HealthSystemConfig {
   /** Title template with {visitType} {practitioner} {specialty} {orgShort} {org} {department} {apptTime}. */
   titleTemplate?: string;
   /** Google event colorId from the live palette. */
@@ -28,16 +28,16 @@ export interface ProviderConfig {
   enabled?: boolean;
 }
 
-export interface ProviderDto {
+export interface HealthSystemDto {
   id: string;
   vendor: Vendor;
   displayName: string;
   brandKey: string | null;
   fhirBaseUrl: string;
   portalUrl: string | null;
-  environment: ProviderEnvironment;
+  environment: HealthSystemEnvironment;
   hasClientSecret: boolean;
-  config: ProviderConfig;
+  config: HealthSystemConfig;
   connection: ConnectionDto | null;
   createdAt: string;
   updatedAt: string;
@@ -45,7 +45,7 @@ export interface ProviderDto {
 
 export interface ConnectionDto {
   id: string;
-  providerId: string;
+  healthSystemId: string;
   status: ConnectionStatus;
   /** ISO; when the current access token expires. */
   accessExpiresAt: string | null;
@@ -120,12 +120,12 @@ export type SettingsPatch = Partial<SettingsDto>;
 
 /**
  * The sync engine's own working shape for a run in progress -- see
- * `worker/sync/run.ts` for why `errors` still names a provider here. None of that
+ * `worker/sync/run.ts` for why `errors` still names a health system here. None of that
  * survives being written to `run_log`, so it is `RunSummaryDto`, not this, that
  * `RunDto` actually carries.
  */
 export interface RunSummary {
-  providers: number;
+  healthSystems: number;
   encountersSeen: number;
   eventsInserted: number;
   eventsPatched: number;
@@ -135,7 +135,7 @@ export interface RunSummary {
   warnings: number;
   filteredView: boolean;
   backedOff: boolean;
-  errors: { providerId: string; code: string }[];
+  errors: { healthSystemId: string; code: string }[];
   /** Upcoming visits the patient-portal pass read, across every portal account. */
   portalVisits: number;
   /** Portal visits not calendared because a FHIR event already covers them. */
@@ -155,7 +155,7 @@ export interface RunSummary {
 /**
  * What `RunDto.summary` actually contains: the same counts as `RunSummary`, but
  * `errors` and `warningCodes` are the bare, stable codes `run_log.summary_json`
- * stores -- never a provider id, which is one join away from naming a health
+ * stores -- never a health system id, which is one join away from naming a health
  * system. `warnings` stays a count; `warningCodes` is the distinct codes behind
  * it, e.g. an Epic OperationOutcome code -- which, not how many.
  */
@@ -177,7 +177,7 @@ export interface AlertDto {
   id: string;
   kind: "reconnect";
   subject: string;
-  providerId: string | null;
+  healthSystemId: string | null;
   trelloCardId: string | null;
   openedAt: string;
   resolvedAt: string | null;
@@ -186,7 +186,7 @@ export interface AlertDto {
 export interface PolicyRuleDto {
   id: string;
   ruleType: PolicyRuleType;
-  /** tool name | resource type | field path "ResourceType.path.to.field" | provider id */
+  /** tool name | resource type | field path "ResourceType.path.to.field" | health system id */
   target: string;
   note: string | null;
   createdAt: string;
@@ -195,7 +195,7 @@ export interface PolicyRuleDto {
    *
    * A stored rule that parses to nothing is the worst kind of wrong: the owner
    * believes an exposure is denied and it is not. Only a malformed `field` target
-   * (or a blank one) can land here -- a `tool`, `resource` or `provider` target is
+   * (or a blank one) can land here -- a `tool`, `resource` or `health_system` target is
    * taken literally, so a valid-looking name that simply matches no tool is not
    * reported. The admin UI shows a warning next to the row.
    */
@@ -233,7 +233,7 @@ export interface McpAuditDto {
   ts: string;
   clientId: string;
   tool: string;
-  providerIds: string[];
+  healthSystemIds: string[];
   resultCount: number;
   ok: boolean;
   errorCode: string | null;
@@ -284,12 +284,12 @@ export interface McpToolCallResponse {
 }
 
 export interface OverviewDto {
-  providers: ProviderDto[];
+  healthSystems: HealthSystemDto[];
   google: GoogleAccountDto;
   openAlerts: AlertDto[];
   lastRuns: RunDto[];
-  /** Counts of cached FHIR resources per type per provider; numbers only. */
-  cacheCounts: { providerId: string; resourceType: string; count: number }[];
+  /** Counts of cached FHIR resources per type per health system; numbers only. */
+  cacheCounts: { healthSystemId: string; resourceType: string; count: number }[];
   calendarEvents: { active: number; ghost: number };
   mcp: { enabled: boolean; grants: number; auditLast24h: number; policyRules: number };
   settings: SettingsDto;
@@ -304,25 +304,25 @@ export interface BrandDto {
   locations: string[];
 }
 
-export interface CreateProviderRequest {
+export interface CreateHealthSystemRequest {
   displayName: string;
   /** Either a brand id from /api/brands or a manual fhirBaseUrl (discovery is run either way). */
   brandId?: string;
   fhirBaseUrl?: string;
   portalUrl?: string;
-  environment: ProviderEnvironment;
+  environment: HealthSystemEnvironment;
   /** Per-org client secret from the Epic developer portal; write-only. */
   clientSecret?: string;
-  config?: ProviderConfig;
+  config?: HealthSystemConfig;
 }
 
-export interface UpdateProviderRequest {
+export interface UpdateHealthSystemRequest {
   displayName?: string;
   portalUrl?: string | null;
-  config?: ProviderConfig;
+  config?: HealthSystemConfig;
 }
 
-export interface SetProviderSecretRequest {
+export interface SetHealthSystemSecretRequest {
   clientSecret: string;
 }
 
@@ -375,7 +375,7 @@ export interface MailSettingsDto {
   allowlist: string[];
 }
 
-/** Health of a provider's portal session. Mirrors `portal_accounts.session_state`. */
+/** Health of a health system's portal session. Mirrors `portal_accounts.session_state`. */
 export type PortalSessionState = "none" | "active" | "needs_reauth";
 
 /**
@@ -388,14 +388,14 @@ export type PortalSessionState = "none" | "active" | "needs_reauth";
 export type PortalSignInStatus = "signed_in" | "awaiting_code";
 
 /**
- * One provider's portal account.
+ * One health system's portal account.
  *
  * Write-only credentials: `hasCredentials` is the whole of what the UI learns
  * about the username and password, and nothing here reflects the cookie jar's
  * contents either -- a session cookie is as good as the password.
  */
 export interface PortalAccountDto {
-  providerId: string;
+  healthSystemId: string;
   /** Origin only, as discovery settled on it. Null until it has been probed. */
   baseUrl: string | null;
   /** The prefix the portal is mounted under, with both slashes. */
@@ -453,7 +453,7 @@ export interface SetPortalCredentialsRequest {
 }
 
 /**
- * The body of `PUT /api/providers/:id/portal`.
+ * The body of `PUT /api/health-systems/:id/portal`.
  *
  * `baseUrl` is any URL on the portal's host; the handler keeps only its origin
  * and runs discovery from there. `mountHint` is a prefix the owner already knows
@@ -493,7 +493,7 @@ export interface PutPortalAccountRequest {
 }
 
 /**
- * The body of `POST /api/providers/:id/portal/discover`.
+ * The body of `POST /api/health-systems/:id/portal/discover`.
  *
  * Deliberately carries no credential: this probes for a login page and stores
  * nothing at all, so the owner can be shown where the portal actually is before
@@ -523,7 +523,7 @@ export interface PortalDiscoveryDto {
 /**
  * How far the current (or last) sign-in attempt got.
  *
- * Reported by `GET /api/providers/:id/portal` for the admin UI to poll while a
+ * Reported by `GET /api/health-systems/:id/portal` for the admin UI to poll while a
  * sign-in is in flight. It lives in the sign-in runner's own Durable Object
  * storage, not in D1: it is progress, and the durable answer is
  * `PortalAccountDto.state` plus `lastErrorCode`.
@@ -552,9 +552,9 @@ export interface PortalSignInState {
 }
 
 /**
- * `GET /api/providers/:id/portal`: the stored account plus live sign-in progress.
+ * `GET /api/health-systems/:id/portal`: the stored account plus live sign-in progress.
  *
- * Always answered, even for a provider that has never had a portal account: the
+ * Always answered, even for a health system that has never had a portal account: the
  * admin UI's portal card renders from this, so a missing row is a synthesized
  * default (`state: "none"`, everything else null) rather than a 404.
  */

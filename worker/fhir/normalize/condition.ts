@@ -56,7 +56,7 @@ export function normalizeCondition(
   return {
     resourceType: "Condition",
     id: resource.id ?? "",
-    provider: ctx.provider,
+    healthSystem: ctx.healthSystem,
     ...(resource.meta?.lastUpdated && { lastUpdated: resource.meta.lastUpdated }),
     ...(code && { code }),
     category,

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Everything about the Google side: which account, which calendar, and the
-// defaults every provider inherits when it has no override of its own.
+// defaults every health system inherits when it has no override of its own.
 
 import { computed, reactive, ref, watch } from "vue";
 

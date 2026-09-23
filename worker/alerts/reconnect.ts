@@ -1,7 +1,7 @@
 /**
  * Builds the title and Markdown body for a Trello reconnect card.
  *
- * Pure formatting: no fetch, no D1, no Env. `providerName` is user data --
+ * Pure formatting: no fetch, no D1, no Env. `healthSystemName` is user data --
  * the display name of a connected health system or "Google" -- and this
  * module only ever puts it into the returned strings; it never logs
  * anything itself.
@@ -16,7 +16,7 @@ type ReconnectKind = "epic" | "google" | "portal";
 
 export interface BuildReconnectCardInput {
   kind: ReconnectKind;
-  providerName: string;
+  healthSystemName: string;
   reconnectUrl: string;
   reason?: string;
   occurredAt: Date;
@@ -56,7 +56,9 @@ function portalNoun(kind: ReconnectKind): string {
 
 /** What the card calls the thing that needs reconnecting. */
 function subjectName(input: BuildReconnectCardInput): string {
-  return input.kind === "portal" ? `${input.providerName} ${PORTAL_LABEL}` : input.providerName;
+  return input.kind === "portal"
+    ? `${input.healthSystemName} ${PORTAL_LABEL}`
+    : input.healthSystemName;
 }
 
 /**

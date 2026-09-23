@@ -1,5 +1,5 @@
 /**
- * One connection per provider: the tokens, the status machine, and the lease.
+ * One connection per health system: the tokens, the status machine, and the lease.
  *
  * Two things here are load-bearing for correctness.
  *
@@ -61,26 +61,26 @@ export function makeConnectionsRepo(ctx: Ctx) {
   const byId = async (id: string): Promise<ConnectionRow | null> =>
     one<ConnectionRow>(ctx.db.prepare(`${SELECT} WHERE id = ?`).bind(id));
 
-  const byProvider = async (providerId: string): Promise<ConnectionRow | null> =>
-    one<ConnectionRow>(ctx.db.prepare(`${SELECT} WHERE provider_id = ?`).bind(providerId));
+  const byHealthSystem = async (healthSystemId: string): Promise<ConnectionRow | null> =>
+    one<ConnectionRow>(ctx.db.prepare(`${SELECT} WHERE health_system_id = ?`).bind(healthSystemId));
 
-  /** The row for a provider, created disconnected if it does not exist yet. */
-  const ensure = async (providerId: string): Promise<ConnectionRow> => {
-    const existing = await byProvider(providerId);
+  /** The row for a health system, created disconnected if it does not exist yet. */
+  const ensure = async (healthSystemId: string): Promise<ConnectionRow> => {
+    const existing = await byHealthSystem(healthSystemId);
     if (existing !== null) return existing;
     const at = ctx.now();
     await run(
       ctx.db
         .prepare(
-          `INSERT INTO connections (id, provider_id, status, created_at, updated_at)
+          `INSERT INTO connections (id, health_system_id, status, created_at, updated_at)
            VALUES (?, ?, 'disconnected', ?, ?)
-           ON CONFLICT (provider_id) DO NOTHING`,
+           ON CONFLICT (health_system_id) DO NOTHING`,
         )
-        .bind(newId(), providerId, at, at),
+        .bind(newId(), healthSystemId, at, at),
     );
-    const created = await byProvider(providerId);
+    const created = await byHealthSystem(healthSystemId);
     if (created === null) {
-      // Unreachable short of the provider row vanishing mid-call, in which case
+      // Unreachable short of the health system row vanishing mid-call, in which case
       // the FK would have thrown above.
       throw new Error("connection row disappeared after insert");
     }
@@ -106,11 +106,11 @@ export function makeConnectionsRepo(ctx: Ctx) {
 
   /** One token write, guarded by whatever predicate the caller's lease demands. */
   const writeTokens = async (
-    providerId: string,
+    healthSystemId: string,
     patch: TokenPatch,
     guard: { clause: string; values: unknown[] },
   ): Promise<ConnectionRow | null> => {
-    const row = await ensure(providerId);
+    const row = await ensure(healthSystemId);
     const sets: string[] = [];
     const values: unknown[] = [];
     const put = (column: string, value: unknown): void => {
@@ -159,7 +159,7 @@ export function makeConnectionsRepo(ctx: Ctx) {
 
   return {
     get: byId,
-    getForProvider: byProvider,
+    getForHealthSystem: byHealthSystem,
 
     async list(): Promise<ConnectionRow[]> {
       return all<ConnectionRow>(ctx.db.prepare(`${SELECT} ORDER BY created_at`));
@@ -167,13 +167,13 @@ export function makeConnectionsRepo(ctx: Ctx) {
 
     /**
      * Connections the scheduled sync should touch: connected, and belonging to a
-     * provider that has not been soft-deleted.
+     * health system that has not been soft-deleted.
      */
     async listActive(): Promise<ConnectionRow[]> {
       return all<ConnectionRow>(
         ctx.db.prepare(
           `SELECT c.* FROM connections c
-             JOIN providers p ON p.id = c.provider_id
+             JOIN health_systems p ON p.id = c.health_system_id
             WHERE c.status = 'connected' AND p.deleted_at IS NULL
             ORDER BY c.created_at`,
         ),
@@ -193,15 +193,15 @@ export function makeConnectionsRepo(ctx: Ctx) {
      * came with: if the write fails after a successful refresh, the old refresh
      * token is already dead and the connection is unrecoverable without a re-auth.
      */
-    async upsertTokens(providerId: string, patch: TokenPatch): Promise<ConnectionRow> {
-      const row = await writeTokens(providerId, patch, {
+    async upsertTokens(healthSystemId: string, patch: TokenPatch): Promise<ConnectionRow> {
+      const row = await writeTokens(healthSystemId, patch, {
         clause: "AND (lease_expires_at IS NULL OR lease_expires_at <= ?)",
         values: [ctx.now()],
       });
       if (row === null) {
-        ctx.log.warn("connections.token_write_blocked", { providerId });
+        ctx.log.warn("connections.token_write_blocked", { healthSystemId });
         throw new AppError("conflict", "a token refresh holds the connection lease", {
-          providerId,
+          healthSystemId,
         });
       }
       return row;
@@ -216,15 +216,15 @@ export function makeConnectionsRepo(ctx: Ctx) {
      * organisation will accept next time.
      */
     async upsertTokensLeased(
-      providerId: string,
+      healthSystemId: string,
       owner: string,
       patch: TokenPatch,
     ): Promise<ConnectionRow | null> {
-      const row = await writeTokens(providerId, patch, {
+      const row = await writeTokens(healthSystemId, patch, {
         clause: "AND lease_owner = ? AND lease_expires_at > ?",
         values: [owner, ctx.now()],
       });
-      if (row === null) ctx.log.warn("connections.lease_lost", { providerId });
+      if (row === null) ctx.log.warn("connections.lease_lost", { healthSystemId });
       return row;
     },
 

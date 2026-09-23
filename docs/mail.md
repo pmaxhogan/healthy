@@ -102,7 +102,7 @@ inbound message — so collection does not depend on mail continuing to arrive.
   racing each other (a retry racing the original attempt) can never both
   claim the same code — the loser's `UPDATE` matches no row.
 
-  **Eligible** means "from a sender this provider's codes come from".
+  **Eligible** means "from a sender this health system's codes come from".
   `portal_accounts.otp_sender_enc` holds that domain, set by the owner (the
   portal card, or `npm run set-portal-credentials -- --otp-sender`) or learned
   from the first code the portal itself accepts; while it is unset the sender
@@ -164,7 +164,7 @@ Shows the setup checklist below, the pending Gmail verification code/link
   the same code can never be used by two sign-in attempts, and a stale one
   cannot be replayed later. Every other kind expires too, and nothing at all
   survives 7 days.
-- **A claim is bound to a sender.** Only the provider's expected sending
+- **A claim is bound to a sender.** Only the health system's expected sending
   domain (or, until one is known, the allowlist) is eligible, and the oldest
   eligible row wins — so a flood of attacker-sent codes cannot be submitted
   to the owner's portal, nor outrun the real one.

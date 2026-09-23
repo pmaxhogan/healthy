@@ -15,13 +15,13 @@ import type {
   CreatePolicyRuleRequest,
   McpToolInfoDto,
   PolicyRuleType,
-  ProviderDto,
+  HealthSystemDto,
 } from "@shared/types.ts";
 
 const props = withDefaults(
   defineProps<{
     tools: McpToolInfoDto[];
-    providers: ProviderDto[];
+    healthSystems: HealthSystemDto[];
     busy?: boolean;
   }>(),
   { busy: false },
@@ -38,7 +38,7 @@ const HINTS: Record<PolicyRuleType, string> = {
   resource: "A FHIR resource type. Nothing of that type is returned by any tool.",
   field:
     "A path like ResourceType.path.to.field. Prefix with allow: to re-permit a field that is denied by default.",
-  provider: "A provider. Its data is excluded from every tool.",
+  health_system: "A health system. Its data is excluded from every tool.",
 };
 
 /** Datalist options for the current rule type. */
@@ -50,8 +50,8 @@ const suggestions = computed<string[]>(() => {
     case "resource": {
       return [...RESOURCE_TYPES];
     }
-    case "provider": {
-      return props.providers.map((provider) => provider.id);
+    case "health_system": {
+      return props.healthSystems.map((healthSystem) => healthSystem.id);
     }
     case "field": {
       return RESOURCE_TYPES.map((type) => `${type}.`);
@@ -84,7 +84,7 @@ function submit(): void {
           <option value="tool">Tool</option>
           <option value="resource">Resource type</option>
           <option value="field">Field path</option>
-          <option value="provider">Provider</option>
+          <option value="health_system">Health system</option>
         </select>
       </label>
 

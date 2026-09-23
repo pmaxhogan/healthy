@@ -1,7 +1,7 @@
 /**
  * Rate-limit detection and the whole-sync backoff.
  *
- * The rule from the spec: any 429 anywhere backs *every* provider off until
+ * The rule from the spec: any 429 anywhere backs *every* health system off until
  * `now + max(Retry-After, 2h)`. Two hours rather than the header's own value
  * because a patient-facing Epic endpoint that starts rate-limiting is throttling
  * the app, not one request -- retrying in the 60 seconds it asked for just burns
@@ -40,7 +40,7 @@ export interface RateLimit {
  *
  * Returns null for everything else, including `upstream_auth` and
  * `needs_reauth`: those are per-connection problems and must not stop the other
- * providers' runs.
+ * health systems' runs.
  */
 export function rateLimitOf(error: unknown): RateLimit | null {
   if (!isAppError(error)) return null;

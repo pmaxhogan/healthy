@@ -70,7 +70,7 @@ function normalizeGeneric(resource: fhir4.FhirResource, ctx: NormalizeCtx): Norm
   return {
     resourceType: resource.resourceType,
     id: resource.id ?? "",
-    provider: ctx.provider,
+    healthSystem: ctx.healthSystem,
     ...(resource.meta?.lastUpdated && { lastUpdated: resource.meta.lastUpdated }),
     ...(narrative && { text: narrative }),
   };
@@ -80,7 +80,7 @@ function normalizeGeneric(resource: fhir4.FhirResource, ctx: NormalizeCtx): Norm
  * Dispatches on `resource.resourceType` to the matching `normalizeX`
  * function. A resource type with no dedicated normalizer (or a type not on
  * {@link NORMALIZED_TYPES}) falls back to a generic `{resourceType, id,
- * provider, text?}` shape, `text` being the resource's narrative if present.
+ * health system, text?}` shape, `text` being the resource's narrative if present.
  */
 
 export function normalizeResource(
@@ -172,7 +172,7 @@ export function appointmentViewFromEncounter(
   const primary = encounter.practitioners[0];
 
   return {
-    provider: ctx.provider,
+    healthSystem: ctx.healthSystem,
     encounterId: encounter.id,
     status: encounter.status,
     ...(encounter.start && { start: encounter.start }),

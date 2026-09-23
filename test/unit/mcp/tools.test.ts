@@ -14,8 +14,8 @@ import {
   NAME_A,
   NAME_B,
   NOW,
-  PROVIDER_A,
-  PROVIDER_B,
+  HEALTH_SYSTEM_A,
+  HEALTH_SYSTEM_B,
   callTool,
   connectTools,
   fakeDeps,
@@ -88,13 +88,13 @@ describe("the envelope", () => {
     expect(parsed.generatedAt).toBe(new Date(NOW * 1000).toISOString());
   });
 
-  it("tags every item with the provider display name and id", async () => {
+  it("tags every item with the health system display name and id", async () => {
     const answer = await callTool(world.client, "get_conditions");
 
     expect(answer.items.length).toBeGreaterThan(0);
     for (const item of answer.items) {
-      expect([NAME_A, NAME_B]).toContain(item.provider);
-      expect([PROVIDER_A, PROVIDER_B]).toContain(item.providerId);
+      expect([NAME_A, NAME_B]).toContain(item.healthSystem);
+      expect([HEALTH_SYSTEM_A, HEALTH_SYSTEM_B]).toContain(item.healthSystemId);
     }
   });
 
@@ -122,7 +122,7 @@ describe("the envelope", () => {
     expect(answer.truncated).toBe(false);
   });
 
-  it("orders newest first across providers", async () => {
+  it("orders newest first across health systems", async () => {
     const answer = await callTool(world.client, "get_conditions");
     const codes = answer.items.map((item) => (item.code as { text?: string } | undefined)?.text);
 
@@ -135,29 +135,31 @@ describe("the envelope", () => {
   });
 });
 
-describe("provider selection", () => {
-  it("reads every provider by default", async () => {
-    const answer = await callTool(world.client, "list_providers");
+describe("health system selection", () => {
+  it("reads every health system by default", async () => {
+    const answer = await callTool(world.client, "list_health_systems");
 
-    expect(answer.items.map((item) => item.provider)).toStrictEqual([NAME_A, NAME_B]);
+    expect(answer.items.map((item) => item.healthSystem)).toStrictEqual([NAME_A, NAME_B]);
   });
 
-  it("narrows by provider id", async () => {
-    const answer = await callTool(world.client, "get_conditions", { providers: [PROVIDER_B] });
+  it("narrows by health system id", async () => {
+    const answer = await callTool(world.client, "get_conditions", {
+      healthSystems: [HEALTH_SYSTEM_B],
+    });
 
-    expect(new Set(answer.items.map((item) => item.providerId))).toStrictEqual(
-      new Set([PROVIDER_B]),
+    expect(new Set(answer.items.map((item) => item.healthSystemId))).toStrictEqual(
+      new Set([HEALTH_SYSTEM_B]),
     );
   });
 
   it("narrows by a case-insensitive substring of the display name", async () => {
-    const answer = await callTool(world.client, "get_conditions", { providers: ["other cli"] });
+    const answer = await callTool(world.client, "get_conditions", { healthSystems: ["other cli"] });
 
-    expect(new Set(answer.items.map((item) => item.provider))).toStrictEqual(new Set([NAME_B]));
+    expect(new Set(answer.items.map((item) => item.healthSystem))).toStrictEqual(new Set([NAME_B]));
   });
 
   it("returns nothing for a name that matches nothing, rather than everything", async () => {
-    const answer = await callTool(world.client, "get_conditions", { providers: ["nonesuch"] });
+    const answer = await callTool(world.client, "get_conditions", { healthSystems: ["nonesuch"] });
 
     expect(answer.items).toStrictEqual([]);
   });
@@ -173,11 +175,11 @@ describe("strict inputs", () => {
     // and I mean it", not a schema violation. Zero is still refused: it is not a
     // meaningful count of items to return.
     ["get_conditions", { limit: 0 }],
-    ["get_conditions", { providers: "prov_a" }],
+    ["get_conditions", { healthSystems: "prov_a" }],
     ["get_conditions", { raw: "yes" }],
     ["get_encounters", { from: "last tuesday" }],
     ["get_document_text", { id: "doc-1" }],
-    ["get_document_text", { provider: PROVIDER_A }],
+    ["get_document_text", { healthSystem: HEALTH_SYSTEM_A }],
   ];
 
   it("refuses a bad argument instead of running the tool", async () => {
@@ -194,7 +196,7 @@ describe("strict inputs", () => {
     for (const name of TOOL_NAMES) {
       const answer = await callTool(world.client, name, {
         nope: 1,
-        ...(name === "get_document_text" && { provider: PROVIDER_A, id: "doc-1" }),
+        ...(name === "get_document_text" && { healthSystem: HEALTH_SYSTEM_A, id: "doc-1" }),
       });
       expect(answer.isError, name).toBe(true);
       expect(answer.text, name).toContain("Invalid arguments");
@@ -311,16 +313,16 @@ describe("the policy, through a tool", () => {
     expect(answer.text).not.toContain("rhinitis");
   });
 
-  it("hides a denied provider everywhere, list_providers included", async () => {
-    world.state.rules = rules({ rule_type: "provider", target: PROVIDER_B });
+  it("hides a denied health system everywhere, list_health_systems included", async () => {
+    world.state.rules = rules({ rule_type: "health_system", target: HEALTH_SYSTEM_B });
 
-    const listed = await callTool(world.client, "list_providers");
+    const listed = await callTool(world.client, "list_health_systems");
     const conditions = await callTool(world.client, "get_conditions");
     const summary = await callTool(world.client, "get_health_summary");
 
     for (const answer of [listed, conditions, summary]) {
       expect(answer.text).not.toContain(NAME_B);
-      expect(answer.text).not.toContain(PROVIDER_B);
+      expect(answer.text).not.toContain(HEALTH_SYSTEM_B);
       expect(answer.text).not.toContain("Migraine");
     }
   });
@@ -375,7 +377,7 @@ describe("the master switch", () => {
   it("answers mcp_disabled from every tool when settings say so", async () => {
     world.state.enabled = false;
 
-    for (const name of ["get_conditions", "list_providers", "get_health_summary"]) {
+    for (const name of ["get_conditions", "list_health_systems", "get_health_summary"]) {
       const answer = await callTool(world.client, name);
       expect(answer.isError, name).toBe(true);
       expect(answer.error, name).toBe("mcp_disabled");
@@ -392,9 +394,9 @@ describe("the master switch", () => {
 });
 
 describe("get_document_text", () => {
-  it("returns the decoded text for a resolvable provider", async () => {
+  it("returns the decoded text for a resolvable health system", async () => {
     const answer = await callTool(world.client, "get_document_text", {
-      provider: PROVIDER_A,
+      healthSystem: HEALTH_SYSTEM_A,
       id: "doc-1",
     });
 
@@ -406,7 +408,7 @@ describe("get_document_text", () => {
     world.state.document = { ok: false, reason: "cap_reached" };
 
     const answer = await callTool(world.client, "get_document_text", {
-      provider: PROVIDER_A,
+      healthSystem: HEALTH_SYSTEM_A,
       id: "doc-1",
     });
 
@@ -418,37 +420,37 @@ describe("get_document_text", () => {
   it("refuses an unsupported format and a missing document distinctly", async () => {
     world.state.document = { ok: false, reason: "unsupported" };
     const unsupported = await callTool(world.client, "get_document_text", {
-      provider: PROVIDER_A,
+      healthSystem: HEALTH_SYSTEM_A,
       id: "d",
     });
     expect(unsupported.error).toBe("unsupported_document");
 
     world.state.document = { ok: false, reason: "not_found" };
     const missing = await callTool(world.client, "get_document_text", {
-      provider: PROVIDER_A,
+      healthSystem: HEALTH_SYSTEM_A,
       id: "d",
     });
     expect(missing.error).toBe("not_found");
   });
 
-  it("refuses a provider name that matches nothing", async () => {
+  it("refuses a health system name that matches nothing", async () => {
     const answer = await callTool(world.client, "get_document_text", {
-      provider: "nonesuch",
+      healthSystem: "nonesuch",
       id: "doc-1",
     });
 
     expect(answer.error).toBe("not_found");
   });
 
-  it("refuses a provider name that matches more than one", async () => {
+  it("refuses a health system name that matches more than one", async () => {
     // Both display names contain "e"; an ambiguous match must not silently pick one.
     const answer = await callTool(world.client, "get_document_text", {
-      provider: "e",
+      healthSystem: "e",
       id: "doc-1",
     });
 
     expect(answer.error).toBe("not_found");
-    expect(answer.text).toContain("more than one provider");
+    expect(answer.text).toContain("more than one health system");
   });
 });
 
@@ -464,7 +466,7 @@ describe("get_sync_status", () => {
 });
 
 describe("get_health_summary", () => {
-  it("reports counts per provider and the most recent items per category", async () => {
+  it("reports counts per health system and the most recent items per category", async () => {
     const answer = await callTool(world.client, "get_health_summary");
     const counts = answer.items.filter((item) => item.kind === "count");
     const recent = answer.items.filter((item) => item.kind === "recent");
@@ -481,7 +483,7 @@ describe("get_health_summary", () => {
   it("does not report its own decoded-document cache as a resource type", async () => {
     world.state.counts = [
       ...world.state.counts,
-      { providerId: PROVIDER_A, resourceType: "_binary_text", count: 3 },
+      { healthSystemId: HEALTH_SYSTEM_A, resourceType: "_binary_text", count: 3 },
     ];
 
     const answer = await callTool(world.client, "get_health_summary");

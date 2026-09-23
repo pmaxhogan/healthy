@@ -1,10 +1,10 @@
 /**
- * `/api/providers/:id/portal` -- the patient-portal account for one health system.
+ * `/api/health-systems/:id/portal` -- the patient-portal account for one health system.
  *
- * A separate file from `routes/providers.ts` because it is a separate subsystem:
+ * A separate file from `routes/health-systems.ts` because it is a separate subsystem:
  * the portal is a scrape with the owner's own login, a cookie jar, a daily attempt
  * budget, its own Durable Object and its own failure vocabulary. It is mounted
- * under `/api/providers` alongside that router; `/:id` and `/:id/portal` are
+ * under `/api/health-systems` alongside that router; `/:id` and `/:id/portal` are
  * different path shapes, so neither can shadow the other.
  *
  * ### The five behaviours worth reading before changing anything
@@ -43,7 +43,7 @@
  * before it can read anything.
  *
  * Nothing here logs a username, a password, a portal host or an emailed code.
- * Provider ids, stable codes and counts only.
+ * Health system ids, stable codes and counts only.
  */
 
 import { Hono } from "hono";
@@ -57,10 +57,10 @@ import { closeAlert, portalSubject } from "../close-alert.ts";
 import { NO_STORE, apiContext, readJson } from "../http.ts";
 import { portalAccountSchema, portalDiscoverSchema } from "../schemas.ts";
 
-import { isLiveProvider } from "./providers.ts";
+import { isLiveHealthSystem } from "./health-systems.ts";
 
 import type { AppHonoEnv } from "../../auth/gate.ts";
-import type { ProviderRow } from "../../db/rows.ts";
+import type { HealthSystemRow } from "../../db/rows.ts";
 import type { PortalEndpoint } from "../../providers/mychart/index.ts";
 import type { ApiContext } from "../http.ts";
 import type {
@@ -74,23 +74,23 @@ const PORTAL_VENDOR = "mychart";
 
 export const portalRouter = new Hono<AppHonoEnv>();
 
-/** The row for `:id`, or a 404. A soft-deleted provider has no portal either. */
-async function requireProvider(api: ApiContext, id: string): Promise<ProviderRow> {
-  const row = await api.repos.providers.get(id);
-  if (!isLiveProvider(row)) throw new AppError("not_found", "no such provider");
+/** The row for `:id`, or a 404. A soft-deleted health system has no portal either. */
+async function requireHealthSystem(api: ApiContext, id: string): Promise<HealthSystemRow> {
+  const row = await api.repos.healthSystems.get(id);
+  if (!isLiveHealthSystem(row)) throw new AppError("not_found", "no such health system");
   return row;
 }
 
 /**
- * What `GET` answers for a provider that has never had a portal account.
+ * What `GET` answers for a health system that has never had a portal account.
  *
  * Synthesized rather than a 404: the admin UI's portal card is how an account is
  * created in the first place, so it has to be able to render against "there is
  * nothing here yet".
  */
-function emptyAccount(providerId: string): PortalAccountDto {
+function emptyAccount(healthSystemId: string): PortalAccountDto {
   return {
-    providerId,
+    healthSystemId,
     baseUrl: null,
     mountPath: null,
     hasCredentials: false,
@@ -115,21 +115,24 @@ function emptyAccount(providerId: string): PortalAccountDto {
  * portal -- which is the question the card is really asking ("is this working?"),
  * and is a count of our own rows rather than anything re-fetched.
  */
-async function portalStatus(api: ApiContext, providerId: string): Promise<PortalAccountStatusDto> {
-  const dto = (await api.repos.portalAccounts.dto(providerId)) ?? emptyAccount(providerId);
-  const signIn = await api.ports.portal.signInState(api.ctx, { providerId });
+async function portalStatus(
+  api: ApiContext,
+  healthSystemId: string,
+): Promise<PortalAccountStatusDto> {
+  const dto = (await api.repos.portalAccounts.dto(healthSystemId)) ?? emptyAccount(healthSystemId);
+  const signIn = await api.ports.portal.signInState(api.ctx, { healthSystemId });
   const lastVisitCount =
     dto.lastOkAt === null
       ? null
-      : await api.repos.calendarEvents.countBySource(providerId, "portal", "active");
+      : await api.repos.calendarEvents.countBySource(healthSystemId, "portal", "active");
   return { ...dto, signIn, lastVisitCount };
 }
 
 /** A 409 when there is no stored login for a job to use. */
-async function requireCredentials(api: ApiContext, providerId: string): Promise<void> {
-  const account = await api.repos.portalAccounts.get(providerId);
+async function requireCredentials(api: ApiContext, healthSystemId: string): Promise<void> {
+  const account = await api.repos.portalAccounts.get(healthSystemId);
   if ((account?.username_enc ?? null) === null || (account?.password_enc ?? null) === null) {
-    throw new AppError("conflict", "no portal credentials are stored for this provider");
+    throw new AppError("conflict", "no portal credentials are stored for this health system");
   }
 }
 
@@ -227,7 +230,7 @@ function toDiscoveryDto(endpoint: PortalEndpoint): PortalDiscoveryDto {
 
 portalRouter.get("/:id/portal", async (c) => {
   const api = apiContext(c);
-  const row = await requireProvider(api, c.req.param("id"));
+  const row = await requireHealthSystem(api, c.req.param("id"));
   return c.json(await portalStatus(api, row.id), 200, NO_STORE);
 });
 
@@ -239,7 +242,7 @@ portalRouter.get("/:id/portal", async (c) => {
  */
 portalRouter.post("/:id/portal/discover", async (c) => {
   const api = apiContext(c);
-  await requireProvider(api, c.req.param("id"));
+  await requireHealthSystem(api, c.req.param("id"));
   const body = await readJson(c, portalDiscoverSchema);
   const hint = mountHintFor({
     baseUrl: body.baseUrl,
@@ -264,7 +267,7 @@ portalRouter.post("/:id/portal/discover", async (c) => {
  */
 portalRouter.put("/:id/portal", async (c) => {
   const api = apiContext(c);
-  const row = await requireProvider(api, c.req.param("id"));
+  const row = await requireHealthSystem(api, c.req.param("id"));
   const body = await readJson(c, portalAccountSchema);
   const stored = await api.repos.portalAccounts.get(row.id);
 
@@ -322,7 +325,7 @@ portalRouter.put("/:id/portal", async (c) => {
  */
 portalRouter.post("/:id/portal/sign-in", async (c) => {
   const api = apiContext(c);
-  const row = await requireProvider(api, c.req.param("id"));
+  const row = await requireHealthSystem(api, c.req.param("id"));
   await requireCredentials(api, row.id);
 
   const limit = await getSetting(api.ctx, "portal_login_attempt_limit");
@@ -334,19 +337,19 @@ portalRouter.post("/:id/portal/sign-in", async (c) => {
     });
   }
 
-  const { started } = await api.ports.portal.startSignIn(api.ctx, { providerId: row.id });
+  const { started } = await api.ports.portal.startSignIn(api.ctx, { healthSystemId: row.id });
   return c.json({ accepted: true, started }, 202, NO_STORE);
 });
 
 /** Read this portal's upcoming visits now. 202, via the runner -- see the header. */
 portalRouter.post("/:id/portal/sync", async (c) => {
   const api = apiContext(c);
-  const row = await requireProvider(api, c.req.param("id"));
+  const row = await requireHealthSystem(api, c.req.param("id"));
   // Refused here rather than in the job: a queued sync with nothing to sign in with
   // fails inside the alarm, which would mark the account `needs_reauth` over a
   // button press that should simply not have been possible.
   await requireCredentials(api, row.id);
-  const { started } = await api.ports.portal.startSync(api.ctx, { providerId: row.id });
+  const { started } = await api.ports.portal.startSync(api.ctx, { healthSystemId: row.id });
   return c.json({ accepted: true, started }, 202, NO_STORE);
 });
 
@@ -359,9 +362,9 @@ portalRouter.post("/:id/portal/sync", async (c) => {
  */
 portalRouter.delete("/:id/portal/session", async (c) => {
   const api = apiContext(c);
-  const row = await requireProvider(api, c.req.param("id"));
+  const row = await requireHealthSystem(api, c.req.param("id"));
   const account = await api.repos.portalAccounts.get(row.id);
-  if (account === null) throw new AppError("not_found", "no portal account for this provider");
+  if (account === null) throw new AppError("not_found", "no portal account for this health system");
   await api.repos.portalAccounts.forgetSession(row.id);
   return c.body(null, 204, NO_STORE);
 });
@@ -370,13 +373,13 @@ portalRouter.delete("/:id/portal/session", async (c) => {
  * Remove the portal account: credentials, jar, endpoint and counters.
  *
  * The calendar events the portal wrote are deliberately left alone, exactly as
- * deleting a provider leaves its events: they are the owner's appointments, and
+ * deleting a health system leaves its events: they are the owner's appointments, and
  * removing an account is not a reason to rewrite their week. Any open reconnect
  * card is closed, because there is now nothing to reconnect.
  */
 portalRouter.delete("/:id/portal", async (c) => {
   const api = apiContext(c);
-  const row = await requireProvider(api, c.req.param("id"));
+  const row = await requireHealthSystem(api, c.req.param("id"));
   await api.repos.portalAccounts.clear(row.id);
   await closeAlert(api, c.env, portalSubject(row.id));
   return c.body(null, 204, NO_STORE);

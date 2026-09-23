@@ -3,7 +3,7 @@
 // These run in real workerd against the real D1 schema, so what they exercise is
 // the actual SQL, the actual AES-GCM sealing, and the actual Epic and Google
 // clients -- only the transport is replaced. `stubUpstreams` answers by hostname:
-// a per-provider FHIR server, Epic's token endpoint, Google's token endpoint, and
+// a per-health system FHIR server, Epic's token endpoint, Google's token endpoint, and
 // an in-memory Google Calendar that stores what `buildEventBody` produced and
 // serves it back through the same `events.list` shape the real API uses. That is
 // what makes "the second run must not duplicate anything" a meaningful assertion
@@ -162,7 +162,7 @@ export function loggedFields(lines: readonly string[], event: string): Record<st
 // Seeding
 // ---------------------------------------------------------------------------
 
-export interface SeedProviderOptions {
+export interface SeedHealthSystemOptions {
   displayName?: string;
   host?: string;
   /** Seconds from the ctx clock until the seeded access token expires. */
@@ -171,28 +171,28 @@ export interface SeedProviderOptions {
   portalUrl?: string | null;
 }
 
-export interface SeededProvider {
-  providerId: string;
+export interface SeededHealthSystem {
+  healthSystemId: string;
   connectionId: string;
   fhirBaseUrl: string;
   patientId: string;
 }
 
 /**
- * A provider with a connected, usable connection.
+ * A health system with a connected, usable connection.
  *
  * `accessTtlSeconds` is the lever the refresh tests pull: a token already inside
  * the five-minute skew forces the token manager down the refresh path on the very
  * first request.
  */
-export async function seedConnectedProvider(
+export async function seedConnectedHealthSystem(
   ctx: Ctx,
-  options: SeedProviderOptions = {},
-): Promise<SeededProvider> {
+  options: SeedHealthSystemOptions = {},
+): Promise<SeededHealthSystem> {
   const repos = makeRepos(ctx);
   const host = options.host ?? "fhir.a.example.test";
   const fhirBaseUrl = `https://${host}/api/FHIR/R4`;
-  const provider = await repos.providers.create({
+  const healthSystem = await repos.healthSystems.create({
     vendor: "epic",
     displayName: options.displayName ?? "A Example Health",
     fhirBaseUrl,
@@ -203,7 +203,7 @@ export async function seedConnectedProvider(
     ...(options.config !== undefined && { config: options.config }),
   });
   const patientId = `patient-${host.split(".", 2)[1] ?? "x"}`;
-  const connection = await repos.connections.upsertTokens(provider.id, {
+  const connection = await repos.connections.upsertTokens(healthSystem.id, {
     patientFhirId: patientId,
     accessToken: "seeded-access-token",
     accessExpiresAt: ctx.now() + (options.accessTtlSeconds ?? 3600),
@@ -211,7 +211,7 @@ export async function seedConnectedProvider(
     scope: "patient/Encounter.rs",
     status: "connected",
   });
-  return { providerId: provider.id, connectionId: connection.id, fhirBaseUrl, patientId };
+  return { healthSystemId: healthSystem.id, connectionId: connection.id, fhirBaseUrl, patientId };
 }
 
 /** The single Google account, connected with a comfortably valid token. */
@@ -519,9 +519,9 @@ export interface Upstreams {
 /**
  * A `fetch` that answers every upstream the sync talks to.
  *
- * `servers` is keyed by hostname, so a two-provider test can make one
+ * `servers` is keyed by hostname, so a two-health system test can make one
  * organisation fail while the other succeeds -- which is the whole point of the
- * per-provider isolation this suite is proving.
+ * per-health system isolation this suite is proving.
  */
 export function stubUpstreams(servers: Record<string, FhirServer>): Upstreams {
   const { calendar, handle: handleCalendar } = makeFakeCalendar();
@@ -781,8 +781,8 @@ function capabilityStatement(
 }
 
 /**
- * The stored form of a logical event key (`<providerId>:<encounterId>` or
- * `<providerId>:csn:<csn>`): what the rows and the Google markers carry.
+ * The stored form of a logical event key (`<healthSystemId>:<encounterId>` or
+ * `<healthSystemId>:csn:<csn>`): what the rows and the Google markers carry.
  */
 export function sk(logicalKey: string): Promise<string> {
   return blindEventKey(blinderFor(DATA_KEY), logicalKey);
@@ -809,7 +809,7 @@ const TABLES = [
   "fhir_cache",
   "oauth_states",
   "connections",
-  "providers",
+  "health_systems",
   "settings",
 ];
 

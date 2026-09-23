@@ -28,7 +28,7 @@ function client(fetchImpl: typeof fetch, getAccessToken = fixedToken): CalendarC
 const MODEL: CalendarEventModel = {
   key: "prov-1:enc-1",
   encounterId: "enc-1",
-  provider: "prov-1",
+  healthSystem: "prov-1",
   title: "Follow-up",
   description: "Synced by Healthy",
   start: "2026-10-01T15:00:00Z",
@@ -60,11 +60,11 @@ describe("buildEventBody", () => {
       healthy: "1",
       key: "prov-1:enc-1",
       fp: "fp-abc",
-      provider: "prov-1",
+      healthSystem: "prov-1",
     });
     expect(
       Object.keys(body.extendedProperties.private).toSorted((a, b) => a.localeCompare(b)),
-    ).toEqual(["fp", "healthy", "key", "provider"]);
+    ).toEqual(["fp", "healthSystem", "healthy", "key"]);
   });
 
   it("carries start and end with the model's time zone", () => {

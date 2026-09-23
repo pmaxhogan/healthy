@@ -1,9 +1,9 @@
-// Writes a provider's patient-portal username and password straight into D1,
+// Writes a health system's patient-portal username and password straight into D1,
 // sealed exactly the way the Worker seals them, without going through the admin
 // UI or a browser.
 //
-//   PORTAL_USERNAME=<user> npm run set-portal-credentials -- --provider <id> --remote
-//   npm run set-portal-credentials -- --provider <id> --local     # both from stdin
+//   PORTAL_USERNAME=<user> npm run set-portal-credentials -- --health-system <id> --remote
+//   npm run set-portal-credentials -- --health-system <id> --local     # both from stdin
 //
 // `--mfa-contact` additionally sets the address (from PORTAL_MFA_CONTACT) the
 // portal should email a verification code to, for the rare deployment whose
@@ -13,7 +13,7 @@
 // `--otp-sender` sets the domain (from PORTAL_OTP_SENDER) the portal's
 // verification-code emails come from. That is what binds a `mail_inbox` row to
 // this account: with it set, no other sender's code is eligible for this
-// provider's sign-in. Optional -- the sender of the first code the portal
+// health system's sign-in. Optional -- the sender of the first code the portal
 // accepts is learned when it is unset -- but setting it up front means even the
 // first sign-in cannot be fed someone else's code.
 //
@@ -21,7 +21,7 @@
 // that path needs a browser session, and a portal password -- which is a login
 // to a whole medical record, not an API credential -- should not be typed into
 // one more window than necessary. This script is the no-browser equivalent, and
-// it is the same shape as `scripts/set-provider-secret.ts`: it shells out to
+// it is the same shape as `scripts/set-health_system-secret.ts`: it shells out to
 // `wrangler d1 execute` the way `npm run migrate:remote` does.
 //
 // Neither value is ever a command-line argument, so neither lands in shell
@@ -46,7 +46,7 @@ import { isRecord } from "../worker/fhir/bundle.ts";
 import { ID_PATTERN } from "../worker/lib/ids.ts";
 import { nowSeconds } from "../worker/lib/time.ts";
 
-import { parseDotEnv } from "./set-provider-secret.ts";
+import { parseDotEnv } from "./set-health-system-secret.ts";
 
 // Matches wrangler.jsonc's `d1_databases[0].database_name`.
 const DB_NAME = "healthy";
@@ -60,7 +60,7 @@ const SEALED_ENVELOPE_PATTERN = /^v2:[A-Za-z0-9_-]+$/u;
 type Target = "--remote" | "--local";
 
 interface CliArgs {
-  providerId: string;
+  healthSystemId: string;
   target: Target;
   /** Also write `mfa_contact_enc` from `PORTAL_MFA_CONTACT`. */
   mfaContact: boolean;
@@ -71,10 +71,10 @@ interface CliArgs {
 function printUsage(): void {
   console.error(
     [
-      "Usage: npm run set-portal-credentials -- --provider <id> (--remote|--local)",
+      "Usage: npm run set-portal-credentials -- --health-system <id> (--remote|--local)",
       "",
       "Options:",
-      "  --provider <id>   Provider row id (a 26-character ULID). Required.",
+      "  --health-system <id>   Health system row id (a 26-character ULID). Required.",
       "  --remote          Write to the deployed (production) D1 database.",
       "  --local           Write to the local D1 database used by `wrangler dev`.",
       "                    Run `npm run migrate:local` first, or the table will",
@@ -111,7 +111,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     process.exit(0);
   }
 
-  let providerId: string | null = null;
+  let healthSystemId: string | null = null;
   let remote = false;
   let local = false;
   let mfaContact = false;
@@ -120,8 +120,8 @@ export function parseArgs(argv: readonly string[]): CliArgs {
   const remaining = [...argv];
   for (let flag = remaining.shift(); flag !== undefined; flag = remaining.shift()) {
     switch (flag) {
-      case "--provider": {
-        providerId = takeValue(remaining, flag);
+      case "--health-system": {
+        healthSystemId = takeValue(remaining, flag);
         continue;
       }
       case "--remote": {
@@ -146,15 +146,15 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     }
   }
 
-  if (providerId === null || providerId === "") {
-    throw new Error("--provider is required");
+  if (healthSystemId === null || healthSystemId === "") {
+    throw new Error("--health-system is required");
   }
   if (remote === local) {
     // Both false (neither given) and both true (given together) are refused:
     // this always writes to a real database, so the target is never inferred.
     throw new Error("exactly one of --remote or --local is required");
   }
-  return { providerId, target: remote ? "--remote" : "--local", mfaContact, otpSender };
+  return { healthSystemId, target: remote ? "--remote" : "--local", mfaContact, otpSender };
 }
 
 /** Drains stdin to EOF and returns it as text, with no encoding surprises. */
@@ -221,7 +221,7 @@ function resolveDataKey(): string {
  * Invoked through Node directly rather than `npx ... { shell: true }`: the
  * `--command` argument is a whole SQL string with spaces and quotes in it, and
  * on Windows a shell re-splits it into several arguments. See the same comment
- * in `set-provider-secret.ts`.
+ * in `set-health_system-secret.ts`.
  */
 const WRANGLER_BIN = path.join(
   path.dirname(createRequire(import.meta.url).resolve("wrangler/package.json")),
@@ -263,8 +263,8 @@ function rowsFromD1Json(stdout: string): unknown[] {
   return first.results;
 }
 
-/** True if a provider with this id exists. `id` must already be ULID-validated. */
-function providerExists(id: string, target: Target): boolean {
+/** True if a health system with this id exists. `id` must already be ULID-validated. */
+function healthSystemExists(id: string, target: Target): boolean {
   const stdout = runWrangler([
     "d1",
     "execute",
@@ -272,7 +272,7 @@ function providerExists(id: string, target: Target): boolean {
     target,
     "--json",
     "--command",
-    `SELECT id FROM providers WHERE id = '${id}'`,
+    `SELECT id FROM health_systems WHERE id = '${id}'`,
   ]);
   return rowsFromD1Json(stdout).length > 0;
 }
@@ -285,20 +285,20 @@ function providerExists(id: string, target: Target): boolean {
  * `test/unit/set-portal-credentials.test.ts` for the round trip that catches a
  * future divergence.
  */
-export function portalUsernameAad(providerId: string): string {
-  return aadFor("portal_accounts", "username_enc", providerId);
+export function portalUsernameAad(healthSystemId: string): string {
+  return aadFor("portal_accounts", "username_enc", healthSystemId);
 }
 
-export function portalPasswordAad(providerId: string): string {
-  return aadFor("portal_accounts", "password_enc", providerId);
+export function portalPasswordAad(healthSystemId: string): string {
+  return aadFor("portal_accounts", "password_enc", healthSystemId);
 }
 
-export function portalMfaContactAad(providerId: string): string {
-  return aadFor("portal_accounts", "mfa_contact_enc", providerId);
+export function portalMfaContactAad(healthSystemId: string): string {
+  return aadFor("portal_accounts", "mfa_contact_enc", healthSystemId);
 }
 
-export function portalOtpSenderAad(providerId: string): string {
-  return aadFor("portal_accounts", "otp_sender_enc", providerId);
+export function portalOtpSenderAad(healthSystemId: string): string {
+  return aadFor("portal_accounts", "otp_sender_enc", healthSystemId);
 }
 
 function checkEnvelope(sealed: string): string {
@@ -313,15 +313,15 @@ function checkEnvelope(sealed: string): string {
 /** Seals both values exactly the way `portalAccounts.setCredentials` does. */
 export async function sealPortalCredentials(
   dataKey: string,
-  providerId: string,
+  healthSystemId: string,
   credentials: { username: string; password: string },
 ): Promise<{ username: string; password: string }> {
   return {
     username: checkEnvelope(
-      await sealShort(dataKey, credentials.username, portalUsernameAad(providerId)),
+      await sealShort(dataKey, credentials.username, portalUsernameAad(healthSystemId)),
     ),
     password: checkEnvelope(
-      await sealShort(dataKey, credentials.password, portalPasswordAad(providerId)),
+      await sealShort(dataKey, credentials.password, portalPasswordAad(healthSystemId)),
     ),
   };
 }
@@ -329,7 +329,7 @@ export async function sealPortalCredentials(
 /**
  * Upsert the row, then read it back.
  *
- * An upsert rather than an update: a provider that has never had a portal
+ * An upsert rather than an update: a health system that has never had a portal
  * account has no `portal_accounts` row at all, and the repo's `ensure()` is not
  * reachable from a script. Storing credentials resets the session the same way
  * the repo does -- a new password invalidates whatever cookie jar was there.
@@ -371,9 +371,9 @@ function writeCredentials(
     "--json",
     "--command",
     `INSERT INTO portal_accounts
-       (provider_id, username_enc, password_enc, session_state, updated_at${extraColumns})
+       (health_system_id, username_enc, password_enc, session_state, updated_at${extraColumns})
      VALUES ('${id}', '${sealed.username}', '${sealed.password}', 'none', ${String(updatedAt)}${extraValues})
-     ON CONFLICT (provider_id) DO UPDATE SET
+     ON CONFLICT (health_system_id) DO UPDATE SET
        username_enc = excluded.username_enc,
        password_enc = excluded.password_enc,
        cookie_jar_enc = NULL,
@@ -390,7 +390,7 @@ function writeCredentials(
     target,
     "--json",
     "--command",
-    `SELECT username_enc, password_enc, mfa_contact_enc, otp_sender_enc, updated_at FROM portal_accounts WHERE provider_id = '${id}'`,
+    `SELECT username_enc, password_enc, mfa_contact_enc, otp_sender_enc, updated_at FROM portal_accounts WHERE health_system_id = '${id}'`,
   ]);
   const row = rowsFromD1Json(stdout)[0];
   const wroteExpectedValue =
@@ -408,8 +408,8 @@ function writeCredentials(
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
-  if (!ID_PATTERN.test(args.providerId)) {
-    throw new Error(`--provider must be a 26-character ULID, got "${args.providerId}"`);
+  if (!ID_PATTERN.test(args.healthSystemId)) {
+    throw new Error(`--health-system must be a 26-character ULID, got "${args.healthSystemId}"`);
   }
 
   const credentials = await readCredentials();
@@ -417,14 +417,14 @@ async function main(): Promise<void> {
   if (credentials.password === "") throw new Error("the portal password was empty");
 
   const dataKey = resolveDataKey();
-  const sealed = await sealPortalCredentials(dataKey, args.providerId, credentials);
+  const sealed = await sealPortalCredentials(dataKey, args.healthSystemId, credentials);
 
   let sealedMfaContact: string | null = null;
   if (args.mfaContact) {
     const contact = process.env.PORTAL_MFA_CONTACT ?? "";
     if (contact === "") throw new Error("--mfa-contact requires PORTAL_MFA_CONTACT to be set");
     sealedMfaContact = checkEnvelope(
-      await sealShort(dataKey, contact, portalMfaContactAad(args.providerId)),
+      await sealShort(dataKey, contact, portalMfaContactAad(args.healthSystemId)),
     );
   }
 
@@ -435,24 +435,26 @@ async function main(): Promise<void> {
     const sender = (process.env.PORTAL_OTP_SENDER ?? "").trim().toLowerCase();
     if (sender === "") throw new Error("--otp-sender requires PORTAL_OTP_SENDER to be set");
     sealedOtpSender = checkEnvelope(
-      await sealShort(dataKey, sender, portalOtpSenderAad(args.providerId)),
+      await sealShort(dataKey, sender, portalOtpSenderAad(args.healthSystemId)),
     );
   }
 
   const targetLabel = args.target === "--remote" ? "remote" : "local";
-  if (!providerExists(args.providerId, args.target)) {
-    throw new Error(`no provider with id ${args.providerId} in the ${targetLabel} database`);
+  if (!healthSystemExists(args.healthSystemId, args.target)) {
+    throw new Error(
+      `no health system with id ${args.healthSystemId} in the ${targetLabel} database`,
+    );
   }
 
   writeCredentials(
-    args.providerId,
+    args.healthSystemId,
     sealed,
     { mfaContactEnc: sealedMfaContact, otpSenderEnc: sealedOtpSender },
     nowSeconds(),
     args.target,
   );
 
-  console.log(`${args.providerId} updated`);
+  console.log(`${args.healthSystemId} updated`);
 }
 
 // Only run when this file is executed directly, not when the unit tests import

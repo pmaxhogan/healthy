@@ -55,7 +55,7 @@ export function normalizeDocumentReference(
   return {
     resourceType: "DocumentReference",
     id: resource.id ?? "",
-    provider: ctx.provider,
+    healthSystem: ctx.healthSystem,
     ...(resource.meta?.lastUpdated && { lastUpdated: resource.meta.lastUpdated }),
     ...(type && { type }),
     category,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Arrive-early minutes: one default for the provider, plus overrides keyed by
+// Arrive-early minutes: one default for the health system, plus overrides keyed by
 // visit type.
 //
 // The override keys are free text because that is what Epic sends as a visit
@@ -9,7 +9,7 @@
 import { computed, ref } from "vue";
 
 const props = defineProps<{
-  /** Provider-wide default, or null to inherit the global setting. */
+  /** Health system-wide default, or null to inherit the global setting. */
   modelValue: number | null;
   overrides: Record<string, number>;
   /** Shown as the value that a null default falls back to. */

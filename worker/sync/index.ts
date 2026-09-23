@@ -16,7 +16,7 @@
  * endpoints do
  *
  * ```ts
- * ectx.waitUntil(runCalendarSync(ctx, { trigger: "manual", providerIds: [id] }));
+ * ectx.waitUntil(runCalendarSync(ctx, { trigger: "manual", healthSystemIds: [id] }));
  * return json({ started: true });
  * ```
  *
@@ -59,6 +59,6 @@ export { resolveReconnectAlert } from "./alerts.ts";
  * capability index are cached there under the synthetic resource types `_smart`
  * and `_capability`, so an overview panel or an MCP health summary that counted
  * `countsByType()` rows as clinical resources would report two phantom
- * "resources" per provider. See `discovery.ts` for why they live there.
+ * "resources" per health system. See `discovery.ts` for why they live there.
  */
 export { isDiscoveryCacheType } from "./discovery.ts";

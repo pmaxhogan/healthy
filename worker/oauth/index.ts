@@ -1,6 +1,6 @@
 // The OAuth surface, mounted at /oauth by app.ts.
 //
-//   GET /oauth/epic/start?provider=   -- begin a provider authorisation
+//   GET /oauth/epic/start?health system=   -- begin a health system authorisation
 //   GET /oauth/callback               -- Epic's redirect back (locked URI)
 //   GET /oauth/google/start           -- begin calendar authorisation
 //   GET /oauth/google/callback        -- Google's redirect back
@@ -10,7 +10,7 @@
 //
 // The MCP client-facing endpoints (`POST /oauth/token`, `POST /oauth/register`
 // and `/.well-known/*`) do NOT belong here. They are served by
-// @cloudflare/workers-oauth-provider, which wraps this whole Hono app in
+// @cloudflare/workers-oauth-health system, which wraps this whole Hono app in
 // worker/index.ts, and they must bypass the owner gate -- an MCP client has no
 // Access identity and no password session.
 //
@@ -30,7 +30,7 @@
 
 import { Hono } from "hono";
 
-import { isLiveProvider } from "../api/routes/providers.ts";
+import { isLiveHealthSystem } from "../api/routes/health-systems.ts";
 import { reposFor } from "../db/index.ts";
 import { isAppError } from "../lib/errors.ts";
 import { logLine, makeLogger } from "../lib/log.ts";
@@ -83,7 +83,7 @@ oauthRouter.route("/", googleOAuthRouter);
  *   - the literal `google` (which is what `alerts.subject` holds for the calendar
  *     account -- it has no connection row at all)
  *   - a `connections.id`, which is what the admin UI has
- *   - a `providers.id`, which is what a reconnect alert's subject encodes
+ *   - a `health_systems.id`, which is what a reconnect alert's subject encodes
  */
 oauthRouter.get("/reconnect/:connectionId", async (c) => {
   const id = c.req.param("connectionId");
@@ -91,10 +91,10 @@ oauthRouter.get("/reconnect/:connectionId", async (c) => {
 
   const repos = reposFor(c.env.DB, c.env, { log: makeLogger({ src: "oauth.reconnect" }) });
   const connection = await repos.connections.get(id);
-  const providerId = connection?.provider_id ?? id;
-  const provider = await repos.providers.get(providerId);
-  return isLiveProvider(provider)
-    ? c.redirect(`/oauth/epic/start?provider=${encodeURIComponent(provider.id)}`, 302)
+  const healthSystemId = connection?.health_system_id ?? id;
+  const healthSystem = await repos.healthSystems.get(healthSystemId);
+  return isLiveHealthSystem(healthSystem)
+    ? c.redirect(`/oauth/epic/start?healthSystem=${encodeURIComponent(healthSystem.id)}`, 302)
     : unknownConnectionPage(c.get("nonce"));
 });
 

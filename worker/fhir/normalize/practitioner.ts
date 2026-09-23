@@ -20,7 +20,7 @@ export function normalizePractitioner(
   return {
     resourceType: "Practitioner",
     id: resource.id ?? "",
-    provider: ctx.provider,
+    healthSystem: ctx.healthSystem,
     ...(resource.meta?.lastUpdated && { lastUpdated: resource.meta.lastUpdated }),
     ...(name && { name }),
     ...(resource.gender && { gender: resource.gender }),

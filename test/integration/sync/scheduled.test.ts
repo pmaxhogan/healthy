@@ -17,7 +17,7 @@ import {
   referencePool,
   resetSyncDb,
   searchBundle,
-  seedConnectedProvider,
+  seedConnectedHealthSystem,
   seedGoogle,
   seedSettings,
   stubUpstreams,
@@ -58,7 +58,7 @@ interface Harness {
   ctx: Ctx;
   server: FhirServer;
   upstreams: Upstreams;
-  providerId: string;
+  healthSystemId: string;
   connectionId: string;
   nowSeconds: number;
 }
@@ -67,7 +67,7 @@ interface Harness {
 async function setup(options: { accessTtlSeconds?: number } = {}): Promise<Harness> {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const ctx = syncCtx({ now: () => nowSeconds });
-  const seeded = await seedConnectedProvider(ctx, {
+  const seeded = await seedConnectedHealthSystem(ctx, {
     host: HOST,
     ...(options.accessTtlSeconds !== undefined && { accessTtlSeconds: options.accessTtlSeconds }),
   });
@@ -148,7 +148,7 @@ describe("runTokenKeepalive", () => {
 
     const summary = await runTokenKeepalive(h.ctx, h.upstreams.deps);
 
-    expect(summary.providers).toBe(1);
+    expect(summary.healthSystems).toBe(1);
     expect(summary.errors).toStrictEqual([]);
     expect(h.server.tokenCalls).toBe(0);
     expect(h.upstreams.googleRefreshes).toBe(0);
@@ -169,7 +169,7 @@ describe("runTokenKeepalive", () => {
   it("keeps the Google grant alive too", async () => {
     const nowSeconds = Math.floor(Date.now() / 1000);
     const ctx = syncCtx({ now: () => nowSeconds });
-    await seedConnectedProvider(ctx, { host: HOST });
+    await seedConnectedHealthSystem(ctx, { host: HOST });
     await seedGoogle(ctx, 60);
     await seedSettings(ctx);
     const upstreams = stubUpstreams({ [HOST]: fhirServer() });
@@ -183,12 +183,12 @@ describe("runTokenKeepalive", () => {
   it("reports a broken connection without failing the others", async () => {
     const nowSeconds = Math.floor(Date.now() / 1000);
     const ctx = syncCtx({ now: () => nowSeconds });
-    const a = await seedConnectedProvider(ctx, {
+    const a = await seedConnectedHealthSystem(ctx, {
       host: HOST,
       displayName: "A Example Health",
       accessTtlSeconds: 60,
     });
-    const b = await seedConnectedProvider(ctx, {
+    const b = await seedConnectedHealthSystem(ctx, {
       host: "fhir.b.example.test",
       displayName: "B Example Health",
     });
@@ -202,25 +202,27 @@ describe("runTokenKeepalive", () => {
 
     const summary = await runTokenKeepalive(ctx, upstreams.deps);
 
-    expect(summary.errors).toStrictEqual([{ providerId: a.providerId, code: "needs_reauth" }]);
+    expect(summary.errors).toStrictEqual([
+      { healthSystemId: a.healthSystemId, code: "needs_reauth" },
+    ]);
     await expect(syncRepos(ctx).connections.get(b.connectionId)).resolves.toMatchObject({
       status: "connected",
     });
     await expect(syncRepos(ctx).alerts.listOpen()).resolves.toMatchObject([
-      { subject: `provider:${a.providerId}` },
+      { subject: `health_system:${a.healthSystemId}` },
     ]);
   });
 
   it("reports a disconnected Google account as an error, not a throw", async () => {
     const nowSeconds = Math.floor(Date.now() / 1000);
     const ctx = syncCtx({ now: () => nowSeconds });
-    await seedConnectedProvider(ctx, { host: HOST });
+    await seedConnectedHealthSystem(ctx, { host: HOST });
     await seedSettings(ctx);
     const upstreams = stubUpstreams({ [HOST]: fhirServer() });
 
     const summary = await runTokenKeepalive(ctx, upstreams.deps);
 
-    expect(summary.errors).toStrictEqual([{ providerId: "google", code: "not_connected" }]);
+    expect(summary.errors).toStrictEqual([{ healthSystemId: "google", code: "not_connected" }]);
   });
 });
 
@@ -229,7 +231,9 @@ describe("refreshConnectionToken", () => {
     const h = await setup();
     const time = clock(h.nowSeconds);
 
-    const result = await refreshConnectionToken(h.ctx, h.providerId, { deps: h.upstreams.deps });
+    const result = await refreshConnectionToken(h.ctx, h.healthSystemId, {
+      deps: h.upstreams.deps,
+    });
 
     expect(result.status).toBe("connected");
     expect(result.accessExpiresAt).toBe(new Date((time.now() + 3600) * 1000).toISOString());
@@ -241,7 +245,7 @@ describe("refreshConnectionToken", () => {
     // cached token has not expired yet.
     const h = await setup();
 
-    await refreshConnectionToken(h.ctx, h.providerId, { force: true, deps: h.upstreams.deps });
+    await refreshConnectionToken(h.ctx, h.healthSystemId, { force: true, deps: h.upstreams.deps });
 
     expect(h.server.tokenCalls).toBe(1);
     const secrets = await syncRepos(h.ctx).connections.getSecrets(h.connectionId);
@@ -251,7 +255,7 @@ describe("refreshConnectionToken", () => {
   it("writes a run_log row of kind refresh either way", async () => {
     const h = await setup();
 
-    await refreshConnectionToken(h.ctx, h.providerId, { deps: h.upstreams.deps });
+    await refreshConnectionToken(h.ctx, h.healthSystemId, { deps: h.upstreams.deps });
 
     await expect(syncRepos(h.ctx).runLog.listRecent()).resolves.toMatchObject([
       { kind: "refresh", ok: true },
@@ -265,7 +269,7 @@ describe("refreshConnectionToken", () => {
     h.server.tokenInvalidGrant = true;
 
     await expect(
-      refreshConnectionToken(h.ctx, h.providerId, { deps: h.upstreams.deps }),
+      refreshConnectionToken(h.ctx, h.healthSystemId, { deps: h.upstreams.deps }),
     ).rejects.toBeInstanceOf(AppError);
 
     const runs = await syncRepos(h.ctx).runLog.listRecent();
@@ -276,11 +280,11 @@ describe("refreshConnectionToken", () => {
     });
   });
 
-  it("refuses a provider that does not exist", async () => {
+  it("refuses a health system that does not exist", async () => {
     const h = await setup();
 
     await expect(
-      refreshConnectionToken(h.ctx, "no-such-provider", { deps: h.upstreams.deps }),
+      refreshConnectionToken(h.ctx, "no-such-health_system", { deps: h.upstreams.deps }),
     ).rejects.toThrow();
   });
 });

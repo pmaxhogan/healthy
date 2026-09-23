@@ -42,7 +42,7 @@ const EXAMPLE_PATIENT: fhir4.Patient = {
  * don't need to construct their own reference graph. */
 export function testCtx(resources: fhir4.Resource[] = []): NormalizeCtx {
   return {
-    provider: "example-provider",
+    healthSystem: "example-health_system",
     refs: mapResolver([
       EXAMPLE_PRACTITIONER,
       EXAMPLE_ORGANIZATION,

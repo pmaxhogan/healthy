@@ -13,7 +13,7 @@ export function normalizeLocation(resource: fhir4.Location, ctx: NormalizeCtx): 
   return {
     resourceType: "Location",
     id: resource.id ?? "",
-    provider: ctx.provider,
+    healthSystem: ctx.healthSystem,
     ...(resource.meta?.lastUpdated && { lastUpdated: resource.meta.lastUpdated }),
     ...(resource.name && { name: resource.name }),
     ...(locationAddress && { address: locationAddress }),

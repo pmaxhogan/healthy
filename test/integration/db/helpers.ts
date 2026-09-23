@@ -38,7 +38,7 @@ export function testBlinder(dataKey = TEST_DATA_KEY): Blinder {
   return blinderFor(dataKey);
 }
 
-/** The stored form of a logical event key (`<providerId>:<encounterId>`). */
+/** The stored form of a logical event key (`<healthSystemId>:<encounterId>`). */
 export function blindKey(logicalKey: string, dataKey = TEST_DATA_KEY): Promise<string> {
   return blindEventKey(testBlinder(dataKey), logicalKey);
 }
@@ -119,12 +119,12 @@ function buildLogger(sink: (level: string, line: string) => void): Logger {
   return logger;
 }
 
-/** Create a provider row and return its id. Nothing here names a real org. */
-export async function seedProvider(
+/** Create a health system row and return its id. Nothing here names a real org. */
+export async function seedHealthSystem(
   repos: Repos,
   overrides: { displayName?: string; clientSecret?: string } = {},
 ): Promise<string> {
-  const provider = await repos.providers.create({
+  const healthSystem = await repos.healthSystems.create({
     vendor: "epic",
     displayName: overrides.displayName ?? "Example Health",
     fhirBaseUrl: "https://fhir.example.test/R4",
@@ -132,7 +132,7 @@ export async function seedProvider(
     environment: "sandbox",
     ...(overrides.clientSecret !== undefined && { clientSecret: overrides.clientSecret }),
   });
-  return provider.id;
+  return healthSystem.id;
 }
 
 // Every table, child before parent so the deletes never trip a foreign key.
@@ -151,7 +151,7 @@ const TABLES = [
   "fhir_cache",
   "oauth_states",
   "connections",
-  "providers",
+  "health_systems",
   "settings",
 ];
 

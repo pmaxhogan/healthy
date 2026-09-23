@@ -2,7 +2,7 @@
 // under the wrong one is written successfully, read back successfully, and then
 // fails to open inside the Worker at sign-in time, with a `crypto` error that
 // says nothing about why. So the AADs are pinned against `aadFor` directly, the
-// same way `set-provider-secret.test.ts` pins its one.
+// same way `set-health_system-secret.test.ts` pins its one.
 
 import { describe, expect, it } from "vitest";
 
@@ -17,10 +17,10 @@ import {
 } from "../../scripts/set-portal-credentials.ts";
 import { aadFor, open } from "../../worker/db/crypto.ts";
 
-// Synthetic ULIDs -- not real provider ids -- just something that satisfies
+// Synthetic ULIDs -- not real health system ids -- just something that satisfies
 // worker/lib/ids.ts's ID_PATTERN shape.
-const PROVIDER_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
-const OTHER_PROVIDER_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
+const HEALTH_SYSTEM_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const OTHER_HEALTH_SYSTEM_ID = "01ARZ3NDEKTSV4RRFFQ69G5FAW";
 const CREDENTIALS = { username: "portal-login", password: "portal-password" };
 
 function freshKey(): string {
@@ -29,27 +29,29 @@ function freshKey(): string {
 
 describe("portal credential AADs", () => {
   it("match the AADs worker/db/repos/portal-accounts.ts seals under", () => {
-    expect(portalUsernameAad(PROVIDER_ID)).toBe(
-      aadFor("portal_accounts", "username_enc", PROVIDER_ID),
+    expect(portalUsernameAad(HEALTH_SYSTEM_ID)).toBe(
+      aadFor("portal_accounts", "username_enc", HEALTH_SYSTEM_ID),
     );
-    expect(portalPasswordAad(PROVIDER_ID)).toBe(
-      aadFor("portal_accounts", "password_enc", PROVIDER_ID),
+    expect(portalPasswordAad(HEALTH_SYSTEM_ID)).toBe(
+      aadFor("portal_accounts", "password_enc", HEALTH_SYSTEM_ID),
     );
-    expect(portalUsernameAad(PROVIDER_ID)).toBe(`portal_accounts.username_enc.${PROVIDER_ID}`);
-    expect(portalOtpSenderAad(PROVIDER_ID)).toBe(
-      aadFor("portal_accounts", "otp_sender_enc", PROVIDER_ID),
+    expect(portalUsernameAad(HEALTH_SYSTEM_ID)).toBe(
+      `portal_accounts.username_enc.${HEALTH_SYSTEM_ID}`,
     );
-    expect(portalMfaContactAad(PROVIDER_ID)).toBe(
-      aadFor("portal_accounts", "mfa_contact_enc", PROVIDER_ID),
+    expect(portalOtpSenderAad(HEALTH_SYSTEM_ID)).toBe(
+      aadFor("portal_accounts", "otp_sender_enc", HEALTH_SYSTEM_ID),
+    );
+    expect(portalMfaContactAad(HEALTH_SYSTEM_ID)).toBe(
+      aadFor("portal_accounts", "mfa_contact_enc", HEALTH_SYSTEM_ID),
     );
   });
 
   it("differ between the columns, so none opens another", () => {
-    expect(portalUsernameAad(PROVIDER_ID)).not.toBe(portalPasswordAad(PROVIDER_ID));
-    expect(portalUsernameAad(PROVIDER_ID)).not.toBe(portalMfaContactAad(PROVIDER_ID));
-    expect(portalPasswordAad(PROVIDER_ID)).not.toBe(portalMfaContactAad(PROVIDER_ID));
-    expect(portalOtpSenderAad(PROVIDER_ID)).not.toBe(portalMfaContactAad(PROVIDER_ID));
-    expect(portalOtpSenderAad(PROVIDER_ID)).not.toBe(portalPasswordAad(PROVIDER_ID));
+    expect(portalUsernameAad(HEALTH_SYSTEM_ID)).not.toBe(portalPasswordAad(HEALTH_SYSTEM_ID));
+    expect(portalUsernameAad(HEALTH_SYSTEM_ID)).not.toBe(portalMfaContactAad(HEALTH_SYSTEM_ID));
+    expect(portalPasswordAad(HEALTH_SYSTEM_ID)).not.toBe(portalMfaContactAad(HEALTH_SYSTEM_ID));
+    expect(portalOtpSenderAad(HEALTH_SYSTEM_ID)).not.toBe(portalMfaContactAad(HEALTH_SYSTEM_ID));
+    expect(portalOtpSenderAad(HEALTH_SYSTEM_ID)).not.toBe(portalPasswordAad(HEALTH_SYSTEM_ID));
   });
 });
 
@@ -57,42 +59,42 @@ describe("sealPortalCredentials", () => {
   it("round-trips both values through the Worker's own open()", async () => {
     const dataKey = freshKey();
 
-    const sealed = await sealPortalCredentials(dataKey, PROVIDER_ID, CREDENTIALS);
+    const sealed = await sealPortalCredentials(dataKey, HEALTH_SYSTEM_ID, CREDENTIALS);
 
     expect(sealed.username.startsWith("v2:")).toBe(true);
     expect(sealed.password.startsWith("v2:")).toBe(true);
     expect(`${sealed.username}${sealed.password}`).not.toContain("portal-");
-    await expect(open(dataKey, sealed.username, portalUsernameAad(PROVIDER_ID))).resolves.toBe(
+    await expect(open(dataKey, sealed.username, portalUsernameAad(HEALTH_SYSTEM_ID))).resolves.toBe(
       CREDENTIALS.username,
     );
-    await expect(open(dataKey, sealed.password, portalPasswordAad(PROVIDER_ID))).resolves.toBe(
+    await expect(open(dataKey, sealed.password, portalPasswordAad(HEALTH_SYSTEM_ID))).resolves.toBe(
       CREDENTIALS.password,
     );
   });
 
   it("will not let the password open under the username's AAD", async () => {
     const dataKey = freshKey();
-    const sealed = await sealPortalCredentials(dataKey, PROVIDER_ID, CREDENTIALS);
+    const sealed = await sealPortalCredentials(dataKey, HEALTH_SYSTEM_ID, CREDENTIALS);
 
     await expect(
-      open(dataKey, sealed.password, portalUsernameAad(PROVIDER_ID)),
+      open(dataKey, sealed.password, portalUsernameAad(HEALTH_SYSTEM_ID)),
     ).rejects.toMatchObject({ code: "crypto" });
   });
 
-  it("will not let a value open on another provider's row", async () => {
+  it("will not let a value open on another health system's row", async () => {
     const dataKey = freshKey();
-    const sealed = await sealPortalCredentials(dataKey, PROVIDER_ID, CREDENTIALS);
+    const sealed = await sealPortalCredentials(dataKey, HEALTH_SYSTEM_ID, CREDENTIALS);
 
     await expect(
-      open(dataKey, sealed.password, portalPasswordAad(OTHER_PROVIDER_ID)),
+      open(dataKey, sealed.password, portalPasswordAad(OTHER_HEALTH_SYSTEM_ID)),
     ).rejects.toMatchObject({ code: "crypto" });
   });
 
   it("never seals the same password to the same ciphertext twice", async () => {
     const dataKey = freshKey();
     const [first, second] = await Promise.all([
-      sealPortalCredentials(dataKey, PROVIDER_ID, CREDENTIALS),
-      sealPortalCredentials(dataKey, PROVIDER_ID, CREDENTIALS),
+      sealPortalCredentials(dataKey, HEALTH_SYSTEM_ID, CREDENTIALS),
+      sealPortalCredentials(dataKey, HEALTH_SYSTEM_ID, CREDENTIALS),
     ]);
 
     expect(first.password).not.toBe(second.password);
@@ -126,15 +128,15 @@ describe("splitStdin", () => {
 });
 
 describe("parseArgs", () => {
-  it("accepts --provider with --remote or --local", () => {
-    expect(parseArgs(["--provider", PROVIDER_ID, "--remote"])).toEqual({
-      providerId: PROVIDER_ID,
+  it("accepts --health-system with --remote or --local", () => {
+    expect(parseArgs(["--health-system", HEALTH_SYSTEM_ID, "--remote"])).toEqual({
+      healthSystemId: HEALTH_SYSTEM_ID,
       target: "--remote",
       mfaContact: false,
       otpSender: false,
     });
-    expect(parseArgs(["--provider", PROVIDER_ID, "--local"])).toEqual({
-      providerId: PROVIDER_ID,
+    expect(parseArgs(["--health-system", HEALTH_SYSTEM_ID, "--local"])).toEqual({
+      healthSystemId: HEALTH_SYSTEM_ID,
       target: "--local",
       mfaContact: false,
       otpSender: false,
@@ -142,8 +144,8 @@ describe("parseArgs", () => {
   });
 
   it("sets mfaContact when --mfa-contact is given", () => {
-    expect(parseArgs(["--provider", PROVIDER_ID, "--remote", "--mfa-contact"])).toEqual({
-      providerId: PROVIDER_ID,
+    expect(parseArgs(["--health-system", HEALTH_SYSTEM_ID, "--remote", "--mfa-contact"])).toEqual({
+      healthSystemId: HEALTH_SYSTEM_ID,
       target: "--remote",
       mfaContact: true,
       otpSender: false,
@@ -151,31 +153,33 @@ describe("parseArgs", () => {
   });
 
   it("sets otpSender when --otp-sender is given", () => {
-    expect(parseArgs(["--provider", PROVIDER_ID, "--remote", "--otp-sender"])).toEqual({
-      providerId: PROVIDER_ID,
+    expect(parseArgs(["--health-system", HEALTH_SYSTEM_ID, "--remote", "--otp-sender"])).toEqual({
+      healthSystemId: HEALTH_SYSTEM_ID,
       target: "--remote",
       mfaContact: false,
       otpSender: true,
     });
   });
 
-  it("refuses when --provider is missing", () => {
-    expect(() => parseArgs(["--remote"])).toThrow(/--provider is required/);
+  it("refuses when --health-system is missing", () => {
+    expect(() => parseArgs(["--remote"])).toThrow(/--health-system is required/);
   });
 
   it("refuses when neither, or both, of --remote and --local are given", () => {
-    expect(() => parseArgs(["--provider", PROVIDER_ID])).toThrow(
+    expect(() => parseArgs(["--health-system", HEALTH_SYSTEM_ID])).toThrow(
       /exactly one of --remote or --local/,
     );
-    expect(() => parseArgs(["--provider", PROVIDER_ID, "--remote", "--local"])).toThrow(
+    expect(() => parseArgs(["--health-system", HEALTH_SYSTEM_ID, "--remote", "--local"])).toThrow(
       /exactly one of --remote or --local/,
     );
   });
 
-  it("refuses an unrecognized argument and a valueless --provider", () => {
-    expect(() => parseArgs(["--provider", PROVIDER_ID, "--remote", "--bogus"])).toThrow(
+  it("refuses an unrecognized argument and a valueless --health-system", () => {
+    expect(() => parseArgs(["--health-system", HEALTH_SYSTEM_ID, "--remote", "--bogus"])).toThrow(
       /unrecognized argument: --bogus/,
     );
-    expect(() => parseArgs(["--provider", "--remote"])).toThrow(/--provider requires a value/);
+    expect(() => parseArgs(["--health-system", "--remote"])).toThrow(
+      /--health-system requires a value/,
+    );
   });
 });

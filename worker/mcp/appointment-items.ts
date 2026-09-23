@@ -15,7 +15,7 @@
  * has happened, while the portal row is kept for a year. The match is the
  * calendar sync's own rule (`sameVisit` in `worker/sync/portal-sync.ts`): the CSN
  * when both sides carry one, otherwise a start within `DEDUPE_WINDOW_SECONDS` for
- * the same provider. A match yields the FHIR item, with any field it lacks filled
+ * the same health system. A match yields the FHIR item, with any field it lacks filled
  * from the portal's copy; the portal item is dropped.
  *
  * ### Policy
@@ -37,14 +37,14 @@ import {
   RANK_FHIR,
   outranks,
   portalRank,
-  sameVisitAcrossProviders,
+  sameVisitAcrossHealthSystems,
 } from "../sync/portal-dedupe.ts";
 import { DEDUPE_WINDOW_SECONDS, portalVisitView } from "../sync/portal-mapping.ts";
 
 import { collect, spec, withinWindow } from "./collect.ts";
 
 import type { TaggedItem } from "./collect.ts";
-import type { PortalVisitRecord, ProviderInfo, ToolDeps } from "./deps.ts";
+import type { PortalVisitRecord, HealthSystemInfo, ToolDeps } from "./deps.ts";
 import type { RawEntry } from "../policy/filter.ts";
 import type { Sighting } from "../sync/portal-dedupe.ts";
 
@@ -53,7 +53,7 @@ export const PORTAL_RAW_WARNING = "portal_items_have_no_raw";
 
 /**
  * `appointmentViewFromEncounter` takes a NormalizeCtx but reads only
- * `ctx.provider` -- every reference it needs was already resolved into the
+ * `ctx.health_system` -- every reference it needs was already resolved into the
  * normalized Encounter. An empty resolver is therefore correct, not a shortcut.
  */
 const NO_REFS = mapResolver([]);
@@ -77,7 +77,7 @@ export interface Appointments {
   items: TaggedItem[];
   /** Empty unless `raw` was asked for. Index-aligned with `items`. */
   rawItems: RawEntry[];
-  providerIds: string[];
+  healthSystemIds: string[];
   /** The tool's own notes, e.g. {@link PORTAL_RAW_WARNING}. */
   warnings: string[];
 }
@@ -85,12 +85,12 @@ export interface Appointments {
 interface Entry {
   item: TaggedItem;
   raw: RawEntry;
-  providerId: string;
+  healthSystemId: string;
   /** Start as unix ms, or NaN when the item has none. */
   start: number;
   csn: string | undefined;
   portal: boolean;
-  /** What the cross-provider dedupe compares. See `worker/sync/portal-dedupe.ts`. */
+  /** What the cross-health system dedupe compares. See `worker/sync/portal-dedupe.ts`. */
   sighting: Sighting;
 }
 
@@ -112,10 +112,10 @@ function locationName(item: TaggedItem): string | undefined {
   return typeof name === "string" ? name : undefined;
 }
 
-/** One item as the cross-provider matcher sees it. */
-function sightingOf(item: TaggedItem, providerId: string, rank: Sighting["rank"]): Sighting {
+/** One item as the cross-health system matcher sees it. */
+function sightingOf(item: TaggedItem, healthSystemId: string, rank: Sighting["rank"]): Sighting {
   return {
-    providerId,
+    healthSystemId,
     start: Math.floor(startOf(item) / 1000),
     csn: stringOf(item, "csn"),
     practitioner: stringOf(item, "practitioner"),
@@ -128,16 +128,16 @@ function sightingOf(item: TaggedItem, providerId: string, rank: Sighting["rank"]
 /** The FHIR half: every cached Encounter, projected, unwindowed. */
 async function fhirEntries(
   deps: ToolDeps,
-  providers: readonly ProviderInfo[],
+  healthSystems: readonly HealthSystemInfo[],
   raw: boolean,
 ): Promise<Entry[]> {
-  const collected = await collect(deps, providers, {
+  const collected = await collect(deps, healthSystems, {
     specs: [
       spec("Encounter", {
         dateOf: (item) => item.start,
         project: (item) => ({
           resourceType: "Encounter",
-          ...appointmentViewFromEncounter(item, { provider: item.provider, refs: NO_REFS }),
+          ...appointmentViewFromEncounter(item, { healthSystem: item.healthSystem, refs: NO_REFS }),
           source: "fhir",
           firstParty: true,
         }),
@@ -146,28 +146,32 @@ async function fhirEntries(
     raw,
   });
   return collected.items.map((item, index) => {
-    const providerId = stringOf(item, "providerId") ?? "";
+    const healthSystemId = stringOf(item, "healthSystemId") ?? "";
     return {
       item,
-      raw: collected.rawItems[index] ?? { provider: "", providerId, resource: {} },
-      providerId,
+      raw: collected.rawItems[index] ?? { healthSystem: "", healthSystemId, resource: {} },
+      healthSystemId,
       start: startOf(item),
       csn: stringOf(item, "csn"),
       portal: false,
-      sighting: sightingOf(item, providerId, RANK_FHIR),
+      sighting: sightingOf(item, healthSystemId, RANK_FHIR),
     };
   });
 }
 
 /** One stored portal visit as an item, tagged exactly like a FHIR one. */
-function portalEntry(provider: ProviderInfo, record: PortalVisitRecord, now: number): Entry {
+function portalEntry(
+  healthSystem: HealthSystemInfo,
+  record: PortalVisitRecord,
+  now: number,
+): Entry {
   // No `encounterId`: a portal visit has no Encounter, and the view's stand-in
   // (`csn:<csn>`) is the calendar's event-key format -- a second copy of the CSN
   // that an `Encounter.csn` deny rule would not reach.
-  const view: Record<string, unknown> = { ...portalVisitView(provider.id, record.visit) };
+  const view: Record<string, unknown> = { ...portalVisitView(healthSystem.id, record.visit) };
   delete view.encounterId;
   const external = record.visit.external;
-  const tags = { provider: provider.displayName, providerId: provider.id };
+  const tags = { healthSystem: healthSystem.displayName, healthSystemId: healthSystem.id };
   const item: TaggedItem = {
     resourceType: "Encounter",
     ...view,
@@ -178,23 +182,27 @@ function portalEntry(provider: ProviderInfo, record: PortalVisitRecord, now: num
     // A copy another organisation's visit arrived through: which portal it was
     // seen in, so a caller can tell it is second-hand.
     firstParty: external !== true,
-    ...(external === true && { via: provider.id }),
+    ...(external === true && { via: healthSystem.id }),
     ...tags,
   };
   return {
     item,
     raw: { ...tags, resource: { resourceType: "Encounter" } },
-    providerId: provider.id,
+    healthSystemId: healthSystem.id,
     start: startOf(item),
     csn: record.visit.csn,
     portal: true,
-    sighting: sightingOf(item, provider.id, portalRank(external === true, record.fetchedAt, now)),
+    sighting: sightingOf(
+      item,
+      healthSystem.id,
+      portalRank(external === true, record.fetchedAt, now),
+    ),
   };
 }
 
 /** True when a FHIR entry and a portal entry are two sightings of one visit. */
 function sameVisit(fhir: Entry, portal: Entry): boolean {
-  if (fhir.providerId !== portal.providerId) return false;
+  if (fhir.healthSystemId !== portal.healthSystemId) return false;
   // The CSN first: it is the portal's own identifier for the visit, and Epic
   // publishes the same number on the Encounter, so a match is not a guess.
   return fhir.csn !== undefined && portal.csn !== undefined
@@ -221,15 +229,15 @@ function enrich(fhir: Entry, portal: Entry): void {
  */
 async function mergePortal(
   deps: ToolDeps,
-  providers: readonly ProviderInfo[],
+  healthSystems: readonly HealthSystemInfo[],
   entries: Entry[],
   now: number,
 ): Promise<void> {
   const claimed = new Set<Entry>();
-  for (const provider of providers) {
-    const records = await deps.portalVisits(provider.id);
+  for (const healthSystem of healthSystems) {
+    const records = await deps.portalVisits(healthSystem.id);
     for (const record of records) {
-      const portal = portalEntry(provider, record, now);
+      const portal = portalEntry(healthSystem, record, now);
       const match = entries.find(
         (entry) => !entry.portal && !claimed.has(entry) && sameVisit(entry, portal),
       );
@@ -244,11 +252,11 @@ async function mergePortal(
 }
 
 /**
- * One item per visit across providers: a visit several organisations' records
+ * One item per visit across health systems: a visit several organisations' records
  * list is answered once, by the sighting that outranks the rest (see
  * `worker/sync/portal-dedupe.ts`). A visit only one of them lists is always kept.
  */
-function collapseAcrossProviders(entries: readonly Entry[]): Entry[] {
+function collapseAcrossHealthSystems(entries: readonly Entry[]): Entry[] {
   const byPrecedence = [...entries];
   byPrecedence.sort((a, b) => {
     if (outranks(a.sighting, b.sighting)) return -1;
@@ -257,7 +265,7 @@ function collapseAcrossProviders(entries: readonly Entry[]): Entry[] {
   const kept: Entry[] = [];
   for (const entry of byPrecedence) {
     const covered = kept.some((winner) =>
-      sameVisitAcrossProviders(winner.sighting, entry.sighting),
+      sameVisitAcrossHealthSystems(winner.sighting, entry.sighting),
     );
     if (!covered) kept.push(entry);
   }
@@ -274,7 +282,7 @@ function compare(order: "asc" | "desc"): (a: Entry, b: Entry) => number {
 }
 
 /**
- * Every appointment the selected providers have, from both sources, windowed on
+ * Every appointment the selected health systems have, from both sources, windowed on
  * `start` and ordered as asked.
  *
  * The dedupe runs before the window, deliberately: a FHIR Encounter just outside
@@ -283,14 +291,14 @@ function compare(order: "asc" | "desc"): (a: Entry, b: Entry) => number {
  */
 export async function collectAppointments(
   deps: ToolDeps,
-  providers: readonly ProviderInfo[],
+  healthSystems: readonly HealthSystemInfo[],
   options: AppointmentOptions,
 ): Promise<Appointments> {
   const raw = options.raw === true;
-  const entries = await fhirEntries(deps, providers, raw);
-  await mergePortal(deps, providers, entries, deps.now());
+  const entries = await fhirEntries(deps, healthSystems, raw);
+  await mergePortal(deps, healthSystems, entries, deps.now());
 
-  const kept = collapseAcrossProviders(entries).filter((entry) =>
+  const kept = collapseAcrossHealthSystems(entries).filter((entry) =>
     withinWindow(stringOf(entry.item, "start"), options.from, options.to),
   );
   kept.sort(compare(options.order));
@@ -298,7 +306,7 @@ export async function collectAppointments(
   return {
     items: kept.map((entry) => entry.item),
     rawItems: raw ? kept.map((entry) => entry.raw) : [],
-    providerIds: providers.map((provider) => provider.id),
+    healthSystemIds: healthSystems.map((healthSystem) => healthSystem.id),
     warnings: raw && kept.some((entry) => entry.portal) ? [PORTAL_RAW_WARNING] : [],
   };
 }

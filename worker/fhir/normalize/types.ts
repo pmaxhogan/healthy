@@ -6,10 +6,10 @@
 // noise.
 import type { RefResolver } from "./refs.ts";
 
-/** Context every `normalizeX` function receives: which provider connection
+/** Context every `normalizeX` function receives: which health system connection
  * the resource came from, and a synchronous resolver for its references. */
 export interface NormalizeCtx {
-  provider: string;
+  healthSystem: string;
   refs: RefResolver;
 }
 
@@ -42,7 +42,7 @@ export interface FieldAlias {
 interface NormalizedBase {
   resourceType: string;
   id: string;
-  provider: string;
+  healthSystem: string;
   lastUpdated?: string;
 }
 
@@ -84,7 +84,7 @@ export interface NormalizedEncounter extends NormalizedBase {
 /** The calendar-facing projection of an `Encounter`: exactly the fields the
  * Google Calendar sync needs to build an event, nothing more. */
 export interface NormalizedAppointmentView {
-  provider: string;
+  healthSystem: string;
   encounterId: string;
   status: string;
   start?: string;

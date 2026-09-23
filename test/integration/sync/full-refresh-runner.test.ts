@@ -1,6 +1,6 @@
 // The FullRefreshRunner Durable Object's own glue: the job it stores, the alarm
 // that runs it, and the cleanup when the job is done. The chunk logic itself is
-// `full-refresh.test.ts`'s job; here the job names a provider that no longer
+// `full-refresh.test.ts`'s job; here the job names a health system that no longer
 // exists, so a chunk finishes at once without reaching any upstream.
 //
 // The runner arms its alarm for "now", and the test runtime fires real alarms,
@@ -15,7 +15,7 @@ import { resetSyncDb } from "./helpers.ts";
 
 beforeEach(resetSyncDb);
 
-const GONE = "01PROVIDERTHATWASDELETED00";
+const GONE = "01HEALTH_SYSTEMTHATWASDELETED00";
 
 type RunnerStub = ReturnType<typeof env.FULL_REFRESH.getByName>;
 

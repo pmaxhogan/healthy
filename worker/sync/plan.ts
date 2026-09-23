@@ -190,7 +190,7 @@ function decideActive(
 /**
  * Reconcile the three sources into one plan.
  *
- * `rows` and `googleEvents` must already be narrowed to one provider and to the
+ * `rows` and `googleEvents` must already be narrowed to one health system and to the
  * sync window: a row older than the window is absent from every search by
  * definition, and diffing it would ghost a real appointment for being old.
  */

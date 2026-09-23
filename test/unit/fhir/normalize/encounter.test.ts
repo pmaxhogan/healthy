@@ -35,7 +35,7 @@ describe("normalizeEncounter", () => {
     expect(result).toMatchObject({
       resourceType: "Encounter",
       id: "enc-1",
-      provider: "example-provider",
+      healthSystem: "example-health_system",
       status: "planned",
       class: "ambulatory",
       visitType: "Office Visit",

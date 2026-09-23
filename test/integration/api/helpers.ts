@@ -234,7 +234,7 @@ const TABLES = [
   "fhir_cache",
   "oauth_states",
   "connections",
-  "providers",
+  "health_systems",
   "settings",
 ];
 
@@ -261,14 +261,14 @@ async function resetDb(): Promise<void> {
   ).run();
 }
 
-/** A sandbox provider pointing at a URL no test ever really reaches. */
+/** A sandbox health system pointing at a URL no test ever really reaches. */
 export const TEST_FHIR_BASE = "https://fhir.example.test/R4";
 
-export async function seedProvider(
+export async function seedHealthSystem(
   options: { clientSecret?: string; displayName?: string } = {},
 ): Promise<string> {
   const repos = testRepos();
-  const provider = await repos.providers.create({
+  const healthSystem = await repos.healthSystems.create({
     vendor: "epic",
     displayName: options.displayName ?? "Example Health",
     fhirBaseUrl: TEST_FHIR_BASE,
@@ -276,5 +276,5 @@ export async function seedProvider(
     environment: "sandbox",
     ...(options.clientSecret !== undefined && { clientSecret: options.clientSecret }),
   });
-  return provider.id;
+  return healthSystem.id;
 }

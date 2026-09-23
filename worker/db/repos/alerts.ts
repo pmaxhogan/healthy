@@ -17,21 +17,21 @@ import { all, one, run } from "../client.ts";
 import type { Ctx } from "../client.ts";
 import type { AlertRow } from "../rows.ts";
 
-/** 'provider:<id>' for a health system, 'google' for the calendar account. */
-export function providerSubject(providerId: string): string {
-  return `provider:${providerId}`;
+/** 'health system:<id>' for a health system, 'google' for the calendar account. */
+export function healthSystemSubject(healthSystemId: string): string {
+  return `health_system:${healthSystemId}`;
 }
 
 /**
  * 'portal:<id>' for a health system's patient-portal session.
  *
- * A different subject from `providerSubject` for the same provider on purpose:
+ * A different subject from `healthSystemSubject` for the same health system on purpose:
  * the FHIR grant and the portal password break independently, so sharing a
  * subject would let one alert's resolution close the other's card. See
  * `worker/sync/alerts.ts`.
  */
-export function portalSubject(providerId: string): string {
-  return `portal:${providerId}`;
+export function portalSubject(healthSystemId: string): string {
+  return `portal:${healthSystemId}`;
 }
 
 /** The subject the Google calendar account's alerts use. */

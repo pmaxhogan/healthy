@@ -23,7 +23,7 @@ import type {
   CachedRow,
   DocumentTextResult,
   PortalVisitRecord,
-  ProviderInfo,
+  HealthSystemInfo,
   SyncStatusEntry,
   ToolDeps,
 } from "../../../worker/mcp/deps.ts";
@@ -33,12 +33,12 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 /** 2026-06-01T00:00:00Z, in unix seconds. An arbitrary fixed "now". */
 export const NOW = 1_780_272_000;
 
-export const PROVIDER_A = "prov_a";
-export const PROVIDER_B = "prov_b";
+export const HEALTH_SYSTEM_A = "prov_a";
+export const HEALTH_SYSTEM_B = "prov_b";
 export const NAME_A = "Example Health";
 export const NAME_B = "Other Clinic";
 
-function provider(id: string, displayName: string): ProviderInfo {
+function healthSystem(id: string, displayName: string): HealthSystemInfo {
   return {
     id,
     displayName,
@@ -53,7 +53,7 @@ function provider(id: string, displayName: string): ProviderInfo {
   };
 }
 
-/** A resource pool for one provider, keyed `resourceType`. */
+/** A resource pool for one health system, keyed `resourceType`. */
 type Pool = Record<string, unknown[]>;
 
 function poolA(): Pool {
@@ -226,9 +226,9 @@ function poolB(): Pool {
 export interface FakeState {
   enabled: boolean;
   rules: PolicyRules;
-  providers: ProviderInfo[];
+  healthSystems: HealthSystemInfo[];
   pools: Map<string, Pool>;
-  /** What the portal pass stored, by provider id. Empty unless a test adds some. */
+  /** What the portal pass stored, by health system id. Empty unless a test adds some. */
   portalVisits: Map<string, PortalVisitRecord[]>;
   counts: CacheCount[];
   syncStatus: SyncStatusEntry[];
@@ -242,36 +242,39 @@ export interface FakeState {
 export interface FakeOverrides {
   enabled?: boolean;
   rules?: PolicyRules;
-  providers?: ProviderInfo[];
+  healthSystems?: HealthSystemInfo[];
   pools?: Map<string, Pool>;
   portalVisits?: Map<string, PortalVisitRecord[]>;
   document?: DocumentTextResult;
 }
 
-/** The two-provider world every tool test starts from. */
+/** The two-health system world every tool test starts from. */
 export function fakeState(overrides: FakeOverrides = {}): FakeState {
   const pools =
     overrides.pools ??
     new Map([
-      [PROVIDER_A, poolA()],
-      [PROVIDER_B, poolB()],
+      [HEALTH_SYSTEM_A, poolA()],
+      [HEALTH_SYSTEM_B, poolB()],
     ]);
   const counts: CacheCount[] = [];
-  for (const [providerId, pool] of pools) {
+  for (const [healthSystemId, pool] of pools) {
     for (const [resourceType, resources] of Object.entries(pool)) {
-      counts.push({ providerId, resourceType, count: resources.length });
+      counts.push({ healthSystemId, resourceType, count: resources.length });
     }
   }
   return {
     enabled: overrides.enabled ?? true,
     rules: overrides.rules ?? EMPTY_RULES,
-    providers: overrides.providers ?? [provider(PROVIDER_A, NAME_A), provider(PROVIDER_B, NAME_B)],
+    healthSystems: overrides.healthSystems ?? [
+      healthSystem(HEALTH_SYSTEM_A, NAME_A),
+      healthSystem(HEALTH_SYSTEM_B, NAME_B),
+    ],
     pools,
     portalVisits: overrides.portalVisits ?? new Map(),
     counts,
     syncStatus: [
       {
-        providerId: PROVIDER_A,
+        healthSystemId: HEALTH_SYSTEM_A,
         resourceType: "Condition",
         lastFullAt: NOW - 86_400,
         lastOk: true,
@@ -318,8 +321,8 @@ function fromPool(pool: Pool | undefined, resourceType: string): unknown[] {
 
 /** A `ToolDeps` over `state`. Mutate `state` between calls to change the world. */
 export function fakeDeps(state: FakeState): ToolDeps {
-  const rows = (providerId: string, resourceType: string): CachedRow[] =>
-    fromPool(state.pools.get(providerId), resourceType).map((resource) => ({
+  const rows = (healthSystemId: string, resourceType: string): CachedRow[] =>
+    fromPool(state.pools.get(healthSystemId), resourceType).map((resource) => ({
       resource,
       lastUpdated: null,
       fetchedAt: NOW,
@@ -334,17 +337,18 @@ export function fakeDeps(state: FakeState): ToolDeps {
     now: () => NOW,
     mcpEnabled: () => Promise.resolve(state.enabled),
     rules: () => Promise.resolve(state.rules),
-    providers: () => Promise.resolve(state.providers),
-    resources: (providerId, resourceType) => Promise.resolve(rows(providerId, resourceType)),
-    referencePool: (providerId) => {
-      const pool = state.pools.get(providerId);
+    healthSystems: () => Promise.resolve(state.healthSystems),
+    resources: (healthSystemId, resourceType) =>
+      Promise.resolve(rows(healthSystemId, resourceType)),
+    referencePool: (healthSystemId) => {
+      const pool = state.pools.get(healthSystemId);
       return Promise.resolve([
         ...fromPool(pool, "Practitioner"),
         ...fromPool(pool, "Location"),
         ...fromPool(pool, "Organization"),
       ]);
     },
-    portalVisits: (providerId) => Promise.resolve(state.portalVisits.get(providerId) ?? []),
+    portalVisits: (healthSystemId) => Promise.resolve(state.portalVisits.get(healthSystemId) ?? []),
     counts: () => Promise.resolve(state.counts),
     syncStatus: () => Promise.resolve(state.syncStatus),
     documentText: () => Promise.resolve(state.document),

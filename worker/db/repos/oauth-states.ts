@@ -22,7 +22,7 @@ import type { OAuthStateKind, OAuthStateRow } from "../rows.ts";
 interface PutState {
   kind: OAuthStateKind;
   /** Required for `epic`, forbidden for `google` (a CHECK enforces it). */
-  providerId?: string | null;
+  healthSystemId?: string | null;
   codeVerifier: string;
   /** Where to send the browser once the callback has finished. */
   redirectAfter?: string | null;
@@ -34,7 +34,7 @@ const aad = (state: string): string => aadFor("oauth_states", "code_verifier_enc
 export interface ConsumedState {
   state: string;
   kind: OAuthStateKind;
-  providerId: string | null;
+  healthSystemId: string | null;
   codeVerifier: string;
   redirectAfter: string | null;
 }
@@ -50,13 +50,13 @@ export function makeOAuthStatesRepo(ctx: Ctx) {
         ctx.db
           .prepare(
             `INSERT INTO oauth_states
-               (state, kind, provider_id, code_verifier_enc, redirect_after, created_at, expires_at)
+               (state, kind, health_system_id, code_verifier_enc, redirect_after, created_at, expires_at)
              VALUES (?, ?, ?, ?, ?, ?, ?)`,
           )
           .bind(
             state,
             input.kind,
-            input.providerId ?? null,
+            input.healthSystemId ?? null,
             verifierEnc,
             input.redirectAfter ?? null,
             at,
@@ -82,7 +82,7 @@ export function makeOAuthStatesRepo(ctx: Ctx) {
       return {
         state: row.state,
         kind: row.kind,
-        providerId: row.provider_id,
+        healthSystemId: row.health_system_id,
         codeVerifier: await open(ctx.env, row.code_verifier_enc, aad(row.state)),
         redirectAfter: row.redirect_after,
       };

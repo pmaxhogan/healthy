@@ -2,34 +2,34 @@ import { describe, expect, it } from "vitest";
 
 import { buildReconnectCard } from "../../../worker/alerts/reconnect.ts";
 
-// Privacy: synthetic provider name and URL only, per this module's test convention.
-const PROVIDER_NAME = "Test Health Provider";
+// Privacy: synthetic health system name and URL only, per this module's test convention.
+const HEALTH_SYSTEM_NAME = "Test Health Health system";
 const RECONNECT_URL = "https://healthy.example.test/reconnect/abc";
 const OCCURRED_AT = new Date("2026-09-21T21:34:56.000Z");
 
 describe("buildReconnectCard", () => {
-  it("titles the card 'Reconnect <providerName> to Healthy'", () => {
+  it("titles the card 'Reconnect <healthSystemName> to Healthy'", () => {
     const { title } = buildReconnectCard({
       kind: "epic",
-      providerName: PROVIDER_NAME,
+      healthSystemName: HEALTH_SYSTEM_NAME,
       reconnectUrl: RECONNECT_URL,
       occurredAt: OCCURRED_AT,
     });
 
-    expect(title).toBe(`Reconnect ${PROVIDER_NAME} to Healthy`);
+    expect(title).toBe(`Reconnect ${HEALTH_SYSTEM_NAME} to Healthy`);
   });
 
-  it("includes the reconnect url, the provider name, and a 3-step numbered list, under 900 chars", () => {
+  it("includes the reconnect url, the health system name, and a 3-step numbered list, under 900 chars", () => {
     const { description } = buildReconnectCard({
       kind: "epic",
-      providerName: PROVIDER_NAME,
+      healthSystemName: HEALTH_SYSTEM_NAME,
       reconnectUrl: RECONNECT_URL,
       reason: "token expired",
       occurredAt: OCCURRED_AT,
     });
 
     expect(description).toContain(RECONNECT_URL);
-    expect(description).toContain(PROVIDER_NAME);
+    expect(description).toContain(HEALTH_SYSTEM_NAME);
     expect(description).toContain("token expired");
     expect(description).toMatch(/1\. Open/);
     expect(description).toMatch(/2\. Click/);
@@ -40,13 +40,13 @@ describe("buildReconnectCard", () => {
   it("adds the consent-screen note for kind 'epic' only", () => {
     const epic = buildReconnectCard({
       kind: "epic",
-      providerName: PROVIDER_NAME,
+      healthSystemName: HEALTH_SYSTEM_NAME,
       reconnectUrl: RECONNECT_URL,
       occurredAt: OCCURRED_AT,
     });
     const google = buildReconnectCard({
       kind: "google",
-      providerName: "Google",
+      healthSystemName: "Google",
       reconnectUrl: RECONNECT_URL,
       occurredAt: OCCURRED_AT,
     });
@@ -59,7 +59,7 @@ describe("buildReconnectCard", () => {
   it("mentions Google, not 'the patient portal', for kind 'google'", () => {
     const { description } = buildReconnectCard({
       kind: "google",
-      providerName: "Google",
+      healthSystemName: "Google",
       reconnectUrl: RECONNECT_URL,
       occurredAt: OCCURRED_AT,
     });
@@ -71,7 +71,7 @@ describe("buildReconnectCard", () => {
   it("omits the parenthetical reason when none is given", () => {
     const { description } = buildReconnectCard({
       kind: "epic",
-      providerName: PROVIDER_NAME,
+      healthSystemName: HEALTH_SYSTEM_NAME,
       reconnectUrl: RECONNECT_URL,
       occurredAt: OCCURRED_AT,
     });
@@ -82,7 +82,7 @@ describe("buildReconnectCard", () => {
   it("stays under 900 chars even with a very long reason", () => {
     const { description } = buildReconnectCard({
       kind: "epic",
-      providerName: PROVIDER_NAME,
+      healthSystemName: HEALTH_SYSTEM_NAME,
       reconnectUrl: RECONNECT_URL,
       reason: "x".repeat(5000),
       occurredAt: OCCURRED_AT,
@@ -94,7 +94,7 @@ describe("buildReconnectCard", () => {
   it("renders the occurrence time in UTC without asserting a local timezone", () => {
     const { description } = buildReconnectCard({
       kind: "epic",
-      providerName: PROVIDER_NAME,
+      healthSystemName: HEALTH_SYSTEM_NAME,
       reconnectUrl: RECONNECT_URL,
       occurredAt: OCCURRED_AT,
     });

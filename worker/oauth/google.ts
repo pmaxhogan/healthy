@@ -3,7 +3,7 @@
  *
  * Simpler than the Epic flow in two ways and subtler in one.
  *
- * Simpler: there is one Google account and one client, so there is no provider to
+ * Simpler: there is one Google account and one client, so there is no health system to
  * look up and no per-organisation secret; and Google's client does not use PKCE
  * here, so the `oauth_states` row carries a throwaway verifier purely to satisfy
  * the NOT NULL column. (The row's real job is the `state` nonce, which is checked
@@ -42,7 +42,7 @@ googleOAuthRouter.get("/google/start", async (c) => {
 
   const state = await repos.oauthStates.put({
     kind: "google",
-    // No provider: a `google` state must have a NULL provider_id (the table has a
+    // No health system: a `google` state must have a NULL health_system_id (the table has a
     // CHECK that says so).
     codeVerifier: newToken(),
     ttlMs: STATE_TTL_MS,

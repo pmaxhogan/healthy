@@ -1,16 +1,16 @@
 <script setup lang="ts">
-// Adding a provider: find the health system in the brands index, then create it --
+// Adding a health system: find the health system in the brands index, then create it --
 // or, when the index does not have it, enter the FHIR base directly.
 //
 // The brands index is the slimmed open.epic bundle the weekly data job commits.
 // Searching it server-side (rather than shipping it to the browser) keeps a
 // multi-megabyte file out of the SPA and means the Worker can validate that the
-// FHIR base a provider is created with is one the index actually lists.
+// FHIR base a health system is created with is one the index actually lists.
 //
 // Manual entry is the escape hatch for a health system the index does not carry
 // yet: the Worker runs the same SMART discovery against it before the row is
-// written (see worker/api/routes/providers.ts), so a bad URL 400s there rather
-// than creating a provider that can never connect. The client-side check here
+// written (see worker/api/routes/health systems.ts), so a bad URL 400s there rather
+// than creating a health system that can never connect. The client-side check here
 // is the same `isHttpsUrl` predicate the Worker's schema uses -- shared so the
 // two cannot silently disagree -- and exists only to catch a typo before a
 // round trip, not to be the source of truth.
@@ -25,9 +25,9 @@ import { debounce } from "../lib/debounce.ts";
 import { toastSuccess } from "../lib/toasts.ts";
 import { useAction } from "../lib/use-load.ts";
 
-import type { BrandDto, ProviderEnvironment } from "@shared/types.ts";
+import type { BrandDto, HealthSystemEnvironment } from "@shared/types.ts";
 
-const emit = defineEmits<{ created: [provider: { id: string; displayName: string }] }>();
+const emit = defineEmits<{ created: [healthSystem: { id: string; displayName: string }] }>();
 
 type Mode = "search" | "manual";
 const mode = ref<Mode>("search");
@@ -40,7 +40,7 @@ const searched = ref(false);
 const picked = ref<BrandDto | null>(null);
 
 const displayName = ref("");
-const environment = ref<ProviderEnvironment>("prod");
+const environment = ref<HealthSystemEnvironment>("prod");
 const clientSecret = ref("");
 const portalUrl = ref("");
 
@@ -145,7 +145,7 @@ async function submitBrand(): Promise<void> {
   const portal = portalUrl.value.trim();
 
   await create.run(async () => {
-    const provider = await endpoints.createProvider({
+    const healthSystem = await endpoints.createHealthSystem({
       displayName: name,
       brandId: brand.id,
       environment: environment.value,
@@ -153,7 +153,7 @@ async function submitBrand(): Promise<void> {
       ...(secret !== "" && { clientSecret: secret }),
     });
     toastSuccess(`${name} added. Connect it to finish.`);
-    emit("created", { id: provider.id, displayName: provider.displayName });
+    emit("created", { id: healthSystem.id, displayName: healthSystem.displayName });
     reset();
   });
 }
@@ -161,7 +161,7 @@ async function submitBrand(): Promise<void> {
 /**
  * The manual path: no `brandId`, so the Worker runs SMART discovery against
  * `fhirBaseUrl` before writing the row (see `resolveEndpoint` in
- * worker/api/routes/providers.ts) and 400s with `upstream_*` if the endpoint does
+ * worker/api/routes/health systems.ts) and 400s with `upstream_*` if the endpoint does
  * not answer like a FHIR server. That failure surfaces through `create.run` and
  * `errorMessage` exactly like any other -- there is nothing to pre-empt here.
  */
@@ -174,7 +174,7 @@ async function submitManual(): Promise<void> {
   const portal = portalUrl.value.trim();
 
   await create.run(async () => {
-    const provider = await endpoints.createProvider({
+    const healthSystem = await endpoints.createHealthSystem({
       displayName: name,
       fhirBaseUrl: url,
       environment: environment.value,
@@ -182,7 +182,7 @@ async function submitManual(): Promise<void> {
       ...(secret !== "" && { clientSecret: secret }),
     });
     toastSuccess(`${name} added. Connect it to finish.`);
-    emit("created", { id: provider.id, displayName: provider.displayName });
+    emit("created", { id: healthSystem.id, displayName: healthSystem.displayName });
     reset();
   });
 }
@@ -191,7 +191,7 @@ async function submitManual(): Promise<void> {
 <template>
   <section class="card">
     <div class="row">
-      <h2>Add a provider</h2>
+      <h2>Add a health system</h2>
       <button type="button" class="small spacer" @click="toggleMode">
         {{ mode === "search" ? "Enter a FHIR base URL manually" : "Search health systems instead" }}
       </button>
@@ -262,7 +262,7 @@ async function submitManual(): Promise<void> {
 
         <div class="row">
           <button class="primary" :disabled="create.busy.value" @click="submitBrand">
-            {{ create.busy.value ? "Adding…" : "Add provider" }}
+            {{ create.busy.value ? "Adding…" : "Add health system" }}
           </button>
           <button class="small" @click="reset">Cancel</button>
         </div>
@@ -272,7 +272,7 @@ async function submitManual(): Promise<void> {
     <template v-else>
       <p class="muted">
         For a health system the brands search does not list yet. The Worker confirms this is a real
-        FHIR endpoint before the provider is saved.
+        FHIR endpoint before the health system is saved.
       </p>
       <div class="fields two">
         <label class="field">
@@ -314,7 +314,7 @@ async function submitManual(): Promise<void> {
           :disabled="!canSubmitManual || create.busy.value"
           @click="submitManual"
         >
-          {{ create.busy.value ? "Adding…" : "Add provider" }}
+          {{ create.busy.value ? "Adding…" : "Add health system" }}
         </button>
         <button class="small" @click="reset">Cancel</button>
       </div>

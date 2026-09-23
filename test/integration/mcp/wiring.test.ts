@@ -133,7 +133,7 @@ describe("/mcp", () => {
   });
 });
 
-describe("the provider's own endpoints", () => {
+describe("the health system's own endpoints", () => {
   it("claims POST /oauth/token exactly, and answers it itself", async () => {
     const response = await SELF.fetch(`${ORIGIN}/oauth/token`, {
       method: "POST",
@@ -160,7 +160,7 @@ describe("the provider's own endpoints", () => {
 });
 
 describe("everything else still reaches Hono", () => {
-  it("GET /oauth/callback -- the Epic redirect -- is the app's, not the provider's", async () => {
+  it("GET /oauth/callback -- the Epic redirect -- is the app's, not the health system's", async () => {
     // The one that would break silently. `/oauth/token` and `/oauth/register` are
     // matched by exact pathname, so the sibling callback routes must fall through.
     const response = await SELF.fetch(`${ORIGIN}/oauth/callback?code=abc&state=xyz`);
@@ -178,7 +178,7 @@ describe("everything else still reaches Hono", () => {
     expect(response.headers.get("content-security-policy")).toContain("default-src 'self'");
   });
 
-  it("the /oauth router answers a signed-in request, not the provider", async () => {
+  it("the /oauth router answers a signed-in request, not the health system", async () => {
     const cookie = await sessionCookie();
 
     const response = await gated("/oauth/callback?code=abc", { headers: { cookie } });
@@ -191,14 +191,14 @@ describe("everything else still reaches Hono", () => {
     expect(body).not.toContain("error_description");
   });
 
-  it("GET /health is public, through the provider and past the gate", async () => {
+  it("GET /health is public, through the health system and past the gate", async () => {
     const response = await SELF.fetch(`${ORIGIN}/health`);
 
     expect(response.status).toBe(200);
     expect(await response.json()).toStrictEqual({ ok: true });
   });
 
-  it("GET /connectors -- the admin UI's MCP page -- reaches Hono's SPA fallback, not the provider", async () => {
+  it("GET /connectors -- the admin UI's MCP page -- reaches Hono's SPA fallback, not the health system", async () => {
     // This is the collision the /mcp block above exists to prevent: the admin
     // page used to sit at /mcp too, and the provider's apiRoute always won,
     // so a direct load or reload 401'd with an empty body instead of ever
@@ -222,7 +222,7 @@ describe("everything else still reaches Hono", () => {
     expect(response.headers.get("content-security-policy")).toContain("default-src 'self'");
   });
 
-  it("GET /connectors with no session reaches the gate, not the provider's bare 401", async () => {
+  it("GET /connectors with no session reaches the gate, not the health system's bare 401", async () => {
     const response = await SELF.fetch(`${ORIGIN}/connectors`);
 
     // Same discriminator as /mcp above: the provider stamps no CSP at all. Here

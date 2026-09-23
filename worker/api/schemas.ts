@@ -17,7 +17,7 @@ import { isHttpsUrl } from "@shared/url.ts";
 import type {
   PortalDiscoverRequest,
   PutPortalAccountRequest,
-  SetProviderSecretRequest,
+  SetHealthSystemSecretRequest,
 } from "@shared/types.ts";
 
 // Re-exported so `test/unit/api/schemas.test.ts` -- and anything else that
@@ -113,8 +113,8 @@ const colorId = z.string().min(1).max(8);
 
 const offsetMinutes = z.number().int().min(0).max(1440);
 
-/** The camelCase per-provider config the SPA sends. */
-const providerConfigSchema = z.strictObject({
+/** The camelCase per-health system config the SPA sends. */
+const healthSystemConfigSchema = z.strictObject({
   titleTemplate: z.string().min(1).max(300).optional(),
   colorId: colorId.optional(),
   arrivalOffsetMin: offsetMinutes.optional(),
@@ -124,37 +124,37 @@ const providerConfigSchema = z.strictObject({
 });
 
 /**
- * `POST /api/providers`.
+ * `POST /api/health-systems`.
  *
  * Either a `brandId` from `/api/brands` or a manual `fhirBaseUrl`; the handler
  * requires exactly one, because "both" would leave it guessing which the owner
  * meant when they disagree.
  */
-export const providerCreateSchema = z.strictObject({
+export const healthSystemCreateSchema = z.strictObject({
   displayName: shortText,
   brandId: z.string().min(1).max(200).optional(),
   fhirBaseUrl: httpsUrl.optional(),
   portalUrl: httpsUrl.optional(),
   environment: z.enum(["prod", "sandbox"]),
   clientSecret: z.string().min(1).max(1000).optional(),
-  config: providerConfigSchema.optional(),
+  config: healthSystemConfigSchema.optional(),
 });
 
-/** `PATCH /api/providers/:id`. The FHIR base is not editable; delete and re-add. */
-export const updateProviderSchema = z.strictObject({
+/** `PATCH /api/health-systems/:id`. The FHIR base is not editable; delete and re-add. */
+export const updateHealthSystemSchema = z.strictObject({
   displayName: shortText.optional(),
   portalUrl: httpsUrl.nullable().optional(),
-  config: providerConfigSchema.optional(),
+  config: healthSystemConfigSchema.optional(),
 });
 
 /**
- * `POST /api/providers/:id/secret`.
+ * `POST /api/health-systems/:id/secret`.
  *
  * Annotated with the shared request DTO rather than just inferring: that is what
- * makes a change to `SetProviderSecretRequest` a compile error here instead of a
+ * makes a change to `SetHealthSystemSecretRequest` a compile error here instead of a
  * schema that quietly stops matching what the SPA sends.
  */
-export const providerSecretSchema: z.ZodType<SetProviderSecretRequest> = z.strictObject({
+export const healthSystemSecretSchema: z.ZodType<SetHealthSystemSecretRequest> = z.strictObject({
   clientSecret: z.string().min(1).max(1000),
 });
 
@@ -179,7 +179,7 @@ export const settingsPatchSchema = z.strictObject({
 
 /** `POST /api/mcp/policy`. */
 export const policyRuleSchema = z.strictObject({
-  ruleType: z.enum(["tool", "resource", "field", "provider"]),
+  ruleType: z.enum(["tool", "resource", "field", "health_system"]),
   target: z.string().min(1).max(200),
   note: z.string().max(500).optional(),
 });
@@ -195,9 +195,9 @@ export const policyRuleSchema = z.strictObject({
  */
 export const mcpToolCallArgsSchema = z.record(z.string(), z.unknown());
 
-/** `POST /api/sync/run` and `POST /api/providers/:id/full-refresh`. */
+/** `POST /api/sync/run` and `POST /api/health-systems/:id/full-refresh`. */
 export const syncRequestSchema = z.strictObject({
-  providerIds: z.array(z.string().min(1).max(64)).max(50).optional(),
+  healthSystemIds: z.array(z.string().min(1).max(64)).max(50).optional(),
 });
 
 /** `GET /api/brands?q=`. */
@@ -206,9 +206,9 @@ export const brandQuerySchema = z.object({
 });
 
 /**
- * `PUT /api/providers/:id/portal`.
+ * `PUT /api/health-systems/:id/portal`.
  *
- * Annotated with the shared request DTO, like `providerSecretSchema`: that is what
+ * Annotated with the shared request DTO, like `healthSystemSecretSchema`: that is what
  * makes a change to `PutPortalAccountRequest` a compile error here rather than a
  * body the SPA sends and the Worker silently rejects.
  *
@@ -229,7 +229,7 @@ export const portalAccountSchema: z.ZodType<PutPortalAccountRequest> = z.strictO
   confirmedOrigin: httpsUrl,
 });
 
-/** `POST /api/providers/:id/portal/discover`. Probe only -- nothing is stored. */
+/** `POST /api/health-systems/:id/portal/discover`. Probe only -- nothing is stored. */
 export const portalDiscoverSchema: z.ZodType<PortalDiscoverRequest> = z.strictObject({
   baseUrl: httpsUrl,
   mountHint: z.string().min(1).max(200).optional(),

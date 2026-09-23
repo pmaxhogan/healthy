@@ -21,16 +21,16 @@ const instant = z
 /**
  * The three arguments every tool takes.
  *
- * `providers` accepts either a provider id (as `list_providers` reports it) or a
+ * `health_systems` accepts either a health system id (as `list_health_systems` reports it) or a
  * case-insensitive substring of a display name, because a model that has just
  * read "Example Health" will try to pass that back.
  */
 const SHARED_ARGS = {
-  providers: z
+  healthSystems: z
     .array(z.string().min(1))
     .max(20)
     .optional()
-    .describe("Provider ids, or case-insensitive substrings of provider display names."),
+    .describe("Health system ids, or case-insensitive substrings of health system display names."),
   raw: z
     .boolean()
     .optional()
@@ -71,7 +71,7 @@ export function sharedOnlyArgs() {
 
 /** What every tool receives, whatever else it declares. */
 export interface SharedArgs {
-  providers?: string[] | undefined;
+  healthSystems?: string[] | undefined;
   raw?: boolean | undefined;
   limit?: number | undefined;
 }

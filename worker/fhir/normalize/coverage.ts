@@ -13,7 +13,7 @@ export function normalizeCoverage(resource: fhir4.Coverage, ctx: NormalizeCtx): 
   return {
     resourceType: "Coverage",
     id: resource.id ?? "",
-    provider: ctx.provider,
+    healthSystem: ctx.healthSystem,
     ...(resource.meta?.lastUpdated && { lastUpdated: resource.meta.lastUpdated }),
     payor,
     ...(type && { type }),

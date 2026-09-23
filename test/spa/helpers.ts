@@ -17,7 +17,7 @@ import type {
   MailSettingsDto,
   OverviewDto,
   PortalAccountStatusDto,
-  ProviderDto,
+  HealthSystemDto,
   RunDto,
   SettingsDto,
 } from "@shared/types.ts";
@@ -112,7 +112,7 @@ export async function testRouter(initial = "/"): Promise<Router> {
     history: createMemoryHistory(),
     routes: [
       { path: "/", component: blank },
-      { path: "/providers", component: blank },
+      { path: "/health-systems", component: blank },
       { path: "/calendar", component: blank },
       { path: "/connectors", component: blank },
       { path: "/alerts", component: blank },
@@ -129,7 +129,7 @@ export async function testRouter(initial = "/"): Promise<Router> {
 export function connection(overrides: Partial<ConnectionDto> = {}): ConnectionDto {
   return {
     id: "conn-1",
-    providerId: "prov-1",
+    healthSystemId: "prov-1",
     status: "connected",
     accessExpiresAt: "2026-09-21T12:45:00.000Z",
     hasRefreshToken: true,
@@ -145,7 +145,7 @@ export function connection(overrides: Partial<ConnectionDto> = {}): ConnectionDt
   };
 }
 
-export function provider(overrides: Partial<ProviderDto> = {}): ProviderDto {
+export function healthSystem(overrides: Partial<HealthSystemDto> = {}): HealthSystemDto {
   return {
     id: "prov-1",
     vendor: "epic",
@@ -190,7 +190,7 @@ function run(overrides: Partial<RunDto> = {}): RunDto {
     finishedAt: "2026-09-21T11:07:04.000Z",
     ok: true,
     summary: {
-      providers: 1,
+      healthSystems: 1,
       encountersSeen: 4,
       eventsInserted: 2,
       eventsPatched: 1,
@@ -214,8 +214,8 @@ function alert(overrides: Partial<AlertDto> = {}): AlertDto {
   return {
     id: "alert-1",
     kind: "reconnect",
-    subject: "provider:prov-2",
-    providerId: "prov-2",
+    subject: "health_system:prov-2",
+    healthSystemId: "prov-2",
     trelloCardId: "card-1",
     openedAt: "2026-09-21T09:00:00.000Z",
     resolvedAt: null,
@@ -250,7 +250,7 @@ export function portalAccount(
   overrides: Partial<PortalAccountStatusDto> = {},
 ): PortalAccountStatusDto {
   return {
-    providerId: "prov-1",
+    healthSystemId: "prov-1",
     baseUrl: "https://portal.example.test",
     mountPath: "/MyChart",
     hasCredentials: true,
@@ -284,16 +284,16 @@ export function brand(overrides: Partial<BrandDto> = {}): BrandDto {
 
 export function overview(overrides: Partial<OverviewDto> = {}): OverviewDto {
   return {
-    providers: [
-      provider(),
-      provider({
+    healthSystems: [
+      healthSystem(),
+      healthSystem({
         id: "prov-2",
         displayName: "Second Example Clinic",
         environment: "sandbox",
         hasClientSecret: false,
         connection: connection({
           id: "conn-2",
-          providerId: "prov-2",
+          healthSystemId: "prov-2",
           status: "needs_reauth",
           lastErrorCode: "invalid_grant",
           needsReauthSince: "2026-09-21T09:00:00.000Z",
@@ -313,9 +313,9 @@ export function overview(overrides: Partial<OverviewDto> = {}): OverviewDto {
     openAlerts: [alert()],
     lastRuns: [run()],
     cacheCounts: [
-      { providerId: "prov-1", resourceType: "Observation", count: 42 },
-      { providerId: "prov-1", resourceType: "Condition", count: 7 },
-      { providerId: "prov-2", resourceType: "Condition", count: 3 },
+      { healthSystemId: "prov-1", resourceType: "Observation", count: 42 },
+      { healthSystemId: "prov-1", resourceType: "Condition", count: 7 },
+      { healthSystemId: "prov-2", resourceType: "Condition", count: 3 },
     ],
     calendarEvents: { active: 5, ghost: 2 },
     mcp: { enabled: true, grants: 1, auditLast24h: 12, policyRules: 3 },

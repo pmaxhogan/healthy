@@ -1,4 +1,4 @@
-// Polls a provider's portal sign-in state after "Sign in now" is pressed.
+// Polls a health system's portal sign-in state after "Sign in now" is pressed.
 //
 // Same shape as RunsView's own poll (3 s ticks, a capped total so a sign-in
 // that never resolves does not poll forever) because it is the same problem: a
@@ -83,8 +83,8 @@ export interface PortalAccountHandle {
   pollSignIn: () => void;
 }
 
-export function usePortalAccount(providerId: string): PortalAccountHandle {
-  const account = useLoad((signal) => endpoints.portalAccount(providerId, signal));
+export function usePortalAccount(healthSystemId: string): PortalAccountHandle {
+  const account = useLoad((signal) => endpoints.portalAccount(healthSystemId, signal));
 
   const polling = ref(false);
 
@@ -110,7 +110,7 @@ export function usePortalAccount(providerId: string): PortalAccountHandle {
     }
     let latest: PortalAccountStatusDto;
     try {
-      latest = await endpoints.portalAccount(providerId);
+      latest = await endpoints.portalAccount(healthSystemId);
     } catch {
       // A transient failure just waits for the next tick -- a real problem is
       // still there next time, and the owner can always reload the page.

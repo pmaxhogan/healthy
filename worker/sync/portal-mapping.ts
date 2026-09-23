@@ -20,7 +20,7 @@
  * **The event key.** A portal visit has no Encounter id, so the key's second
  * half is `csn:<csn>` -- the portal's contact-serial number, prefixed so that it
  * can never collide with an Epic resource id and so that `source = 'portal'` is
- * visible in the key itself. The full key is `<providerId>:csn:<csn>`.
+ * visible in the key itself. The full key is `<healthSystemId>:csn:<csn>`.
  *
  * **What "off the schedule" means here.** `mapping.ts` knows the FHIR Encounter
  * statuses (`cancelled`, `entered-in-error`); the portal has its own vocabulary,
@@ -38,7 +38,7 @@ import type { PortalVisit, PortalVisitStatus } from "../providers/mychart/index.
 /**
  * The infix that marks the portal half of an event key.
  *
- * `<providerId>:csn:<csn>`. Epic resource ids do not contain a colon, so a key
+ * `<healthSystemId>:csn:<csn>`. Epic resource ids do not contain a colon, so a key
  * carrying this one is unambiguously a portal row even without reading `source`.
  */
 const CSN_PREFIX = "csn:";
@@ -63,15 +63,15 @@ export function portalEncounterId(csn: string): string {
 }
 
 /**
- * What every one of a provider's portal event keys starts with.
+ * What every one of a health system's portal event keys starts with.
  *
  * The one place the marker is spelled out for a *caller*: both passes of the sync
  * filter on it -- the portal pass to take its own rows and events, the FHIR pass to
  * leave them alone -- and a second copy of the string in either file is a way for
  * the two filters to stop being exact complements of each other.
  */
-export function portalKeyPrefix(providerId: string): string {
-  return `${providerId}:${CSN_PREFIX}`;
+export function portalKeyPrefix(healthSystemId: string): string {
+  return `${healthSystemId}:${CSN_PREFIX}`;
 }
 
 /** The CSN a portal event key carries, or null when the key is not a portal one. */
@@ -124,10 +124,13 @@ function locationOf(visit: PortalVisit): NormalizedLocationRef | undefined {
  * said, and a translation would both lose `no_show` and invent a precision the
  * portal's contradictory status booleans do not have.
  */
-export function portalVisitView(providerId: string, visit: PortalVisit): NormalizedAppointmentView {
+export function portalVisitView(
+  healthSystemId: string,
+  visit: PortalVisit,
+): NormalizedAppointmentView {
   const location = locationOf(visit);
   return {
-    provider: providerId,
+    healthSystem: healthSystemId,
     encounterId: portalEncounterId(visit.csn),
     status: visit.status,
     start: visit.start,

@@ -18,7 +18,7 @@ import type {
   ConnectionDto,
   ColorOptionDto,
   CreatePolicyRuleRequest,
-  CreateProviderRequest,
+  CreateHealthSystemRequest,
   GoogleAccountDto,
   MailInboxEntryDto,
   MailSettingsDto,
@@ -33,12 +33,12 @@ import type {
   PortalDiscoverRequest,
   PortalDiscoveryDto,
   PortalSignInPhase,
-  ProviderDto,
+  HealthSystemDto,
   PutPortalAccountRequest,
   RunDto,
   SettingsDto,
   SettingsPatch,
-  UpdateProviderRequest,
+  UpdateHealthSystemRequest,
 } from "@shared/types.ts";
 
 /** The 202 body of every route whose work outlives the response. */
@@ -63,63 +63,67 @@ export const endpoints = {
 
   overview: (signal?: AbortSignal): Promise<OverviewDto> => api.get("/api/overview", signal),
 
-  providers: (signal?: AbortSignal): Promise<ProviderDto[]> => api.get("/api/providers", signal),
-  createProvider: (body: CreateProviderRequest): Promise<ProviderDto> =>
-    api.post("/api/providers", body),
+  healthSystems: (signal?: AbortSignal): Promise<HealthSystemDto[]> =>
+    api.get("/api/health-systems", signal),
+  createHealthSystem: (body: CreateHealthSystemRequest): Promise<HealthSystemDto> =>
+    api.post("/api/health-systems", body),
   /**
    * PATCH, not PUT: the FHIR base is not editable, so this is a partial update by
    * construction. The `config` it carries, however, replaces the stored config
    * wholesale -- the Worker says so -- which is how a blank field clears back to
    * the global default.
    */
-  updateProvider: (id: string, body: UpdateProviderRequest): Promise<ProviderDto> =>
-    api.patch(`/api/providers/${encodeURIComponent(id)}`, body),
-  setProviderSecret: (id: string, clientSecret: string): Promise<ProviderDto> =>
-    api.post(`/api/providers/${encodeURIComponent(id)}/secret`, { clientSecret }),
+  updateHealthSystem: (id: string, body: UpdateHealthSystemRequest): Promise<HealthSystemDto> =>
+    api.patch(`/api/health-systems/${encodeURIComponent(id)}`, body),
+  setHealthSystemSecret: (id: string, clientSecret: string): Promise<HealthSystemDto> =>
+    api.post(`/api/health-systems/${encodeURIComponent(id)}/secret`, { clientSecret }),
   /** 202 `{ accepted: true }`: the sync outlives the response, so /api/runs is where the result lands. */
-  syncProvider: (id: string): Promise<Accepted> =>
-    api.post(`/api/providers/${encodeURIComponent(id)}/sync`),
+  syncHealthSystem: (id: string): Promise<Accepted> =>
+    api.post(`/api/health-systems/${encodeURIComponent(id)}/sync`),
   /** Awaited server-side, so this one does answer with the connection's new state. */
-  refreshProviderToken: (id: string): Promise<ConnectionDto> =>
-    api.post(`/api/providers/${encodeURIComponent(id)}/refresh-token`),
-  fullRefreshProvider: (id: string): Promise<Accepted> =>
-    api.post(`/api/providers/${encodeURIComponent(id)}/full-refresh`),
-  deleteProvider: (id: string): Promise<void> =>
-    api.delete(`/api/providers/${encodeURIComponent(id)}`),
+  refreshHealthSystemToken: (id: string): Promise<ConnectionDto> =>
+    api.post(`/api/health-systems/${encodeURIComponent(id)}/refresh-token`),
+  fullRefreshHealthSystem: (id: string): Promise<Accepted> =>
+    api.post(`/api/health-systems/${encodeURIComponent(id)}/full-refresh`),
+  deleteHealthSystem: (id: string): Promise<void> =>
+    api.delete(`/api/health-systems/${encodeURIComponent(id)}`),
 
   /**
-   * Always answered, even for a provider that has never had a portal account --
+   * Always answered, even for a health system that has never had a portal account --
    * the Worker synthesizes a `state: "none"` default rather than 404ing, so the
    * card can always render Save. See `PortalAccountStatusDto` in shared/types.ts.
    */
-  portalAccount: (providerId: string, signal?: AbortSignal): Promise<PortalAccountStatusDto> =>
-    api.get(`/api/providers/${encodeURIComponent(providerId)}/portal`, signal),
+  portalAccount: (healthSystemId: string, signal?: AbortSignal): Promise<PortalAccountStatusDto> =>
+    api.get(`/api/health-systems/${encodeURIComponent(healthSystemId)}/portal`, signal),
   /**
    * Probe for the portal without storing anything, so the owner can confirm the
    * origin before a credential is sealed against it. Step one of `savePortalAccount`.
    */
-  discoverPortal: (providerId: string, body: PortalDiscoverRequest): Promise<PortalDiscoveryDto> =>
-    api.post(`/api/providers/${encodeURIComponent(providerId)}/portal/discover`, body),
+  discoverPortal: (
+    healthSystemId: string,
+    body: PortalDiscoverRequest,
+  ): Promise<PortalDiscoveryDto> =>
+    api.post(`/api/health-systems/${encodeURIComponent(healthSystemId)}/portal/discover`, body),
   /**
    * PUT, not POST: this replaces the login wholesale. `username`, `password` and
    * `confirmedOrigin` are all required on every call, never a partial update.
    */
   savePortalAccount: (
-    providerId: string,
+    healthSystemId: string,
     body: PutPortalAccountRequest,
   ): Promise<PortalAccountStatusDto> =>
-    api.put(`/api/providers/${encodeURIComponent(providerId)}/portal`, body),
+    api.put(`/api/health-systems/${encodeURIComponent(healthSystemId)}/portal`, body),
   /** 202 `{ accepted, started }`: the sign-in outlives the response -- poll `portalAccount` for it. */
-  startPortalSignIn: (providerId: string): Promise<Accepted & { started: boolean }> =>
-    api.post(`/api/providers/${encodeURIComponent(providerId)}/portal/sign-in`),
+  startPortalSignIn: (healthSystemId: string): Promise<Accepted & { started: boolean }> =>
+    api.post(`/api/health-systems/${encodeURIComponent(healthSystemId)}/portal/sign-in`),
   /** Drops the stored cookie jar without touching the saved credentials. */
-  forgetPortalSession: (providerId: string): Promise<void> =>
-    api.delete(`/api/providers/${encodeURIComponent(providerId)}/portal/session`),
+  forgetPortalSession: (healthSystemId: string): Promise<void> =>
+    api.delete(`/api/health-systems/${encodeURIComponent(healthSystemId)}/portal/session`),
   /** Removes the credentials and the session both. */
-  removePortalAccount: (providerId: string): Promise<void> =>
-    api.delete(`/api/providers/${encodeURIComponent(providerId)}/portal`),
-  syncPortalNow: (providerId: string): Promise<Accepted> =>
-    api.post(`/api/providers/${encodeURIComponent(providerId)}/portal/sync`),
+  removePortalAccount: (healthSystemId: string): Promise<void> =>
+    api.delete(`/api/health-systems/${encodeURIComponent(healthSystemId)}/portal`),
+  syncPortalNow: (healthSystemId: string): Promise<Accepted> =>
+    api.post(`/api/health-systems/${encodeURIComponent(healthSystemId)}/portal/sync`),
 
   google: (signal?: AbortSignal): Promise<GoogleAccountDto> => api.get("/api/google", signal),
   googleCalendars: (signal?: AbortSignal): Promise<CalendarOptionDto[]> =>

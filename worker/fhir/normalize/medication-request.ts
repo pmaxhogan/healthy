@@ -23,7 +23,7 @@ export function normalizeMedicationRequest(
   return {
     resourceType: "MedicationRequest",
     id: resource.id ?? "",
-    provider: ctx.provider,
+    healthSystem: ctx.healthSystem,
     ...(resource.meta?.lastUpdated && { lastUpdated: resource.meta.lastUpdated }),
     ...(medication && { medication }),
     status: resource.status,

@@ -79,7 +79,7 @@ describe("GET /api/runs", () => {
 
   it("projects the stored counts into the UI's vocabulary", async () => {
     await seedRun("calendar", {
-      providers: 2,
+      healthSystems: 2,
       inserted: 3,
       patched: 1,
       ghosted: 2,

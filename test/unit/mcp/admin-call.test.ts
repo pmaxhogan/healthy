@@ -50,7 +50,7 @@ describe("listMcpTools", () => {
     const tools = await listMcpTools(fakeDeps(fakeState()));
 
     const documentText = tools.find((tool) => tool.name === "get_document_text");
-    expect(documentText?.inputSchema.required).toStrictEqual(["provider", "id"]);
+    expect(documentText?.inputSchema.required).toStrictEqual(["healthSystem", "id"]);
 
     const conditions = tools.find((tool) => tool.name === "get_conditions");
     expect(conditions?.inputSchema.required ?? []).toStrictEqual([]);

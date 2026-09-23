@@ -15,7 +15,7 @@
 
 import { collectAppointments } from "../appointment-items.ts";
 import { WINDOW_ARGS, toolArgs } from "../args.ts";
-import { collect, effectiveLimit, selectProviders, spec } from "../collect.ts";
+import { collect, effectiveLimit, selectHealthSystems, spec } from "../collect.ts";
 import { BINARY_TEXT_TYPE } from "../deps.ts";
 import { LABORATORY, hasCategory } from "../match.ts";
 import { respond } from "../respond.ts";
@@ -23,7 +23,7 @@ import { respond } from "../respond.ts";
 import { readTool } from "./register.ts";
 
 import type { CollectSpec, TaggedItem } from "../collect.ts";
-import type { ProviderInfo, ToolDeps } from "../deps.ts";
+import type { HealthSystemInfo, ToolDeps } from "../deps.ts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 /** How many recent items of each section the summary carries. */
@@ -69,11 +69,11 @@ const SECTIONS: { section: string; specs: () => CollectSpec[] }[] = [
  */
 async function nearestAppointments(
   deps: ToolDeps,
-  providers: readonly ProviderInfo[],
+  healthSystems: readonly HealthSystemInfo[],
   now: number,
   perSection: number,
 ): Promise<TaggedItem[]> {
-  const { items } = await collectAppointments(deps, providers, { order: "asc" });
+  const { items } = await collectAppointments(deps, healthSystems, { order: "asc" });
   const nowMs = now * 1000;
   const isUpcoming = (item: TaggedItem): boolean =>
     typeof item.start === "string" && Date.parse(item.start) >= nowMs;
@@ -102,15 +102,15 @@ function perSectionLimit(limit: number | undefined): number {
 
 async function recentItems(
   deps: ToolDeps,
-  providers: readonly ProviderInfo[],
+  healthSystems: readonly HealthSystemInfo[],
   now: number,
   perSection: number,
 ): Promise<TaggedItem[]> {
   const out: TaggedItem[] = [];
-  const appointments = await nearestAppointments(deps, providers, now, perSection);
+  const appointments = await nearestAppointments(deps, healthSystems, now, perSection);
   out.push(...appointments.map((item) => ({ ...item, kind: "recent", section: "appointments" })));
   for (const entry of SECTIONS) {
-    const collected = await collect(deps, providers, { specs: entry.specs() });
+    const collected = await collect(deps, healthSystems, { specs: entry.specs() });
     for (const item of collected.items.slice(0, perSection)) {
       out.push({ ...item, kind: "recent", section: entry.section });
     }
@@ -136,32 +136,38 @@ export function registerSummaryTool(server: McpServer, deps: ToolDeps): void {
       schema: toolArgs(WINDOW_ARGS),
     },
     async (args, run) => {
-      const providers = selectProviders(await deps.providers(), run.rules, args.providers);
-      const names = new Map(providers.map((provider) => [provider.id, provider.displayName]));
+      const healthSystems = selectHealthSystems(
+        await deps.healthSystems(),
+        run.rules,
+        args.healthSystems,
+      );
+      const names = new Map(
+        healthSystems.map((healthSystem) => [healthSystem.id, healthSystem.displayName]),
+      );
 
       const items: TaggedItem[] = [];
       const counts = await deps.counts();
       for (const count of counts) {
-        const name = names.get(count.providerId);
+        const name = names.get(count.healthSystemId);
         // `_binary_text` is this server's own cache of decoded documents, not a
         // FHIR resource type, so it has no business in a record summary.
         if (name === undefined || count.resourceType === BINARY_TEXT_TYPE) continue;
         items.push({
           kind: "count",
-          provider: name,
-          providerId: count.providerId,
+          healthSystem: name,
+          healthSystemId: count.healthSystemId,
           resourceType: count.resourceType,
           count: count.count,
         });
       }
-      items.push(...(await recentItems(deps, providers, run.now, perSectionLimit(args.limit))));
+      items.push(...(await recentItems(deps, healthSystems, run.now, perSectionLimit(args.limit))));
 
       return respond({
         tool: "get_health_summary",
         rules: run.rules,
         items,
         limit: effectiveLimit(args.limit),
-        providerIds: providers.map((provider) => provider.id),
+        healthSystemIds: healthSystems.map((healthSystem) => healthSystem.id),
         now: run.now,
       });
     },

@@ -93,24 +93,24 @@ describe("GET /oauth/google/start", () => {
     expect(location.searchParams.get("scope")).not.toContain("openid");
   });
 
-  it("writes a google state row with no provider, which the table's CHECK requires", async () => {
+  it("writes a google state row with no health system, which the table's CHECK requires", async () => {
     const response = await call("/oauth/google/start", { headers: { cookie: owner().cookie } });
     const state = new URL(response.headers.get("location") ?? "").searchParams.get("state") ?? "";
 
     const row = await testRepos()
       .ctx.db.prepare(
-        "SELECT kind, provider_id, expires_at, created_at FROM oauth_states WHERE state = ?",
+        "SELECT kind, health_system_id, expires_at, created_at FROM oauth_states WHERE state = ?",
       )
       .bind(state)
       .first<{
         kind: string;
-        provider_id: string | null;
+        health_system_id: string | null;
         expires_at: number;
         created_at: number;
       }>();
 
     expect(row?.kind).toBe("google");
-    expect(row?.provider_id).toBeNull();
+    expect(row?.health_system_id).toBeNull();
     expect((row?.expires_at ?? 0) - (row?.created_at ?? 0)).toBe(600);
   });
 
@@ -237,14 +237,14 @@ describe("GET /oauth/google/callback", () => {
 
   it("refuses an Epic state presented at the Google callback", async () => {
     const repos = testRepos();
-    const provider = await repos.providers.create({
+    const healthSystem = await repos.healthSystems.create({
       vendor: "epic",
       displayName: "Example Health",
       fhirBaseUrl: "https://fhir.example.test/R4",
     });
     const state = await repos.oauthStates.put({
       kind: "epic",
-      providerId: provider.id,
+      healthSystemId: healthSystem.id,
       codeVerifier: "v",
       ttlMs: 60_000,
     });

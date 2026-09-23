@@ -11,7 +11,7 @@ import { toastSuccess } from "../lib/toasts.ts";
 import { useAction, useLoad } from "../lib/use-load.ts";
 
 const alerts = useLoad((signal) => endpoints.alerts(signal));
-const providers = useLoad((signal) => endpoints.providers(signal));
+const healthSystems = useLoad((signal) => endpoints.healthSystems(signal));
 const settings = useLoad((signal) => endpoints.settings(signal));
 
 const testAction = useAction();
@@ -19,8 +19,8 @@ const archiveAction = useAction();
 const testCardId = ref<string | null>(null);
 
 const timezone = computed(() => settings.data.value?.timezone ?? null);
-const providerNames = computed(() =>
-  Object.fromEntries((providers.data.value ?? []).map((p) => [p.id, p.displayName])),
+const healthSystemNames = computed(() =>
+  Object.fromEntries((healthSystems.data.value ?? []).map((p) => [p.id, p.displayName])),
 );
 const open = computed(() => (alerts.data.value ?? []).filter((a) => a.resolvedAt === null));
 const recent = computed(() => (alerts.data.value ?? []).filter((a) => a.resolvedAt !== null));
@@ -55,13 +55,13 @@ async function archiveTest(): Promise<void> {
         empty-text="Nothing needs re-authenticating."
         @retry="alerts.reload()"
       >
-        <AlertsList :alerts="open" :timezone="timezone" :provider-names="providerNames" />
+        <AlertsList :alerts="open" :timezone="timezone" :health-system-names="healthSystemNames" />
       </StateBlock>
     </section>
 
     <section v-if="recent.length > 0" class="card">
       <h2>Resolved</h2>
-      <AlertsList :alerts="recent" :timezone="timezone" :provider-names="providerNames" />
+      <AlertsList :alerts="recent" :timezone="timezone" :health-system-names="healthSystemNames" />
     </section>
 
     <section class="card">

@@ -2,7 +2,7 @@
  * The patient-portal pass: upcoming visits onto the calendar, without waiting for
  * FHIR to admit they exist.
  *
- * It runs at the end of the hourly calendar run, per provider whose portal
+ * It runs at the end of the hourly calendar run, per health system whose portal
  * account is `active`, and it writes through exactly the same mapping, diff and
  * event writer the FHIR pass uses. What is different is only where the
  * appointments came from and what is known about them.
@@ -24,7 +24,7 @@
  *
  * **A FHIR Encounter that turns up later adopts the portal's row and its event.**
  * That is `adoptPortalRows`, called from the FHIR pass before its diff: the row is
- * renamed from `<providerId>:csn:<csn>` to `<providerId>:<encounterId>` and the
+ * renamed from `<healthSystemId>:csn:<csn>` to `<healthSystemId>:<encounterId>` and the
  * existing calendar entry is patched in place. Without it the portal event would
  * be ghosted (it is no longer "upcoming") and a duplicate inserted beside it.
  *
@@ -60,7 +60,7 @@
  * "missing only if still ahead" rule, because that table -- not the calendar -- is
  * what `get_appointments` serves upcoming visits from.
  *
- * Log lines carry provider ids, counts and stable codes. Never a visit, a
+ * Log lines carry health system ids, counts and stable codes. Never a visit, a
  * practitioner, a CSN, a code or a byte of portal markup -- the CSN is an upstream
  * identifier and is treated exactly like an Encounter id (see
  * `worker/db/repos/calendar-events.ts`'s `logSafeKey`).
@@ -76,7 +76,7 @@ import { fromIso, toIso } from "../lib/time.ts";
 import { resolveReconnectAlert } from "./alerts.ts";
 import { buildCalendarModel, ghostModel } from "./mapping.ts";
 import { planChanges } from "./plan.ts";
-import { outranks, portalRank, sameVisitAcrossProviders } from "./portal-dedupe.ts";
+import { outranks, portalRank, sameVisitAcrossHealthSystems } from "./portal-dedupe.ts";
 import { SIGN_IN_BUSY_CODE, acquirePortalSignIn, releasePortalSignIn } from "./portal-gate.ts";
 import {
   DEDUPE_WINDOW_SECONDS,
@@ -106,13 +106,13 @@ import type { RunState } from "./run.ts";
 import type { Blinder } from "../db/blind.ts";
 import type { Ctx } from "../db/client.ts";
 import type { Repos } from "../db/index.ts";
-import type { CalendarEventRow, ProviderRow } from "../db/rows.ts";
+import type { CalendarEventRow, HealthSystemRow } from "../db/rows.ts";
 import type { CalendarClient } from "../google/calendar.ts";
 import type { CalendarEventModel, EventRecord } from "../google/types.ts";
 import type { PortalVisit } from "../providers/mychart/index.ts";
 
 /**
- * What the FHIR pass saw for one provider, as the dedupe needs it.
+ * What the FHIR pass saw for one health system, as the dedupe needs it.
  *
  * Collected during the FHIR pass rather than read back from `calendar_events`,
  * because the strongest signal -- the Encounter's CSN -- is not stored: the row
@@ -124,7 +124,7 @@ export interface FhirSighting {
   /** Shifted starts of the events the FHIR pass mapped, as unix seconds. */
   starts: number[];
   /**
-   * The same Encounters as the cross-provider dedupe sees them: real (unshifted)
+   * The same Encounters as the cross-health system dedupe sees them: real (unshifted)
    * start and CSN. Only a CSN can tie another organisation's portal copy to one
    * of these -- see `worker/sync/portal-dedupe.ts`.
    */
@@ -142,17 +142,17 @@ export interface PortalPassInput {
   nowIso: string;
   /** Unix second the sync window opens. Rows older than this are not diffed. */
   windowStartSeconds: number;
-  /** Every `healthy=1` event on the target calendar, across every provider. */
+  /** Every `healthy=1` event on the target calendar, across every health system. */
   googleEvents: readonly EventRecord[];
   settings: MappingSettings;
   state: RunState;
   deps: SyncDeps;
   /** Blinds event keys and keys fingerprints; see `worker/db/blind.ts`. */
   blinder: Blinder;
-  /** What the FHIR pass mapped this run, per provider id. */
+  /** What the FHIR pass mapped this run, per health system id. */
   fhirSeen: ReadonlyMap<string, FhirSighting>;
-  /** Narrow the pass to these providers. The manual button's argument. */
-  providerIds?: readonly string[] | undefined;
+  /** Narrow the pass to these health systems. The manual button's argument. */
+  healthSystemIds?: readonly string[] | undefined;
   /**
    * How long to wait for an emailed code when a session has to be re-established.
    *
@@ -185,15 +185,15 @@ interface PortalCandidateBuild {
 /**
  * Sync every active portal account's upcoming visits.
  *
- * Per-provider isolation, like the FHIR pass: a portal that will not let us in
+ * Per-health system isolation, like the FHIR pass: a portal that will not let us in
  * costs one code on `portalErrors` and nothing else. Never throws.
  */
 export async function runPortalPass(input: PortalPassInput): Promise<void> {
   const { ctx, repos } = input;
   const accounts = await repos.portalAccounts.listActive();
-  const wanted = input.providerIds;
+  const wanted = input.healthSystemIds;
   const selected =
-    wanted === undefined ? accounts : accounts.filter((row) => wanted.includes(row.provider_id));
+    wanted === undefined ? accounts : accounts.filter((row) => wanted.includes(row.health_system_id));
   if (selected.length === 0) {
     ctx.log.debug("portal.no_accounts", { active: accounts.length });
     return;
@@ -201,67 +201,67 @@ export async function runPortalPass(input: PortalPassInput): Promise<void> {
 
   // Two phases, so that every portal's visits are stored before any calendar is
   // written: which copy of a visit two organisations both list gets the event is
-  // decided from `portal_visits` (see `crossProviderDuplicate`), and deciding it
-  // while a provider later in this loop had not yet been read would let whichever
+  // decided from `portal_visits` (see `crossHealthSystemDuplicate`), and deciding it
+  // while a health system later in this loop had not yet been read would let whichever
   // ran first win, and the loser be calendared too.
-  const loaded: { providerId: string; visits: PortalVisit[] }[] = [];
+  const loaded: { healthSystemId: string; visits: PortalVisit[] }[] = [];
   for (const account of selected) {
-    const providerId = account.provider_id;
+    const healthSystemId = account.health_system_id;
     try {
-      const visits = await loadPortalVisits(input, providerId);
-      if (visits !== null) loaded.push({ providerId, visits });
+      const visits = await loadPortalVisits(input, healthSystemId);
+      if (visits !== null) loaded.push({ healthSystemId, visits });
     } catch (error) {
-      portalFailed(input, providerId, error);
+      portalFailed(input, healthSystemId, error);
     }
   }
-  for (const { providerId, visits } of loaded) {
+  for (const { healthSystemId, visits } of loaded) {
     try {
-      await syncPortalCalendar(input, providerId, visits);
+      await syncPortalCalendar(input, healthSystemId, visits);
     } catch (error) {
-      portalFailed(input, providerId, error);
+      portalFailed(input, healthSystemId, error);
     }
   }
 }
 
-function portalFailed(input: PortalPassInput, providerId: string, error: unknown): void {
+function portalFailed(input: PortalPassInput, healthSystemId: string, error: unknown): void {
   const code = isAppError(error) ? error.code : "internal";
   input.state.summary.portalErrors.push(code);
-  input.ctx.log.error("portal.provider_failed", { providerId, ...errorFields(error) });
+  input.ctx.log.error("portal.health_system_failed", { healthSystemId, ...errorFields(error) });
 }
 
-/** One provider's first phase: session, visits, and the stored copy. Null: no session. */
+/** One health system's first phase: session, visits, and the stored copy. Null: no session. */
 async function loadPortalVisits(
   input: PortalPassInput,
-  providerId: string,
+  healthSystemId: string,
 ): Promise<PortalVisit[] | null> {
   const { ctx, repos } = input;
-  const session = await ensureSession(input, providerId);
+  const session = await ensureSession(input, healthSystemId);
   if (session === null) return null;
 
   const visits = await session.client.loadUpcoming(input.timezone);
   // The jar as it is now: `LoadUpcoming` refreshes the session cookie, and
   // dropping that refresh is how a working session expires a day early.
-  await repos.portalAccounts.saveCookieJar(providerId, session.client.jar.serialise());
+  await repos.portalAccounts.saveCookieJar(healthSystemId, session.client.jar.serialise());
   input.state.summary.portalVisits += visits.length;
-  ctx.log.info("portal.upcoming", { providerId, visits: visits.length });
+  ctx.log.info("portal.upcoming", { healthSystemId, visits: visits.length });
 
-  if ((await repos.providers.get(providerId)) === null) return null;
-  await recordVisits(input, providerId, visits);
+  if ((await repos.healthSystems.get(healthSystemId)) === null) return null;
+  await recordVisits(input, healthSystemId, visits);
   return visits;
 }
 
-/** One provider's second phase: diff and write its calendar events. */
+/** One health system's second phase: diff and write its calendar events. */
 async function syncPortalCalendar(
   input: PortalPassInput,
-  providerId: string,
+  healthSystemId: string,
   visits: readonly PortalVisit[],
 ): Promise<void> {
   const { ctx, repos } = input;
-  const provider = await repos.providers.get(providerId);
-  if (provider === null) return;
+  const healthSystem = await repos.healthSystems.get(healthSystemId);
+  if (healthSystem === null) return;
 
-  const builds = await buildPortalCandidates(input, provider, visits);
-  const stored = await repos.calendarEvents.list({ providerId, source: "portal" });
+  const builds = await buildPortalCandidates(input, healthSystem, visits);
+  const stored = await repos.calendarEvents.list({ healthSystemId, source: "portal" });
   // Narrowed to the window before the diff sees them, exactly as the FHIR pass
   // narrows its own: a row older than the window would be ghosted for being old.
   const rows = stored.filter(
@@ -273,23 +273,23 @@ async function syncPortalCalendar(
     builds,
     rows,
   );
-  // Portal keys only, not every key this provider owns: the FHIR pass's events
+  // Portal keys only, not every key this health system owns: the FHIR pass's events
   // have no candidate here, and handing them to the diff would report each one as
   // an orphan. `:csn:` is what makes the two halves distinguishable by key alone.
-  const portalPrefix = portalKeyPrefix(providerId);
+  const portalPrefix = portalKeyPrefix(healthSystemId);
   const events = input.googleEvents.filter((event) =>
     (keyOf(event) ?? "").startsWith(portalPrefix),
   );
   // Duplicates are taken out of the diff whether or not their removal succeeds:
   // left in, a row would be ghosted as vanished and its event reported as an
   // orphan. A removal that failed leaves its row, and the next run tries again.
-  await removeDuplicates(input, providerId, duplicates, events);
+  await removeDuplicates(input, healthSystemId, duplicates, events);
   const dropped = new Set(duplicates.map((row) => row.event_key));
   const planRows = rows.filter((row) => !dropped.has(row.event_key));
   const planEvents = events.filter((event) => !dropped.has(keyOf(event) ?? ""));
   const plan = planChanges(planRows, planEvents, candidates);
   ctx.log.info("portal.plan", {
-    providerId,
+    healthSystemId,
     inserts: plan.inserts.length,
     patches: plan.patches.length,
     ghosts: plan.ghosts.length,
@@ -300,15 +300,15 @@ async function syncPortalCalendar(
 
   input.state.unchanged += plan.unchanged.length;
   for (const entry of plan.entries) {
-    await applyPortalEntry(input, providerId, entry, models, ghosts, planRows);
+    await applyPortalEntry(input, healthSystemId, entry, models, ghosts, planRows);
   }
   // Past visits the portal has stopped returning: not a change, but the rows were
   // looked at and `last_seen_at` has to say so.
   if (touched.length > 0) await repos.calendarEvents.touch(touched);
 
   // The portal answered, so whatever the reconnect card was warning about is over.
-  await repos.portalAccounts.markActive(providerId);
-  await resolveReconnectAlert(ctx, { providerId, portal: true }, input.deps);
+  await repos.portalAccounts.markActive(healthSystemId);
+  await resolveReconnectAlert(ctx, { healthSystemId, portal: true }, input.deps);
 }
 
 /**
@@ -324,13 +324,13 @@ async function syncPortalCalendar(
  */
 async function recordVisits(
   input: PortalPassInput,
-  providerId: string,
+  healthSystemId: string,
   visits: readonly PortalVisit[],
 ): Promise<void> {
   try {
-    await input.repos.portalVisits.record(providerId, visits, { complete: true });
+    await input.repos.portalVisits.record(healthSystemId, visits, { complete: true });
   } catch (error) {
-    input.ctx.log.warn("portal.visits_store_failed", { providerId, ...errorFields(error) });
+    input.ctx.log.warn("portal.visits_store_failed", { healthSystemId, ...errorFields(error) });
   }
 }
 
@@ -343,9 +343,9 @@ function keyOf(event: EventRecord): string | null {
 }
 
 /**
- * A live session for this provider, signing in once if the stored one is dead.
+ * A live session for this health system, signing in once if the stored one is dead.
  *
- * Null means the pass cannot continue for this provider, and the reason has
+ * Null means the pass cannot continue for this health system, and the reason has
  * already been recorded on the account (and on `portalErrors`). Exactly one
  * automatic sign-in attempt per run, and only while the daily budget allows one:
  * the account's own counter is what stops an hourly cron from walking into a
@@ -369,14 +369,14 @@ function keyOf(event: EventRecord): string | null {
  */
 async function ensureSession(
   input: PortalPassInput,
-  providerId: string,
+  healthSystemId: string,
 ): Promise<PortalSession | null> {
   const { ctx } = input;
   const deps = portalDeps(input.deps);
-  const opened = await openPortalSession(ctx, providerId, deps);
+  const opened = await openPortalSession(ctx, healthSystemId, deps);
   if (await opened.session.client.isSessionAlive()) return opened.session;
 
-  ctx.log.info("portal.session_dead", { providerId });
+  ctx.log.info("portal.session_dead", { healthSystemId });
   const waitSeconds = input.signInWaitSeconds ?? OTP_WAIT_SECONDS;
   if (waitSeconds <= 0) {
     // The caller has said it will not wait for a code here. Not a failure of the
@@ -386,10 +386,10 @@ async function ensureSession(
     return null;
   }
 
-  const left = await attemptsLeft(ctx, providerId);
+  const left = await attemptsLeft(ctx, healthSystemId);
   if (left <= 0) {
-    ctx.log.warn("portal.attempts_exhausted", { providerId });
-    const outcome = await failSignIn(ctx, providerId, "portal_attempts_exhausted", deps);
+    ctx.log.warn("portal.attempts_exhausted", { healthSystemId });
+    const outcome = await failSignIn(ctx, healthSystemId, "portal_attempts_exhausted", deps);
     input.state.summary.portalErrors.push(outcome.code ?? "portal_attempts_exhausted");
     return null;
   }
@@ -398,14 +398,14 @@ async function ensureSession(
     // A wait that ends on its own, at the next UTC day, like the spacing below:
     // the account stays active and nothing is opened, so a portal that signs in
     // on its trusted device resumes by itself tomorrow.
-    ctx.log.info("portal.signin.left_for_owner", { providerId, left });
+    ctx.log.info("portal.signin.left_for_owner", { healthSystemId, left });
     input.state.summary.portalErrors.push(SIGN_IN_DEFERRED);
     return null;
   }
   if (unattended) {
-    const codes = await input.repos.portalAccounts.unattendedCodes(providerId);
+    const codes = await input.repos.portalAccounts.unattendedCodes(healthSystemId);
     if (unattendedCodeWait(codes, ctx.now()) === "wait") {
-      ctx.log.info("portal.signin.deferred", { providerId, codesToday: codes.today });
+      ctx.log.info("portal.signin.deferred", { healthSystemId, codesToday: codes.today });
       input.state.summary.portalErrors.push(SIGN_IN_DEFERRED);
       return null;
     }
@@ -415,16 +415,16 @@ async function ensureSession(
   // sign-ins can each pass the attempt check above before either increments it,
   // and the second `SendCode` invalidates the code the first is waiting for. See
   // `portal-gate.ts`.
-  if (!(await acquirePortalSignIn(ctx, providerId, "cron"))) {
-    ctx.log.info("portal.signin_busy", { providerId });
+  if (!(await acquirePortalSignIn(ctx, healthSystemId, "cron"))) {
+    ctx.log.info("portal.signin_busy", { healthSystemId });
     input.state.summary.portalErrors.push(SIGN_IN_BUSY_CODE);
     return null;
   }
   let outcome;
   try {
-    outcome = await signInAndWait(ctx, providerId, deps, waitSeconds, { unattended });
+    outcome = await signInAndWait(ctx, healthSystemId, deps, waitSeconds, { unattended });
   } finally {
-    await releasePortalSignIn(ctx, providerId);
+    await releasePortalSignIn(ctx, healthSystemId);
   }
   if (outcome.phase !== "signed_in") {
     input.state.summary.portalErrors.push(outcome.code ?? "internal");
@@ -433,21 +433,21 @@ async function ensureSession(
   // Re-opened, deliberately: the sign-in sealed a new jar and the client that ran
   // it is not this one. Carrying on with the stale client would send the request
   // that just succeeded in signing in without the cookie it earned.
-  const reopened = await openPortalSession(ctx, providerId, deps);
+  const reopened = await openPortalSession(ctx, healthSystemId, deps);
   return reopened.session;
 }
 
 /** Map every visit, and decide which ones the FHIR pass has already covered. */
 async function buildPortalCandidates(
   input: PortalPassInput,
-  provider: ProviderRow,
+  healthSystem: HealthSystemRow,
   visits: readonly PortalVisit[],
 ): Promise<PortalCandidateBuild[]> {
-  const seen = input.fhirSeen.get(provider.id);
+  const seen = input.fhirSeen.get(healthSystem.id);
   // Rows the FHIR pass wrote, whenever it wrote them: the Encounter for a visit
   // may have been mapped in an earlier run and not returned in this one.
   const fhirRows = await input.repos.calendarEvents.list({
-    providerId: provider.id,
+    healthSystemId: healthSystem.id,
     source: "fhir",
   });
   const starts = [
@@ -457,16 +457,16 @@ async function buildPortalCandidates(
       .filter((start): start is number => start !== null && start >= input.windowStartSeconds),
   ];
 
-  const config = await input.repos.providers.getConfig(provider.id);
+  const config = await input.repos.healthSystems.getConfig(healthSystem.id);
   const now = input.ctx.now();
-  const others = await otherSightings(input, provider.id, now);
+  const others = await otherSightings(input, healthSystem.id, now);
   const builds: PortalCandidateBuild[] = [];
   for (const visit of visits) {
-    const mapping = await buildCalendarModel(portalVisitView(provider.id, visit), {
-      provider: {
-        id: provider.id,
-        displayName: provider.display_name,
-        portalUrl: provider.portal_url,
+    const mapping = await buildCalendarModel(portalVisitView(healthSystem.id, visit), {
+      healthSystem: {
+        id: healthSystem.id,
+        displayName: healthSystem.display_name,
+        portalUrl: healthSystem.portal_url,
         config,
       },
       settings: input.settings,
@@ -474,29 +474,29 @@ async function buildPortalCandidates(
       blinder: input.blinder,
     });
     const start = fromIso(mapping.model.start);
-    const mine = portalSighting(provider.id, visit, now, now);
+    const mine = portalSighting(healthSystem.id, visit, now, now);
     const duplicate =
       (seen?.csns.has(visit.csn) ?? false) ||
       starts.some((other) => Math.abs(other - start) <= DEDUPE_WINDOW_SECONDS) ||
-      others.some((other) => sameVisitAcrossProviders(other, mine) && outranks(other, mine));
+      others.some((other) => sameVisitAcrossHealthSystems(other, mine) && outranks(other, mine));
     builds.push({ visit, mapping, duplicate });
   }
 
   const skipped = builds.filter((build) => build.duplicate).length;
   input.state.summary.portalSkipped += skipped;
-  if (skipped > 0) input.ctx.log.info("portal.deduped", { providerId: provider.id, skipped });
+  if (skipped > 0) input.ctx.log.info("portal.deduped", { healthSystemId: healthSystem.id, skipped });
   return builds;
 }
 
-/** One portal visit as the cross-provider dedupe sees it. */
+/** One portal visit as the cross-health system dedupe sees it. */
 function portalSighting(
-  providerId: string,
+  healthSystemId: string,
   visit: PortalVisit,
   fetchedAt: number,
   now: number,
 ): Sighting {
   return {
-    providerId,
+    healthSystemId,
     start: fromIso(visit.start),
     csn: visit.csn,
     practitioner: visit.practitioner,
@@ -507,7 +507,7 @@ function portalSighting(
 }
 
 /**
- * Every other provider's sightings a visit here could be a copy of: the portal
+ * Every other health system's sightings a visit here could be a copy of: the portal
  * visits they last stored (this run's included -- the first phase stored them)
  * and the Encounters their FHIR pass mapped this run.
  *
@@ -521,15 +521,15 @@ function portalSighting(
  */
 async function otherSightings(
   input: PortalPassInput,
-  providerId: string,
+  healthSystemId: string,
   now: number,
 ): Promise<Sighting[]> {
-  const stored = await input.repos.portalVisits.listExcept(providerId);
+  const stored = await input.repos.portalVisits.listExcept(healthSystemId);
   const sightings = stored.map((row) =>
-    portalSighting(row.providerId, row.visit, row.fetchedAt, now),
+    portalSighting(row.healthSystemId, row.visit, row.fetchedAt, now),
   );
   for (const [otherId, seen] of input.fhirSeen) {
-    if (otherId !== providerId) sightings.push(...seen.sightings);
+    if (otherId !== healthSystemId) sightings.push(...seen.sightings);
   }
   return sightings;
 }
@@ -624,7 +624,7 @@ async function portalPlanInputs(
  */
 async function removeDuplicates(
   input: PortalPassInput,
-  providerId: string,
+  healthSystemId: string,
   duplicates: readonly CalendarEventRow[],
   events: readonly EventRecord[],
 ): Promise<void> {
@@ -643,10 +643,10 @@ async function removeDuplicates(
       }
       if (await input.repos.calendarEvents.remove(row.event_key)) removed += 1;
     } catch (error) {
-      input.ctx.log.warn("portal.duplicate_remove_failed", { providerId, ...errorFields(error) });
+      input.ctx.log.warn("portal.duplicate_remove_failed", { healthSystemId, ...errorFields(error) });
     }
   }
-  input.ctx.log.info("portal.duplicates_removed", { providerId, removed });
+  input.ctx.log.info("portal.duplicates_removed", { healthSystemId, removed });
 }
 
 /** One mapped visit as a plan candidate, filling the model maps as it goes. */
@@ -691,7 +691,7 @@ async function portalCandidate(
 /** Carry out one planned change. The portal half of `calendar-sync.ts`'s writer. */
 async function applyPortalEntry(
   input: PortalPassInput,
-  providerId: string,
+  healthSystemId: string,
   entry: PlanEntry,
   models: ReadonlyMap<string, CalendarEventModel>,
   ghosts: ReadonlyMap<string, CalendarEventModel>,
@@ -703,13 +703,13 @@ async function applyPortalEntry(
       const model = models.get(entry.key);
       if (model === undefined) return;
       const created = await input.calendar.insertEvent(input.calendarId, buildEventBody(model));
-      await persistPortalRow(input, providerId, entry.key, created.id, model);
+      await persistPortalRow(input, healthSystemId, entry.key, created.id, model);
       state.summary.eventsInserted += 1;
       return;
     }
     case "patch":
     case "restore": {
-      await patchPortal(input, providerId, entry, models);
+      await patchPortal(input, healthSystemId, entry, models);
       return;
     }
     case "ghost": {
@@ -747,7 +747,7 @@ async function applyPortalEntry(
 
 async function patchPortal(
   input: PortalPassInput,
-  providerId: string,
+  healthSystemId: string,
   entry: PlanEntry,
   models: ReadonlyMap<string, CalendarEventModel>,
 ): Promise<void> {
@@ -763,11 +763,11 @@ async function patchPortal(
     // It went away between the listing and the patch; inserting is what the plan
     // would have decided had it known.
     const created = await input.calendar.insertEvent(input.calendarId, buildEventBody(model));
-    await persistPortalRow(input, providerId, entry.key, created.id, model, restore);
+    await persistPortalRow(input, healthSystemId, entry.key, created.id, model, restore);
     input.state.summary.eventsInserted += 1;
     return;
   }
-  await persistPortalRow(input, providerId, entry.key, patched.id, model, restore);
+  await persistPortalRow(input, healthSystemId, entry.key, patched.id, model, restore);
   if (restore) input.state.summary.eventsRestored += 1;
   else input.state.summary.eventsPatched += 1;
 }
@@ -778,7 +778,7 @@ function ghostedAtFor(key: string, rows: readonly CalendarEventRow[], now: numbe
 
 async function persistPortalRow(
   input: PortalPassInput,
-  providerId: string,
+  healthSystemId: string,
   key: string,
   googleEventId: string,
   model: CalendarEventModel,
@@ -786,7 +786,7 @@ async function persistPortalRow(
 ): Promise<void> {
   await input.repos.calendarEvents.upsert({
     eventKey: key,
-    providerId,
+    healthSystemId,
     encounterId: model.encounterId,
     calendarId: input.calendarId,
     googleEventId,
@@ -802,7 +802,7 @@ async function persistPortalRow(
 export interface AdoptPortalInput {
   ctx: Ctx;
   repos: Repos;
-  providerId: string;
+  healthSystemId: string;
   /** This run's FHIR mappings, by event key. */
   mappings: ReadonlyMap<string, CalendarMapping>;
   rows: readonly CalendarEventRow[];
@@ -855,16 +855,16 @@ export async function adoptPortalRows(input: AdoptPortalInput): Promise<{
     } catch (error) {
       renames.delete(fromKey);
       input.ctx.log.warn("portal.adopt_failed", {
-        providerId: input.providerId,
+        healthSystemId: input.healthSystemId,
         ...errorFields(error),
       });
     }
   }
-  input.ctx.log.info("portal.adopted", { providerId: input.providerId, adopted });
+  input.ctx.log.info("portal.adopted", { healthSystemId: input.healthSystemId, adopted });
 
   const refs = new Map<string, string>();
   for (const [fromKey, rename] of renames) {
-    refs.set(fromKey, await encounterRef(input.blinder, input.providerId, rename.encounterId));
+    refs.set(fromKey, await encounterRef(input.blinder, input.healthSystemId, rename.encounterId));
   }
   return {
     rows: input.rows.map((row) => {
@@ -904,7 +904,7 @@ async function planRenames(
     const csn =
       mapping.csn === undefined
         ? undefined
-        : await blindCsn(input.blinder, input.providerId, mapping.csn);
+        : await blindCsn(input.blinder, input.healthSystemId, mapping.csn);
     const match = portalRows.find(
       (row) => !claimed.has(row.event_key) && sameVisit(row, mapping, csn),
     );

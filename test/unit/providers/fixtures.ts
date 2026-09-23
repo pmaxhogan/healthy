@@ -1,5 +1,5 @@
 /**
- * Fixture loading and a scripted `fetch` for the provider and FHIR unit tests.
+ * Fixture loading and a scripted `fetch` for the health system and FHIR unit tests.
  *
  * The fixtures under `test/fixtures/epic/` are synthetic: invented ids, invented
  * place names, invented token values. Nothing here came from a real chart, and

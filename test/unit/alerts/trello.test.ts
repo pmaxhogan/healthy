@@ -8,7 +8,7 @@ import { makeLogger } from "../../../worker/lib/log.ts";
 const MUST_LIST_ID = "list_must_test";
 const DONE_LIST_ID = "list_done_test";
 const RECONNECT_URL = "https://healthy.example.test/reconnect/abc";
-const TITLE = "Reconnect Test Provider to Healthy";
+const TITLE = "Reconnect Test Health system to Healthy";
 
 interface RecordedCall {
   url: URL;
@@ -281,8 +281,8 @@ describe("credential hygiene", () => {
     }
   });
 
-  it("never logs the provider name or card body, even when card creation fails", async () => {
-    // The provider display name is user data (see this module's header
+  it("never logs the health system name or card body, even when card creation fails", async () => {
+    // The health system display name is user data (see this module's header
     // comment): it must not reach a log line just because it is part of the
     // POST /cards query string.
     const lines: string[] = [];
@@ -302,7 +302,7 @@ describe("credential hygiene", () => {
     await expect(
       alerts.openReconnectCard({
         title: TITLE,
-        description: "Reconnect Some Provider desc",
+        description: "Reconnect Some Health system desc",
         url: RECONNECT_URL,
       }),
     ).rejects.toMatchObject({ code: "upstream_error" });
@@ -310,7 +310,7 @@ describe("credential hygiene", () => {
     expect(lines.length).toBeGreaterThan(0);
     for (const line of lines) {
       expect(line).not.toContain(TITLE);
-      expect(line).not.toContain("Reconnect Some Provider desc");
+      expect(line).not.toContain("Reconnect Some Health system desc");
       expect(line).not.toContain(RECONNECT_URL);
     }
   });

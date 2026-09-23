@@ -13,10 +13,10 @@ import type { FullRefreshRunner } from "./sync/runner.ts";
 
 export interface Env {
   // --- Bindings (see wrangler.jsonc) ---------------------------------------
-  /** Primary datastore: providers, connections, FHIR cache, audit, run log. */
+  /** Primary datastore: health systems, connections, FHIR cache, audit, run log. */
   DB: D1Database;
   /**
-   * Token and grant storage for @cloudflare/workers-oauth-provider. The
+   * Token and grant storage for @cloudflare/workers-oauth-health system. The
    * binding name is fixed by that library and cannot be changed.
    */
   OAUTH_KV: KVNamespace;
@@ -25,13 +25,13 @@ export interface Env {
   /** SQLite-backed Durable Object hosting the MCP session. */
   HEALTHY_MCP: DurableObjectNamespace;
   /**
-   * One object per provider, driving a manual full refresh across as many alarm
+   * One object per health system, driving a manual full refresh across as many alarm
    * invocations as it takes. See `worker/sync/runner.ts` for why a request's
    * `waitUntil` cannot do this job.
    */
   FULL_REFRESH: DurableObjectNamespace<FullRefreshRunner>;
   /**
-   * One object per provider, driving a patient-portal sign-in across as many
+   * One object per health system, driving a patient-portal sign-in across as many
    * ten-second alarm invocations as the emailed code takes to arrive, and the
    * portal sync that follows one. See `worker/sync/portal-runner.ts` for why a
    * request's `waitUntil` cannot wait for an email.

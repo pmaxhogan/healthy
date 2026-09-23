@@ -1,7 +1,7 @@
 /**
- * Cached SMART discovery and CapabilityStatement, per provider.
+ * Cached SMART discovery and CapabilityStatement, per health system.
  *
- * **Where they live, and why.** Both documents are per-provider, JSON, and want a
+ * **Where they live, and why.** Both documents are per-health system, JSON, and want a
  * TTL -- which is exactly what `fhir_cache` already is, down to the sealed
  * payload and the `expires_at` sweep. Rather than add a table (and a migration
  * this agent does not own) they are stored there under two synthetic resource
@@ -31,7 +31,7 @@ import { errorFields } from "../lib/log.ts";
 
 import type { Ctx } from "../db/client.ts";
 import type { Repos } from "../db/index.ts";
-import type { ProviderRow } from "../db/rows.ts";
+import type { HealthSystemRow } from "../db/rows.ts";
 import type { CapabilityIndex, SmartConfig } from "../fhir/types.ts";
 import type { ProviderAdapter } from "../providers/adapter.ts";
 
@@ -88,11 +88,11 @@ function isCapabilityIndex(value: unknown): value is CapabilityIndex {
 
 async function readCached<T>(
   repos: Repos,
-  providerId: string,
+  healthSystemId: string,
   resourceType: string,
   guard: (value: unknown) => value is T,
 ): Promise<T | null> {
-  const row = await repos.fhirCache.get(providerId, resourceType, CACHE_ID);
+  const row = await repos.fhirCache.get(healthSystemId, resourceType, CACHE_ID);
   if (row === null) return null;
   // A payload written by an older shape is treated as a miss rather than an
   // error: the document is re-fetched and the row overwritten.
@@ -101,39 +101,39 @@ async function readCached<T>(
 
 async function writeCached(
   repos: Repos,
-  providerId: string,
+  healthSystemId: string,
   resourceType: string,
   document: unknown,
 ): Promise<void> {
   const envelope: CachedDocument = { resourceType, id: CACHE_ID, document };
-  await repos.fhirCache.upsertMany(providerId, [envelope], DISCOVERY_TTL_MS);
+  await repos.fhirCache.upsertMany(healthSystemId, [envelope], DISCOVERY_TTL_MS);
 }
 
 /**
- * The provider's SMART configuration, from the cache when it is still fresh.
+ * The health system's SMART configuration, from the cache when it is still fresh.
  *
- * `force` is for the admin "test this provider" path: it re-fetches even when a
+ * `force` is for the admin "test this health system" path: it re-fetches even when a
  * cached copy would do.
  */
 export async function getSmartConfig(
   ctx: Ctx,
   repos: Repos,
-  provider: ProviderRow,
+  healthSystem: HealthSystemRow,
   adapter: ProviderAdapter,
   options: { force?: boolean } = {},
 ): Promise<SmartConfig> {
   if (options.force !== true) {
-    const cached = await readCached(repos, provider.id, SMART_CACHE_TYPE, isSmartConfig);
+    const cached = await readCached(repos, healthSystem.id, SMART_CACHE_TYPE, isSmartConfig);
     if (cached !== null) return cached;
   }
-  const config = await adapter.discover(provider.fhir_base_url);
-  await writeCached(repos, provider.id, SMART_CACHE_TYPE, config);
-  ctx.log.info("sync.discovery.refreshed", { providerId: provider.id });
+  const config = await adapter.discover(healthSystem.fhir_base_url);
+  await writeCached(repos, healthSystem.id, SMART_CACHE_TYPE, config);
+  ctx.log.info("sync.discovery.refreshed", { healthSystemId: healthSystem.id });
   return config;
 }
 
 /**
- * The provider's capability index, from the cache when it is still fresh.
+ * The health system's capability index, from the cache when it is still fresh.
  *
  * Returns null rather than throwing when the fetch fails: every consumer
  * (`encounterStatusFilter`, `filterSupported`) already treats a null index as
@@ -143,33 +143,38 @@ export async function getSmartConfig(
 export async function getCapabilityIndex(
   ctx: Ctx,
   repos: Repos,
-  provider: ProviderRow,
+  healthSystem: HealthSystemRow,
   adapter: ProviderAdapter,
   accessToken: string,
 ): Promise<CapabilityIndex | null> {
-  const cached = await readCached(repos, provider.id, CAPABILITY_CACHE_TYPE, isCapabilityIndex);
+  const cached = await readCached(repos, healthSystem.id, CAPABILITY_CACHE_TYPE, isCapabilityIndex);
   if (cached !== null) return cached;
   try {
-    const index = await adapter.getCapabilities(provider.fhir_base_url, accessToken);
-    await writeCached(repos, provider.id, CAPABILITY_CACHE_TYPE, index);
+    const index = await adapter.getCapabilities(healthSystem.fhir_base_url, accessToken);
+    await writeCached(repos, healthSystem.id, CAPABILITY_CACHE_TYPE, index);
     ctx.log.info("sync.capabilities.refreshed", {
-      providerId: provider.id,
+      healthSystemId: healthSystem.id,
       resourceTypes: Object.keys(index.resources).length,
     });
     return index;
   } catch (error) {
-    ctx.log.warn("sync.capabilities.failed", { providerId: provider.id, ...errorFields(error) });
+    ctx.log.warn("sync.capabilities.failed", {
+      healthSystemId: healthSystem.id,
+      ...errorFields(error),
+    });
     return null;
   }
 }
 
-/** The Epic client id for a provider's environment. Throws when it is unset. */
-export function clientIdFor(ctx: Ctx, provider: ProviderRow): string {
+/** The Epic client id for a health system's environment. Throws when it is unset. */
+export function clientIdFor(ctx: Ctx, healthSystem: HealthSystemRow): string {
   const clientId =
-    provider.environment === "prod" ? ctx.env.EPIC_CLIENT_ID_PROD : ctx.env.EPIC_CLIENT_ID_NONPROD;
+    healthSystem.environment === "prod"
+      ? ctx.env.EPIC_CLIENT_ID_PROD
+      : ctx.env.EPIC_CLIENT_ID_NONPROD;
   if (clientId === undefined || clientId === "") {
     throw new AppError("internal", "the Epic client id secret for this environment is not set", {
-      environment: provider.environment,
+      environment: healthSystem.environment,
     });
   }
   return clientId;

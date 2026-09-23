@@ -56,7 +56,7 @@ const ERROR_MESSAGES = new Map<ToolErrorCode, string>([
   ["mcp_disabled", "the MCP surface is switched off in this deployment's settings"],
   ["policy_denied", "the owner's exposure policy denies this tool"],
   ["not_found", "no such record in the local cache"],
-  ["not_connected", "that provider has no usable connection right now"],
+  ["not_connected", "that health system has no usable connection right now"],
   ["document_cap_reached", "daily document cap reached"],
   ["unsupported_document", "the document is not in a format this server can turn into text"],
   ["upstream_error", "the health system could not be reached or refused the request"],
@@ -68,8 +68,8 @@ export interface ToolOutcome {
   result: CallToolResult;
   /** Items actually returned, for the audit row. */
   resultCount: number;
-  /** Provider ids the call read from, for the audit row. Ids, never names. */
-  providerIds: string[];
+  /** Health system ids the call read from, for the audit row. Ids, never names. */
+  healthSystemIds: string[];
   /** Null on success; the stable code otherwise. */
   errorCode: ToolErrorCode | null;
 }
@@ -84,7 +84,7 @@ function textResult(payload: unknown, isError: boolean): CallToolResult {
 /** An `isError` answer. The only way a tool reports failure. */
 export function toolError(
   code: ToolErrorCode,
-  options: { providerIds?: string[]; detail?: string } = {},
+  options: { healthSystemIds?: string[]; detail?: string } = {},
 ): ToolOutcome {
   return {
     result: textResult(
@@ -96,7 +96,7 @@ export function toolError(
       true,
     ),
     resultCount: 0,
-    providerIds: options.providerIds ?? [],
+    healthSystemIds: options.healthSystemIds ?? [],
     errorCode: code,
   };
 }
@@ -111,8 +111,8 @@ export interface RespondInput {
   rawItems?: readonly RawEntry[] | undefined;
   /** Omitted (or undefined) means no limit: every matching item is returned. */
   limit?: number | undefined;
-  /** Provider ids read from, for the audit row. */
-  providerIds: string[];
+  /** Health system ids read from, for the audit row. */
+  healthSystemIds: string[];
   /** Notes the tool itself wants to pass on (cache staleness, sync warnings). */
   warnings?: readonly string[] | undefined;
   /** Unix seconds. */
@@ -123,7 +123,7 @@ export interface RespondInput {
  * Filter, page, serialise.
  *
  * `items` and `rawItems` stay index-aligned through the filter: both are judged
- * by the same resource-type and provider rules, so an item and the raw resource
+ * by the same resource-type and health system rules, so an item and the raw resource
  * behind it are always dropped together.
  */
 export function respond(input: RespondInput): ToolOutcome {
@@ -135,7 +135,7 @@ export function respond(input: RespondInput): ToolOutcome {
   });
 
   if (filtered.denied) {
-    return toolError("policy_denied", { providerIds: input.providerIds });
+    return toolError("policy_denied", { healthSystemIds: input.healthSystemIds });
   }
 
   const limit = input.limit === undefined ? undefined : Math.max(0, Math.trunc(input.limit));
@@ -157,7 +157,7 @@ export function respond(input: RespondInput): ToolOutcome {
   return {
     result: textResult(payload, false),
     resultCount: items.length,
-    providerIds: input.providerIds,
+    healthSystemIds: input.healthSystemIds,
     errorCode: null,
   };
 }

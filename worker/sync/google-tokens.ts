@@ -14,7 +14,7 @@
  *     the admin UI reads to show what the grant covers, so an empty scope means
  *     "keep what is there".
  *   - **There is exactly one account.** Its subject is the literal `"google"`, and
- *     it is resolved once per run *before* the provider loop: if the calendar is
+ *     it is resolved once per run *before* the health system loop: if the calendar is
  *     unreachable there is no point asking four organisations for appointments
  *     nobody can write down.
  */

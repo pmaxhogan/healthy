@@ -14,13 +14,13 @@
  * a second copy of these rules would let the two disagree about what "one visit"
  * means.
  *
- * ### Same visit, across providers
+ * ### Same visit, across health systems
  *
  * A CSN is numbered per Epic instance, so two organisations' numbers can collide
  * and one organisation's copy of another's visit may carry either number. It is
- * therefore never enough on its own across providers. Two sightings are the same
+ * therefore never enough on its own across health systems. Two sightings are the same
  * visit when their starts are within `DEDUPE_WINDOW_SECONDS` (the tolerance the
- * same-provider rule already uses -- two views of one appointment have been seen
+ * same-health system rule already uses -- two views of one appointment have been seen
  * a minute or two apart) AND at least one of:
  *
  *  - the same CSN;
@@ -38,7 +38,7 @@
  * a portal copy that does not say it is someone else's, then one that does, then
  * a portal copy that has not been refreshed for {@link STALE_SECONDS} (its portal
  * is failing, so a fresher copy elsewhere is the better guide). Ties go to the
- * lower provider id, which only has to be stable, so every caller picks the same
+ * lower health system id, which only has to be stable, so every caller picks the same
  * winner.
  */
 
@@ -57,7 +57,7 @@ const RANK_STALE: SightingRank = 3;
 
 /** What the matcher needs to know about one sighting of a visit. */
 export interface Sighting {
-  providerId: string;
+  healthSystemId: string;
   /** Unix seconds. */
   start: number;
   csn?: string | undefined;
@@ -118,10 +118,10 @@ function agree(a: string | undefined, b: string | undefined): boolean | null {
   return left === "" || right === "" ? null : left === right;
 }
 
-/** True when two sightings from different providers are one appointment. */
-export function sameVisitAcrossProviders(a: Sighting, b: Sighting): boolean {
+/** True when two sightings from different health systems are one appointment. */
+export function sameVisitAcrossHealthSystems(a: Sighting, b: Sighting): boolean {
   if (
-    a.providerId === b.providerId ||
+    a.healthSystemId === b.healthSystemId ||
     !Number.isFinite(a.start) ||
     !Number.isFinite(b.start) ||
     Math.abs(a.start - b.start) > DEDUPE_WINDOW_SECONDS
@@ -137,5 +137,5 @@ export function sameVisitAcrossProviders(a: Sighting, b: Sighting): boolean {
 
 /** True when `a` speaks for the visit over `b`. */
 export function outranks(a: Sighting, b: Sighting): boolean {
-  return a.rank === b.rank ? a.providerId < b.providerId : a.rank < b.rank;
+  return a.rank === b.rank ? a.healthSystemId < b.healthSystemId : a.rank < b.rank;
 }

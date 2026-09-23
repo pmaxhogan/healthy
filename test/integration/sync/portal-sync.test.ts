@@ -43,7 +43,7 @@ import {
   recordingLog,
   resetSyncDb,
   searchBundle,
-  seedConnectedProvider,
+  seedConnectedHealthSystem,
   seedGoogle,
   seedSettings,
   sk,
@@ -53,7 +53,7 @@ import {
   syncRepos,
 } from "./helpers.ts";
 
-import type { FhirServer, SeededProvider, Upstreams } from "./helpers.ts";
+import type { FhirServer, SeededHealthSystem, Upstreams } from "./helpers.ts";
 import type { Ctx } from "../../../worker/db/client.ts";
 import type { PortalAccountRow } from "../../../worker/db/rows.ts";
 import type { PortalVisit } from "../../../worker/providers/mychart/index.ts";
@@ -69,23 +69,23 @@ const SOON = "2026-06-20T14:30:00+00:00";
 
 interface Fixture {
   ctx: Ctx;
-  provider: SeededProvider;
+  healthSystem: SeededHealthSystem;
   portal: FakePortal;
   upstreams: Upstreams;
   server: FhirServer;
 }
 
-/** A connected provider, a Google account, settings, and an active portal account. */
+/** A connected health system, a Google account, settings, and an active portal account. */
 async function fixture(options: { portal?: Partial<FakePortal> } = {}): Promise<Fixture> {
   const ctx = syncCtx();
-  const provider = await seedConnectedProvider(ctx, { host: HOST });
+  const healthSystem = await seedConnectedHealthSystem(ctx, { host: HOST });
   await seedGoogle(ctx);
   await seedSettings(ctx);
-  await seedPortalAccount(ctx, provider.providerId);
-  const server = fhirServer({ patientId: provider.patientId });
+  await seedPortalAccount(ctx, healthSystem.healthSystemId);
+  const server = fhirServer({ patientId: healthSystem.patientId });
   return {
     ctx,
-    provider,
+    healthSystem,
     portal: fakePortal(options.portal),
     upstreams: stubUpstreams({ [HOST]: server }),
     server,
@@ -121,9 +121,9 @@ function withEncounters(fix: Fixture, encounters: readonly fhir4.Encounter[]): v
   fix.server.resources.set("Organization/org-1", organization("org-1", "Example Health"));
 }
 
-/** The key a portal visit is calendared under: `<providerId>:csn:<blind>`. */
-function portalKey(provider: SeededProvider, csn: string): Promise<string> {
-  return sk(`${provider.providerId}:csn:${csn}`);
+/** The key a portal visit is calendared under: `<healthSystemId>:csn:<blind>`. */
+function portalKey(healthSystem: SeededHealthSystem, csn: string): Promise<string> {
+  return sk(`${healthSystem.healthSystemId}:csn:${csn}`);
 }
 
 describe("portal visits on the calendar", () => {
@@ -135,14 +135,16 @@ describe("portal visits on the calendar", () => {
     expect(summary.portalVisits).toBe(1);
     expect(summary.eventsInserted).toBe(1);
     expect(summary.portalErrors).toStrictEqual([]);
-    const key = await portalKey(fix.provider, "csn-1");
+    const key = await portalKey(fix.healthSystem, "csn-1");
     const event = fix.upstreams.calendar.byKey().get(key);
     expect(event?.summary).toBe("Follow-up · A. Example, MD");
     expect(event?.visibility).toBe("private");
 
     const row = await syncRepos(fix.ctx).calendarEvents.getByKey(key);
     expect(row?.source).toBe("portal");
-    expect(row?.portal_csn).toBe(await blindCsn(syncBlinder(), fix.provider.providerId, "csn-1"));
+    expect(row?.portal_csn).toBe(
+      await blindCsn(syncBlinder(), fix.healthSystem.healthSystemId, "csn-1"),
+    );
     expect(row?.state).toBe("active");
   });
 
@@ -160,7 +162,7 @@ describe("portal visits on the calendar", () => {
     expect(changed.eventsPatched).toBe(1);
     expect(fix.upstreams.calendar.inserts).toBe(1);
     expect(
-      fix.upstreams.calendar.byKey().get(await portalKey(fix.provider, "csn-1"))?.summary,
+      fix.upstreams.calendar.byKey().get(await portalKey(fix.healthSystem, "csn-1"))?.summary,
     ).toBe("Annual physical · A. Example, MD");
   });
 
@@ -172,11 +174,11 @@ describe("portal visits on the calendar", () => {
     const summary = await portalRun(fix);
 
     expect(summary.eventsGhosted).toBe(1);
-    const event = fix.upstreams.calendar.byKey().get(await portalKey(fix.provider, "csn-1"));
+    const event = fix.upstreams.calendar.byKey().get(await portalKey(fix.healthSystem, "csn-1"));
     expect(event?.summary).toBe("Cancelled: Follow-up · A. Example, MD");
     expect(event?.transparency).toBe("transparent");
     const row = await syncRepos(fix.ctx).calendarEvents.getByKey(
-      await portalKey(fix.provider, "csn-1"),
+      await portalKey(fix.healthSystem, "csn-1"),
     );
     expect(row?.state).toBe("ghost");
     // A cancellation keeps its event: only a duplicate is ever deleted.
@@ -207,11 +209,11 @@ describe("portal visits on the calendar", () => {
 
     expect(summary.eventsRestored).toBe(1);
     const row = await syncRepos(fix.ctx).calendarEvents.getByKey(
-      await portalKey(fix.provider, "csn-1"),
+      await portalKey(fix.healthSystem, "csn-1"),
     );
     expect(row?.state).toBe("active");
     expect(
-      fix.upstreams.calendar.byKey().get(await portalKey(fix.provider, "csn-1"))?.summary,
+      fix.upstreams.calendar.byKey().get(await portalKey(fix.healthSystem, "csn-1"))?.summary,
     ).toBe("Follow-up · A. Example, MD");
   });
 
@@ -225,14 +227,14 @@ describe("portal visits on the calendar", () => {
 
     expect(summary.eventsGhosted).toBe(1);
     const row = await syncRepos(fix.ctx).calendarEvents.getByKey(
-      await portalKey(fix.provider, "csn-1"),
+      await portalKey(fix.healthSystem, "csn-1"),
     );
     expect(row?.state).toBe("ghost");
     // The calendar is not re-rendered from a copy it did not just read: the row is
     // marked and the entry the owner is looking at is left alone.
     expect(fix.upstreams.calendar.patches).toBe(patchesBefore);
     expect(
-      fix.upstreams.calendar.byKey().get(await portalKey(fix.provider, "csn-1"))?.summary,
+      fix.upstreams.calendar.byKey().get(await portalKey(fix.healthSystem, "csn-1"))?.summary,
     ).toBe("Follow-up · A. Example, MD");
   });
 
@@ -248,7 +250,7 @@ describe("portal visits on the calendar", () => {
 
     expect(summary.eventsGhosted).toBe(0);
     const row = await syncRepos(fix.ctx).calendarEvents.getByKey(
-      await portalKey(fix.provider, "csn-1"),
+      await portalKey(fix.healthSystem, "csn-1"),
     );
     expect(row?.state).toBe("active");
   });
@@ -263,9 +265,9 @@ describe("portal visits that FHIR also knows about", () => {
 
     expect(summary.portalVisits).toBe(1);
     expect(summary.portalSkipped).toBe(1);
-    expect(calendarKeys(fix)).toStrictEqual([await sk(`${fix.provider.providerId}:enc-1`)]);
+    expect(calendarKeys(fix)).toStrictEqual([await sk(`${fix.healthSystem.healthSystemId}:enc-1`)]);
     const stray = await syncRepos(fix.ctx).calendarEvents.getByKey(
-      await portalKey(fix.provider, "csn-1"),
+      await portalKey(fix.healthSystem, "csn-1"),
     );
     expect(stray).toBeNull();
   });
@@ -291,7 +293,7 @@ describe("portal visits that FHIR also knows about", () => {
     }
     expect(fix.upstreams.calendar.patches).toBe(patchesBefore);
     const row = await syncRepos(fix.ctx).calendarEvents.getByKey(
-      await portalKey(fix.provider, "csn-1"),
+      await portalKey(fix.healthSystem, "csn-1"),
     );
     expect(row?.state).toBe("active");
   });
@@ -309,12 +311,14 @@ describe("portal visits that FHIR also knows about", () => {
     // One event, still the one the portal created.
     expect(fix.upstreams.calendar.inserts).toBe(1);
     expect(summary.eventsPatched).toBe(1);
-    expect(calendarKeys(fix)).toStrictEqual([await sk(`${fix.provider.providerId}:enc-1`)]);
+    expect(calendarKeys(fix)).toStrictEqual([await sk(`${fix.healthSystem.healthSystemId}:enc-1`)]);
 
     const repos = syncRepos(fix.ctx);
-    const stray = await repos.calendarEvents.getByKey(await portalKey(fix.provider, "csn-1"));
+    const stray = await repos.calendarEvents.getByKey(await portalKey(fix.healthSystem, "csn-1"));
     expect(stray).toBeNull();
-    const row = await repos.calendarEvents.getByKey(await sk(`${fix.provider.providerId}:enc-1`));
+    const row = await repos.calendarEvents.getByKey(
+      await sk(`${fix.healthSystem.healthSystemId}:enc-1`),
+    );
     expect(row?.source).toBe("fhir");
     expect(row?.portal_csn).toBeNull();
     expect(row?.state).toBe("active");
@@ -337,7 +341,7 @@ describe("portal visits stored for the MCP", () => {
 
     // The calendar skipped csn-1 as a duplicate; the MCP's copy keeps both, and
     // leaves the dedupe to the tool, which also sees the Encounter.
-    const stored = await syncRepos(fix.ctx).portalVisits.list(fix.provider.providerId);
+    const stored = await syncRepos(fix.ctx).portalVisits.list(fix.healthSystem.healthSystemId);
     expect(stored.map((row) => row.csn)).toStrictEqual(["csn-1", "csn-2"]);
     expect(stored[1]?.visit).toStrictEqual(
       portalVisit({ csn: "csn-2", start: "2026-12-01T15:00:00+00:00", isVideo: true }),
@@ -352,7 +356,7 @@ describe("portal visits stored for the MCP", () => {
     fix.portal.visits = [portalVisit({ csn: "csn-1", visitType: "Annual physical" })];
     await portalRun(fix);
 
-    const [row] = await syncRepos(fix.ctx).portalVisits.list(fix.provider.providerId);
+    const [row] = await syncRepos(fix.ctx).portalVisits.list(fix.healthSystem.healthSystemId);
     expect(row?.visit.visitType).toBe("Annual physical");
   });
 
@@ -365,7 +369,7 @@ describe("portal visits stored for the MCP", () => {
     fix.portal.visits = [portalVisit({ csn: "csn-1", status: "canceled" })];
     await portalRun(fix);
 
-    const stored = await syncRepos(fix.ctx).portalVisits.list(fix.provider.providerId);
+    const stored = await syncRepos(fix.ctx).portalVisits.list(fix.healthSystem.healthSystemId);
     const byCsn = new Map(stored.map((row) => [row.csn, row]));
     expect(byCsn.get("csn-1")).toMatchObject({ state: "active", missingSince: null });
     expect(byCsn.get("csn-1")?.visit.status).toBe("canceled");
@@ -380,27 +384,30 @@ describe("portal visits stored for the MCP", () => {
     fix.portal.visits = [];
     await portalRun(fix);
 
-    const [row] = await syncRepos(fix.ctx).portalVisits.list(fix.provider.providerId);
+    const [row] = await syncRepos(fix.ctx).portalVisits.list(fix.healthSystem.healthSystemId);
     expect(row).toMatchObject({ csn: "csn-1", state: "active" });
   });
 });
 
-async function secondOrganisation(fix: Fixture, visits: PortalVisit[]): Promise<SeededProvider> {
-  const other = await seedConnectedProvider(fix.ctx, {
+async function secondOrganisation(
+  fix: Fixture,
+  visits: PortalVisit[],
+): Promise<SeededHealthSystem> {
+  const other = await seedConnectedHealthSystem(fix.ctx, {
     host: "fhir.b.example.test",
     displayName: "B Example Health",
   });
-  await syncRepos(fix.ctx).portalVisits.record(other.providerId, visits, { complete: true });
+  await syncRepos(fix.ctx).portalVisits.record(other.healthSystemId, visits, { complete: true });
   return other;
 }
 
 /**
  * The owning organisation's own event for the visit, as its portal pass would
- * have written it. Provider B has no portal account in these tests, so nothing
+ * have written it. Health system B has no portal account in these tests, so nothing
  * touches it -- which is what lets a test prove the delete aimed at A's copy only.
  */
-async function ownersEvent(fix: Fixture, owner: SeededProvider, csn: string): Promise<string> {
-  const key = await sk(`${owner.providerId}:csn:${csn}`);
+async function ownersEvent(fix: Fixture, owner: SeededHealthSystem, csn: string): Promise<string> {
+  const key = await sk(`${owner.healthSystemId}:csn:${csn}`);
   fix.upstreams.calendar.plant({
     summary: "Follow-up · A. Example, MD",
     start: { dateTime: SOON },
@@ -410,20 +417,20 @@ async function ownersEvent(fix: Fixture, owner: SeededProvider, csn: string): Pr
   return key;
 }
 
-/** Provider A calendars its second-hand copy before any better copy is known. */
+/** Health system A calendars its second-hand copy before any better copy is known. */
 async function calendaredSecondHand(fix: Fixture): Promise<string> {
   const summary = await portalRun(fix);
   expect(summary.eventsInserted).toBe(1);
-  return await portalKey(fix.provider, "csn-a-view");
+  return await portalKey(fix.healthSystem, "csn-a-view");
 }
 
 const shared = (overrides: Partial<PortalVisit> = {}): PortalVisit =>
   portalVisit({ csn: "csn-a-view", start: SOON, external: true, ...overrides });
 
 describe("one visit, one event, across organisations", () => {
-  // Provider B's stored visits stand in for a second organisation whose portal
+  // Health system B's stored visits stand in for a second organisation whose portal
   // pass already ran (or whose session is failing now): the dedupe reads them from
-  // `portal_visits` either way. Its copy of the visit is first-hand; provider A's
+  // `portal_visits` either way. Its copy of the visit is first-hand; health system A's
   // portal lists the same visit second-hand, through a shared record.
   it("does not calendar a second-hand copy of a visit its own organisation lists", async () => {
     const fix = await fixture({ portal: { visits: [shared()] } });
@@ -434,7 +441,7 @@ describe("one visit, one event, across organisations", () => {
     expect(summary.eventsInserted).toBe(0);
     expect(summary.portalSkipped).toBe(1);
     // Still stored: the MCP decides between the two copies for itself.
-    const stored = await syncRepos(fix.ctx).portalVisits.list(fix.provider.providerId);
+    const stored = await syncRepos(fix.ctx).portalVisits.list(fix.healthSystem.healthSystemId);
     expect(stored.map((row) => row.csn)).toStrictEqual(["csn-a-view"]);
   });
 
@@ -444,7 +451,7 @@ describe("one visit, one event, across organisations", () => {
     const summary = await portalRun(fix);
 
     expect(summary.eventsInserted).toBe(1);
-    expect(calendarKeys(fix)).toStrictEqual([await portalKey(fix.provider, "csn-a-view")]);
+    expect(calendarKeys(fix)).toStrictEqual([await portalKey(fix.healthSystem, "csn-a-view")]);
   });
 
   it("deletes, rather than ghosts, a second-hand event once the owner's copy turns up", async () => {
@@ -529,7 +536,7 @@ describe("one visit, one event, across organisations", () => {
     expect(calendarKeys(fix)).toStrictEqual([]);
 
     // The owning organisation is disconnected: its stored visits are forgotten.
-    await syncRepos(fix.ctx).portalVisits.clearProvider(owner.providerId);
+    await syncRepos(fix.ctx).portalVisits.clearHealthSystem(owner.healthSystemId);
     const summary = await portalRun(fix);
 
     expect(summary.eventsInserted).toBe(1);
@@ -554,7 +561,7 @@ describe("one visit, one event, across organisations", () => {
     const summary = await portalRun(fix);
 
     expect(summary.eventsInserted).toBe(1);
-    expect(calendarKeys(fix)).toStrictEqual([await portalKey(fix.provider, "csn-a-own")]);
+    expect(calendarKeys(fix)).toStrictEqual([await portalKey(fix.healthSystem, "csn-a-own")]);
   });
 });
 
@@ -577,7 +584,7 @@ describe("portal sessions", () => {
     expect(summary.eventsInserted).toBe(1);
     expect(summary.portalErrors).toStrictEqual([]);
 
-    const account = await syncRepos(fix.ctx).portalAccounts.get(fix.provider.providerId);
+    const account = await syncRepos(fix.ctx).portalAccounts.get(fix.healthSystem.healthSystemId);
     expect(account?.session_state).toBe("active");
     expect(account?.login_attempts_today).toBe(1);
     // The code is single use: nothing may claim it twice.
@@ -611,7 +618,7 @@ describe("portal sessions", () => {
 
     expect(fix.portal.submitted).toStrictEqual([]);
     expect(summary.portalErrors).toStrictEqual(["portal_2fa_required"]);
-    const account = await syncRepos(fix.ctx).portalAccounts.get(fix.provider.providerId);
+    const account = await syncRepos(fix.ctx).portalAccounts.get(fix.healthSystem.healthSystemId);
     expect(account?.session_state).toBe("needs_reauth");
   });
 
@@ -630,18 +637,20 @@ describe("portal sessions", () => {
 
   it("learns the sender of the first accepted code, binding later claims to it", async () => {
     const ctx = syncCtx();
-    const provider = await seedConnectedProvider(ctx, { host: HOST });
+    const healthSystem = await seedConnectedHealthSystem(ctx, { host: HOST });
     await seedGoogle(ctx);
     await seedSettings(ctx);
     // No expected sender yet -- the very first sign-in, where the allowlist is
     // the only gate.
-    await seedPortalAccount(ctx, provider.providerId, { otpSenderDomain: null });
+    await seedPortalAccount(ctx, healthSystem.healthSystemId, { otpSenderDomain: null });
     await setSetting(ctx, "mail_sender_allowlist", `${OTP_SENDER_DOMAIN},google.com`);
     const repos = syncRepos(ctx);
-    await expect(repos.portalAccounts.getOtpSender(provider.providerId)).resolves.toBeNull();
+    await expect(
+      repos.portalAccounts.getOtpSender(healthSystem.healthSystemId),
+    ).resolves.toBeNull();
     const portal = fakePortal({ alive: false, loginStatus: "awaiting_code", visits: [] });
     await seedOtp(ctx, "246810");
-    const upstreams = stubUpstreams({ [HOST]: fhirServer({ patientId: provider.patientId }) });
+    const upstreams = stubUpstreams({ [HOST]: fhirServer({ patientId: healthSystem.patientId }) });
 
     await runCalendarSync(ctx, {
       trigger: "manual",
@@ -652,13 +661,13 @@ describe("portal sessions", () => {
     expect(portal.submitted).toStrictEqual(["246810"]);
     // The portal itself confirmed the code, which makes its sender the
     // authoritative answer to "where do this account's codes come from".
-    await expect(repos.portalAccounts.getOtpSender(provider.providerId)).resolves.toBe(
+    await expect(repos.portalAccounts.getOtpSender(healthSystem.healthSystemId)).resolves.toBe(
       OTP_SENDER_DOMAIN,
     );
   });
 
   it("does not sign in at all while another driver holds the gate", async () => {
-    // Two sign-ins for one provider can each pass the attempt check before either
+    // Two sign-ins for one health system can each pass the attempt check before either
     // increments it -- overshooting the daily budget that exists to keep the
     // portal from locking the account -- and the second `SendCode` invalidates the
     // code the first is waiting for. The admin button's Durable Object is the one
@@ -667,7 +676,7 @@ describe("portal sessions", () => {
       portal: { alive: false, loginStatus: "awaiting_code", visits: [] },
     });
     await seedOtp(fix.ctx, "424242");
-    const held = await acquirePortalSignIn(fix.ctx, fix.provider.providerId, "test");
+    const held = await acquirePortalSignIn(fix.ctx, fix.healthSystem.healthSystemId, "test");
     expect(held).toBe(true);
 
     try {
@@ -677,10 +686,10 @@ describe("portal sessions", () => {
       expect(fix.portal.calls.sendCodes).toBe(0);
       expect(summary.portalErrors).toStrictEqual(["portal_signin_busy"]);
       // No attempt spent either: the budget is for sign-ins actually made.
-      const account = await syncRepos(fix.ctx).portalAccounts.get(fix.provider.providerId);
+      const account = await syncRepos(fix.ctx).portalAccounts.get(fix.healthSystem.healthSystemId);
       expect(account?.login_attempts_today).toBe(0);
     } finally {
-      await releasePortalSignIn(fix.ctx, fix.provider.providerId);
+      await releasePortalSignIn(fix.ctx, fix.healthSystem.healthSystemId);
     }
   });
 
@@ -689,8 +698,8 @@ describe("portal sessions", () => {
       portal: { alive: false, loginStatus: "awaiting_code", visits: [] },
     });
     await seedOtp(fix.ctx, "424242");
-    await acquirePortalSignIn(fix.ctx, fix.provider.providerId, "test");
-    await releasePortalSignIn(fix.ctx, fix.provider.providerId);
+    await acquirePortalSignIn(fix.ctx, fix.healthSystem.healthSystemId, "test");
+    await releasePortalSignIn(fix.ctx, fix.healthSystem.healthSystemId);
 
     await portalRun(fix);
 
@@ -710,7 +719,7 @@ describe("portal sessions", () => {
     const summary = await portalRun(fix);
 
     expect(summary.portalVisits).toBe(many);
-    const stored = await syncRepos(fix.ctx).portalVisits.list(fix.provider.providerId);
+    const stored = await syncRepos(fix.ctx).portalVisits.list(fix.healthSystem.healthSystemId);
     expect(stored).toHaveLength(many);
     const runs = await syncRepos(fix.ctx).runLog.listRecent({ limit: 1 });
     expect(runs[0]?.summary.warnings).not.toContain("portal_visits_truncated");
@@ -718,17 +727,17 @@ describe("portal sessions", () => {
 
   it("passes the shell API base and the MFA contact to the adapter when signing in", async () => {
     const ctx = syncCtx();
-    const provider = await seedConnectedProvider(ctx, { host: HOST });
+    const healthSystem = await seedConnectedHealthSystem(ctx, { host: HOST });
     await seedGoogle(ctx);
     await seedSettings(ctx);
     // Falls back to the setting: the account's own endpoint never learned one.
     await setSetting(ctx, "portal_api_base_path", "/api/shell/v1");
-    await seedPortalAccount(ctx, provider.providerId, {
+    await seedPortalAccount(ctx, healthSystem.healthSystemId, {
       mfaContact: "owner@example.test",
     });
     const portal = fakePortal({ alive: false, loginStatus: "awaiting_code" });
     await seedOtp(ctx, "135790");
-    const upstreams = stubUpstreams({ [HOST]: fhirServer({ patientId: provider.patientId }) });
+    const upstreams = stubUpstreams({ [HOST]: fhirServer({ patientId: healthSystem.patientId }) });
 
     await runCalendarSync(ctx, {
       trigger: "manual",
@@ -747,13 +756,13 @@ describe("portal sessions", () => {
 
   it("prefers the endpoint's own API base over the settings fallback", async () => {
     const ctx = syncCtx();
-    const provider = await seedConnectedProvider(ctx, { host: HOST });
+    const healthSystem = await seedConnectedHealthSystem(ctx, { host: HOST });
     await seedGoogle(ctx);
     await seedSettings(ctx);
     await setSetting(ctx, "portal_api_base_path", "/from/settings");
-    await seedPortalAccount(ctx, provider.providerId, { apiBasePath: "/from/endpoint" });
+    await seedPortalAccount(ctx, healthSystem.healthSystemId, { apiBasePath: "/from/endpoint" });
     const portal = fakePortal({ alive: true, visits: [] });
-    const upstreams = stubUpstreams({ [HOST]: fhirServer({ patientId: provider.patientId }) });
+    const upstreams = stubUpstreams({ [HOST]: fhirServer({ patientId: healthSystem.patientId }) });
 
     await runCalendarSync(ctx, {
       trigger: "manual",
@@ -766,12 +775,12 @@ describe("portal sessions", () => {
 
   it("marks the account and opens one reconnect card when the code never arrives", async () => {
     const ctx = syncCtx({ trello: true });
-    const provider = await seedConnectedProvider(ctx, { host: HOST });
+    const healthSystem = await seedConnectedHealthSystem(ctx, { host: HOST });
     await seedGoogle(ctx);
     await seedSettings(ctx);
-    await seedPortalAccount(ctx, provider.providerId);
+    await seedPortalAccount(ctx, healthSystem.healthSystemId);
     const portal = fakePortal({ alive: false, loginStatus: "awaiting_code" });
-    const upstreams = stubUpstreams({ [HOST]: fhirServer({ patientId: provider.patientId }) });
+    const upstreams = stubUpstreams({ [HOST]: fhirServer({ patientId: healthSystem.patientId }) });
 
     const summary = await runCalendarSync(ctx, {
       trigger: "manual",
@@ -782,26 +791,26 @@ describe("portal sessions", () => {
     expect(summary.portalErrors).toStrictEqual(["portal_2fa_required"]);
     // A portal that needs the owner is an expected state, not a failed run.
     expect(summary.errors).toStrictEqual([]);
-    const account = await syncRepos(ctx).portalAccounts.get(provider.providerId);
+    const account = await syncRepos(ctx).portalAccounts.get(healthSystem.healthSystemId);
     expect(account?.session_state).toBe("needs_reauth");
     expect(account?.last_error_code).toBe("portal_2fa_required");
     // `portal_2fa_required` is not one of the codes that raises a card: the owner
-    // will see it on the Providers page, and a card per missing email would be noise.
+    // will see it on the Health systems page, and a card per missing email would be noise.
     expect(upstreams.trelloCards).toStrictEqual([]);
   });
 
   it("refuses to sign in at all once the daily attempt budget is spent, and alerts", async () => {
     const ctx = syncCtx({ trello: true });
-    const provider = await seedConnectedProvider(ctx, {
+    const healthSystem = await seedConnectedHealthSystem(ctx, {
       host: HOST,
       displayName: "A Example Health",
     });
     await seedGoogle(ctx);
     await seedSettings(ctx);
-    await seedPortalAccount(ctx, provider.providerId);
-    await spendAttempts(ctx, provider.providerId, 3);
+    await seedPortalAccount(ctx, healthSystem.healthSystemId);
+    await spendAttempts(ctx, healthSystem.healthSystemId, 3);
     const portal = fakePortal({ alive: false });
-    const upstreams = stubUpstreams({ [HOST]: fhirServer({ patientId: provider.patientId }) });
+    const upstreams = stubUpstreams({ [HOST]: fhirServer({ patientId: healthSystem.patientId }) });
 
     const summary = await runCalendarSync(ctx, {
       trigger: "manual",
@@ -811,14 +820,14 @@ describe("portal sessions", () => {
 
     expect(portal.calls.logins).toBe(0);
     expect(summary.portalErrors).toStrictEqual(["portal_attempts_exhausted"]);
-    const account = await syncRepos(ctx).portalAccounts.get(provider.providerId);
+    const account = await syncRepos(ctx).portalAccounts.get(healthSystem.healthSystemId);
     expect(account?.session_state).toBe("needs_reauth");
 
-    // The card names the portal, not the FHIR connection, and links to /providers.
+    // The card names the portal, not the FHIR connection, and links to /health systems.
     expect(upstreams.trelloCards).toHaveLength(1);
     expect(upstreams.trelloCards[0]?.name).toBe("Reconnect A Example Health MyChart to Healthy");
-    expect(upstreams.trelloCards[0]?.desc).toContain("/providers");
-    const alert = await syncRepos(ctx).alerts.getOpen(`portal:${provider.providerId}`);
+    expect(upstreams.trelloCards[0]?.desc).toContain("/health-systems");
+    const alert = await syncRepos(ctx).alerts.getOpen(`portal:${healthSystem.healthSystemId}`);
     expect(alert).not.toBeNull();
   });
 
@@ -840,7 +849,7 @@ describe("portal sessions", () => {
   it("skips an account that is not active, without touching the portal", async () => {
     const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1" })] } });
     await syncRepos(fix.ctx).portalAccounts.markNeedsReauth(
-      fix.provider.providerId,
+      fix.healthSystem.healthSystemId,
       "portal_login_failed",
     );
 
@@ -1037,25 +1046,25 @@ describe("a session proven good minutes ago", () => {
   // fresh sign-in would fix. See `RECENT_SESSION_SECONDS`.
 
   it("is recent right after the account was marked active", async () => {
-    const provider = await seedConnectedProvider(syncCtx(), { host: HOST });
-    await seedPortalAccount(syncCtx(), provider.providerId);
+    const healthSystem = await seedConnectedHealthSystem(syncCtx(), { host: HOST });
+    await seedPortalAccount(syncCtx(), healthSystem.healthSystemId);
 
     const later = syncCtx({ now: () => T0 + 60 });
-    await expect(recentSessionAge(later, provider.providerId)).resolves.toBe(60);
+    await expect(recentSessionAge(later, healthSystem.healthSystemId)).resolves.toBe(60);
   });
 
   it("stops being recent once the window has passed", async () => {
-    const provider = await seedConnectedProvider(syncCtx(), { host: HOST });
-    await seedPortalAccount(syncCtx(), provider.providerId);
+    const healthSystem = await seedConnectedHealthSystem(syncCtx(), { host: HOST });
+    await seedPortalAccount(syncCtx(), healthSystem.healthSystemId);
 
     const later = syncCtx({ now: () => T0 + RECENT_SESSION_SECONDS });
-    await expect(recentSessionAge(later, provider.providerId)).resolves.toBeNull();
+    await expect(recentSessionAge(later, healthSystem.healthSystemId)).resolves.toBeNull();
   });
 
   it("is never recent for an account that has never been proven good", async () => {
-    const provider = await seedConnectedProvider(syncCtx(), { host: HOST });
-    await seedPortalAccount(syncCtx(), provider.providerId, { active: false });
+    const healthSystem = await seedConnectedHealthSystem(syncCtx(), { host: HOST });
+    await seedPortalAccount(syncCtx(), healthSystem.healthSystemId, { active: false });
 
-    await expect(recentSessionAge(syncCtx(), provider.providerId)).resolves.toBeNull();
+    await expect(recentSessionAge(syncCtx(), healthSystem.healthSystemId)).resolves.toBeNull();
   });
 });

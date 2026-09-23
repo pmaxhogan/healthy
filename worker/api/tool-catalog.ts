@@ -23,18 +23,18 @@ import type { McpToolInfoDto } from "@shared/types.ts";
 
 export const TOOL_CATALOG: readonly McpToolInfoDto[] = [
   {
-    name: "list_providers",
+    name: "list_health_systems",
     description: "The connected health systems and what each one exposes.",
     resourceTypes: [],
   },
   {
     name: "get_sync_status",
-    description: "When each provider was last synced, and whether it needs re-authorising.",
+    description: "When each health system was last synced, and whether it needs re-authorising.",
     resourceTypes: [],
   },
   {
     name: "get_patient_profile",
-    description: "Demographics as each provider holds them.",
+    description: "Demographics as each health system holds them.",
     resourceTypes: ["Patient"],
   },
   {
@@ -127,7 +127,7 @@ export const TOOL_CATALOG: readonly McpToolInfoDto[] = [
   },
   {
     name: "get_health_summary",
-    description: "Counts and the most recent items per category, across every provider.",
+    description: "Counts and the most recent items per category, across every health system.",
     resourceTypes: [],
   },
 ];

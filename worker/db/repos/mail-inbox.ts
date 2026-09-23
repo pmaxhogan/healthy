@@ -14,7 +14,7 @@
  * `takeFreshOtp` is the security-relevant operation, and it has two jobs.
  *
  *   - **Only the right sender's code may be claimed.** An eligible row is one
- *     from the provider's own expected sender where it has one, and otherwise
+ *     from the health system's own expected sender where it has one, and otherwise
  *     one that is both on the sender allowlist and on the same site
  *     (registrable domain) as this portal's own base URL. Without either half,
  *     a stranger who can reach the inbound address -- or, before any sender is
@@ -121,7 +121,7 @@ export interface OtpClaimFilter {
   since: number;
   now: number;
   /**
-   * The domain this provider's codes come from, when it is known.
+   * The domain this health system's codes come from, when it is known.
    *
    * Non-null narrows eligibility to that domain (or a subdomain of it) and
    * nothing else. Null falls back to the sender allowlist -- narrowed by
@@ -268,7 +268,7 @@ export function makeMailInboxRepo(ctx: Ctx) {
      * marking it consumed in the same statement.
      *
      * Null when there is nothing to claim -- an expired code, an
-     * already-consumed one, one from a sender this provider has never had a
+     * already-consumed one, one from a sender this health system has never had a
      * code from, or nothing having arrived yet all look the same to the caller,
      * which is the point: there is nothing it could do differently for any of
      * them.
@@ -346,7 +346,7 @@ export function makeMailInboxRepo(ctx: Ctx) {
  * Whether a row from `senderDomain` may be claimed under `filter`.
  *
  * An expected sender narrows eligibility to that domain (or a subdomain of it)
- * and nothing else -- the strongest rule, and once a provider has one it wins
+ * and nothing else -- the strongest rule, and once a health system has one it wins
  * outright, even for a sender on a different site than the portal itself (a
  * vendor-hosted deployment can legitimately email from a different domain than
  * it serves the portal from). Without one, two things both have to hold: the

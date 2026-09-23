@@ -156,7 +156,7 @@ const RAW_BASE_FIELDS = [
   "modifierExtension",
 ] as const satisfies readonly (keyof fhir4.DomainResource)[];
 
-const NORMALIZED_BASE_FIELDS = ["resourceType", "id", "provider", "lastUpdated"] as const;
+const NORMALIZED_BASE_FIELDS = ["resourceType", "id", "healthSystem", "lastUpdated"] as const;
 
 const ENCOUNTER_RAW_FIELDS = [
   ...RAW_BASE_FIELDS,

@@ -15,15 +15,15 @@
  * when the row was newly created. If Trello is unconfigured the row still lands
  * and the admin UI still shows the alert.
  *
- * Log lines carry subjects (`provider:<id>`, `portal:<id>`, `google`) and error
- * codes. Never a provider display name -- that names a real health system -- and
+ * Log lines carry subjects (`health_system:<id>`, `portal:<id>`, `google`) and error
+ * codes. Never a health system display name -- that names a real health system -- and
  * never a card body, which contains one.
  */
 
 import { buildReconnectCard } from "../alerts/reconnect.ts";
 import { createTrelloAlerts } from "../alerts/trello.ts";
 import { makeRepos } from "../db/index.ts";
-import { GOOGLE_SUBJECT, portalSubject, providerSubject } from "../db/repos/alerts.ts";
+import { GOOGLE_SUBJECT, portalSubject, healthSystemSubject } from "../db/repos/alerts.ts";
 import { errorFields } from "../lib/log.ts";
 
 import { DEFAULT_PUBLIC_ORIGIN, resolveDeps } from "./deps.ts";
@@ -36,23 +36,23 @@ import type { Ctx } from "../db/client.ts";
  * Who an alert is about: the Google account, one health system's FHIR connection,
  * or one health system's patient-portal session.
  *
- * The portal is a separate subject from the FHIR connection for the same provider,
+ * The portal is a separate subject from the FHIR connection for the same health system,
  * and that is load-bearing. They break independently and are fixed differently --
  * one is an OAuth reconnect, the other is a password and an emailed code -- so one
  * subject for both would mean a dead portal session silently closing the card
  * about a dead FHIR grant, or the reverse.
  */
-export type AlertSubject = "google" | { providerId: string; portal?: true };
+export type AlertSubject = "google" | { healthSystemId: string; portal?: true };
 
 /** The label Trello cards use for the calendar account. Not a health system. */
-const GOOGLE_PROVIDER_NAME = "Google";
+const GOOGLE_SUBJECT_NAME = "Google";
 
 /** `alerts.subject` for a subject. */
 function subjectKey(subject: AlertSubject): string {
   if (subject === "google") return GOOGLE_SUBJECT;
   return subject.portal === true
-    ? portalSubject(subject.providerId)
-    : providerSubject(subject.providerId);
+    ? portalSubject(subject.healthSystemId)
+    : healthSystemSubject(subject.healthSystemId);
 }
 
 /**
@@ -88,19 +88,19 @@ function trelloFor(ctx: Ctx, trelloFetch: typeof fetch): TrelloAlerts | null {
  *
  * Epic reconnects are per-connection, so the path carries the connection id.
  * Google has exactly one account, so it goes straight to the start of the
- * consent flow. A portal reconnect is neither, and goes to the Providers page.
+ * consent flow. A portal reconnect is neither, and goes to the Health systems page.
  * The origin is this app's own public domain, which is not personal data;
  * `deps.origin` overrides it for a local run or a test.
  */
 function reconnectUrl(origin: string, subject: AlertSubject, connectionId: string | null): string {
   if (subject === "google") return `${origin}/oauth/google/start`;
   // A portal session is not an OAuth grant: there is no consent screen to send the
-  // owner to, only the Providers page, where they re-enter the password and press
-  // "Sign in now". The path carries no provider id, because a URL that names one is
+  // owner to, only the Health systems page, where they re-enter the password and press
+  // "Sign in now". The path carries no health system id, because a URL that names one is
   // one lookup away from naming a health system and this one ends up in Trello.
-  if (subject.portal === true) return `${origin}/providers`;
+  if (subject.portal === true) return `${origin}/health-systems`;
   return connectionId === null
-    ? `${origin}/oauth/epic/start?provider=${encodeURIComponent(subject.providerId)}`
+    ? `${origin}/oauth/epic/start?healthSystem=${encodeURIComponent(subject.healthSystemId)}`
     : `${origin}/oauth/reconnect/${connectionId}`;
 }
 
@@ -135,11 +135,16 @@ export async function openReconnectAlert(
     const trello = trelloFor(ctx, resolved.trelloFetch);
     if (trello === null) return;
 
-    const provider = subject === "google" ? null : await repos.providers.get(subject.providerId);
+    const healthSystem =
+      subject === "google" ? null : await repos.healthSystems.get(subject.healthSystemId);
     const connection =
-      subject === "google" ? null : await repos.connections.getForProvider(subject.providerId);
-    const providerName =
-      subject === "google" ? GOOGLE_PROVIDER_NAME : (provider?.display_name ?? subject.providerId);
+      subject === "google"
+        ? null
+        : await repos.connections.getForHealthSystem(subject.healthSystemId);
+    const healthSystemName =
+      subject === "google"
+        ? GOOGLE_SUBJECT_NAME
+        : (healthSystem?.display_name ?? subject.healthSystemId);
     const url = reconnectUrl(
       resolved.origin ?? DEFAULT_PUBLIC_ORIGIN,
       subject,
@@ -148,7 +153,7 @@ export async function openReconnectAlert(
 
     const card = buildReconnectCard({
       kind: kindOf(subject),
-      providerName,
+      healthSystemName,
       reconnectUrl: url,
       reason,
       occurredAt: new Date(alert.opened_at * 1000),
@@ -170,7 +175,7 @@ export async function openReconnectAlert(
 /**
  * Close the open alert for a subject and complete its Trello card.
  *
- * Called after every successful token refresh and every successful provider
+ * Called after every successful token refresh and every successful health system
  * sync, which is what makes the card's "this completes itself" promise true. A
  * subject with nothing open is one SELECT and no writes.
  */

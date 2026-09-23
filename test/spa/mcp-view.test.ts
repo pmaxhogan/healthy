@@ -35,7 +35,7 @@ async function mountMcp(rules: PolicyRuleDto[]): Promise<ReturnType<typeof mount
     "/api/mcp/audit": () => fakeResponse({ body: [] }),
     "/api/mcp/tools": () => fakeResponse({ body: [] }),
     "/api/mcp/tools/schema": () => fakeResponse({ body: [] }),
-    "/api/providers": () => fakeResponse({ body: [] }),
+    "/api/health-systems": () => fakeResponse({ body: [] }),
   });
   const router = await testRouter("/connectors");
   const wrapper = mount(McpView, { global: { plugins: [router] } });

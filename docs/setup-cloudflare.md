@@ -15,7 +15,7 @@ Put the resulting ids into `wrangler.jsonc`:
 
 - `d1_databases[0].database_id` — the D1 database id.
 - `kv_namespaces[0].id` — the KV namespace id. The binding name must stay
-  `OAUTH_KV`; `@cloudflare/workers-oauth-provider` requires that exact name
+  `OAUTH_KV`; `@cloudflare/workers-oauth-health_system` requires that exact name
   and it is not configurable.
 - `account_id` — your Cloudflare account id.
 
@@ -43,7 +43,7 @@ Worker.
 
 Put an **Access application** in front of your hostname, with a policy that
 allows only your own identity (your Google account, or whichever identity
-provider your Cloudflare Zero Trust team uses).
+health system your Cloudflare Zero Trust team uses).
 
 An AI MCP client cannot complete an interactive Access login, so a narrow,
 exact set of paths has to bypass Access. Configure this as either a

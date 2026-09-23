@@ -28,7 +28,7 @@ export function normalizeDevice(resource: fhir4.Device, ctx: NormalizeCtx): Norm
   return {
     resourceType: "Device",
     id: resource.id ?? "",
-    provider: ctx.provider,
+    healthSystem: ctx.healthSystem,
     ...(resource.meta?.lastUpdated && { lastUpdated: resource.meta.lastUpdated }),
     ...(type && { type }),
     ...(resource.manufacturer && { manufacturer: resource.manufacturer }),

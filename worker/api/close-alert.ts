@@ -3,11 +3,11 @@
  *
  * Distinct from the sync engine's `resolveReconnectAlert`, which is the path a
  * successful reconnection takes. This is the administrative one: the owner deleted
- * the provider or disconnected Google, so the alert is moot rather than resolved.
+ * the health system or disconnected Google, so the alert is moot rather than resolved.
  *
  * Trello is best effort on purpose. The database row is the source of truth for
  * "is there an open alert"; a card that could not be moved is a stale card, which
- * is a great deal better than a failed DELETE that leaves the provider half
+ * is a great deal better than a failed DELETE that leaves the health system half
  * removed.
  */
 
@@ -31,14 +31,14 @@ export async function closeAlert(api: ApiContext, env: Env, subject: string): Pr
   }
 }
 
-/** `alerts.subject` for a provider. Mirrors `db/repos/alerts.ts`. */
-export function providerSubject(providerId: string): string {
-  if (providerId === "") throw new AppError("bad_request", "a provider id is required");
-  return `provider:${providerId}`;
+/** `alerts.subject` for a health system. Mirrors `db/repos/alerts.ts`. */
+export function healthSystemSubject(healthSystemId: string): string {
+  if (healthSystemId === "") throw new AppError("bad_request", "a health system id is required");
+  return `health_system:${healthSystemId}`;
 }
 
-/** `alerts.subject` for a provider's portal session. Mirrors `db/repos/alerts.ts`. */
-export function portalSubject(providerId: string): string {
-  if (providerId === "") throw new AppError("bad_request", "a provider id is required");
-  return `portal:${providerId}`;
+/** `alerts.subject` for a health system's portal session. Mirrors `db/repos/alerts.ts`. */
+export function portalSubject(healthSystemId: string): string {
+  if (healthSystemId === "") throw new AppError("bad_request", "a health system id is required");
+  return `portal:${healthSystemId}`;
 }

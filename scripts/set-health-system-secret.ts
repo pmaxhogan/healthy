@@ -2,17 +2,17 @@
 // sealed exactly the way the Worker seals it, without going through the admin
 // UI or a browser.
 //
-//   PROVIDER_CLIENT_SECRET=<secret> npm run set-provider-secret -- --provider <id> --remote
-//   npm run set-provider-secret -- --provider <id> --local          # reads the secret from stdin
+//   HEALTH_SYSTEM_CLIENT_SECRET=<secret> npm run set-health-system-secret -- --health-system <id> --remote
+//   npm run set-health-system-secret -- --health-system <id> --local          # reads the secret from stdin
 //
-// Why this exists: `POST /api/providers/:id/secret` is how the admin UI sets
+// Why this exists: `POST /api/health-systems/:id/secret` is how the admin UI sets
 // this column, but that path requires a browser session, and a production
 // client secret should never be typed into one. This script is the
 // no-browser equivalent -- it shells out to `wrangler d1 execute` the same
 // way `npm run migrate:remote` does.
 //
 // The secret is never a command-line argument and never on the command line
-// / in shell history: it comes from the `PROVIDER_CLIENT_SECRET` environment
+// / in shell history: it comes from the `HEALTH_SYSTEM_CLIENT_SECRET` environment
 // variable or, failing that, from stdin. `DATA_KEY` -- needed to seal the
 // value the same way `worker/db/crypto.ts` does -- comes from the
 // environment or from a gitignored `.dev.vars`, the same two places every
@@ -36,29 +36,29 @@ import { nowSeconds } from "../worker/lib/time.ts";
 const DB_NAME = "healthy";
 
 // Defence in depth: `sealShort()` always returns this shape, but the value is
-// about to be interpolated into a SQL string (see `updateProvider` below),
+// about to be interpolated into a SQL string (see `updateHealthSystem` below),
 // so it is checked again right before that happens rather than trusted.
 const SEALED_ENVELOPE_PATTERN = /^v2:[A-Za-z0-9_-]+$/u;
 
 type Target = "--remote" | "--local";
 
 interface CliArgs {
-  providerId: string;
+  healthSystemId: string;
   target: Target;
 }
 
 function printUsage(): void {
   console.error(
     [
-      "Usage: npm run set-provider-secret -- --provider <id> (--remote|--local)",
+      "Usage: npm run set-health-system-secret -- --health-system <id> (--remote|--local)",
       "",
       "Options:",
-      "  --provider <id>   Provider row id (a 26-character ULID). Required.",
+      "  --health-system <id>   Health system row id (a 26-character ULID). Required.",
       "  --remote          Write to the deployed (production) D1 database.",
       "  --local           Write to the local D1 database used by `wrangler dev`.",
       "                    Exactly one of --remote / --local is required.",
       "",
-      "The secret is read from the PROVIDER_CLIENT_SECRET environment variable,",
+      "The secret is read from the HEALTH_SYSTEM_CLIENT_SECRET environment variable,",
       "or from stdin if that is unset -- never from a command-line argument.",
     ].join("\n"),
   );
@@ -79,15 +79,15 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     process.exit(0);
   }
 
-  let providerId: string | null = null;
+  let healthSystemId: string | null = null;
   let remote = false;
   let local = false;
 
   const remaining = [...argv];
   for (let flag = remaining.shift(); flag !== undefined; flag = remaining.shift()) {
     switch (flag) {
-      case "--provider": {
-        providerId = takeValue(remaining, flag);
+      case "--health-system": {
+        healthSystemId = takeValue(remaining, flag);
         continue;
       }
       case "--remote": {
@@ -104,15 +104,15 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     }
   }
 
-  if (providerId === null || providerId === "") {
-    throw new Error("--provider is required");
+  if (healthSystemId === null || healthSystemId === "") {
+    throw new Error("--health-system is required");
   }
   if (remote === local) {
     // Both false (neither given) and both true (given together) are refused:
     // this always writes to a real database, so the target is never inferred.
     throw new Error("exactly one of --remote or --local is required");
   }
-  return { providerId, target: remote ? "--remote" : "--local" };
+  return { healthSystemId, target: remote ? "--remote" : "--local" };
 }
 
 /** Drains stdin to EOF and returns it as text, with no encoding surprises. */
@@ -125,19 +125,19 @@ async function readStdin(): Promise<string> {
 }
 
 /**
- * The client secret: `PROVIDER_CLIENT_SECRET` if set, otherwise stdin.
+ * The client secret: `HEALTH_SYSTEM_CLIENT_SECRET` if set, otherwise stdin.
  *
  * Reading from stdin rather than a prompt (unlike `set-password.ts`) is
  * deliberate -- the caller in practice pipes it in from a gitignored file or a
- * secrets manager, e.g. `PROVIDER_CLIENT_SECRET="$(...)" npm run ...` or
- * `npm run set-provider-secret -- ... < secret.txt`. Either way it is never a
+ * secrets manager, e.g. `HEALTH_SYSTEM_CLIENT_SECRET="$(...)" npm run ...` or
+ * `npm run set-health_system-secret -- ... < secret.txt`. Either way it is never a
  * process argument, so it never lands in shell history or `ps`.
  */
 async function readSecret(): Promise<string> {
-  const fromEnv = process.env.PROVIDER_CLIENT_SECRET;
+  const fromEnv = process.env.HEALTH_SYSTEM_CLIENT_SECRET;
   if (fromEnv !== undefined && fromEnv !== "") return fromEnv;
 
-  console.error("PROVIDER_CLIENT_SECRET is not set; reading the secret from stdin...");
+  console.error("HEALTH_SYSTEM_CLIENT_SECRET is not set; reading the secret from stdin...");
   const raw = await readStdin();
   // Strip exactly the trailing newline a shell heredoc/pipe adds; nothing else
   // -- a real client secret should not contain other leading/trailing
@@ -239,7 +239,7 @@ function rowsFromD1Json(stdout: string): unknown[] {
 }
 
 /** True if a row with this id exists. `id` must already be ULID-validated: it is interpolated into the SQL text (see the module comment on why). */
-function providerExists(id: string, target: Target): boolean {
+function healthSystemExists(id: string, target: Target): boolean {
   const stdout = runWrangler([
     "d1",
     "execute",
@@ -247,7 +247,7 @@ function providerExists(id: string, target: Target): boolean {
     target,
     "--json",
     "--command",
-    `SELECT id FROM providers WHERE id = '${id}'`,
+    `SELECT id FROM health_systems WHERE id = '${id}'`,
   ]);
   return rowsFromD1Json(stdout).length > 0;
 }
@@ -267,7 +267,12 @@ function providerExists(id: string, target: Target): boolean {
  * checking that field would make this refuse every local write it just made.
  * Reading the row back is the one check that is true regardless of target.
  */
-function updateProviderSecret(id: string, sealed: string, updatedAt: number, target: Target): void {
+function updateHealthSystemSecret(
+  id: string,
+  sealed: string,
+  updatedAt: number,
+  target: Target,
+): void {
   runWrangler([
     "d1",
     "execute",
@@ -275,7 +280,7 @@ function updateProviderSecret(id: string, sealed: string, updatedAt: number, tar
     target,
     "--json",
     "--command",
-    `UPDATE providers SET client_secret_enc = '${sealed}', updated_at = ${String(updatedAt)} WHERE id = '${id}'`,
+    `UPDATE health_systems SET client_secret_enc = '${sealed}', updated_at = ${String(updatedAt)} WHERE id = '${id}'`,
   ]);
 
   const stdout = runWrangler([
@@ -285,7 +290,7 @@ function updateProviderSecret(id: string, sealed: string, updatedAt: number, tar
     target,
     "--json",
     "--command",
-    `SELECT client_secret_enc, updated_at FROM providers WHERE id = '${id}'`,
+    `SELECT client_secret_enc, updated_at FROM health_systems WHERE id = '${id}'`,
   ]);
   const row = rowsFromD1Json(stdout)[0];
   const wroteExpectedValue =
@@ -296,29 +301,29 @@ function updateProviderSecret(id: string, sealed: string, updatedAt: number, tar
 }
 
 /**
- * The AAD one provider's `client_secret_enc` cell is sealed under.
+ * The AAD one health system's `client_secret_enc` cell is sealed under.
  *
- * Must equal `secretAad` in `worker/db/repos/providers.ts` exactly -- that
- * private helper is what `providersRepo.getClientSecret` calls `open()` with,
+ * Must equal `secretAad` in `worker/db/repos/health-systems.ts` exactly -- that
+ * private helper is what `healthSystemsRepo.getClientSecret` calls `open()` with,
  * so a value this script writes is only ever legible to the Worker if this
- * matches it byte for byte. See `test/unit/set-provider-secret.test.ts` for
+ * matches it byte for byte. See `test/unit/set-health_system-secret.test.ts` for
  * the round trip that catches a future divergence.
  */
-export function providerSecretAad(providerId: string): string {
-  return aadFor("providers", "client_secret_enc", providerId);
+export function healthSystemSecretAad(healthSystemId: string): string {
+  return aadFor("providers", "client_secret_enc", healthSystemId);
 }
 
-/** Seals `secret` exactly the way `providersRepo.setClientSecret` does. */
-export async function sealProviderSecret(
+/** Seals `secret` exactly the way `healthSystemsRepo.setClientSecret` does. */
+export async function sealHealthSystemSecret(
   dataKey: string,
-  providerId: string,
+  healthSystemId: string,
   secret: string,
 ): Promise<string> {
-  const sealed = await sealShort(dataKey, secret, providerSecretAad(providerId));
+  const sealed = await sealShort(dataKey, secret, healthSystemSecretAad(healthSystemId));
   if (!SEALED_ENVELOPE_PATTERN.test(sealed)) {
     // Unreachable in practice -- sealShort() always returns this shape -- but this
     // value is about to be interpolated into SQL text (see
-    // `updateProviderSecret`), so it is re-checked right here rather than
+    // `updateHealthSystemSecret`), so it is re-checked right here rather than
     // trusted from a caller away.
     throw new Error("sealShort() produced an unexpected envelope shape");
   }
@@ -328,8 +333,8 @@ export async function sealProviderSecret(
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
-  if (!ID_PATTERN.test(args.providerId)) {
-    throw new Error(`--provider must be a 26-character ULID, got "${args.providerId}"`);
+  if (!ID_PATTERN.test(args.healthSystemId)) {
+    throw new Error(`--health-system must be a 26-character ULID, got "${args.healthSystemId}"`);
   }
 
   const secret = await readSecret();
@@ -338,20 +343,22 @@ async function main(): Promise<void> {
   }
 
   const dataKey = resolveDataKey();
-  const sealed = await sealProviderSecret(dataKey, args.providerId, secret);
+  const sealed = await sealHealthSystemSecret(dataKey, args.healthSystemId, secret);
 
   const targetLabel = args.target === "--remote" ? "remote" : "local";
-  if (!providerExists(args.providerId, args.target)) {
-    throw new Error(`no provider with id ${args.providerId} in the ${targetLabel} database`);
+  if (!healthSystemExists(args.healthSystemId, args.target)) {
+    throw new Error(
+      `no health system with id ${args.healthSystemId} in the ${targetLabel} database`,
+    );
   }
 
-  updateProviderSecret(args.providerId, sealed, nowSeconds(), args.target);
+  updateHealthSystemSecret(args.healthSystemId, sealed, nowSeconds(), args.target);
 
-  console.log(`${args.providerId} updated`);
+  console.log(`${args.healthSystemId} updated`);
 }
 
-// Only run when this file is executed directly (`tsx scripts/set-provider-secret.ts`
-// / `npm run set-provider-secret`), not when the unit tests import it for its
+// Only run when this file is executed directly (`tsx scripts/set-health_system-secret.ts`
+// / `npm run set-health_system-secret`), not when the unit tests import it for its
 // pure helpers -- the same guard `scripts/hash-password.ts` uses.
 const entry = process.argv[1];
 if (entry !== undefined && import.meta.url === pathToFileURL(entry).href) {
@@ -359,7 +366,7 @@ if (entry !== undefined && import.meta.url === pathToFileURL(entry).href) {
     await main();
   } catch (error) {
     console.error(
-      `set-provider-secret failed: ${error instanceof Error ? error.message : String(error)}`,
+      `set-health-system-secret failed: ${error instanceof Error ? error.message : String(error)}`,
     );
     printUsage();
     process.exit(1);

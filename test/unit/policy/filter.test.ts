@@ -28,8 +28,8 @@ function serialise(input: ApplyPolicyInput): string {
 const patient = {
   resourceType: "Patient",
   id: "p1",
-  provider: "Example Health",
-  providerId: "prov_a",
+  healthSystem: "Example Health",
+  healthSystemId: "prov_a",
   name: "Test Person",
   birthDate: "1970-07-07",
   address: { city: "Testville", state: "TS" },
@@ -39,8 +39,8 @@ const patient = {
 const observation = {
   resourceType: "Observation",
   id: "o1",
-  provider: "Example Health",
-  providerId: "prov_a",
+  healthSystem: "Example Health",
+  healthSystemId: "prov_a",
   code: "Blood pressure",
   category: ["vital-signs"],
   components: [
@@ -50,8 +50,8 @@ const observation = {
 };
 
 const rawPatient: RawEntry = {
-  provider: "Example Health",
-  providerId: "prov_a",
+  healthSystem: "Example Health",
+  healthSystemId: "prov_a",
   resource: {
     resourceType: "Patient",
     id: "p1",
@@ -104,26 +104,31 @@ describe("resource rules", () => {
   });
 });
 
-describe("provider rules", () => {
-  it("removes items and raw resources from that provider, and does not name it", () => {
-    const fromB = { ...observation, providerId: "prov_b", provider: "Other Health", id: "o2" };
+describe("health system rules", () => {
+  it("removes items and raw resources from that health system, and does not name it", () => {
+    const fromB = {
+      ...observation,
+      healthSystemId: "prov_b",
+      healthSystem: "Other Health",
+      id: "o2",
+    };
     const serialised = serialise({
       tool: "get_vitals",
       items: [observation, fromB],
       rawItems: [
         {
-          provider: "Other Health",
-          providerId: "prov_b",
+          healthSystem: "Other Health",
+          healthSystemId: "prov_b",
           resource: { resourceType: "Observation", id: "o2" },
         },
       ],
-      rules: rules({ rule_type: "provider", target: "prov_b" }),
+      rules: rules({ rule_type: "health_system", target: "prov_b" }),
     });
 
     expect(serialised).not.toContain("prov_b");
     expect(serialised).not.toContain("Other Health");
     expect(serialised).toContain("prov_a");
-    expect(serialised).toContain("policy_provider_denied");
+    expect(serialised).toContain("policy_health_system_denied");
   });
 });
 
@@ -231,11 +236,13 @@ describe("field rules across the normalized/raw vocabulary divide", () => {
   };
 
   it("the documented example strips the value from both the normalized item and the raw resource", () => {
-    const item = { ...normalizeObservation(rawBloodPressure, testCtx()), providerId: "prov_a" };
+    const item = { ...normalizeObservation(rawBloodPressure, testCtx()), healthSystemId: "prov_a" };
     const result = applyPolicy({
       tool: "get_vitals",
       items: [item],
-      rawItems: [{ provider: "Example Health", providerId: "prov_a", resource: rawBloodPressure }],
+      rawItems: [
+        { healthSystem: "Example Health", healthSystemId: "prov_a", resource: rawBloodPressure },
+      ],
       rules: rules({ rule_type: "field", target: "Observation.component[].valueQuantity.value" }),
     });
 
@@ -251,11 +258,13 @@ describe("field rules across the normalized/raw vocabulary divide", () => {
   });
 
   it("a rule written in the normalized vocabulary strips the raw value[x] behind it", () => {
-    const item = { ...normalizeObservation(rawTemperature, testCtx()), providerId: "prov_a" };
+    const item = { ...normalizeObservation(rawTemperature, testCtx()), healthSystemId: "prov_a" };
     const result = applyPolicy({
       tool: "get_vitals",
       items: [item],
-      rawItems: [{ provider: "Example Health", providerId: "prov_a", resource: rawTemperature }],
+      rawItems: [
+        { healthSystem: "Example Health", healthSystemId: "prov_a", resource: rawTemperature },
+      ],
       rules: rules({ rule_type: "field", target: "Observation.value" }),
     });
 
@@ -267,7 +276,7 @@ describe("field rules across the normalized/raw vocabulary divide", () => {
   it("a rule in either vocabulary is inert -- and silent -- against a shape with nothing to remove", () => {
     // No `component[]` on this Observation, so the raw-vocabulary rule has
     // nothing to strip there; it must not report a removal it did not make.
-    const item = { ...normalizeObservation(rawTemperature, testCtx()), providerId: "prov_a" };
+    const item = { ...normalizeObservation(rawTemperature, testCtx()), healthSystemId: "prov_a" };
     const result = applyPolicy({
       tool: "get_vitals",
       items: [item],
@@ -286,8 +295,8 @@ describe("field rules against the appointment view", () => {
   // in any of the three vocabularies has to reach it.
   const appointment = {
     resourceType: "Encounter",
-    provider: "Example Health",
-    providerId: "prov_a",
+    healthSystem: "Example Health",
+    healthSystemId: "prov_a",
     source: "portal",
     status: "scheduled",
     start: "2026-07-01T09:00:00+00:00",
@@ -299,8 +308,8 @@ describe("field rules against the appointment view", () => {
   const encounterItem = {
     resourceType: "Encounter",
     id: "enc-1",
-    provider: "Example Health",
-    providerId: "prov_a",
+    healthSystem: "Example Health",
+    healthSystemId: "prov_a",
     practitioners: [{ name: "Q. Example, DO" }],
   };
 
@@ -387,8 +396,8 @@ describe("the sensitive default", () => {
     const coverage = {
       resourceType: "Coverage",
       id: "c1",
-      provider: "Example Health",
-      providerId: "prov_a",
+      healthSystem: "Example Health",
+      healthSystemId: "prov_a",
       payor: ["Example Insurer"],
       status: "active",
       subscriberId: "SUB-12345",
@@ -414,7 +423,7 @@ describe("things that are not items", () => {
   it("drops a value it cannot filter rather than passing it through", () => {
     // No tool produces one, and that is the point: the choke point's contract is
     // that nothing leaves unfiltered, so a value with no `resourceType` to judge,
-    // no `providerId` to check and no `sensitive` list to honour is dropped.
+    // no `healthSystemId` to check and no `sensitive` list to honour is dropped.
     const result = applyPolicy({
       tool: "get_conditions",
       items: ["a bare string", 42, null, patient],
@@ -451,8 +460,8 @@ describe("combinations", () => {
       rawItems: [
         rawPatient,
         {
-          provider: "Example Health",
-          providerId: "prov_a",
+          healthSystem: "Example Health",
+          healthSystemId: "prov_a",
           resource: { resourceType: "Observation", id: "o1" },
         },
       ],

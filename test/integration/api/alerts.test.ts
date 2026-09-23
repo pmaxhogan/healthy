@@ -32,7 +32,7 @@ describe("GET /api/alerts", () => {
     const opened = await repos.alerts.openOrGet("google");
     await repos.alerts.setCard(opened.alert.id, "card-1");
     await repos.alerts.resolve("google");
-    await repos.alerts.openOrGet("provider:PROV1");
+    await repos.alerts.openOrGet("health_system:PROV1");
 
     const alerts = await json<AlertDto[]>(await owner().get("/api/alerts"));
 
@@ -40,10 +40,10 @@ describe("GET /api/alerts", () => {
     const google = alerts.find((alert) => alert.subject === "google");
     expect(google?.trelloCardId).toBe("card-1");
     expect(google?.resolvedAt).not.toBeNull();
-    expect(google?.providerId).toBeNull();
-    const provider = alerts.find((alert) => alert.subject === "provider:PROV1");
-    expect(provider?.providerId).toBe("PROV1");
-    expect(provider?.resolvedAt).toBeNull();
+    expect(google?.healthSystemId).toBeNull();
+    const healthSystem = alerts.find((alert) => alert.subject === "health_system:PROV1");
+    expect(healthSystem?.healthSystemId).toBe("PROV1");
+    expect(healthSystem?.resolvedAt).toBeNull();
   });
 
   it("honours ?limit=", async () => {

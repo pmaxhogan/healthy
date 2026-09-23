@@ -40,7 +40,7 @@ import type { SettingKey, Settings } from "./schemas.ts";
 export const FALLBACK_TIMEZONE = "UTC";
 
 // Once per isolate, not once per call: the hourly sync would otherwise emit the
-// same warning for every provider on every run. A one-field object rather than a
+// same warning for every health system on every run. A one-field object rather than a
 // bare `let`, because a module-level `let` reassigned from inside a function is
 // exactly the pattern that makes state like this hard to find.
 const warned = { timezone: false };

@@ -40,7 +40,7 @@ export function normalizeImmunization(
   return {
     resourceType: "Immunization",
     id: resource.id ?? "",
-    provider: ctx.provider,
+    healthSystem: ctx.healthSystem,
     ...(resource.meta?.lastUpdated && { lastUpdated: resource.meta.lastUpdated }),
     ...(vaccine && { vaccine }),
     ...(occurrence && { occurrence }),

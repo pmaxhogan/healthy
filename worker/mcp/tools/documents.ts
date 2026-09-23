@@ -16,7 +16,7 @@
 import { z } from "zod";
 
 import { WINDOW_ARGS, toolArgs } from "../args.ts";
-import { selectProviders, spec } from "../collect.ts";
+import { selectHealthSystems, spec } from "../collect.ts";
 import { respond, toolError } from "../respond.ts";
 
 import { collectionTool, readTool } from "./register.ts";
@@ -34,10 +34,10 @@ const FAILURE_CODES: Record<DocumentTextFailure, ToolErrorCode> = {
 };
 
 const DOCUMENT_TEXT_ARGS = z.strictObject({
-  provider: z
+  healthSystem: z
     .string()
     .min(1)
-    .describe("Provider id, or a case-insensitive substring of its display name."),
+    .describe("Health system id, or a case-insensitive substring of its display name."),
   id: z.string().min(1).describe("The DocumentReference id, as get_documents reported it."),
 });
 
@@ -65,20 +65,26 @@ export function registerDocumentTools(server: McpServer, deps: ToolDeps): void {
       schema: DOCUMENT_TEXT_ARGS,
     },
     async (args, run) => {
-      const matches = selectProviders(await deps.providers(), run.rules, [args.provider]);
-      const [provider] = matches;
-      if (provider === undefined) {
-        return toolError("not_found", { detail: "no provider matches that name or id" });
+      const matches = selectHealthSystems(await deps.healthSystems(), run.rules, [
+        args.healthSystem,
+      ]);
+      const [healthSystem] = matches;
+      if (healthSystem === undefined) {
+        return toolError("not_found", { detail: "no health system matches that name or id" });
       }
       if (matches.length > 1) {
         return toolError("not_found", {
-          detail: "that name matches more than one provider; use the id from list_providers",
+          detail:
+            "that name matches more than one health system; use the id from list_health_systems",
         });
       }
 
-      const result = await deps.documentText({ providerId: provider.id, documentId: args.id });
+      const result = await deps.documentText({
+        healthSystemId: healthSystem.id,
+        documentId: args.id,
+      });
       if (!result.ok) {
-        return toolError(FAILURE_CODES[result.reason], { providerIds: [provider.id] });
+        return toolError(FAILURE_CODES[result.reason], { healthSystemIds: [healthSystem.id] });
       }
 
       return respond({
@@ -88,8 +94,8 @@ export function registerDocumentTools(server: McpServer, deps: ToolDeps): void {
           {
             resourceType: "DocumentReference",
             kind: "document_text",
-            provider: provider.displayName,
-            providerId: provider.id,
+            healthSystem: healthSystem.displayName,
+            healthSystemId: healthSystem.id,
             id: result.documentId,
             contentType: result.contentType,
             cached: result.cached,
@@ -98,7 +104,7 @@ export function registerDocumentTools(server: McpServer, deps: ToolDeps): void {
           },
         ],
         limit: 1,
-        providerIds: [provider.id],
+        healthSystemIds: [healthSystem.id],
         now: run.now,
       });
     },

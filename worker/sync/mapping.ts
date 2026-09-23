@@ -43,7 +43,7 @@ import { AppError } from "../lib/errors.ts";
 import { addMinutes, formatInZone } from "../lib/time.ts";
 
 import type { Blinder } from "../db/blind.ts";
-import type { ProviderConfig } from "../db/schemas.ts";
+import type { HealthSystemConfig } from "../db/schemas.ts";
 import type { NormalizedAddress, NormalizedAppointmentView } from "../fhir/normalize/types.ts";
 import type { CalendarEventModel } from "../google/types.ts";
 
@@ -62,7 +62,7 @@ const OFF_SCHEDULE_STATUSES: ReadonlySet<string> = new Set(["cancelled", "entere
 const FOOTER_PREFIX = "Synced by Healthy · last checked ";
 const FOOTER_SUFFIX = " · do not edit";
 const GHOST_TITLE_PREFIX = "Cancelled: ";
-const VANISHED_PREFIX = "No longer on the provider's schedule as of ";
+const VANISHED_PREFIX = "No longer on the health system's schedule as of ";
 
 /**
  * Characters a title template uses to join two values.
@@ -111,17 +111,17 @@ export interface MappingSettings {
   defaultArrivalOffsetMin: number;
 }
 
-/** The provider fields the mapping reads, with its stored per-provider config. */
-interface MappingProvider {
+/** The health system fields the mapping reads, with its stored per-health system config. */
+interface MappingHealthSystem {
   id: string;
   displayName: string;
   portalUrl: string | null;
-  /** `providers.config_json`, already parsed. Snake_case, as stored. */
-  config: ProviderConfig;
+  /** `health_systems.config_json`, already parsed. Snake_case, as stored. */
+  config: HealthSystemConfig;
 }
 
 export interface MappingInput {
-  provider: MappingProvider;
+  healthSystem: MappingHealthSystem;
   settings: MappingSettings;
   /** ISO instant the run started, rendered into the footer. */
   nowIso: string;
@@ -168,32 +168,32 @@ export interface GhostOptions {
 }
 
 /**
- * `<providerId>:<encounterId>`: the *logical* key. What is stored and written to
+ * `<healthSystemId>:<encounterId>`: the *logical* key. What is stored and written to
  * Google is `blindEventKey(blinder, eventKey(...))`.
  */
-export function eventKey(providerId: string, encounterId: string): string {
-  return `${providerId}:${encounterId}`;
+export function eventKey(healthSystemId: string, encounterId: string): string {
+  return `${healthSystemId}:${encounterId}`;
 }
 
 /** Split an event key back into its halves. Null when it is not one of ours. */
-export function parseEventKey(key: string): { providerId: string; encounterId: string } | null {
+export function parseEventKey(key: string): { healthSystemId: string; encounterId: string } | null {
   const index = key.indexOf(":");
   return index <= 0 || index === key.length - 1
     ? null
-    : { providerId: key.slice(0, index), encounterId: key.slice(index + 1) };
+    : { healthSystemId: key.slice(0, index), encounterId: key.slice(index + 1) };
 }
 
 /**
  * Minutes to arrive early for this appointment.
  *
- * Precedence, most specific first: a per-visit-type override on the provider, the
- * provider's own default, then the global default. Visit types are matched
+ * Precedence, most specific first: a per-visit-type override on the health system, the
+ * health system's own default, then the global default. Visit types are matched
  * case-insensitively because Epic's `Encounter.type[0].text` capitalisation
  * varies between organisations and between versions of the same one.
  */
 export function arrivalOffsetFor(
   visitType: string | undefined,
-  config: ProviderConfig,
+  config: HealthSystemConfig,
   fallbackMin: number,
 ): number {
   if (visitType !== undefined) {
@@ -323,9 +323,12 @@ function joinInline(parts: readonly (string | undefined)[], separator: string): 
  * Kept separate because this -- and not the whole description -- is what the
  * fingerprint covers. See the module comment.
  */
-function descriptionBody(view: NormalizedAppointmentView, provider: MappingProvider): string {
+function descriptionBody(
+  view: NormalizedAppointmentView,
+  healthSystem: MappingHealthSystem,
+): string {
   const where = joinLines([
-    view.org ?? provider.displayName,
+    view.org ?? healthSystem.displayName,
     view.department,
     view.location?.name,
     joinInline([addressText(view.location?.address), view.location?.phone], " · "),
@@ -334,7 +337,7 @@ function descriptionBody(view: NormalizedAppointmentView, provider: MappingProvi
     joinInline([view.practitioner, view.specialty], " — "),
     joinInline([view.visitType, view.status], " · "),
   ]);
-  return joinSections([where, who, provider.portalUrl ?? ""]);
+  return joinSections([where, who, healthSystem.portalUrl ?? ""]);
 }
 
 /** Everything the fingerprint covers, in a fixed order. */
@@ -370,27 +373,27 @@ export async function buildCalendarModel(
       encounterId: view.encounterId,
     });
   }
-  const { provider, settings } = input;
+  const { healthSystem, settings } = input;
   const timezone = settings.timezone;
   const apptTime = formatApptTime(reportedStart, timezone);
 
   const offsetMin = arrivalOffsetFor(
     view.visitType,
-    provider.config,
+    healthSystem.config,
     settings.defaultArrivalOffsetMin,
   );
   const start = offsetMin > 0 ? addMinutes(reportedStart, -offsetMin) : reportedStart;
   const end = resolveEnd(reportedStart, view.end, start);
 
-  const template = provider.config.title_template ?? settings.defaultTitleTemplate;
+  const template = healthSystem.config.title_template ?? settings.defaultTitleTemplate;
   const baseTitle = renderTitle(
     template,
     new Map([
       ["visitType", view.visitType ?? ""],
       ["practitioner", view.practitioner ?? ""],
       ["specialty", view.specialty ?? ""],
-      ["orgShort", provider.config.org_short ?? view.org ?? provider.displayName],
-      ["org", view.org ?? provider.displayName],
+      ["orgShort", healthSystem.config.org_short ?? view.org ?? healthSystem.displayName],
+      ["org", view.org ?? healthSystem.displayName],
       ["department", view.department ?? ""],
       ["apptTime", apptTime],
     ]),
@@ -400,14 +403,14 @@ export async function buildCalendarModel(
   // already says.
   const title = offsetMin > 0 ? `${baseTitle} (appt ${apptTime})` : baseTitle;
 
-  const location = locationText(view, provider.portalUrl);
-  const colorId = provider.config.color_id ?? settings.defaultColorId ?? undefined;
-  const body = descriptionBody(view, provider);
+  const location = locationText(view, healthSystem.portalUrl);
+  const colorId = healthSystem.config.color_id ?? settings.defaultColorId ?? undefined;
+  const body = descriptionBody(view, healthSystem);
 
   const draft: Omit<CalendarEventModel, "fingerprint"> = {
-    key: await blindEventKey(input.blinder, eventKey(provider.id, view.encounterId)),
+    key: await blindEventKey(input.blinder, eventKey(healthSystem.id, view.encounterId)),
     encounterId: view.encounterId,
-    provider: provider.id,
+    healthSystem: healthSystem.id,
     title,
     description: joinSections([body, footerLine(input.nowIso, timezone)]),
     ...(location !== undefined && { location }),

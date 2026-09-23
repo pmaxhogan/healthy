@@ -18,7 +18,7 @@ describe("run_log.start and finish", () => {
       finishedAt: null,
       ok: null,
       summary: {
-        providers: 0,
+        healthSystems: 0,
         inserted: 0,
         patched: 0,
         ghosted: 0,
@@ -39,13 +39,13 @@ describe("run_log.start and finish", () => {
     time.advance(42);
     await repos.runLog.finish(id, {
       ok: true,
-      summary: { providers: 2, inserted: 3, ghosted: 1, warnings: ["4119"] },
+      summary: { healthSystems: 2, inserted: 3, ghosted: 1, warnings: ["4119"] },
     });
 
     expect(await repos.runLog.get(id)).toMatchObject({
       finishedAt: T0 + 42,
       ok: true,
-      summary: { providers: 2, inserted: 3, ghosted: 1, patched: 0, warnings: ["4119"] },
+      summary: { healthSystems: 2, inserted: 3, ghosted: 1, patched: 0, warnings: ["4119"] },
     });
   });
 

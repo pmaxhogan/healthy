@@ -4,7 +4,7 @@
  *
  * Why a keepalive exists at all. Epic's refresh tokens expire on a rolling window
  * measured from last use, so a connection that is never *refreshed* eventually
- * dies even though nothing is wrong with it -- and a provider whose appointments
+ * dies even though nothing is wrong with it -- and a health system whose appointments
  * are all in the past makes no upstream request at all. Touching every connection
  * once an hour keeps the grant alive, and it surfaces a revoked one within the hour
  * rather than whenever the owner next happens to have an appointment.
@@ -56,19 +56,19 @@ export interface RefreshTokenResult {
  */
 export async function refreshConnectionToken(
   ctx: Ctx,
-  providerId: string,
+  healthSystemId: string,
   options: RefreshTokenOptions = {},
 ): Promise<RefreshTokenResult> {
   const repos = makeRepos(ctx);
   const runId = await repos.runLog.start(options.trigger ?? "refresh");
   try {
-    const handle = await withAccessToken(ctx, providerId, options.deps ?? {});
+    const handle = await withAccessToken(ctx, healthSystemId, options.deps ?? {});
     await handle.getAccessToken(options.force === true ? { forceRefresh: true } : undefined);
-    const connection = await repos.connections.getForProvider(providerId);
+    const connection = await repos.connections.getForHealthSystem(healthSystemId);
     if (connection === null) {
-      throw new AppError("not_connected", "the provider is not connected", { providerId });
+      throw new AppError("not_connected", "the health system is not connected", { healthSystemId });
     }
-    await repos.runLog.finish(runId, { ok: true, summary: { providers: 1 } });
+    await repos.runLog.finish(runId, { ok: true, summary: { healthSystems: 1 } });
     return {
       status: connection.status,
       accessExpiresAt:
@@ -77,9 +77,9 @@ export async function refreshConnectionToken(
   } catch (error) {
     await repos.runLog.finish(runId, {
       ok: false,
-      summary: { providers: 1, errors: [codeOf(error)] },
+      summary: { healthSystems: 1, errors: [codeOf(error)] },
     });
-    ctx.log.warn("sync.refresh_failed", { providerId, ...errorFields(error) });
+    ctx.log.warn("sync.refresh_failed", { healthSystemId, ...errorFields(error) });
     throw error;
   }
 }
@@ -88,7 +88,7 @@ export async function refreshConnectionToken(
  * Touch every connection, Google included, so no grant dies of disuse.
  *
  * Isolated per connection and never throws: this runs alongside the hourly sync,
- * and a single broken provider must not stop the others being kept alive. The
+ * and a single broken health system must not stop the others being kept alive. The
  * failures it finds have already marked their connection and opened their alert
  * inside the token managers.
  */
@@ -96,15 +96,15 @@ export async function runTokenKeepalive(ctx: Ctx, deps: SyncDeps = {}): Promise<
   const repos = makeRepos(ctx);
   const outcome = await record(ctx, "refresh", async (state) => {
     const targets = await syncTargets(repos);
-    state.summary.providers = targets.length;
+    state.summary.healthSystems = targets.length;
     for (const target of targets) {
       try {
-        const handle = await withAccessToken(ctx, target.provider.id, deps);
+        const handle = await withAccessToken(ctx, target.healthSystem.id, deps);
         await handle.getAccessToken();
       } catch (error) {
-        state.summary.errors.push({ providerId: target.provider.id, code: codeOf(error) });
+        state.summary.errors.push({ healthSystemId: target.healthSystem.id, code: codeOf(error) });
         ctx.log.warn("sync.keepalive_failed", {
-          providerId: target.provider.id,
+          healthSystemId: target.healthSystem.id,
           ...errorFields(error),
         });
       }
@@ -113,8 +113,8 @@ export async function runTokenKeepalive(ctx: Ctx, deps: SyncDeps = {}): Promise<
       const getGoogleToken = await withGoogleAccessToken(ctx, deps);
       await getGoogleToken();
     } catch (error) {
-      state.summary.errors.push({ providerId: "google", code: codeOf(error) });
-      ctx.log.warn("sync.keepalive_failed", { providerId: "google", ...errorFields(error) });
+      state.summary.errors.push({ healthSystemId: "google", code: codeOf(error) });
+      ctx.log.warn("sync.keepalive_failed", { healthSystemId: "google", ...errorFields(error) });
     }
   });
   return outcome.summary;

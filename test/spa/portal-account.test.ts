@@ -1,7 +1,7 @@
 // PortalAccountCard covers the wave B2 admin UI: saving a login, starting a
 // sign-in and watching it through the emailed-code round trip, and the two
 // destructive actions. `GET`, `PUT` and `DELETE` (remove) all share the exact
-// path `/api/providers/prov-1/portal`, so `installPortal` below branches on
+// path `/api/health-systems/prov-1/portal`, so `installPortal` below branches on
 // the method of the *last recorded call* rather than registering three routes
 // that `installFakeApi` (which keys on path only) could not tell apart.
 //
@@ -28,7 +28,7 @@ import type {
   PortalSignInPhase,
 } from "@shared/types.ts";
 
-const PORTAL_PATH = "/api/providers/prov-1/portal";
+const PORTAL_PATH = "/api/health-systems/prov-1/portal";
 
 interface PortalRoutes {
   /** Answers every GET; `n` is the 1-based count of GETs served so far. */
@@ -74,7 +74,7 @@ function installPortal(routes: PortalRoutes = {}): FakeFetch {
 }
 
 function mountCard(portalUrl: string | null = null): ReturnType<typeof mount> {
-  return mount(PortalAccountCard, { props: { providerId: "prov-1", portalUrl } });
+  return mount(PortalAccountCard, { props: { healthSystemId: "prov-1", portalUrl } });
 }
 
 async function mountLoaded(routes: PortalRoutes = {}): Promise<{
@@ -209,7 +209,7 @@ describe("PortalAccountCard: credentials", () => {
     );
   });
 
-  it("falls back to the provider's own portal URL when the account has none yet", async () => {
+  it("falls back to the health system's own portal URL when the account has none yet", async () => {
     installPortal({ get: () => portalAccount({ baseUrl: null }) });
     const wrapper = mountCard("https://portal.fromprovider.test");
     await flushPromises();

@@ -5,7 +5,7 @@
 //
 // WARNING: rotating DATA_KEY makes every existing sealed column unreadable.
 // There is no key-id in the envelope yet, so a rotation means re-authorising
-// every provider and dropping the FHIR cache. Generate this once, at setup.
+// every health system and dropping the FHIR cache. Generate this once, at setup.
 
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";

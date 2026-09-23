@@ -1,6 +1,6 @@
 // The backoff is two small functions and one judgement call: which errors mean
 // "you are going too fast" and which mean "this connection is broken". Getting
-// the second one wrong would stop the whole sync for one provider's bad token.
+// the second one wrong would stop the whole sync for one health system's bad token.
 
 import { describe, expect, it } from "vitest";
 
@@ -53,7 +53,7 @@ describe("rateLimitOf", () => {
   });
 
   it("does not mistake a broken connection for a rate limit", () => {
-    // These are per-connection problems. Backing every provider off for one of
+    // These are per-connection problems. Backing every health system off for one of
     // them would cost the owner every other organisation's appointments.
     expect(rateLimitOf(new AppError("needs_reauth"))).toBeNull();
     expect(rateLimitOf(new AppError("upstream_auth", "forbidden", { status: 403 }))).toBeNull();

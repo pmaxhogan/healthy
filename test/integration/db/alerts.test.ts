@@ -1,21 +1,21 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { GOOGLE_SUBJECT, providerSubject } from "../../../worker/db/repos/alerts.ts";
+import { GOOGLE_SUBJECT, healthSystemSubject } from "../../../worker/db/repos/alerts.ts";
 
-import { T0, clock, resetDb, seedProvider, testRepos } from "./helpers.ts";
+import { T0, clock, resetDb, seedHealthSystem, testRepos } from "./helpers.ts";
 
 beforeEach(resetDb);
 
 describe("alerts.openOrGet", () => {
   it("opens one alert and says it created it", async () => {
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
+    const healthSystemId = await seedHealthSystem(repos);
 
-    const { alert, created } = await repos.alerts.openOrGet(providerSubject(providerId));
+    const { alert, created } = await repos.alerts.openOrGet(healthSystemSubject(healthSystemId));
 
     expect(created).toBe(true);
     expect(alert.kind).toBe("reconnect");
-    expect(alert.subject).toBe(`provider:${providerId}`);
+    expect(alert.subject).toBe(`health_system:${healthSystemId}`);
     expect(alert.opened_at).toBe(T0);
     expect(alert.resolved_at).toBeNull();
   });
@@ -24,7 +24,7 @@ describe("alerts.openOrGet", () => {
     // This is what stops the hourly sync opening a Trello card every hour for as
     // long as a connection stays broken.
     const repos = testRepos();
-    const subject = providerSubject(await seedProvider(repos));
+    const subject = healthSystemSubject(await seedHealthSystem(repos));
 
     const first = await repos.alerts.openOrGet(subject);
     const second = await repos.alerts.openOrGet(subject);
@@ -36,7 +36,7 @@ describe("alerts.openOrGet", () => {
 
   it("lets exactly one of two concurrent callers create the alert", async () => {
     const repos = testRepos();
-    const subject = providerSubject(await seedProvider(repos));
+    const subject = healthSystemSubject(await seedHealthSystem(repos));
 
     const results = await Promise.all([
       repos.alerts.openOrGet(subject),
@@ -49,8 +49,12 @@ describe("alerts.openOrGet", () => {
 
   it("keeps separate alerts for separate subjects", async () => {
     const repos = testRepos();
-    const first = providerSubject(await seedProvider(repos, { displayName: "A Example Health" }));
-    const second = providerSubject(await seedProvider(repos, { displayName: "B Example Health" }));
+    const first = healthSystemSubject(
+      await seedHealthSystem(repos, { displayName: "A Example Health" }),
+    );
+    const second = healthSystemSubject(
+      await seedHealthSystem(repos, { displayName: "B Example Health" }),
+    );
 
     await repos.alerts.openOrGet(first);
     await repos.alerts.openOrGet(second);
@@ -64,7 +68,7 @@ describe("alerts.resolve", () => {
   it("closes the open alert and hands it back so its card can be completed", async () => {
     const time = clock();
     const repos = testRepos({ now: time.now });
-    const subject = providerSubject(await seedProvider(repos));
+    const subject = healthSystemSubject(await seedHealthSystem(repos));
     const { alert } = await repos.alerts.openOrGet(subject);
     await repos.alerts.setCard(alert.id, "trello-card-1");
 
@@ -88,7 +92,7 @@ describe("alerts.resolve", () => {
     // The unique index is partial -- on unresolved rows only -- which is exactly
     // what makes a second cycle possible while still deduping within one.
     const repos = testRepos();
-    const subject = providerSubject(await seedProvider(repos));
+    const subject = healthSystemSubject(await seedHealthSystem(repos));
     const { alert: first } = await repos.alerts.openOrGet(subject);
     await repos.alerts.resolve(subject);
 

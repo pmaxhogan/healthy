@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  fromProviderConfigDto,
+  fromHealthSystemConfigDto,
   fromSettingsPatch,
   maskAccountLabel,
   reconnectPathFor,
@@ -19,18 +19,18 @@ import {
   toConnectionDto,
   toGoogleAccountDto,
   toPolicyRuleDto,
-  toProviderConfigDto,
-  toProviderDto,
+  toHealthSystemConfigDto,
+  toHealthSystemDto,
   toRunDto,
   toRunSummaryDto,
 } from "../../../worker/api/dto.ts";
-import { SETTING_DEFAULTS, providerConfigSchema } from "../../../worker/db/schemas.ts";
+import { SETTING_DEFAULTS, healthSystemConfigSchema } from "../../../worker/db/schemas.ts";
 
 import type {
   AlertRow,
   ConnectionRow,
   McpPolicyRow,
-  ProviderRow,
+  HealthSystemRow,
 } from "../../../worker/db/rows.ts";
 
 /** A stable comparator, so the key assertions do not depend on locale ordering. */
@@ -48,7 +48,7 @@ const SECRETS = {
   email: "someone@example.test",
 };
 
-const providerRow: ProviderRow = {
+const healthSystemRow: HealthSystemRow = {
   id: "PROV1",
   vendor: "epic",
   display_name: "Example Health",
@@ -65,7 +65,7 @@ const providerRow: ProviderRow = {
 
 const connectionRow: ConnectionRow = {
   id: "CONN1",
-  provider_id: "PROV1",
+  health_system_id: "PROV1",
   patient_fhir_id_enc: "v1:c2VhbGVkLXBhdGllbnQ",
   access_token_enc: "v1:c2VhbGVkLWFjY2Vzcw",
   access_expires_at: T0 + 3600,
@@ -126,19 +126,19 @@ describe("toConnectionDto", () => {
   });
 });
 
-describe("toProviderDto", () => {
-  const config = providerConfigSchema.parse(JSON.parse(providerRow.config_json));
+describe("toHealthSystemDto", () => {
+  const config = healthSystemConfigSchema.parse(JSON.parse(healthSystemRow.config_json));
 
   it("reports that a client secret is set without carrying it", () => {
-    const dto = toProviderDto({ row: providerRow, config, connection: connectionRow });
+    const dto = toHealthSystemDto({ row: healthSystemRow, config, connection: connectionRow });
 
     expect(dto.hasClientSecret).toBe(true);
     assertNoSecrets(dto);
   });
 
-  it("reports hasClientSecret false for a provider that still needs one", () => {
-    const dto = toProviderDto({
-      row: { ...providerRow, client_secret_enc: null },
+  it("reports hasClientSecret false for a health system that still needs one", () => {
+    const dto = toHealthSystemDto({
+      row: { ...healthSystemRow, client_secret_enc: null },
       config,
       connection: null,
     });
@@ -148,7 +148,7 @@ describe("toProviderDto", () => {
   });
 
   it("does not carry config_json, only the parsed camelCase config", () => {
-    const dto = toProviderDto({ row: providerRow, config, connection: null });
+    const dto = toHealthSystemDto({ row: healthSystemRow, config, connection: null });
 
     expect(JSON.stringify(dto)).not.toContain("config_json");
     expect(JSON.stringify(dto)).not.toContain("title_template");
@@ -156,9 +156,9 @@ describe("toProviderDto", () => {
   });
 });
 
-describe("the provider config mapping", () => {
+describe("the health system config mapping", () => {
   it("round-trips through both directions", () => {
-    const stored = providerConfigSchema.parse({
+    const stored = healthSystemConfigSchema.parse({
       title_template: "{visitType} · {practitioner}",
       color_id: "5",
       arrival_offset_min: 15,
@@ -167,7 +167,7 @@ describe("the provider config mapping", () => {
       enabled: false,
     });
 
-    const dto = toProviderConfigDto(stored);
+    const dto = toHealthSystemConfigDto(stored);
     expect(dto).toStrictEqual({
       titleTemplate: "{visitType} · {practitioner}",
       colorId: "5",
@@ -177,17 +177,17 @@ describe("the provider config mapping", () => {
       enabled: false,
     });
 
-    expect(providerConfigSchema.parse(fromProviderConfigDto(dto))).toStrictEqual(stored);
+    expect(healthSystemConfigSchema.parse(fromHealthSystemConfigDto(dto))).toStrictEqual(stored);
   });
 
   it("omits the optional keys that were absent rather than sending undefined", () => {
-    const dto = toProviderConfigDto(providerConfigSchema.parse({}));
+    const dto = toHealthSystemConfigDto(healthSystemConfigSchema.parse({}));
 
     expect(Object.keys(dto).toSorted(alphabetical)).toStrictEqual([
       "arrivalOffsetsByVisitType",
       "enabled",
     ]);
-    expect(Object.keys(fromProviderConfigDto({}))).toStrictEqual([]);
+    expect(Object.keys(fromHealthSystemConfigDto({}))).toStrictEqual([]);
   });
 });
 
@@ -261,7 +261,7 @@ describe("the settings mapping", () => {
     // except a key with its own dedicated route, which this patch deliberately
     // does not cover. `mail_sender_allowlist` is edited through
     // `PUT /api/mail/settings` instead, the same way `SettingsPatch` itself
-    // never grew a field for anything the /mcp or /providers routes own.
+    // never grew a field for anything the /mcp or /health systems routes own.
     // `portal_api_base_path` has no route at all -- it names no organisation
     // that a default could disclose, is needed by almost no deployment, and is
     // set directly in D1 (see `worker/db/schemas.ts`'s comment on it).
@@ -291,14 +291,14 @@ describe("the settings mapping", () => {
 
 describe("toRunSummaryDto", () => {
   const stored = {
-    providers: 2,
+    healthSystems: 2,
     inserted: 3,
     patched: 1,
     ghosted: 4,
     restored: 2,
     unchanged: 10,
     resources: 120,
-    // Bare codes, no provider prefix -- `toStoredSummary` writes them this way
+    // Bare codes, no health system prefix -- `toStoredSummary` writes them this way
     // by design, so this fixture does too rather than exercising a shape that
     // never actually reaches this function.
     errors: ["upstream_unavailable", "needs_reauth"],
@@ -341,7 +341,7 @@ describe("toRunSummaryDto", () => {
     expect(toRunSummaryDto({ ...stored, backedOff: true }).backedOff).toBe(true);
   });
 
-  it("passes the stored error codes straight through, with no provider to reconstruct", () => {
+  it("passes the stored error codes straight through, with no health system to reconstruct", () => {
     expect(toRunSummaryDto(stored).errors).toStrictEqual(["upstream_unavailable", "needs_reauth"]);
   });
 
@@ -370,7 +370,7 @@ describe("toRunDto", () => {
       finishedAt: null,
       ok: null,
       summary: {
-        providers: 0,
+        healthSystems: 0,
         inserted: 0,
         patched: 0,
         ghosted: 0,
@@ -398,18 +398,18 @@ describe("toAlertDto", () => {
   const row: AlertRow = {
     id: "ALERT1",
     kind: "reconnect",
-    subject: "provider:PROV1",
+    subject: "health_system:PROV1",
     trello_card_id: "card-1",
     opened_at: T0,
     resolved_at: null,
   };
 
-  it("extracts the provider id from the subject", () => {
-    expect(toAlertDto(row).providerId).toBe("PROV1");
+  it("extracts the health system id from the subject", () => {
+    expect(toAlertDto(row).healthSystemId).toBe("PROV1");
   });
 
-  it("reports no provider id for the Google subject", () => {
-    expect(toAlertDto({ ...row, subject: "google" }).providerId).toBeNull();
+  it("reports no health system id for the Google subject", () => {
+    expect(toAlertDto({ ...row, subject: "google" }).healthSystemId).toBeNull();
   });
 });
 
@@ -463,7 +463,7 @@ describe("toPolicyRuleDto and toAuditDto", () => {
       ts: T0,
       clientId: null,
       tool: "get_appointments",
-      providers: ["PROV1"],
+      healthSystems: ["PROV1"],
       resultCount: 3,
       ok: true,
       errorCode: null,
@@ -472,6 +472,6 @@ describe("toPolicyRuleDto and toAuditDto", () => {
 
     expect(dto.clientId).toBe("unknown");
     expect(dto.durationMs).toBe(0);
-    expect(dto.providerIds).toStrictEqual(["PROV1"]);
+    expect(dto.healthSystemIds).toStrictEqual(["PROV1"]);
   });
 });

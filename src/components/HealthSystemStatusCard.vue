@@ -1,7 +1,7 @@
 <script setup lang="ts">
-// One provider's health, on the overview.
+// One health system's health, on the overview.
 //
-// Read-only apart from Reconnect: editing lives on /providers. The Reconnect
+// Read-only apart from Reconnect: editing lives on /health systems. The Reconnect
 // link is a real anchor because the OAuth start is a Worker route that redirects
 // off-origin -- a fetch could not follow it and a router push would not leave.
 
@@ -12,21 +12,21 @@ import { reconnectHref } from "../lib/oauth.ts";
 
 import StatusPill from "./StatusPill.vue";
 
-import type { ProviderDto } from "@shared/types.ts";
+import type { HealthSystemDto } from "@shared/types.ts";
 
-const props = defineProps<{ provider: ProviderDto }>();
+const props = defineProps<{ healthSystem: HealthSystemDto }>();
 
-const connection = computed(() => props.provider.connection);
+const connection = computed(() => props.healthSystem.connection);
 const status = computed(() => connection.value?.status ?? "disconnected");
 const expired = computed(() => isPast(connection.value?.accessExpiresAt));
-const href = computed(() => reconnectHref(props.provider));
+const href = computed(() => reconnectHref(props.healthSystem));
 </script>
 
 <template>
   <article class="card">
     <div class="head">
-      <h3>{{ provider.displayName }}</h3>
-      <span v-if="provider.environment === 'sandbox'" class="chip env">sandbox</span>
+      <h3>{{ healthSystem.displayName }}</h3>
+      <span v-if="healthSystem.environment === 'sandbox'" class="chip env">sandbox</span>
       <StatusPill :status="status" />
     </div>
 
@@ -51,8 +51,8 @@ const href = computed(() => reconnectHref(props.provider));
       </div>
     </dl>
 
-    <p v-if="provider.config.enabled === false" class="muted">Sync is switched off.</p>
-    <p v-else-if="!provider.hasClientSecret" class="muted">
+    <p v-if="healthSystem.config.enabled === false" class="muted">Sync is switched off.</p>
+    <p v-else-if="!healthSystem.hasClientSecret" class="muted">
       No client secret set yet — connecting will fail until one is.
     </p>
 
@@ -61,7 +61,7 @@ const href = computed(() => reconnectHref(props.provider));
       <a v-else class="btn small primary" :href="href">
         {{ status === "needs_reauth" ? "Reconnect" : "Connect" }}
       </a>
-      <RouterLink class="btn small spacer" to="/providers">Configure</RouterLink>
+      <RouterLink class="btn small spacer" to="/health-systems">Configure</RouterLink>
     </div>
   </article>
 </template>

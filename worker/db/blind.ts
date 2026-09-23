@@ -162,19 +162,19 @@ export function isBlinded(value: string): boolean {
 /** `fhir_cache.resource_id`, and `calendar_events.encounter_id` for an Encounter. */
 export function blindResourceId(
   blinder: Blinder,
-  providerId: string,
+  healthSystemId: string,
   resourceType: string,
   resourceId: string,
 ): Promise<string> {
   return blinder.id(
     "fhir_cache.resource_id",
-    `${providerId}\u{0}${resourceType}\u{0}${resourceId}`,
+    `${healthSystemId}\u{0}${resourceType}\u{0}${resourceId}`,
   );
 }
 
 /** `portal_visits.csn` and `calendar_events.portal_csn`. */
-export function blindCsn(blinder: Blinder, providerId: string, csn: string): Promise<string> {
-  return blinder.id("portal.csn", `${providerId}\u{0}${csn}`);
+export function blindCsn(blinder: Blinder, healthSystemId: string, csn: string): Promise<string> {
+  return blinder.id("portal.csn", `${healthSystemId}\u{0}${csn}`);
 }
 
 /** `calendar_events.calendar_id`: the owner's calendar id is usually their email address. */
@@ -189,11 +189,11 @@ const PORTAL_KEY_INFIX = "csn:";
  * The stored form of an event key -- the `calendar_events` primary key and the
  * `extendedProperties.private.key` marker on the Google event alike.
  *
- * `logicalKey` is what the key used to be: `<providerId>:<encounterId>` or
- * `<providerId>:csn:<csn>`. Only the upstream half is blinded, and the
+ * `logicalKey` is what the key used to be: `<healthSystemId>:<encounterId>` or
+ * `<healthSystemId>:csn:<csn>`. Only the upstream half is blinded, and the
  * structure is kept, because the sync partitions Google's listing by the
- * `<providerId>:` prefix and tells portal keys from FHIR keys by `:csn:`. The
- * provider half is this app's own row id and names no one.
+ * `<healthSystemId>:` prefix and tells portal keys from FHIR keys by `:csn:`. The
+ * health system half is this app's own row id and names no one.
  *
  * Deterministic in the logical key alone, which is what lets the backfill turn
  * every pre-blinding key -- in D1 and on the calendar -- into the key the sync
@@ -201,13 +201,13 @@ const PORTAL_KEY_INFIX = "csn:";
  */
 export async function blindEventKey(blinder: Blinder, logicalKey: string): Promise<string> {
   const separator = logicalKey.indexOf(":");
-  if (separator <= 0) throw blindError("event key has no provider prefix");
-  const providerId = logicalKey.slice(0, separator);
+  if (separator <= 0) throw blindError("event key has no health system prefix");
+  const healthSystemId = logicalKey.slice(0, separator);
   const rest = logicalKey.slice(separator + 1);
   const blinded = await blinder.id("calendar_events.event_key", logicalKey);
   return rest.startsWith(PORTAL_KEY_INFIX)
-    ? `${providerId}:${PORTAL_KEY_INFIX}${blinded}`
-    : `${providerId}:${blinded}`;
+    ? `${healthSystemId}:${PORTAL_KEY_INFIX}${blinded}`
+    : `${healthSystemId}:${blinded}`;
 }
 
 /** True when an event key is already in its blinded form. */

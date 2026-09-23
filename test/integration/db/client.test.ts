@@ -170,12 +170,12 @@ describe("reposFor", () => {
         "oauthStates",
         "portalAccounts",
         "portalVisits",
-        "providers",
+        "healthSystems",
         "runLog",
       ]),
     );
     expect(repos.ctx.now()).toBe(T0);
     // Reaches the real database, not a stub.
-    expect(await repos.providers.list()).toStrictEqual([]);
+    expect(await repos.healthSystems.list()).toStrictEqual([]);
   });
 });

@@ -28,7 +28,7 @@ import { toAlertDto, toRunDto, toSettingsDto } from "../dto.ts";
 import { NO_STORE, apiContext } from "../http.ts";
 
 import { projectGoogle } from "./google.ts";
-import { listProviderDtos } from "./providers.ts";
+import { listHealthSystemDtos } from "./health-systems.ts";
 
 import type { AppHonoEnv } from "../../auth/gate.ts";
 import type { CalendarEventState } from "../../db/rows.ts";
@@ -45,8 +45,8 @@ import type { OverviewDto } from "@shared/types.ts";
  * report two cached "records" for a provider that has never been synced.
  */
 function clinicalCounts(
-  counts: readonly { providerId: string; resourceType: string; count: number }[],
-): { providerId: string; resourceType: string; count: number }[] {
+  counts: readonly { healthSystemId: string; resourceType: string; count: number }[],
+): { healthSystemId: string; resourceType: string; count: number }[] {
   return counts.filter((entry) => !isDiscoveryCacheType(entry.resourceType));
 }
 
@@ -94,8 +94,8 @@ async function countGrants(api: ApiContext, env: Env): Promise<number> {
 overviewRouter.get("/", async (c) => {
   const api = apiContext(c);
 
-  const [providers, google, alertRows, runEntries, cacheCounts, settings] = await Promise.all([
-    listProviderDtos(api),
+  const [healthSystems, google, alertRows, runEntries, cacheCounts, settings] = await Promise.all([
+    listHealthSystemDtos(api),
     projectGoogle(api),
     api.repos.alerts.listOpen(),
     api.repos.runLog.listRecent({ limit: OVERVIEW_RUNS }),
@@ -110,7 +110,7 @@ overviewRouter.get("/", async (c) => {
   ]);
 
   const overview: OverviewDto = {
-    providers,
+    healthSystems,
     google,
     openAlerts: alertRows.map((row) => toAlertDto(row)),
     lastRuns: runEntries.map((entry) => toRunDto(entry)),

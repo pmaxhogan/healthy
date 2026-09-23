@@ -17,7 +17,7 @@ const GHOST_FP = "fingerprint-ghost";
 function row(overrides: Partial<CalendarEventRow> = {}): CalendarEventRow {
   return {
     event_key: KEY,
-    provider_id: "prov-1",
+    health_system_id: "prov-1",
     encounter_id: "enc-1",
     calendar_id: "primary",
     google_event_id: "google-1",
@@ -43,7 +43,9 @@ function event(overrides: Partial<EventRecord> = {}): EventRecord {
     end: { dateTime: "2026-10-01T16:00:00Z", timeZone: "UTC" },
     colorId: null,
     transparency: null,
-    extendedProperties: { private: { healthy: "1", key: KEY, fp: ACTIVE_FP, provider: "prov-1" } },
+    extendedProperties: {
+      private: { healthy: "1", key: KEY, fp: ACTIVE_FP, healthSystem: "prov-1" },
+    },
     updated: null,
     etag: null,
     ...overrides,

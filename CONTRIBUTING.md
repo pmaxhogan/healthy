@@ -24,7 +24,7 @@ You will also need [gitleaks](https://github.com/gitleaks/gitleaks) on your PATH
 This repository is public and the application handles health information. **No
 commit may contain personal data**, including:
 
-- health-system, clinic, or provider names
+- health-system, clinic, or health system names
 - FHIR base URLs, organisation ids, or portal URLs
 - email addresses, patient identifiers, or anything from a real record
 - the Cloudflare Access team domain or application AUD
@@ -45,7 +45,7 @@ gitignored and must stay that way.
 - Tests: pure logic goes in `test/unit/` (fast, Node); anything touching D1, a
   Durable Object, or the Worker's request path goes in `test/integration/`,
   which runs in real workerd.
-- No logging of tokens, patient data, or provider names. Structured JSON logs
+- No logging of tokens, patient data, or health system names. Structured JSON logs
   with explicit fields only.
 - Commits are Conventional Commits (`feat:`, `fix:`, `chore:` …).
 

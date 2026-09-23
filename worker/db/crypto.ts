@@ -17,7 +17,7 @@
  *
  * The AAD is not decoration. It binds a ciphertext to exactly one
  * `<table>.<column>.<rowId>`, so a value copied from one row to another -- say a
- * revoked provider's client secret pasted over a live one, or a cached payload
+ * revoked health system's client secret pasted over a live one, or a cached payload
  * moved between patients -- fails to open rather than quietly decrypting. Every
  * caller must therefore pass the same `aadFor(...)` on open as it did on seal.
  *
@@ -119,7 +119,7 @@ function keyFor(source: KeySource): Promise<CryptoKey> {
 
 /**
  * The AAD for one cell. `rowId` is whatever uniquely names the row in its table:
- * a primary key, or a composite like `<providerId>:<type>:<id>` for the cache.
+ * a primary key, or a composite like `<healthSystemId>:<type>:<id>` for the cache.
  */
 export function aadFor(table: string, column: string, rowId: string | number): string {
   return `${table}.${column}.${String(rowId)}`;

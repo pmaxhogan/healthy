@@ -45,7 +45,7 @@ describe("normalizeResource", () => {
     expect(result).toEqual({
       resourceType: "ImagingStudy",
       id: "img-1",
-      provider: "example-provider",
+      healthSystem: "example-health_system",
       text: "<div>Chest X-ray, two views.</div>",
     });
   });
@@ -56,7 +56,7 @@ describe("normalizeResource", () => {
     expect(result).toEqual({
       resourceType: "Media",
       id: "media-1",
-      provider: "example-provider",
+      healthSystem: "example-health_system",
     });
   });
 });
@@ -95,7 +95,7 @@ describe("appointmentViewFromEncounter", () => {
     const view = appointmentViewFromEncounter(normalized, ctx);
 
     expect(view).toMatchObject({
-      provider: "example-provider",
+      healthSystem: "example-health_system",
       encounterId: "enc-view-1",
       status: "planned",
       start: "2026-10-01T14:00:00Z",

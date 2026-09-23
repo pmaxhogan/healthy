@@ -12,7 +12,7 @@
  *   - **30-day cache.** A practitioner's name and a clinic's address change on a
  *     scale of years. Re-reading them hourly would be the single largest source of
  *     upstream requests in the whole app.
- *   - **50 reads per provider per run -- a pace, not a ceiling.** This is the
+ *   - **50 reads per health system per run -- a pace, not a ceiling.** This is the
  *     hourly cron pass, which gets one invocation and no alarm to resume in (the
  *     Durable Object chunking `full-refresh.ts` uses does not apply here). A first
  *     sync of a long history, or a wide `window_past_days`, can reference hundreds
@@ -45,7 +45,7 @@ import type * as fhir4 from "fhir/r4";
 /** How long a resolved reference stays usable. 30 days, in milliseconds. */
 const REFERENCE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-/** Reads one provider may make in one run. See the module comment. */
+/** Reads one health system may make in one run. See the module comment. */
 const MAX_REFERENCE_READS = 50;
 
 /**
@@ -115,7 +115,7 @@ export interface ResolveReport {
 export async function resolveReferences(
   ctx: Ctx,
   repos: Repos,
-  providerId: string,
+  healthSystemId: string,
   references: readonly ParsedReference[],
   client: FhirClient,
   options: { maxReads?: number } = {},
@@ -125,7 +125,7 @@ export async function resolveReferences(
   const fetched: Resource[] = [];
 
   for (const reference of references) {
-    const cached = await repos.fhirCache.get(providerId, reference.resourceType, reference.id);
+    const cached = await repos.fhirCache.get(healthSystemId, reference.resourceType, reference.id);
     if (cached !== null) {
       report.fromCache += 1;
       report.resources.push(cached.resource as Resource);
@@ -144,7 +144,7 @@ export async function resolveReferences(
 
   if (fetched.length > 0) {
     await repos.fhirCache.upsertMany(
-      providerId,
+      healthSystemId,
       fetched.map((resource) => ({
         ...resource,
         resourceType: resource.resourceType,
@@ -162,7 +162,7 @@ export async function resolveReferences(
     // one `MAX_REFERENCE_READS` batch at a time -- but the caller has to be able
     // to see that it happened rather than notice only that an event is missing a
     // practitioner's name.
-    ctx.log.warn("sync.refs.deferred", { providerId, deferred: report.deferred, maxReads });
+    ctx.log.warn("sync.refs.deferred", { healthSystemId, deferred: report.deferred, maxReads });
   }
   return report;
 }

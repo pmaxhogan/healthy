@@ -49,7 +49,7 @@ describe("D1 migrations", () => {
 
     for (const table of [
       "settings",
-      "providers",
+      "health_systems",
       "connections",
       "google_account",
       "oauth_states",

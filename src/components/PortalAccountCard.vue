@@ -1,9 +1,9 @@
 <script setup lang="ts">
-// The MyChart portal login for one provider: save it, start a sign-in, watch it
+// The MyChart portal login for one health system: save it, start a sign-in, watch it
 // through the emailed-code round trip, sync on demand, or tear it down.
 //
-// Embedded inside ProviderEditor rather than owning its own page: the portal
-// login is a property of the provider, exactly like the FHIR client secret a
+// Embedded inside HealthSystemEditor rather than owning its own page: the portal
+// login is a property of the health system, exactly like the FHIR client secret a
 // few rows up, and it is write-only for the same reason -- this is a sealed-in-D1
 // credential, not something the UI should ever read back. Only the password
 // field is literally write-only, though: the username is not secret on its
@@ -25,12 +25,12 @@ import StateBlock from "./StateBlock.vue";
 import type { PortalDiscoveryDto, PortalSignInPhase } from "@shared/types.ts";
 
 const props = defineProps<{
-  providerId: string;
-  /** The provider's own `portalUrl`, used only to prefill an unset base URL. */
+  healthSystemId: string;
+  /** The health system's own `portalUrl`, used only to prefill an unset base URL. */
   portalUrl: string | null;
 }>();
 
-const portal = usePortalAccount(props.providerId);
+const portal = usePortalAccount(props.healthSystemId);
 
 interface Draft {
   baseUrl: string;
@@ -50,7 +50,7 @@ const draft = reactive<Draft>({
 const seeded = ref(false);
 
 // Seeds the base URL once the account has loaded, from whatever it already has
-// or, failing that, the provider's own portal URL -- and never again, so a
+// or, failing that, the health system's own portal URL -- and never again, so a
 // poll tick bringing a fresh DTO in mid-edit cannot clobber what the owner just
 // typed. `seeded` (not a bare module- or top-level binding) is what
 // unicorn/no-top-level-assignment-in-function wants for a flag written from
@@ -163,7 +163,7 @@ async function onSave(): Promise<void> {
     return;
   }
   await save.run(async () => {
-    discovered.value = await endpoints.discoverPortal(props.providerId, { baseUrl: typed });
+    discovered.value = await endpoints.discoverPortal(props.healthSystemId, { baseUrl: typed });
   });
 }
 
@@ -179,7 +179,7 @@ async function submit(confirmedOrigin: string): Promise<void> {
   const baseUrl = draft.baseUrl.trim();
   const mfaContact = draft.mfaContact.trim();
   const otpSenderDomain = draft.otpSenderDomain.trim();
-  const saved = await endpoints.savePortalAccount(props.providerId, {
+  const saved = await endpoints.savePortalAccount(props.healthSystemId, {
     username: draft.username,
     password: draft.password,
     confirmedOrigin,
@@ -191,7 +191,7 @@ async function submit(confirmedOrigin: string): Promise<void> {
   toastSuccess("Portal login saved.");
   // The password (and the username, which travelled with it) is never kept
   // around once it has been sent -- the fields go back to blank exactly like
-  // ProviderEditor's own client-secret field does.
+  // HealthSystemEditor's own client-secret field does.
   draft.username = "";
   draft.password = "";
   draft.mfaContact = "";
@@ -215,7 +215,7 @@ async function onSignIn(): Promise<void> {
   // to "Sign in now" within a few seconds even though a sign-in may genuinely
   // still be running elsewhere.
   const ok = await signIn.run(async () => {
-    const result = await endpoints.startPortalSignIn(props.providerId);
+    const result = await endpoints.startPortalSignIn(props.healthSystemId);
     signInStarted.value = result.started;
     if (result.started) toastSuccess("Sign-in started.");
   });
@@ -233,14 +233,14 @@ async function onSignIn(): Promise<void> {
 
 async function onSync(): Promise<void> {
   await syncNow.run(async () => {
-    await endpoints.syncPortalNow(props.providerId);
+    await endpoints.syncPortalNow(props.healthSystemId);
     toastSuccess("Portal sync started.");
   });
 }
 
 async function onForgetSession(): Promise<void> {
   const ok = await forgetting.run(async () => {
-    await endpoints.forgetPortalSession(props.providerId);
+    await endpoints.forgetPortalSession(props.healthSystemId);
     toastSuccess("Portal session forgotten.");
   });
   confirmingForget.value = false;
@@ -249,7 +249,7 @@ async function onForgetSession(): Promise<void> {
 
 async function onRemove(): Promise<void> {
   const ok = await removing.run(async () => {
-    await endpoints.removePortalAccount(props.providerId);
+    await endpoints.removePortalAccount(props.healthSystemId);
     toastSuccess("Portal login removed.");
   });
   confirmingRemove.value = false;
@@ -370,7 +370,7 @@ async function onRemove(): Promise<void> {
     <ConfirmDialog
       v-if="confirmingRemove"
       title="Remove this portal login?"
-      body="The stored username, password and session are deleted. Portal syncing stops for this provider until a login is saved again."
+      body="The stored username, password and session are deleted. Portal syncing stops for this health system until a login is saved again."
       confirm-label="Remove"
       :busy="removing.busy.value"
       @cancel="confirmingRemove = false"

@@ -21,7 +21,7 @@ import {
   referencePool,
   resetSyncDb,
   searchBundle,
-  seedConnectedProvider,
+  seedConnectedHealthSystem,
   seedGoogle,
   seedSettings,
   sk,
@@ -49,19 +49,19 @@ interface Harness {
   time: ReturnType<typeof clock>;
   server: FhirServer;
   upstreams: Upstreams;
-  providerId: string;
+  healthSystemId: string;
   connectionId: string;
   lines: string[];
 }
 
-/** One provider, one Google account, two appointments: the ordinary case. */
+/** One health system, one Google account, two appointments: the ordinary case. */
 async function setup(
   options: { encounters?: Parameters<typeof encounter>[0][]; trello?: boolean } = {},
 ): Promise<Harness> {
   const time = clock();
   const { log, lines } = recordingLog();
   const ctx = syncCtx({ now: time.now, log, ...(options.trello === true && { trello: true }) });
-  const seeded = await seedConnectedProvider(ctx, { host: HOST_A });
+  const seeded = await seedConnectedHealthSystem(ctx, { host: HOST_A });
   await seedGoogle(ctx);
   await seedSettings(ctx);
 
@@ -84,7 +84,7 @@ describe("the first run", () => {
 
     const summary = await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
 
-    expect(summary.providers).toBe(1);
+    expect(summary.healthSystems).toBe(1);
     expect(summary.encountersSeen).toBe(2);
     expect(summary.eventsInserted).toBe(2);
     expect(summary.eventsPatched).toBe(0);
@@ -92,10 +92,10 @@ describe("the first run", () => {
     expect(summary.errors).toStrictEqual([]);
     expect(h.upstreams.calendar.events()).toHaveLength(2);
 
-    const rows = await syncRepos(h.ctx).calendarEvents.list({ providerId: h.providerId });
+    const rows = await syncRepos(h.ctx).calendarEvents.list({ healthSystemId: h.healthSystemId });
     expect(rows.map((row) => row.event_key)).toStrictEqual([
-      await sk(`${h.providerId}:enc-2`),
-      await sk(`${h.providerId}:enc-1`),
+      await sk(`${h.healthSystemId}:enc-2`),
+      await sk(`${h.healthSystemId}:enc-1`),
     ]);
     expect(rows.every((row) => row.state === "active")).toBe(true);
   });
@@ -105,11 +105,11 @@ describe("the first run", () => {
 
     await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
 
-    const event = h.upstreams.calendar.byKey().get(await sk(`${h.providerId}:enc-1`));
+    const event = h.upstreams.calendar.byKey().get(await sk(`${h.healthSystemId}:enc-1`));
     expect(event).toBeDefined();
     const properties = (event?.extendedProperties as { private: Record<string, string> }).private;
     expect(properties.healthy).toBe("1");
-    expect(properties.provider).toBe(h.providerId);
+    expect(properties.healthSystem).toBe(h.healthSystemId);
     expect(event?.summary).toBe("Office Visit · Test Alpha");
     expect(event?.visibility).toBe("private");
     expect(event?.transparency).toBe("opaque");
@@ -146,8 +146,8 @@ describe("the first run", () => {
     expect(runs[0]?.kind).toBe("calendar");
     expect(runs[0]?.ok).toBe(true);
     expect(runs[0]?.summary.inserted).toBe(2);
-    expect(runs[0]?.summary.providers).toBe(1);
-    expect(JSON.stringify(runs[0]?.summary)).not.toContain(h.providerId);
+    expect(runs[0]?.summary.healthSystems).toBe(1);
+    expect(JSON.stringify(runs[0]?.summary)).not.toContain(h.healthSystemId);
   });
 
   it("records the trigger as manual when a human asked for it", async () => {
@@ -196,7 +196,7 @@ describe("the second run", () => {
     // No duplicates: the same two Google events, patched in place.
     expect(h.upstreams.calendar.events().map((event) => event.id)).toStrictEqual(firstIds);
 
-    const ghost = h.upstreams.calendar.byKey().get(await sk(`${h.providerId}:enc-2`));
+    const ghost = h.upstreams.calendar.byKey().get(await sk(`${h.healthSystemId}:enc-2`));
     expect(ghost?.summary).toBe("Cancelled: Office Visit · Test Alpha");
   });
 
@@ -208,15 +208,17 @@ describe("the second run", () => {
     h.server.encounters = searchBundle([encounter({ id: "enc-1", start: UPCOMING })]);
     await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
 
-    const ghost = h.upstreams.calendar.byKey().get(await sk(`${h.providerId}:enc-2`));
+    const ghost = h.upstreams.calendar.byKey().get(await sk(`${h.healthSystemId}:enc-2`));
     expect(String(ghost?.summary).startsWith("Cancelled: ")).toBe(true);
     expect(ghost?.transparency).toBe("transparent");
     expect(ghost?.colorId).toBe("8");
     // Rebuilt from fhir_cache, so the original details survive the disappearance.
     expect(String(ghost?.description)).toContain("Example Regional");
-    expect(String(ghost?.description)).toContain("No longer on the provider's schedule as of");
+    expect(String(ghost?.description)).toContain("No longer on the health system's schedule as of");
 
-    const row = await syncRepos(h.ctx).calendarEvents.getByKey(await sk(`${h.providerId}:enc-2`));
+    const row = await syncRepos(h.ctx).calendarEvents.getByKey(
+      await sk(`${h.healthSystemId}:enc-2`),
+    );
     expect(row?.state).toBe("ghost");
     expect(row?.ghosted_at).toBe(T0 + 3600);
   });
@@ -258,7 +260,7 @@ describe("the second run", () => {
     // either half on its own and the third run sees a stale fingerprint, patches
     // the same event again, re-stamps `ghosted_at`, and so does every run after it.
     const h = await setup();
-    const key = await sk(`${h.providerId}:enc-2`);
+    const key = await sk(`${h.healthSystemId}:enc-2`);
     const repos = syncRepos(h.ctx);
     await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
     const active = await repos.calendarEvents.getByKey(key);
@@ -305,12 +307,16 @@ describe("the third run", () => {
 
     expect(summary.eventsRestored).toBe(1);
     expect(summary.eventsGhosted).toBe(0);
-    const restored = h.upstreams.calendar.byKey().get(await sk(`${h.providerId}:enc-2`));
+    const restored = h.upstreams.calendar.byKey().get(await sk(`${h.healthSystemId}:enc-2`));
     expect(String(restored?.summary).startsWith("Cancelled: ")).toBe(false);
     expect(restored?.transparency).toBe("opaque");
-    expect(String(restored?.description)).not.toContain("No longer on the provider's schedule");
+    expect(String(restored?.description)).not.toContain(
+      "No longer on the health system's schedule",
+    );
 
-    const row = await syncRepos(h.ctx).calendarEvents.getByKey(await sk(`${h.providerId}:enc-2`));
+    const row = await syncRepos(h.ctx).calendarEvents.getByKey(
+      await sk(`${h.healthSystemId}:enc-2`),
+    );
     expect(row?.state).toBe("active");
     expect(row?.ghosted_at).toBeNull();
   });
@@ -328,7 +334,7 @@ describe("cancellation and other statuses", () => {
     const summary = await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
 
     expect(summary.eventsGhosted).toBe(1);
-    const ghost = h.upstreams.calendar.byKey().get(await sk(`${h.providerId}:enc-1`));
+    const ghost = h.upstreams.calendar.byKey().get(await sk(`${h.healthSystemId}:enc-1`));
     expect(ghost?.transparency).toBe("transparent");
   });
 
@@ -382,7 +388,9 @@ describe("an event the owner deleted by hand", () => {
 
     expect(summary.eventsInserted).toBe(1);
     expect(h.upstreams.calendar.events()).toHaveLength(1);
-    const row = await syncRepos(h.ctx).calendarEvents.getByKey(await sk(`${h.providerId}:enc-1`));
+    const row = await syncRepos(h.ctx).calendarEvents.getByKey(
+      await sk(`${h.healthSystemId}:enc-1`),
+    );
     expect(row?.google_event_id).not.toBe(first?.id);
   });
 
@@ -399,12 +407,12 @@ describe("an event the owner deleted by hand", () => {
     expect(summary.eventsGhosted).toBe(1);
     expect(h.upstreams.calendar.events()).toHaveLength(0);
     await expect(
-      syncRepos(h.ctx).calendarEvents.getByKey(await sk(`${h.providerId}:enc-1`)),
+      syncRepos(h.ctx).calendarEvents.getByKey(await sk(`${h.healthSystemId}:enc-1`)),
     ).resolves.toMatchObject({ state: "ghost" });
     expect(loggedEvent(h.lines, "sync.ghost.row_only")).toBe(true);
 
     // Regression: neither the sync's own ghost log nor the repo's must carry the
-    // upstream encounter id, joined or bare. `providerId` (our row id) and a short
+    // upstream encounter id, joined or bare. `healthSystemId` (our row id) and a short
     // digest are the only identifiers allowed through -- see
     // `worker/db/repos/calendar-events.ts`'s `logSafeKey` and SECURITY.md, "No PHI
     // in logs".
@@ -413,7 +421,7 @@ describe("an event the owner deleted by hand", () => {
       expect(fields.length).toBeGreaterThan(0);
       for (const line of fields) {
         const serialized = JSON.stringify(line);
-        expect(serialized).not.toContain(`${h.providerId}:`);
+        expect(serialized).not.toContain(`${h.healthSystemId}:`);
         expect(serialized).not.toContain("enc-1");
       }
     }
@@ -445,8 +453,8 @@ describe("the invariant", () => {
       extendedProperties: {
         private: {
           healthy: "1",
-          key: await sk(`${h.providerId}:gone-forever`),
-          provider: h.providerId,
+          key: await sk(`${h.healthSystemId}:gone-forever`),
+          healthSystem: h.healthSystemId,
         },
       },
     });
@@ -469,8 +477,8 @@ describe("the window", () => {
     await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
     const repos = syncRepos(h.ctx);
     await repos.calendarEvents.upsert({
-      eventKey: await sk(`${h.providerId}:ancient`),
-      providerId: h.providerId,
+      eventKey: await sk(`${h.healthSystemId}:ancient`),
+      healthSystemId: h.healthSystemId,
       encounterId: "ancient",
       calendarId: "primary",
       googleEventId: "google-ancient",
@@ -483,7 +491,7 @@ describe("the window", () => {
 
     expect(summary.eventsGhosted).toBe(0);
     await expect(
-      repos.calendarEvents.getByKey(await sk(`${h.providerId}:ancient`)),
+      repos.calendarEvents.getByKey(await sk(`${h.healthSystemId}:ancient`)),
     ).resolves.toMatchObject({
       state: "active",
     });
@@ -525,28 +533,28 @@ describe("Epic 4119, the filtered patient view", () => {
     expect(summary.eventsInserted).toBe(1);
     expect(summary.eventsGhosted).toBe(0);
     await expect(
-      syncRepos(h.ctx).calendarEvents.getByKey(await sk(`${h.providerId}:enc-1`)),
+      syncRepos(h.ctx).calendarEvents.getByKey(await sk(`${h.healthSystemId}:enc-1`)),
     ).resolves.toMatchObject({ state: "active" });
   });
 });
 
 /**
- * Two providers, sorted so "A" is attempted first.
+ * Two health systems, sorted so "A" is attempted first.
  *
  * A's access token is already inside the five-minute refresh skew, so its very
  * first request goes through the refresh path -- which is what lets a test make
  * that refresh fail without touching anything B does.
  */
-async function twoProviders(options: { trello?: boolean } = {}) {
+async function twoHealthSystems(options: { trello?: boolean } = {}) {
   const time = clock();
   const { log, lines } = recordingLog();
   const ctx = syncCtx({ now: time.now, log, ...(options.trello === true && { trello: true }) });
-  const a = await seedConnectedProvider(ctx, {
+  const a = await seedConnectedHealthSystem(ctx, {
     host: HOST_A,
     displayName: "A Example Health",
     accessTtlSeconds: 60,
   });
-  const b = await seedConnectedProvider(ctx, { host: HOST_B, displayName: "B Example Health" });
+  const b = await seedConnectedHealthSystem(ctx, { host: HOST_B, displayName: "B Example Health" });
   await seedGoogle(ctx);
   await seedSettings(ctx);
 
@@ -558,9 +566,9 @@ async function twoProviders(options: { trello?: boolean } = {}) {
   return { ctx, time, a, b, serverA, serverB, upstreams, lines };
 }
 
-describe("per-provider isolation", () => {
-  it("marks a rejected grant, opens an alert, and syncs the other provider anyway", async () => {
-    const h = await twoProviders();
+describe("per-health system isolation", () => {
+  it("marks a rejected grant, opens an alert, and syncs the other health system anyway", async () => {
+    const h = await twoHealthSystems();
     h.serverA.tokenInvalidGrant = true;
 
     const summary = await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
@@ -570,11 +578,13 @@ describe("per-provider isolation", () => {
       status: "needs_reauth",
       last_error_code: "needs_reauth",
     });
-    expect(summary.errors).toStrictEqual([{ providerId: h.a.providerId, code: "needs_reauth" }]);
+    expect(summary.errors).toStrictEqual([
+      { healthSystemId: h.a.healthSystemId, code: "needs_reauth" },
+    ]);
 
     const alerts = await repos.alerts.listOpen();
     expect(alerts).toHaveLength(1);
-    expect(alerts[0]?.subject).toBe(`provider:${h.a.providerId}`);
+    expect(alerts[0]?.subject).toBe(`health_system:${h.a.healthSystemId}`);
     // Trello is unconfigured in this env, so the row still lands and the fact is
     // logged rather than throwing into the sync.
     expect(alerts[0]?.trello_card_id).toBeNull();
@@ -582,11 +592,11 @@ describe("per-provider isolation", () => {
 
     // The other organisation's appointment is on the calendar regardless.
     expect(summary.eventsInserted).toBe(1);
-    expect(h.upstreams.calendar.byKey().has(await sk(`${h.b.providerId}:enc-b`))).toBe(true);
+    expect(h.upstreams.calendar.byKey().has(await sk(`${h.b.healthSystemId}:enc-b`))).toBe(true);
   });
 
   it("opens a Trello card, once, when Trello is configured", async () => {
-    const h = await twoProviders({ trello: true });
+    const h = await twoHealthSystems({ trello: true });
     h.serverA.tokenInvalidGrant = true;
 
     await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
@@ -607,7 +617,7 @@ describe("per-provider isolation", () => {
   });
 
   it("clears the alert once the connection works again", async () => {
-    const h = await twoProviders({ trello: true });
+    const h = await twoHealthSystems({ trello: true });
     h.serverA.tokenInvalidGrant = true;
     await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
     const repos = syncRepos(h.ctx);
@@ -629,7 +639,7 @@ describe("per-provider isolation", () => {
     // is a blip, and throwing away a working refresh token over one would cost the
     // owner a re-authorisation they did not need. The connection goes to `error`,
     // which `syncTargets` retries on the next run.
-    const h = await twoProviders();
+    const h = await twoHealthSystems();
     h.serverA.tokenStatus = 500;
 
     const summary = await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
@@ -645,15 +655,15 @@ describe("per-provider isolation", () => {
     // No reconnect alert: there is nothing for the owner to do about a 500.
     await expect(repos.alerts.listOpen()).resolves.toStrictEqual([]);
     expect(summary.errors).toStrictEqual([
-      { providerId: h.a.providerId, code: "upstream_unavailable" },
+      { healthSystemId: h.a.healthSystemId, code: "upstream_unavailable" },
     ]);
     // And the other organisation is unaffected.
     expect(summary.eventsInserted).toBe(1);
-    expect(h.upstreams.calendar.byKey().has(await sk(`${h.b.providerId}:enc-b`))).toBe(true);
+    expect(h.upstreams.calendar.byKey().has(await sk(`${h.b.healthSystemId}:enc-b`))).toBe(true);
   });
 
   it("recovers on the next run once the token endpoint is back", async () => {
-    const h = await twoProviders();
+    const h = await twoHealthSystems();
     h.serverA.tokenStatus = 500;
     await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
     h.serverA.tokenStatus = null;
@@ -662,14 +672,14 @@ describe("per-provider isolation", () => {
     const summary = await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
 
     expect(summary.errors).toStrictEqual([]);
-    expect(h.upstreams.calendar.byKey().has(await sk(`${h.a.providerId}:enc-a`))).toBe(true);
+    expect(h.upstreams.calendar.byKey().has(await sk(`${h.a.healthSystemId}:enc-a`))).toBe(true);
     await expect(syncRepos(h.ctx).connections.get(h.a.connectionId)).resolves.toMatchObject({
       status: "connected",
     });
   });
 
   it("rotates and stores the refresh token before the new access token is used", async () => {
-    const h = await twoProviders();
+    const h = await twoHealthSystems();
 
     await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
 
@@ -683,16 +693,16 @@ describe("per-provider isolation", () => {
     });
   });
 
-  it("stops every provider and backs off when one returns 429", async () => {
-    const h = await twoProviders();
-    // Provider A sorts first by display name, so B is the one that must be spared.
+  it("stops every health system and backs off when one returns 429", async () => {
+    const h = await twoHealthSystems();
+    // Health system A sorts first by display name, so B is the one that must be spared.
     h.serverA.encounterStatus = 429;
     h.serverA.retryAfter = "60";
 
     const summary = await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
 
     expect(summary.backedOff).toBe(true);
-    expect(summary.errors.map((error) => error.providerId)).toStrictEqual([h.a.providerId]);
+    expect(summary.errors.map((error) => error.healthSystemId)).toStrictEqual([h.a.healthSystemId]);
     // Two hours, not the 60 seconds the header asked for: see backoff.ts.
     const until = await getSetting(h.ctx, "sync_backoff_until");
     expect(until).toBe(T0 + 2 * 60 * 60);
@@ -701,7 +711,7 @@ describe("per-provider isolation", () => {
   });
 
   it("skips the next hourly run while the backoff stands", async () => {
-    const h = await twoProviders();
+    const h = await twoHealthSystems();
     h.serverA.encounterStatus = 429;
     await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
     const repos = syncRepos(h.ctx);
@@ -719,7 +729,7 @@ describe("per-provider isolation", () => {
   });
 
   it("runs anyway when a human forces it, and clears the backoff", async () => {
-    const h = await twoProviders();
+    const h = await twoHealthSystems();
     h.serverA.encounterStatus = 429;
     await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
     h.serverA.encounterStatus = null;
@@ -736,11 +746,11 @@ describe("per-provider isolation", () => {
     await expect(getSetting(h.ctx, "sync_backoff_until")).resolves.toBeNull();
   });
 
-  it("narrows the run to the providers it was asked for", async () => {
-    const h = await twoProviders();
+  it("narrows the run to the health systems it was asked for", async () => {
+    const h = await twoHealthSystems();
 
     await runCalendarSync(h.ctx, {
-      providerIds: [h.b.providerId],
+      healthSystemIds: [h.b.healthSystemId],
       deps: h.upstreams.deps,
     });
 
@@ -748,20 +758,20 @@ describe("per-provider isolation", () => {
     expect(h.serverB.searchCalls).toBe(1);
   });
 
-  it("skips a provider switched off in its own config", async () => {
-    const h = await twoProviders();
-    await syncRepos(h.ctx).providers.update(h.b.providerId, { config: { enabled: false } });
+  it("skips a health system switched off in its own config", async () => {
+    const h = await twoHealthSystems();
+    await syncRepos(h.ctx).healthSystems.update(h.b.healthSystemId, { config: { enabled: false } });
 
     const summary = await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
 
-    expect(summary.providers).toBe(1);
+    expect(summary.healthSystems).toBe(1);
     expect(h.serverB.searchCalls).toBe(0);
   });
 
-  it("retries a provider left in the error state by a previous run", async () => {
+  it("retries a health system left in the error state by a previous run", async () => {
     // `connections.listActive()` would have hidden it; the sync deliberately
     // does not use that.
-    const h = await twoProviders();
+    const h = await twoHealthSystems();
     await syncRepos(h.ctx).connections.markError(h.b.connectionId, "upstream_unavailable");
 
     const summary = await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
@@ -779,7 +789,7 @@ describe("Google unavailable", () => {
     const time = clock();
     const { log } = recordingLog();
     const ctx = syncCtx({ now: time.now, log });
-    await seedConnectedProvider(ctx, { host: HOST_A });
+    await seedConnectedHealthSystem(ctx, { host: HOST_A });
     await seedSettings(ctx);
     // Google is never connected.
     const server = fhirServer({ resources: referencePool() });
@@ -788,14 +798,14 @@ describe("Google unavailable", () => {
 
     const summary = await runCalendarSync(ctx, { deps: upstreams.deps });
 
-    expect(summary.errors).toStrictEqual([{ providerId: "google", code: "not_connected" }]);
+    expect(summary.errors).toStrictEqual([{ healthSystemId: "google", code: "not_connected" }]);
     expect(server.searchCalls).toBe(0);
   });
 
   it("refreshes an expiring Google token before it writes", async () => {
     const time = clock();
     const ctx = syncCtx({ now: time.now });
-    await seedConnectedProvider(ctx, { host: HOST_A });
+    await seedConnectedHealthSystem(ctx, { host: HOST_A });
     await seedGoogle(ctx, 60);
     await seedSettings(ctx);
     const server = fhirServer({ resources: referencePool() });
@@ -814,11 +824,11 @@ describe("Google unavailable", () => {
   });
 });
 
-describe("per-provider configuration", () => {
-  it("uses the provider's title template, colour and arrival offset", async () => {
+describe("per-health system configuration", () => {
+  it("uses the health system's title template, colour and arrival offset", async () => {
     const time = clock();
     const ctx = syncCtx({ now: time.now });
-    const seeded = await seedConnectedProvider(ctx, {
+    const seeded = await seedConnectedHealthSystem(ctx, {
       host: HOST_A,
       config: {
         title_template: "{orgShort}: {visitType}",
@@ -835,7 +845,7 @@ describe("per-provider configuration", () => {
 
     await runCalendarSync(ctx, { deps: upstreams.deps });
 
-    const event = upstreams.calendar.byKey().get(await sk(`${seeded.providerId}:enc-1`));
+    const event = upstreams.calendar.byKey().get(await sk(`${seeded.healthSystemId}:enc-1`));
     expect(event?.summary).toBe("AEH: Office Visit (appt 3:30 PM)");
     expect(event?.colorId).toBe("5");
     expect((event?.start as { dateTime: string }).dateTime).toBe("2026-06-29T15:05:00.000Z");
@@ -843,7 +853,7 @@ describe("per-provider configuration", () => {
 });
 
 describe("nothing to do", () => {
-  it("writes a clean run when there are no providers at all", async () => {
+  it("writes a clean run when there are no health systems at all", async () => {
     const ctx = syncCtx();
     await seedGoogle(ctx);
     await seedSettings(ctx);
@@ -851,7 +861,7 @@ describe("nothing to do", () => {
 
     const summary = await runCalendarSync(ctx, { deps: upstreams.deps });
 
-    expect(summary.providers).toBe(0);
+    expect(summary.healthSystems).toBe(0);
     expect(summary.errors).toStrictEqual([]);
     await expect(syncRepos(ctx).runLog.listRecent()).resolves.toMatchObject([{ ok: true }]);
   });
@@ -861,7 +871,9 @@ describe("changing the target calendar", () => {
   it("moves a tracked event instead of duplicating it", async () => {
     const h = await setup({ encounters: [{ id: "enc-1", start: UPCOMING }] });
     await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
-    const original = h.upstreams.calendar.byKeyOn("primary").get(await sk(`${h.providerId}:enc-1`));
+    const original = h.upstreams.calendar
+      .byKeyOn("primary")
+      .get(await sk(`${h.healthSystemId}:enc-1`));
     expect(original).toBeDefined();
 
     await setSetting(h.ctx, "calendar_id", "vacation");
@@ -874,11 +886,15 @@ describe("changing the target calendar", () => {
     // the new calendar -- not a second, duplicate insert.
     expect(h.upstreams.calendar.events()).toHaveLength(1);
     expect(h.upstreams.calendar.byKeyOn("primary").size).toBe(0);
-    const moved = h.upstreams.calendar.byKeyOn("vacation").get(await sk(`${h.providerId}:enc-1`));
+    const moved = h.upstreams.calendar
+      .byKeyOn("vacation")
+      .get(await sk(`${h.healthSystemId}:enc-1`));
     expect(moved?.id).toBe(original?.id);
     expect(h.upstreams.calendar.moves).toBe(1);
 
-    const row = await syncRepos(h.ctx).calendarEvents.getByKey(await sk(`${h.providerId}:enc-1`));
+    const row = await syncRepos(h.ctx).calendarEvents.getByKey(
+      await sk(`${h.healthSystemId}:enc-1`),
+    );
     expect(row?.calendar_id).toBe("vacation");
     expect(row?.google_event_id).toBe(original?.id);
   });
@@ -896,11 +912,15 @@ describe("changing the target calendar", () => {
     expect(summary.eventsGhosted).toBe(1);
     expect(summary.eventsInserted).toBe(0);
     expect(h.upstreams.calendar.byKeyOn("primary").size).toBe(0);
-    const ghost = h.upstreams.calendar.byKeyOn("vacation").get(await sk(`${h.providerId}:enc-1`));
+    const ghost = h.upstreams.calendar
+      .byKeyOn("vacation")
+      .get(await sk(`${h.healthSystemId}:enc-1`));
     expect(ghost).toBeDefined();
     expect(String(ghost?.summary).startsWith("Cancelled: ")).toBe(true);
 
-    const row = await syncRepos(h.ctx).calendarEvents.getByKey(await sk(`${h.providerId}:enc-1`));
+    const row = await syncRepos(h.ctx).calendarEvents.getByKey(
+      await sk(`${h.healthSystemId}:enc-1`),
+    );
     expect(row?.calendar_id).toBe("vacation");
     expect(row?.state).toBe("ghost");
   });

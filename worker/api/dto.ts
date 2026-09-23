@@ -13,7 +13,7 @@
  * Two representation mismatches are bridged here rather than in the handlers:
  *
  *  - **camelCase vs snake_case.** `shared/types.ts` is the SPA's vocabulary and is
- *    camelCase; `providers.config_json` and the `settings` table are snake_case
+ *    camelCase; `health_systems.config_json` and the `settings` table are snake_case
  *    because that is what the columns are called. Both directions live here.
  *  - **seconds vs ISO.** Every D1 timestamp is an integer unix second; every DTO
  *    field is an ISO-8601 instant, because that is what `Date` parses and what
@@ -24,10 +24,16 @@ import { toIso } from "../lib/time.ts";
 import { parseAllowlistCsv } from "../mail/classify.ts";
 import { buildRules } from "../policy/rules.ts";
 
-import type { AlertRow, ConnectionRow, MailKind, McpPolicyRow, ProviderRow } from "../db/rows.ts";
 import type {
-  ProviderConfig as DbProviderConfig,
-  ProviderConfigInput,
+  AlertRow,
+  ConnectionRow,
+  MailKind,
+  McpPolicyRow,
+  HealthSystemRow,
+} from "../db/rows.ts";
+import type {
+  HealthSystemConfig as DbHealthSystemConfig,
+  HealthSystemConfigInput,
   RunSummary as DbRunSummary,
   Settings,
 } from "../db/schemas.ts";
@@ -39,8 +45,8 @@ import type {
   MailSettingsDto,
   McpAuditDto,
   PolicyRuleDto,
-  ProviderConfig,
-  ProviderDto,
+  HealthSystemConfig,
+  HealthSystemDto,
   RunDto,
   RunKind,
   RunSummaryDto,
@@ -84,7 +90,7 @@ export interface AuditEntryLike {
   ts: number;
   clientId: string | null;
   tool: string;
-  providers: string[];
+  healthSystems: string[];
   resultCount: number;
   ok: boolean;
   errorCode: string | null;
@@ -97,7 +103,7 @@ function isoOrNull(seconds: number | null): string | null {
 }
 
 /**
- * `providers.vendor` is CHECK-constrained by the migration to the vendors the
+ * `health_systems.vendor` is CHECK-constrained by the migration to the vendors the
  * adapter registry knows, so the column cannot hold anything else. The assertion
  * carries that fact across the db boundary without a runtime branch that could
  * never be taken.
@@ -107,12 +113,12 @@ function toVendor(value: string): Vendor {
 }
 
 // ---------------------------------------------------------------------------
-// providers
+// health systems
 // ---------------------------------------------------------------------------
 
-/** `providers.config_json` -> the SPA's camelCase `ProviderConfig`. */
-export function toProviderConfigDto(config: DbProviderConfig): ProviderConfig {
-  const dto: ProviderConfig = {
+/** `health_systems.config_json` -> the SPA's camelCase `HealthSystemConfig`. */
+export function toHealthSystemConfigDto(config: DbHealthSystemConfig): HealthSystemConfig {
+  const dto: HealthSystemConfig = {
     arrivalOffsetsByVisitType: { ...config.arrival_offsets_by_visit_type },
     enabled: config.enabled,
   };
@@ -123,9 +129,11 @@ export function toProviderConfigDto(config: DbProviderConfig): ProviderConfig {
   return dto;
 }
 
-/** The SPA's `ProviderConfig` -> what `providers.update` takes. */
-export function fromProviderConfigDto(config: Loose<ProviderConfig>): ProviderConfigInput {
-  const input: ProviderConfigInput = {};
+/** The SPA's `HealthSystemConfig` -> what `health_systems.update` takes. */
+export function fromHealthSystemConfigDto(
+  config: Loose<HealthSystemConfig>,
+): HealthSystemConfigInput {
+  const input: HealthSystemConfigInput = {};
   if (config.titleTemplate !== undefined) input.title_template = config.titleTemplate;
   if (config.colorId !== undefined) input.color_id = config.colorId;
   if (config.arrivalOffsetMin !== undefined) input.arrival_offset_min = config.arrivalOffsetMin;
@@ -152,7 +160,7 @@ export function reconnectPathFor(connectionId: string): string {
 export function toConnectionDto(row: ConnectionRow): ConnectionDto {
   return {
     id: row.id,
-    providerId: row.provider_id,
+    healthSystemId: row.health_system_id,
     status: row.status,
     accessExpiresAt: isoOrNull(row.access_expires_at),
     hasRefreshToken: row.refresh_token_enc !== null,
@@ -167,14 +175,14 @@ export function toConnectionDto(row: ConnectionRow): ConnectionDto {
   };
 }
 
-export interface ProviderProjection {
-  row: ProviderRow;
-  config: DbProviderConfig;
+export interface HealthSystemProjection {
+  row: HealthSystemRow;
+  config: DbHealthSystemConfig;
   connection: ConnectionRow | null;
 }
 
-/** A provider row (plus its parsed config and connection) -> `ProviderDto`. */
-export function toProviderDto(input: ProviderProjection): ProviderDto {
+/** A health system row (plus its parsed config and connection) -> `HealthSystemDto`. */
+export function toHealthSystemDto(input: HealthSystemProjection): HealthSystemDto {
   return {
     id: input.row.id,
     vendor: toVendor(input.row.vendor),
@@ -186,7 +194,7 @@ export function toProviderDto(input: ProviderProjection): ProviderDto {
     // The boolean, never the ciphertext: the admin UI only has to know whether
     // the per-organisation secret still needs to be pasted in.
     hasClientSecret: input.row.client_secret_enc !== null,
-    config: toProviderConfigDto(input.config),
+    config: toHealthSystemConfigDto(input.config),
     connection: input.connection === null ? null : toConnectionDto(input.connection),
     createdAt: toIso(input.row.created_at),
     updatedAt: toIso(input.row.updated_at),
@@ -312,7 +320,7 @@ export function fromSettingsPatch(patch: Loose<SettingsPatch>): Partial<Settings
  *    zero, so the number of distinct codes is the floor for `warnings` -- which is
  *    why that is a `max` and not a read.
  *  - `errors` is passed straight through: `run_log.summary_json.errors` is
- *    already bare, stable codes with no provider prefix, by design (see
+ *    already bare, stable codes with no health system prefix, by design (see
  *    `worker/sync/run.ts`), so there is nothing here to parse.
  *  - `filteredView` and `backedOff` come straight off the stored summary. A run
  *    that saw a filtered schedule is the run that refused to ghost anything, and a
@@ -321,7 +329,7 @@ export function fromSettingsPatch(patch: Loose<SettingsPatch>): Partial<Settings
  */
 export function toRunSummaryDto(summary: DbRunSummary): RunSummaryDto {
   return {
-    providers: summary.providers,
+    healthSystems: summary.healthSystems,
     encountersSeen: summary.inserted + summary.patched + summary.restored + summary.unchanged,
     eventsInserted: summary.inserted,
     eventsPatched: summary.patched,
@@ -355,17 +363,17 @@ export function toRunDto(entry: RunEntryLike): RunDto {
 // ---------------------------------------------------------------------------
 
 /**
- * `alerts.subject` is `provider:<id>`, `portal:<id>` or the literal `google`.
+ * `alerts.subject` is `health_system:<id>`, `portal:<id>` or the literal `google`.
  *
- * Both prefixes yield the same `providerId`, because the UI groups alerts by the
+ * Both prefixes yield the same `healthSystemId`, because the UI groups alerts by the
  * health system they concern -- a dead FHIR grant and a dead portal session are
- * two alerts about one provider, and the subject string is still there for
+ * two alerts about one health system, and the subject string is still there for
  * anything that needs to tell them apart.
  */
-const SUBJECT_PREFIXES = ["provider:", "portal:"] as const;
+const SUBJECT_PREFIXES = ["health_system:", "portal:"] as const;
 
-/** The provider id a subject names, or null when it names none. */
-function providerIdOfSubject(subject: string): string | null {
+/** The health system id a subject names, or null when it names none. */
+function healthSystemIdOfSubject(subject: string): string | null {
   for (const prefix of SUBJECT_PREFIXES) {
     if (subject.startsWith(prefix)) return subject.slice(prefix.length);
   }
@@ -377,7 +385,7 @@ export function toAlertDto(row: AlertRow): AlertDto {
     id: row.id,
     kind: row.kind,
     subject: row.subject,
-    providerId: providerIdOfSubject(row.subject),
+    healthSystemId: healthSystemIdOfSubject(row.subject),
     trelloCardId: row.trello_card_id,
     openedAt: toIso(row.opened_at),
     resolvedAt: isoOrNull(row.resolved_at),
@@ -459,7 +467,7 @@ export function toAuditDto(entry: AuditEntryLike): McpAuditDto {
     // string, so the unknown case is named rather than left empty.
     clientId: entry.clientId ?? "unknown",
     tool: entry.tool,
-    providerIds: entry.providers,
+    healthSystemIds: entry.healthSystems,
     resultCount: entry.resultCount,
     ok: entry.ok,
     errorCode: entry.errorCode,

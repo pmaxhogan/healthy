@@ -1,4 +1,4 @@
-// `/api/providers/:id/portal`, end to end in real workerd against real D1.
+// `/api/health-systems/:id/portal`, end to end in real workerd against real D1.
 //
 // Two things here are worth more than the CRUD around them.
 //
@@ -35,7 +35,7 @@ import {
   freshOwner,
   json,
   resetPorts,
-  seedProvider,
+  seedHealthSystem,
   stubFetch,
   testCtx,
   testRepos,
@@ -120,7 +120,7 @@ function orgMountStub(mount: string): ReturnType<typeof stubFetch> {
  */
 function fakeRunner(portal: FakePortal): {
   ports: Parameters<typeof usePorts>[0];
-  run: (ctx: Ctx, providerId: string) => Promise<void>;
+  run: (ctx: Ctx, healthSystemId: string) => Promise<void>;
   starts: number;
   syncs: number;
 } {
@@ -132,7 +132,7 @@ function fakeRunner(portal: FakePortal): {
   const runner = {
     ports: {
       portal: {
-        startSignIn: (_ctx: Ctx, _options: { providerId: string }) => {
+        startSignIn: (_ctx: Ctx, _options: { healthSystemId: string }) => {
           state.starts += 1;
           state.phase = { phase: "logging_in", code: null, startedAt: 1, updatedAt: 1 };
           return Promise.resolve({ started: true });
@@ -144,10 +144,10 @@ function fakeRunner(portal: FakePortal): {
         signInState: () => Promise.resolve(state.phase),
       },
     },
-    run: async (ctx: Ctx, providerId: string): Promise<void> => {
+    run: async (ctx: Ctx, healthSystemId: string): Promise<void> => {
       const outcome = await signInAndWait(
         ctx,
-        providerId,
+        healthSystemId,
         portalDeps({ portalAdapter: portal.adapter, sleep: () => Promise.resolve() }),
       );
       state.phase = { phase: outcome.phase, code: outcome.code, startedAt: 1, updatedAt: 2 };
@@ -174,17 +174,17 @@ function idlePorts(): Parameters<typeof usePorts>[0] {
   };
 }
 
-describe("GET /api/providers/:id/portal", () => {
-  it("answers a default account for a provider that has never had one", async () => {
+describe("GET /api/health-systems/:id/portal", () => {
+  it("answers a default account for a health system that has never had one", async () => {
     usePorts(idlePorts());
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
 
-    const response = await owner().get(`/api/providers/${providerId}/portal`);
+    const response = await owner().get(`/api/health-systems/${healthSystemId}/portal`);
 
     expect(response.status).toBe(200);
     const dto = await json<PortalAccountStatusDto>(response);
     expect(dto).toStrictEqual({
-      providerId,
+      healthSystemId,
       baseUrl: null,
       mountPath: null,
       hasCredentials: false,
@@ -203,20 +203,20 @@ describe("GET /api/providers/:id/portal", () => {
     });
   });
 
-  it("404s for a provider that does not exist", async () => {
+  it("404s for a health system that does not exist", async () => {
     usePorts(idlePorts());
-    const response = await owner().get("/api/providers/nope/portal");
+    const response = await owner().get("/api/health-systems/nope/portal");
     expect(response.status).toBe(404);
   });
 
   it("reports the visits it is tracking once the portal has answered", async () => {
     usePorts(idlePorts());
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
     const ctx = testCtx();
-    await seedPortalAccount(ctx, providerId);
+    await seedPortalAccount(ctx, healthSystemId);
     await testRepos().calendarEvents.upsert({
-      eventKey: await blindKey(`${providerId}:csn:csn-1`),
-      providerId,
+      eventKey: await blindKey(`${healthSystemId}:csn:csn-1`),
+      healthSystemId,
       encounterId: "csn:csn-1",
       calendarId: "primary",
       googleEventId: "gcal-1",
@@ -227,7 +227,7 @@ describe("GET /api/providers/:id/portal", () => {
     });
 
     const dto = await json<PortalAccountStatusDto>(
-      await owner().get(`/api/providers/${providerId}/portal`),
+      await owner().get(`/api/health-systems/${healthSystemId}/portal`),
     );
     expect(dto.state).toBe("active");
     expect(dto.hasCredentials).toBe(true);
@@ -258,15 +258,15 @@ describe("GET /api/providers/:id/portal", () => {
         signInState: () => Promise.resolve(STALE_PHASE),
       },
     });
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
     const ctx = testCtx();
-    await seedPortalAccount(ctx, providerId);
+    await seedPortalAccount(ctx, healthSystemId);
 
     // The cron path, simulated directly: only the account row moves.
-    await testRepos().portalAccounts.markNeedsReauth(providerId, "portal_handoff_failed");
+    await testRepos().portalAccounts.markNeedsReauth(healthSystemId, "portal_handoff_failed");
 
     const dto = await json<PortalAccountStatusDto>(
-      await owner().get(`/api/providers/${providerId}/portal`),
+      await owner().get(`/api/health-systems/${healthSystemId}/portal`),
     );
 
     expect(dto.signIn).toStrictEqual(STALE_PHASE);
@@ -280,12 +280,12 @@ describe("GET /api/providers/:id/portal", () => {
   });
 });
 
-describe("PUT /api/providers/:id/portal", () => {
+describe("PUT /api/health-systems/:id/portal", () => {
   it("discovers the portal, seals the credentials and never echoes the password", async () => {
     usePorts({ ...idlePorts(), fetch: htmlStub(LOGIN_PAGE).fetchImpl });
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
 
-    const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
+    const response = await owner().send("PUT", `/api/health-systems/${healthSystemId}/portal`, {
       baseUrl: `${PORTAL_ORIGIN}/somewhere/else`,
       mountHint: PORTAL_MOUNT,
       confirmedOrigin: PORTAL_ORIGIN,
@@ -305,17 +305,17 @@ describe("PUT /api/providers/:id/portal", () => {
     expect(dto.hasSession).toBe(false);
 
     // Sealed, not merely hidden by the projection.
-    const secrets = await testRepos().portalAccounts.getSecrets(providerId);
+    const secrets = await testRepos().portalAccounts.getSecrets(healthSystemId);
     expect(secrets?.username).toBe(PORTAL_USERNAME);
     expect(secrets?.password).toBe(PORTAL_PASSWORD);
   });
 
   it("stores the MFA contact when supplied, sealed and never echoed", async () => {
     usePorts({ ...idlePorts(), fetch: htmlStub(LOGIN_PAGE).fetchImpl });
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
     const mfaContact = "owner@example.test";
 
-    const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
+    const response = await owner().send("PUT", `/api/health-systems/${healthSystemId}/portal`, {
       baseUrl: PORTAL_ORIGIN,
       mountHint: PORTAL_MOUNT,
       confirmedOrigin: PORTAL_ORIGIN,
@@ -330,15 +330,15 @@ describe("PUT /api/providers/:id/portal", () => {
     const dto = JSON.parse(body) as PortalAccountStatusDto;
     expect(dto.hasMfaContact).toBe(true);
 
-    const secrets = await testRepos().portalAccounts.getSecrets(providerId);
+    const secrets = await testRepos().portalAccounts.getSecrets(healthSystemId);
     expect(secrets?.mfaContact).toBe(mfaContact);
   });
 
   it("leaves a stored MFA contact alone when the PUT omits it", async () => {
     usePorts({ ...idlePorts(), fetch: htmlStub(LOGIN_PAGE).fetchImpl });
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
     const mfaContact = "owner@example.test";
-    await owner().send("PUT", `/api/providers/${providerId}/portal`, {
+    await owner().send("PUT", `/api/health-systems/${healthSystemId}/portal`, {
       baseUrl: PORTAL_ORIGIN,
       mountHint: PORTAL_MOUNT,
       confirmedOrigin: PORTAL_ORIGIN,
@@ -347,22 +347,22 @@ describe("PUT /api/providers/:id/portal", () => {
       mfaContact,
     });
 
-    await owner().send("PUT", `/api/providers/${providerId}/portal`, {
+    await owner().send("PUT", `/api/health-systems/${healthSystemId}/portal`, {
       baseUrl: PORTAL_ORIGIN,
       confirmedOrigin: PORTAL_ORIGIN,
       username: PORTAL_USERNAME,
       password: "a-new-password",
     });
 
-    const secrets = await testRepos().portalAccounts.getSecrets(providerId);
+    const secrets = await testRepos().portalAccounts.getSecrets(healthSystemId);
     expect(secrets?.mfaContact).toBe(mfaContact);
   });
 
   it("rejects a malformed MFA contact", async () => {
     usePorts({ ...idlePorts(), fetch: htmlStub(LOGIN_PAGE).fetchImpl });
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
 
-    const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
+    const response = await owner().send("PUT", `/api/health-systems/${healthSystemId}/portal`, {
       baseUrl: PORTAL_ORIGIN,
       mountHint: PORTAL_MOUNT,
       confirmedOrigin: PORTAL_ORIGIN,
@@ -376,9 +376,9 @@ describe("PUT /api/providers/:id/portal", () => {
 
   it("stores the whole discovery result, not just the two columns", async () => {
     usePorts({ ...idlePorts(), fetch: htmlStub(LOGIN_PAGE).fetchImpl });
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
 
-    await owner().send("PUT", `/api/providers/${providerId}/portal`, {
+    await owner().send("PUT", `/api/health-systems/${healthSystemId}/portal`, {
       baseUrl: PORTAL_ORIGIN,
       confirmedOrigin: PORTAL_ORIGIN,
       username: PORTAL_USERNAME,
@@ -387,7 +387,7 @@ describe("PUT /api/providers/:id/portal", () => {
 
     // Opaque to everything outside the adapter, which is why it is stored whole:
     // it says how to sign in to this deployment, not only where it lives.
-    const endpoint = await testRepos().portalAccounts.getEndpoint(providerId);
+    const endpoint = await testRepos().portalAccounts.getEndpoint(healthSystemId);
     expect(endpoint?.baseUrl).toBe(PORTAL_ORIGIN);
     expect(endpoint?.mountPath).toBe(PORTAL_MOUNT);
   });
@@ -395,11 +395,11 @@ describe("PUT /api/providers/:id/portal", () => {
   it("derives a mount hint from the pasted URL's path when none is given, and stores it", async () => {
     const stub = orgMountStub("orgseg");
     usePorts({ ...idlePorts(), fetch: stub.fetchImpl });
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
 
     // The owner pasted the login page itself, not the bare host -- and a
     // deeper path than the mount, to prove only the first segment is taken.
-    const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
+    const response = await owner().send("PUT", `/api/health-systems/${healthSystemId}/portal`, {
       baseUrl: `${PORTAL_ORIGIN}/orgseg/Authentication/Login`,
       confirmedOrigin: PORTAL_ORIGIN,
       username: PORTAL_USERNAME,
@@ -410,17 +410,17 @@ describe("PUT /api/providers/:id/portal", () => {
     const dto = await json<PortalAccountStatusDto>(response);
     expect(dto.baseUrl).toBe(PORTAL_ORIGIN);
     expect(dto.mountPath).toBe("/orgseg/");
-    const endpoint = await testRepos().portalAccounts.getEndpoint(providerId);
+    const endpoint = await testRepos().portalAccounts.getEndpoint(healthSystemId);
     expect(endpoint?.mountPath).toBe("/orgseg/");
   });
 
   it("skips discovery when the endpoint is already known and the origin is unchanged", async () => {
     const stub = htmlStub(LOGIN_PAGE);
     usePorts({ ...idlePorts(), fetch: stub.fetchImpl });
-    const providerId = await seedProvider();
-    await seedPortalAccount(testCtx(), providerId);
+    const healthSystemId = await seedHealthSystem();
+    await seedPortalAccount(testCtx(), healthSystemId);
 
-    const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
+    const response = await owner().send("PUT", `/api/health-systems/${healthSystemId}/portal`, {
       baseUrl: PORTAL_ORIGIN,
       confirmedOrigin: PORTAL_ORIGIN,
       username: PORTAL_USERNAME,
@@ -431,15 +431,15 @@ describe("PUT /api/providers/:id/portal", () => {
     // Re-probing is several unauthenticated requests to a host with bot protection,
     // for an answer we already have.
     expect(stub.requests).toStrictEqual([]);
-    const secrets = await testRepos().portalAccounts.getSecrets(providerId);
+    const secrets = await testRepos().portalAccounts.getSecrets(healthSystemId);
     expect(secrets?.password).toBe("a-new-password");
   });
 
   it("rejects a URL that hosts no login page with one stable code", async () => {
     usePorts({ ...idlePorts(), fetch: htmlStub(NOT_A_LOGIN_PAGE).fetchImpl });
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
 
-    const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
+    const response = await owner().send("PUT", `/api/health-systems/${healthSystemId}/portal`, {
       baseUrl: PORTAL_ORIGIN,
       confirmedOrigin: PORTAL_ORIGIN,
       username: PORTAL_USERNAME,
@@ -452,14 +452,14 @@ describe("PUT /api/providers/:id/portal", () => {
     expect(body.details?.reason).toBe("portal_parse_failed");
     // Nothing was written: an account sealed against a URL that hosts no portal can
     // never sign in.
-    expect(await testRepos().portalAccounts.get(providerId)).toBeNull();
+    expect(await testRepos().portalAccounts.get(healthSystemId)).toBeNull();
   });
 
   it("refuses a first save with no URL to probe", async () => {
     usePorts(idlePorts());
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
 
-    const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
+    const response = await owner().send("PUT", `/api/health-systems/${healthSystemId}/portal`, {
       confirmedOrigin: PORTAL_ORIGIN,
       username: PORTAL_USERNAME,
       password: PORTAL_PASSWORD,
@@ -472,16 +472,16 @@ describe("PUT /api/providers/:id/portal", () => {
 
   it("refuses a save with no confirmedOrigin at all", async () => {
     usePorts({ ...idlePorts(), fetch: htmlStub(LOGIN_PAGE).fetchImpl });
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
 
-    const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
+    const response = await owner().send("PUT", `/api/health-systems/${healthSystemId}/portal`, {
       baseUrl: PORTAL_ORIGIN,
       username: PORTAL_USERNAME,
       password: PORTAL_PASSWORD,
     });
 
     expect(response.status).toBe(400);
-    expect(await testRepos().portalAccounts.get(providerId)).toBeNull();
+    expect(await testRepos().portalAccounts.get(healthSystemId)).toBeNull();
   });
 
   it("refuses to seal credentials when the probe lands somewhere the owner did not confirm", async () => {
@@ -503,9 +503,9 @@ describe("PUT /api/providers/:id/portal", () => {
       },
     ]);
     usePorts({ ...idlePorts(), fetch: stub.fetchImpl });
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
 
-    const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
+    const response = await owner().send("PUT", `/api/health-systems/${healthSystemId}/portal`, {
       baseUrl: PORTAL_ORIGIN,
       confirmedOrigin: PORTAL_ORIGIN,
       username: PORTAL_USERNAME,
@@ -517,7 +517,7 @@ describe("PUT /api/providers/:id/portal", () => {
     expect(body.error).toBe("portal_origin_unconfirmed");
     expect(body.details?.landedOrigin).toBe(MOVED_ORIGIN);
     // No endpoint, and above all no credential.
-    expect(await testRepos().portalAccounts.get(providerId)).toBeNull();
+    expect(await testRepos().portalAccounts.get(healthSystemId)).toBeNull();
   });
 
   it("reports an off-site redirect as a discovery failure that names where it went", async () => {
@@ -532,9 +532,9 @@ describe("PUT /api/providers/:id/portal", () => {
       },
     ]);
     usePorts({ ...idlePorts(), fetch: stub.fetchImpl });
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
 
-    const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
+    const response = await owner().send("PUT", `/api/health-systems/${healthSystemId}/portal`, {
       baseUrl: PORTAL_ORIGIN,
       confirmedOrigin: PORTAL_ORIGIN,
       username: PORTAL_USERNAME,
@@ -548,18 +548,22 @@ describe("PUT /api/providers/:id/portal", () => {
     // The one host this surface names, because it is the one thing the owner can
     // act on -- and it never reaches a log line.
     expect(body.details?.landedOrigin).toBe("https://attacker.example");
-    expect(await testRepos().portalAccounts.get(providerId)).toBeNull();
+    expect(await testRepos().portalAccounts.get(healthSystemId)).toBeNull();
   });
 });
 
-describe("POST /api/providers/:id/portal/discover", () => {
+describe("POST /api/health-systems/:id/portal/discover", () => {
   it("reports the origin, mount and flavour, and stores nothing at all", async () => {
     usePorts({ ...idlePorts(), fetch: htmlStub(LOGIN_PAGE).fetchImpl });
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
 
-    const response = await owner().send("POST", `/api/providers/${providerId}/portal/discover`, {
-      baseUrl: `${PORTAL_ORIGIN}/MyChart/Authentication/Login`,
-    });
+    const response = await owner().send(
+      "POST",
+      `/api/health-systems/${healthSystemId}/portal/discover`,
+      {
+        baseUrl: `${PORTAL_ORIGIN}/MyChart/Authentication/Login`,
+      },
+    );
 
     expect(response.status).toBe(200);
     expect(await json<PortalDiscoveryDto>(response)).toStrictEqual({
@@ -568,17 +572,21 @@ describe("POST /api/providers/:id/portal/discover", () => {
       flavor: "classic",
     });
     // A probe, not a write: no row exists until the owner confirms the origin.
-    expect(await testRepos().portalAccounts.get(providerId)).toBeNull();
+    expect(await testRepos().portalAccounts.get(healthSystemId)).toBeNull();
   });
 
   it("takes no credential, and rejects one offered", async () => {
     usePorts({ ...idlePorts(), fetch: htmlStub(LOGIN_PAGE).fetchImpl });
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
 
-    const response = await owner().send("POST", `/api/providers/${providerId}/portal/discover`, {
-      baseUrl: PORTAL_ORIGIN,
-      password: PORTAL_PASSWORD,
-    });
+    const response = await owner().send(
+      "POST",
+      `/api/health-systems/${healthSystemId}/portal/discover`,
+      {
+        baseUrl: PORTAL_ORIGIN,
+        password: PORTAL_PASSWORD,
+      },
+    );
 
     expect(response.status).toBe(400);
   });
@@ -586,49 +594,56 @@ describe("POST /api/providers/:id/portal/discover", () => {
   it("rejects a non-https URL before probing anything", async () => {
     const stub = htmlStub(LOGIN_PAGE);
     usePorts({ ...idlePorts(), fetch: stub.fetchImpl });
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
 
-    const response = await owner().send("POST", `/api/providers/${providerId}/portal/discover`, {
-      baseUrl: INSECURE_ORIGIN,
-    });
+    const response = await owner().send(
+      "POST",
+      `/api/health-systems/${healthSystemId}/portal/discover`,
+      {
+        baseUrl: INSECURE_ORIGIN,
+      },
+    );
 
     expect(response.status).toBe(400);
     expect(stub.requests).toStrictEqual([]);
   });
 
-  it("404s for a provider that does not exist", async () => {
+  it("404s for a health system that does not exist", async () => {
     usePorts(idlePorts());
-    const response = await owner().send("POST", "/api/providers/nope/portal/discover", {
+    const response = await owner().send("POST", "/api/health-systems/nope/portal/discover", {
       baseUrl: PORTAL_ORIGIN,
     });
     expect(response.status).toBe(404);
   });
 });
 
-describe("POST /api/providers/:id/portal/sign-in", () => {
+describe("POST /api/health-systems/:id/portal/sign-in", () => {
   it("answers 202 and walks the phase from logging_in to signed_in", async () => {
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
     const ctx = testCtx();
-    await seedPortalAccount(ctx, providerId);
+    await seedPortalAccount(ctx, healthSystemId);
     const portal = fakePortal({ alive: false, loginStatus: "awaiting_code" });
     const runner = fakeRunner(portal);
     usePorts(runner.ports);
     await seedOtp(ctx, "998877");
 
-    const started = await owner().send("POST", `/api/providers/${providerId}/portal/sign-in`);
+    const started = await owner().send(
+      "POST",
+      `/api/health-systems/${healthSystemId}/portal/sign-in`,
+    );
     expect(started.status).toBe(202);
     expect(await json(started)).toStrictEqual({ accepted: true, started: true });
 
     const waiting = await json<PortalAccountStatusDto>(
-      await owner().get(`/api/providers/${providerId}/portal`),
+      await owner().get(`/api/health-systems/${healthSystemId}/portal`),
     );
     expect(waiting.signIn.phase).toBe("logging_in");
 
     // The job, as the Durable Object's alarms would have run it.
-    await runner.run(ctx, providerId);
+    await runner.run(ctx, healthSystemId);
 
     const done = await json<PortalAccountStatusDto>(
-      await owner().get(`/api/providers/${providerId}/portal`),
+      await owner().get(`/api/health-systems/${healthSystemId}/portal`),
     );
     expect(done.signIn.phase).toBe("signed_in");
     expect(done.signIn.code).toBeNull();
@@ -637,9 +652,9 @@ describe("POST /api/providers/:id/portal/sign-in", () => {
   });
 
   it("reports a failure as a phase and a stable code, never as the emailed code", async () => {
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
     const ctx = testCtx();
-    await seedPortalAccount(ctx, providerId);
+    await seedPortalAccount(ctx, healthSystemId);
     const portal = fakePortal({
       alive: false,
       loginError: new AppError("portal_login_failed", "rejected"),
@@ -647,11 +662,11 @@ describe("POST /api/providers/:id/portal/sign-in", () => {
     const runner = fakeRunner(portal);
     usePorts(runner.ports);
 
-    await owner().send("POST", `/api/providers/${providerId}/portal/sign-in`);
-    await runner.run(ctx, providerId);
+    await owner().send("POST", `/api/health-systems/${healthSystemId}/portal/sign-in`);
+    await runner.run(ctx, healthSystemId);
 
     const dto = await json<PortalAccountStatusDto>(
-      await owner().get(`/api/providers/${providerId}/portal`),
+      await owner().get(`/api/health-systems/${healthSystemId}/portal`),
     );
     expect(dto.signIn).toMatchObject({ phase: "failed", code: "portal_login_failed" });
     expect(dto.state).toBe("needs_reauth");
@@ -659,14 +674,17 @@ describe("POST /api/providers/:id/portal/sign-in", () => {
   });
 
   it("refuses with 429 once the daily attempt budget is spent", async () => {
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
     const ctx = testCtx();
-    await seedPortalAccount(ctx, providerId);
-    await spendAttempts(ctx, providerId, 3);
+    await seedPortalAccount(ctx, healthSystemId);
+    await spendAttempts(ctx, healthSystemId, 3);
     const runner = fakeRunner(fakePortal());
     usePorts(runner.ports);
 
-    const response = await owner().send("POST", `/api/providers/${providerId}/portal/sign-in`);
+    const response = await owner().send(
+      "POST",
+      `/api/health-systems/${healthSystemId}/portal/sign-in`,
+    );
 
     expect(response.status).toBe(429);
     const body = await json<ApiError>(response);
@@ -676,15 +694,18 @@ describe("POST /api/providers/:id/portal/sign-in", () => {
   });
 
   it("allows one more attempt once the limit setting is raised", async () => {
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
     const ctx = testCtx();
-    await seedPortalAccount(ctx, providerId);
-    await spendAttempts(ctx, providerId, 3);
+    await seedPortalAccount(ctx, healthSystemId);
+    await spendAttempts(ctx, healthSystemId, 3);
     const runner = fakeRunner(fakePortal());
     usePorts(runner.ports);
 
     await owner().send("PUT", "/api/settings", { portalLoginAttemptLimit: 5 });
-    const response = await owner().send("POST", `/api/providers/${providerId}/portal/sign-in`);
+    const response = await owner().send(
+      "POST",
+      `/api/health-systems/${healthSystemId}/portal/sign-in`,
+    );
 
     expect(response.status).toBe(202);
     expect(runner.starts).toBe(1);
@@ -692,9 +713,12 @@ describe("POST /api/providers/:id/portal/sign-in", () => {
 
   it("refuses to start when there are no credentials to try", async () => {
     usePorts(idlePorts());
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
 
-    const response = await owner().send("POST", `/api/providers/${providerId}/portal/sign-in`);
+    const response = await owner().send(
+      "POST",
+      `/api/health-systems/${healthSystemId}/portal/sign-in`,
+    );
 
     expect(response.status).toBe(409);
     const body = await json<ApiError>(response);
@@ -702,14 +726,17 @@ describe("POST /api/providers/:id/portal/sign-in", () => {
   });
 });
 
-describe("POST /api/providers/:id/portal/sync", () => {
+describe("POST /api/health-systems/:id/portal/sync", () => {
   it("answers 202 and queues the job on the runner, not on waitUntil", async () => {
-    const providerId = await seedProvider();
-    await seedPortalAccount(testCtx(), providerId);
+    const healthSystemId = await seedHealthSystem();
+    await seedPortalAccount(testCtx(), healthSystemId);
     const runner = fakeRunner(fakePortal());
     usePorts(runner.ports);
 
-    const response = await owner().send("POST", `/api/providers/${providerId}/portal/sync`);
+    const response = await owner().send(
+      "POST",
+      `/api/health-systems/${healthSystemId}/portal/sync`,
+    );
 
     expect(response.status).toBe(202);
     expect(await json(response)).toStrictEqual({ accepted: true, started: true });
@@ -717,11 +744,14 @@ describe("POST /api/providers/:id/portal/sync", () => {
   });
 
   it("refuses to queue a sync with no credentials to sign in with", async () => {
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
     const runner = fakeRunner(fakePortal());
     usePorts(runner.ports);
 
-    const response = await owner().send("POST", `/api/providers/${providerId}/portal/sync`);
+    const response = await owner().send(
+      "POST",
+      `/api/health-systems/${healthSystemId}/portal/sync`,
+    );
 
     // Refused here, not inside the alarm: a job that fails there marks the account
     // `needs_reauth` over a button press that should not have been possible.
@@ -730,18 +760,21 @@ describe("POST /api/providers/:id/portal/sync", () => {
   });
 });
 
-describe("DELETE /api/providers/:id/portal", () => {
+describe("DELETE /api/health-systems/:id/portal", () => {
   it("forgets the session but keeps the credentials", async () => {
     usePorts(idlePorts());
-    const providerId = await seedProvider();
-    await seedPortalAccount(testCtx(), providerId);
+    const healthSystemId = await seedHealthSystem();
+    await seedPortalAccount(testCtx(), healthSystemId);
 
-    const response = await owner().send("DELETE", `/api/providers/${providerId}/portal/session`);
+    const response = await owner().send(
+      "DELETE",
+      `/api/health-systems/${healthSystemId}/portal/session`,
+    );
 
     expect(response.status).toBe(204);
     expect(await response.text()).toBe("");
     const dto = await json<PortalAccountStatusDto>(
-      await owner().get(`/api/providers/${providerId}/portal`),
+      await owner().get(`/api/health-systems/${healthSystemId}/portal`),
     );
     expect(dto.hasSession).toBe(false);
     expect(dto.hasCredentials).toBe(true);
@@ -750,31 +783,34 @@ describe("DELETE /api/providers/:id/portal", () => {
 
   it("404s a forget with no account to forget", async () => {
     usePorts(idlePorts());
-    const providerId = await seedProvider();
-    const response = await owner().send("DELETE", `/api/providers/${providerId}/portal/session`);
+    const healthSystemId = await seedHealthSystem();
+    const response = await owner().send(
+      "DELETE",
+      `/api/health-systems/${healthSystemId}/portal/session`,
+    );
     expect(response.status).toBe(404);
   });
 
-  it("goes with the provider, so a soft delete does not outlive its credentials", async () => {
+  it("goes with the health system, so a soft delete does not outlive its credentials", async () => {
     usePorts(idlePorts());
-    const providerId = await seedProvider();
-    await seedPortalAccount(testCtx(), providerId);
+    const healthSystemId = await seedHealthSystem();
+    await seedPortalAccount(testCtx(), healthSystemId);
 
-    await owner().send("DELETE", `/api/providers/${providerId}`);
+    await owner().send("DELETE", `/api/health-systems/${healthSystemId}`);
 
-    // `providers` is soft-deleted, so the row's ON DELETE CASCADE never fires: the
+    // `health_systems` is soft-deleted, so the row's ON DELETE CASCADE never fires: the
     // sealed password and cookie jar have to be cleared by hand or they stay.
-    expect(await testRepos().portalAccounts.get(providerId)).toBeNull();
+    expect(await testRepos().portalAccounts.get(healthSystemId)).toBeNull();
   });
 
   it("removes the account entirely, and leaves the calendar alone", async () => {
     usePorts(idlePorts());
-    const providerId = await seedProvider();
+    const healthSystemId = await seedHealthSystem();
     const ctx = testCtx();
-    await seedPortalAccount(ctx, providerId);
+    await seedPortalAccount(ctx, healthSystemId);
     await testRepos().calendarEvents.upsert({
-      eventKey: await blindKey(`${providerId}:csn:csn-1`),
-      providerId,
+      eventKey: await blindKey(`${healthSystemId}:csn:csn-1`),
+      healthSystemId,
       encounterId: "csn:csn-1",
       calendarId: "primary",
       googleEventId: "gcal-1",
@@ -784,19 +820,19 @@ describe("DELETE /api/providers/:id/portal", () => {
       portalCsn: "csn-1",
     });
 
-    const response = await owner().send("DELETE", `/api/providers/${providerId}/portal`);
+    const response = await owner().send("DELETE", `/api/health-systems/${healthSystemId}/portal`);
 
     expect(response.status).toBe(204);
-    expect(await testRepos().portalAccounts.get(providerId)).toBeNull();
+    expect(await testRepos().portalAccounts.get(healthSystemId)).toBeNull();
     // The owner's appointments are theirs; removing an account is not a reason to
     // rewrite their week.
     const kept = await testRepos().calendarEvents.getByKey(
-      await blindKey(`${providerId}:csn:csn-1`),
+      await blindKey(`${healthSystemId}:csn:csn-1`),
     );
     expect(kept).not.toBeNull();
 
     const dto = await json<PortalAccountStatusDto>(
-      await owner().get(`/api/providers/${providerId}/portal`),
+      await owner().get(`/api/health-systems/${healthSystemId}/portal`),
     );
     expect(dto.hasCredentials).toBe(false);
     expect(dto.state).toBe("none");

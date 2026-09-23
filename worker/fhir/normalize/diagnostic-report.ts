@@ -28,7 +28,7 @@ export function normalizeDiagnosticReport(
   return {
     resourceType: "DiagnosticReport",
     id: resource.id ?? "",
-    provider: ctx.provider,
+    healthSystem: ctx.healthSystem,
     ...(resource.meta?.lastUpdated && { lastUpdated: resource.meta.lastUpdated }),
     ...(code && { code }),
     category,

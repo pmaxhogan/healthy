@@ -11,7 +11,7 @@ import {
   rawColumn,
   recordingLog,
   resetDb,
-  seedProvider,
+  seedHealthSystem,
   testBlinder,
   testRepos,
 } from "./helpers.ts";
@@ -24,7 +24,7 @@ const START = 1_769_960_000;
 
 async function seedEvent(
   repos: Repos,
-  providerId: string,
+  healthSystemId: string,
   overrides: {
     encounterId?: string;
     fingerprint?: string;
@@ -34,8 +34,8 @@ async function seedEvent(
 ) {
   const encounterId = overrides.encounterId ?? "enc-1";
   return repos.calendarEvents.upsert({
-    eventKey: await blindKey(`${providerId}:${encounterId}`),
-    providerId,
+    eventKey: await blindKey(`${healthSystemId}:${encounterId}`),
+    healthSystemId,
     encounterId,
     calendarId: "primary",
     googleEventId: `google-${encounterId}`,
@@ -48,9 +48,9 @@ async function seedEvent(
 describe("calendar_events.upsert", () => {
   it("inserts an active row and stamps both clocks", async () => {
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
+    const healthSystemId = await seedHealthSystem(repos);
 
-    const row = await seedEvent(repos, providerId);
+    const row = await seedEvent(repos, healthSystemId);
 
     expect(row.state).toBe("active");
     expect(row.ghosted_at).toBeNull();
@@ -62,11 +62,11 @@ describe("calendar_events.upsert", () => {
   it("keeps first_seen_at and updates the rest on a second pass", async () => {
     const time = clock();
     const repos = testRepos({ now: time.now });
-    const providerId = await seedProvider(repos);
-    await seedEvent(repos, providerId);
+    const healthSystemId = await seedHealthSystem(repos);
+    await seedEvent(repos, healthSystemId);
 
     time.advance(3600);
-    const updated = await seedEvent(repos, providerId, { fingerprint: "fingerprint-b" });
+    const updated = await seedEvent(repos, healthSystemId, { fingerprint: "fingerprint-b" });
 
     expect(updated.first_seen_at).toBe(T0);
     expect(updated.last_seen_at).toBe(T0 + 3600);
@@ -77,13 +77,13 @@ describe("calendar_events.upsert", () => {
     // The unique index on (calendar_id, google_event_id) is what stops two
     // encounters silently sharing one calendar entry.
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
-    await seedEvent(repos, providerId, { encounterId: "enc-1" });
+    const healthSystemId = await seedHealthSystem(repos);
+    await seedEvent(repos, healthSystemId, { encounterId: "enc-1" });
 
     await expect(
       repos.calendarEvents.upsert({
-        eventKey: await blindKey(`${providerId}:enc-2`),
-        providerId,
+        eventKey: await blindKey(`${healthSystemId}:enc-2`),
+        healthSystemId,
         encounterId: "enc-2",
         calendarId: "primary",
         googleEventId: "google-enc-1",
@@ -99,8 +99,8 @@ describe("ghosting and restoring", () => {
     // history, greyed out, with the time it disappeared.
     const time = clock();
     const repos = testRepos({ now: time.now });
-    const providerId = await seedProvider(repos);
-    const row = await seedEvent(repos, providerId);
+    const healthSystemId = await seedHealthSystem(repos);
+    const row = await seedEvent(repos, healthSystemId);
 
     time.advance(7200);
 
@@ -116,8 +116,8 @@ describe("ghosting and restoring", () => {
   it("is idempotent and keeps the original ghosted_at", async () => {
     const time = clock();
     const repos = testRepos({ now: time.now });
-    const providerId = await seedProvider(repos);
-    const row = await seedEvent(repos, providerId);
+    const healthSystemId = await seedHealthSystem(repos);
+    const row = await seedEvent(repos, healthSystemId);
 
     await repos.calendarEvents.markGhost(row.event_key);
     time.advance(86_400);
@@ -130,8 +130,8 @@ describe("ghosting and restoring", () => {
 
   it("restores a ghost and can update its fingerprint at the same time", async () => {
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
-    const row = await seedEvent(repos, providerId);
+    const healthSystemId = await seedHealthSystem(repos);
+    const row = await seedEvent(repos, healthSystemId);
     await repos.calendarEvents.markGhost(row.event_key);
 
     expect(await repos.calendarEvents.restore(row.event_key, "fingerprint-c")).toBe(true);
@@ -145,8 +145,8 @@ describe("ghosting and restoring", () => {
 
   it("keeps the fingerprint when restore is not given one", async () => {
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
-    const row = await seedEvent(repos, providerId);
+    const healthSystemId = await seedHealthSystem(repos);
+    const row = await seedEvent(repos, healthSystemId);
     await repos.calendarEvents.markGhost(row.event_key);
 
     await repos.calendarEvents.restore(row.event_key);
@@ -158,19 +158,19 @@ describe("ghosting and restoring", () => {
 
   it("does not restore an event that was never ghosted", async () => {
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
-    const row = await seedEvent(repos, providerId);
+    const healthSystemId = await seedHealthSystem(repos);
+    const row = await seedEvent(repos, healthSystemId);
 
     expect(await repos.calendarEvents.restore(row.event_key)).toBe(false);
   });
 
   it("un-ghosts through a restoring upsert, because reappearing upstream is the signal", async () => {
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
-    const row = await seedEvent(repos, providerId);
+    const healthSystemId = await seedHealthSystem(repos);
+    const row = await seedEvent(repos, healthSystemId);
     await repos.calendarEvents.markGhost(row.event_key);
 
-    const back = await seedEvent(repos, providerId, { restore: true });
+    const back = await seedEvent(repos, healthSystemId, { restore: true });
 
     expect(back.state).toBe("active");
     expect(back.ghosted_at).toBeNull();
@@ -182,12 +182,12 @@ describe("ghosting and restoring", () => {
     // `ghosted_at`, re-render the "as of" line, and patch the event again for ever.
     const time = clock();
     const repos = testRepos({ now: time.now });
-    const providerId = await seedProvider(repos);
-    const row = await seedEvent(repos, providerId);
+    const healthSystemId = await seedHealthSystem(repos);
+    const row = await seedEvent(repos, healthSystemId);
     await repos.calendarEvents.markGhost(row.event_key);
 
     time.advance(3600);
-    const again = await seedEvent(repos, providerId, { fingerprint: "fingerprint-ghost" });
+    const again = await seedEvent(repos, healthSystemId, { fingerprint: "fingerprint-ghost" });
 
     expect(again.state).toBe("ghost");
     expect(again.ghosted_at).toBe(T0);
@@ -197,8 +197,8 @@ describe("ghosting and restoring", () => {
   it("moves the fingerprint of a row that is already a ghost, and only then", async () => {
     const time = clock();
     const repos = testRepos({ now: time.now });
-    const providerId = await seedProvider(repos);
-    const row = await seedEvent(repos, providerId);
+    const healthSystemId = await seedHealthSystem(repos);
+    const row = await seedEvent(repos, healthSystemId);
 
     expect(await repos.calendarEvents.markGhost(row.event_key, { fingerprint: "ghost-1" })).toBe(
       true,
@@ -226,16 +226,16 @@ describe("ghosting and restoring", () => {
     expect(await repos.calendarEvents.getByKey("nope:nope")).toBeNull();
   });
 
-  it("logs the provider id and a digest, never the encounter id, when ghosting or restoring", async () => {
-    // Regression: `eventKey` is `<providerId>:<encounterId>` -- the encounter half
+  it("logs the health system id and a digest, never the encounter id, when ghosting or restoring", async () => {
+    // Regression: `eventKey` is `<healthSystemId>:<encounterId>` -- the encounter half
     // is Epic's own resource id, and the `:` defeats the log redactor's 32-char
     // opaque-string rule (see worker/lib/log.ts's header and SECURITY.md, "No PHI
     // in logs"). `calendar_events.ghosted` and `calendar_events.restored` must
-    // carry `providerId` (our own row id) and a short digest instead.
+    // carry `healthSystemId` (our own row id) and a short digest instead.
     const { log, lines } = recordingLog();
     const repos = testRepos({ log });
-    const providerId = await seedProvider(repos);
-    const row = await seedEvent(repos, providerId, { encounterId: "enc-secret" });
+    const healthSystemId = await seedHealthSystem(repos);
+    const row = await seedEvent(repos, healthSystemId, { encounterId: "enc-secret" });
 
     await repos.calendarEvents.markGhost(row.event_key);
     await repos.calendarEvents.restore(row.event_key);
@@ -247,21 +247,21 @@ describe("ghosting and restoring", () => {
     expect(restored).toHaveLength(1);
 
     for (const line of [...ghosted, ...restored]) {
-      expect(line.providerId).toBe(providerId);
+      expect(line.healthSystemId).toBe(healthSystemId);
       expect(typeof line.eventKeyHash).toBe("string");
       expect(line.eventKey).toBeUndefined();
       const serialized = JSON.stringify(line);
       expect(serialized).not.toContain("enc-secret");
-      expect(serialized).not.toContain(`${providerId}:`);
+      expect(serialized).not.toContain(`${healthSystemId}:`);
     }
   });
 });
 
 describe("calendar_events.list and touch", () => {
-  it("filters by provider, state and start, ordered by start", async () => {
+  it("filters by health system, state and start, ordered by start", async () => {
     const repos = testRepos();
-    const first = await seedProvider(repos, { displayName: "A Example Health" });
-    const second = await seedProvider(repos, { displayName: "B Example Health" });
+    const first = await seedHealthSystem(repos, { displayName: "A Example Health" });
+    const second = await seedHealthSystem(repos, { displayName: "B Example Health" });
 
     await seedEvent(repos, first, { encounterId: "late", startAt: START + 7200 });
     await seedEvent(repos, first, { encounterId: "early", startAt: START });
@@ -270,11 +270,11 @@ describe("calendar_events.list and touch", () => {
     await seedEvent(repos, second, { encounterId: "other", startAt: START });
 
     expect(
-      await column(repos.calendarEvents.list({ providerId: first }), "google_event_id"),
+      await column(repos.calendarEvents.list({ healthSystemId: first }), "google_event_id"),
     ).toStrictEqual(["google-early", "google-gone", "google-late"]);
     expect(
       await column(
-        repos.calendarEvents.list({ providerId: first, state: "active" }),
+        repos.calendarEvents.list({ healthSystemId: first, state: "active" }),
         "google_event_id",
       ),
     ).toStrictEqual(["google-early", "google-late"]);
@@ -286,17 +286,17 @@ describe("calendar_events.list and touch", () => {
 
   it("sorts rows with no start time last rather than first", async () => {
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
+    const healthSystemId = await seedHealthSystem(repos);
 
     await repos.calendarEvents.upsert({
-      eventKey: await blindKey(`${providerId}:undated`),
-      providerId,
+      eventKey: await blindKey(`${healthSystemId}:undated`),
+      healthSystemId,
       encounterId: "undated",
       calendarId: "primary",
       googleEventId: "google-undated",
       fingerprint: "f",
     });
-    await seedEvent(repos, providerId, { encounterId: "dated" });
+    await seedEvent(repos, healthSystemId, { encounterId: "dated" });
 
     expect(await column(repos.calendarEvents.list(), "google_event_id")).toStrictEqual([
       "google-dated",
@@ -307,9 +307,9 @@ describe("calendar_events.list and touch", () => {
   it("touches many keys at once and ignores the ones it does not have", async () => {
     const time = clock();
     const repos = testRepos({ now: time.now });
-    const providerId = await seedProvider(repos);
-    const a = await seedEvent(repos, providerId, { encounterId: "a" });
-    const b = await seedEvent(repos, providerId, { encounterId: "b" });
+    const healthSystemId = await seedHealthSystem(repos);
+    const a = await seedEvent(repos, healthSystemId, { encounterId: "a" });
+    const b = await seedEvent(repos, healthSystemId, { encounterId: "b" });
 
     time.advance(600);
 
@@ -324,13 +324,13 @@ describe("calendar_events.list and touch", () => {
 describe("what calendar_events stores", () => {
   it("blinds the key, the encounter, the calendar and the CSN, and seals the start", async () => {
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
+    const healthSystemId = await seedHealthSystem(repos);
     const blinder = testBlinder();
-    const eventKey = await blindKey(`${providerId}:csn:csn-secret`);
+    const eventKey = await blindKey(`${healthSystemId}:csn:csn-secret`);
 
     const row = await repos.calendarEvents.upsert({
       eventKey,
-      providerId,
+      healthSystemId,
       encounterId: "csn:csn-secret",
       calendarId: "owner@example.test",
       googleEventId: "google-1",
@@ -343,8 +343,8 @@ describe("what calendar_events stores", () => {
     // What the sync reads: the real start and calendar, opened.
     expect(row.start_at).toBe(START);
     expect(row.calendar_id).toBe("owner@example.test");
-    expect(row.portal_csn).toBe(await blindCsn(blinder, providerId, "csn-secret"));
-    expect(row.encounter_id).toBe(await blindCsn(blinder, providerId, "csn-secret"));
+    expect(row.portal_csn).toBe(await blindCsn(blinder, healthSystemId, "csn-secret"));
+    expect(row.encounter_id).toBe(await blindCsn(blinder, healthSystemId, "csn-secret"));
 
     // What a D1 snapshot holds.
     const raw = await env.DB.prepare("SELECT * FROM calendar_events WHERE event_key = ?")
@@ -361,23 +361,23 @@ describe("what calendar_events stores", () => {
 
   it("stores a FHIR row's encounter as the same blind the cache keys the Encounter by", async () => {
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
+    const healthSystemId = await seedHealthSystem(repos);
 
-    const row = await seedEvent(repos, providerId, { encounterId: "enc-9" });
+    const row = await seedEvent(repos, healthSystemId, { encounterId: "enc-9" });
 
     expect(row.encounter_id).toBe(
-      await blindResourceId(testBlinder(), providerId, "Encounter", "enc-9"),
+      await blindResourceId(testBlinder(), healthSystemId, "Encounter", "enc-9"),
     );
   });
 
   it("refuses a key that still carries the upstream id", async () => {
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
+    const healthSystemId = await seedHealthSystem(repos);
 
     await expect(
       repos.calendarEvents.upsert({
-        eventKey: `${providerId}:enc-1`,
-        providerId,
+        eventKey: `${healthSystemId}:enc-1`,
+        healthSystemId,
         encounterId: "enc-1",
         calendarId: "primary",
         googleEventId: "google-1",
@@ -388,9 +388,9 @@ describe("what calendar_events stores", () => {
 
   it("keeps the sealed detail readable across a rekey and re-seals it on a calendar move", async () => {
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
-    const row = await seedEvent(repos, providerId, { encounterId: "csn:c-1" });
-    const toKey = await blindKey(`${providerId}:enc-7`);
+    const healthSystemId = await seedHealthSystem(repos);
+    const row = await seedEvent(repos, healthSystemId, { encounterId: "csn:c-1" });
+    const toKey = await blindKey(`${healthSystemId}:enc-7`);
 
     expect(
       await repos.calendarEvents.rekey(row.event_key, toKey, {
@@ -415,15 +415,15 @@ describe("what calendar_events stores", () => {
     );
   });
 
-  it("filters by provider and state through the index, not a table walk", async () => {
+  it("filters by health system and state through the index, not a table walk", async () => {
     const plan = await env.DB.prepare(
-      `EXPLAIN QUERY PLAN SELECT * FROM calendar_events WHERE provider_id = ? AND state = ?`,
+      `EXPLAIN QUERY PLAN SELECT * FROM calendar_events WHERE health_system_id = ? AND state = ?`,
     )
       .bind("p", "active")
       .all<{ detail: string }>();
     const details = plan.results.map((step) => step.detail).join("\n");
 
-    expect(details).toMatch(/USING INDEX calendar_events_provider/u);
+    expect(details).toMatch(/USING INDEX calendar_events_health_system/u);
     expect(details).not.toMatch(/^SCAN calendar_events$/mu);
   });
 

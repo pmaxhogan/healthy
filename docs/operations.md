@@ -18,7 +18,7 @@ deployment owner's timezone in a public repository.
   one clear keepalive failure.
 - **Daily, `23 6 * * *`.** Runs the full-scope FHIR refresh that
   repopulates the cache the MCP reads from (every resource type, for every
-  connected provider), then a calendar sync — cheap immediately afterward,
+  connected health system), then a calendar sync — cheap immediately afterward,
   since the refresh just filled the cache the sync's reference resolution
   reads from. Finishes by pruning expired FHIR cache rows, expired OAuth
   states, and `mcp_audit` rows older than a year.
@@ -57,8 +57,8 @@ watching it and every code it asks for is an email to the owner:
 
 ## Backoff on 429
 
-A rate limit from _any_ provider, or from Google, backs off _every_
-provider's sync until the same moment — not just the one that got limited.
+A rate limit from _any_ health system, or from Google, backs off _every_
+health system's sync until the same moment — not just the one that got limited.
 The detection covers three shapes: an explicit 429, a rate-limit error
 carrying a `Retry-After`-derived delay, and Google's quota-exhaustion
 response, which is a **403**, not a 429, but is treated identically. The
@@ -74,7 +74,7 @@ Every sync (scheduled or manual) writes one row to `run_log`: its kind
 (`calendar`, `full`, `refresh`, or `manual`), when it started and finished,
 whether it succeeded, and a `summary_json` of counts, plus the distinct
 warning and error codes seen (`warningCodes`, `errors`) — bare, stable codes
-such as an Epic OperationOutcome code, never a provider id or any clinical
+such as an Epic OperationOutcome code, never a health system id or any clinical
 content. View recent runs in the admin UI's **Runs** page, or `GET
 /api/runs`.
 
@@ -82,12 +82,12 @@ content. View recent runs in the admin UI's **Runs** page, or `GET
 
 When a connection's token refresh fails with `invalid_grant`, Healthy opens
 a Trello card via `openReconnectCard` and records an `alerts` row. There is
-at most one open alert per subject (`provider:<id>` or `google`) — a
+at most one open alert per subject (`health_system:<id>` or `google`) — a
 partial unique index enforces that a second failure while one is already
 open is a no-op, not a duplicate card.
 
 The card's link is `https://<your-host>/oauth/reconnect/<id>`, where `<id>`
-can be the literal `google`, a `connections.id`, or a `providers.id` — the
+can be the literal `google`, a `connections.id`, or a `health_systems.id` — the
 route resolves whichever it is handed and redirects into the right
 authorisation flow. Opening it on a phone works end to end: sign in past
 Access and the password, land on the health system's or Google's own
@@ -131,7 +131,7 @@ persistently; a ghost that reappears in a later sync (the appointment was
 rescheduled back, or a search-window quirk made it vanish temporarily) is
 **restored** to active rather than left ghosted forever.
 
-Ghosting is suppressed for a provider on any run where Epic reports the
+Ghosting is suppressed for a health system on any run where Epic reports the
 `4119` OperationOutcome warning (partial or filtered results): a real
 appointment must never be turned into a ghost because an organisation's own
 API had a temporary filtering problem, so inserts and patches still
@@ -163,9 +163,9 @@ put SESSION_SECRET`. This invalidates every existing session cookie; you
   re-authorising every Epic and Google connection from scratch and letting
   the FHIR cache repopulate — there is no in-place re-encryption path.
 - **A per-organisation Epic client secret** — set or rotate it from the
-  provider's page in the admin UI (`POST /api/providers/:id/secret`), or, with
+  health system's page in the admin UI (`POST /api/health-systems/:id/secret`), or, with
   no live browser session against that environment, `npm run
-set-provider-secret -- --provider <id> --remote`. Write-only: once saved,
+set-health-system-secret -- --health-system <id> --remote`. Write-only: once saved,
   it is never read back or displayed again.
 - **`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `EPIC_CLIENT_ID_PROD`/
   `EPIC_CLIENT_ID_NONPROD`, `TRELLO_KEY`/`TRELLO_TOKEN`/list ids** —
@@ -180,7 +180,7 @@ set-provider-secret -- --provider <id> --remote`. Write-only: once saved,
 There is no single "wipe everything" button; wiping is a combination of
 disconnecting through the admin UI (which does the safe parts — revoking
 what can be revoked upstream, clearing the FHIR cache, soft-deleting the
-provider) and, for a full reset, operating on D1 directly:
+health system) and, for a full reset, operating on D1 directly:
 
 ```sh
 npx wrangler d1 execute healthy --remote --command "DELETE FROM fhir_cache"
@@ -209,7 +209,7 @@ A few things this does **not** do, worth knowing before you rely on it:
   scripts as well as in `wrangler.jsonc`; if you renamed the database, the
   scripts (and the commands above) need the new name too.
 
-To decommission a deployment entirely: disconnect every provider and
+To decommission a deployment entirely: disconnect every health system and
 Google from the admin UI, revoke every MCP grant, then delete the D1
 database and the KV namespace from the Cloudflare dashboard or with
 `wrangler d1 delete` / `wrangler kv namespace delete`.
@@ -219,7 +219,7 @@ database and the KV namespace from the Cloudflare dashboard or with
 Logs are structured JSON lines (`worker/lib/log.ts`), one object per line.
 Redaction is applied to every field on every line and is a safety net, not
 the primary control — the actual guarantee is that call sites are written,
-and tested, to never pass clinical content, provider names, or credentials
+and tested, to never pass clinical content, health system names, or credentials
 to the logger in the first place:
 
 - Any key that looks credential-shaped (containing `token`, `secret`,

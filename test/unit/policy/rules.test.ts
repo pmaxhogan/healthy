@@ -12,7 +12,7 @@ import {
   buildRules,
   fieldRuleResolves,
   fieldRulesFor,
-  isProviderDenied,
+  isHealthSystemDenied,
   isSensitiveAllowed,
   isToolDenied,
   parseFieldTarget,
@@ -25,7 +25,7 @@ const rows = (...input: PolicyRuleInput[]): PolicyRuleInput[] => input;
 describe("EMPTY_RULES", () => {
   it("denies nothing, which is the posture on a fresh database", () => {
     expect(isToolDenied(EMPTY_RULES, "get_allergies")).toBe(false);
-    expect(isProviderDenied(EMPTY_RULES, "prov_a")).toBe(false);
+    expect(isHealthSystemDenied(EMPTY_RULES, "prov_a")).toBe(false);
     expect(fieldRulesFor(EMPTY_RULES, "Patient")).toStrictEqual([]);
     expect(EMPTY_RULES.unparsed).toStrictEqual([]);
   });
@@ -76,7 +76,7 @@ describe("buildRules", () => {
       rows(
         { rule_type: "tool", target: "get_documents" },
         { rule_type: "resource", target: "Coverage" },
-        { rule_type: "provider", target: "prov_b" },
+        { rule_type: "health_system", target: "prov_b" },
         { rule_type: "field", target: "Patient.address.city" },
       ),
     );
@@ -84,7 +84,7 @@ describe("buildRules", () => {
     expect(isToolDenied(rules, "get_documents")).toBe(true);
     expect(isToolDenied(rules, "get_allergies")).toBe(false);
     expect(rules.resources.has("Coverage")).toBe(true);
-    expect(isProviderDenied(rules, "prov_b")).toBe(true);
+    expect(isHealthSystemDenied(rules, "prov_b")).toBe(true);
     expect(rules.fields).toHaveLength(1);
     expect(rules.unparsed).toStrictEqual([]);
   });

@@ -1,11 +1,11 @@
 /**
  * The daily full-scope refresh that fills the MCP's read cache.
  *
- * Everything the owner's record contains, per provider, once a day, into
+ * Everything the owner's record contains, per health system, once a day, into
  * `fhir_cache` with an eight-day TTL -- a day longer than a week so a single
  * missed night never empties the cache the MCP serves from.
  *
- * Isolation is per (provider, resource type), one level finer than the calendar
+ * Isolation is per (health system, resource type), one level finer than the calendar
  * sync. That is deliberate: an organisation that exposes Immunization but not
  * Coverage should produce a cache full of immunizations and one recorded failure,
  * not an empty cache. `fhir_sync_state` is where those failures live, and it
@@ -22,7 +22,7 @@
  *   - **`DocumentReference` is metadata only, and `Binary` is never searched.**
  *     Epic caps document queries per day (error 4135), and the attached document
  *     bodies are fetched lazily when the MCP is actually asked for one.
- *   - **4135 stops document work for that provider for the rest of the run.** The
+ *   - **4135 stops document work for that health system for the rest of the run.** The
  *     cap is daily, so continuing would spend the remaining quota on failures.
  *   - **Only `Patient` is read by id.** The other `mode: "read"` entries
  *     (Practitioner, Location, Organization, Medication, Binary) exist to be
@@ -45,11 +45,11 @@
  * what cron still uses and what the tests drive.
  *
  * Resuming needs no new table. `fhir_sync_state.last_full_at` is already stamped
- * per (provider, resource type) on success *and* on failure, so a type whose stamp
+ * per (health system, resource type) on success *and* on failure, so a type whose stamp
  * is at or after the cycle's start instant is done for this cycle and is skipped --
  * which also means a type that failed is not retried within one cycle.
  *
- * Log lines carry provider ids, resource type names, counts and Epic codes. Never
+ * Log lines carry health system ids, resource type names, counts and Epic codes. Never
  * a search URL -- the parameters carry the patient id -- and never a resource.
  */
 
@@ -94,7 +94,7 @@ const DOCUMENT_TYPES: ReadonlySet<string> = new Set(["DocumentReference", "Binar
 export const CHUNK_BUDGET_MS = 20_000;
 
 export interface FullRefreshOptions {
-  providerIds?: string[];
+  healthSystemIds?: string[];
   trigger?: RunKind;
   deps?: SyncDeps;
 }
@@ -102,7 +102,7 @@ export interface FullRefreshOptions {
 /**
  * What one chunk hands the next.
  *
- * `pending` is the providers still to walk, `cycleStartedAt` the instant the whole
+ * `pending` is the health systems still to walk, `cycleStartedAt` the instant the whole
  * refresh began (the resume marker against `fhir_sync_state.last_full_at`), and
  * `runId` plus `state` the one open run row and its counts so far. `runId` is null
  * only before the first chunk has opened the row.
@@ -128,7 +128,7 @@ export interface ChunkOptions extends FullRefreshOptions {
 }
 
 /**
- * Refresh every provider's cached record, start to finish, in this invocation.
+ * Refresh every health system's cached record, start to finish, in this invocation.
  *
  * Writes one `run_log` row of kind "full" and resolves with its summary. Never
  * throws. Safe only where the caller has minutes of wall clock -- cron does, a
@@ -143,7 +143,7 @@ export async function runFullRefresh(
 }
 
 /**
- * One chunk of a refresh: as many (provider, resource type) passes as the budget
+ * One chunk of a refresh: as many (health system, resource type) passes as the budget
  * allows, then a job describing the rest.
  *
  * With no `budgetMs` this is `runFullRefresh` and `job` always comes back null.
@@ -199,22 +199,22 @@ export async function runFullRefreshChunk(
     ctx,
     options.trigger ?? "full",
     async (state) => {
-      const targets = await syncTargets(repos, resuming?.pending ?? options.providerIds);
+      const targets = await syncTargets(repos, resuming?.pending ?? options.healthSystemIds);
       // Only on the chunk that opens the row. A later chunk sees just what is left
-      // of `targets`, so counting again there would report one provider for a
+      // of `targets`, so counting again there would report one health system for a
       // refresh of three.
-      if (openRunId === null) state.summary.providers = targets.length;
+      if (openRunId === null) state.summary.healthSystems = targets.length;
       for (const [index, target] of targets.entries()) {
         try {
-          const stopped = await refreshProvider(ctx, repos, target, state, deps, {
+          const stopped = await refreshHealthSystem(ctx, repos, target, state, deps, {
             cycleStartedAt,
             chunked: resuming !== undefined,
             budget,
           });
           if (stopped) {
-            deferred.pending = targets.slice(index).map((remaining) => remaining.provider.id);
+            deferred.pending = targets.slice(index).map((remaining) => remaining.healthSystem.id);
             ctx.log.info("refresh.deferred", {
-              providerId: target.provider.id,
+              healthSystemId: target.healthSystem.id,
               pending: deferred.pending.length,
               types: budget.processed,
             });
@@ -222,9 +222,12 @@ export async function runFullRefreshChunk(
           }
           await repos.connections.recordSync(target.connection.id, "full");
         } catch (error) {
-          state.summary.errors.push({ providerId: target.provider.id, code: codeOf(error) });
-          ctx.log.error("refresh.provider_failed", {
-            providerId: target.provider.id,
+          state.summary.errors.push({
+            healthSystemId: target.healthSystem.id,
+            code: codeOf(error),
+          });
+          ctx.log.error("refresh.health_system_failed", {
+            healthSystemId: target.healthSystem.id,
             ...errorFields(error),
           });
           const limit = rateLimitOf(error);
@@ -287,7 +290,7 @@ interface RefreshPass {
 }
 
 /**
- * The resource types this provider has already had refreshed in this cycle.
+ * The resource types this health system has already had refreshed in this cycle.
  *
  * One query rather than one per entry, and only for a chunked run: an unchunked
  * refresh has nothing to skip, and asking would make "run it twice in a row"
@@ -295,10 +298,10 @@ interface RefreshPass {
  */
 async function completedTypes(
   repos: Repos,
-  providerId: string,
+  healthSystemId: string,
   cycleStartedAt: number,
 ): Promise<ReadonlySet<string>> {
-  const states = await repos.fhirSyncState.listByProvider(providerId);
+  const states = await repos.fhirSyncState.listByHealthSystem(healthSystemId);
   return new Set(
     states
       .filter((state) => state.lastFullAt !== null && state.lastFullAt >= cycleStartedAt)
@@ -306,8 +309,8 @@ async function completedTypes(
   );
 }
 
-/** True when the budget ran out and this provider still has resource types left. */
-async function refreshProvider(
+/** True when the budget ran out and this health system still has resource types left. */
+async function refreshHealthSystem(
   ctx: Ctx,
   repos: Repos,
   target: SyncTarget,
@@ -315,15 +318,15 @@ async function refreshProvider(
   deps: SyncDeps,
   pass: RefreshPass,
 ): Promise<boolean> {
-  const providerId = target.provider.id;
+  const healthSystemId = target.healthSystem.id;
   const done = pass.chunked
-    ? await completedTypes(repos, providerId, pass.cycleStartedAt)
+    ? await completedTypes(repos, healthSystemId, pass.cycleStartedAt)
     : new Set<string>();
-  const session = await getFhirClientFor(ctx, providerId, deps);
+  const session = await getFhirClientFor(ctx, healthSystemId, deps);
   const capabilities = await getCapabilityIndex(
     ctx,
     repos,
-    target.provider,
+    target.healthSystem,
     session.adapter,
     await session.getAccessToken(),
   );
@@ -332,7 +335,7 @@ async function refreshProvider(
   const entries =
     capabilities === null ? [...SEARCH_REGISTRY] : filterSupported(SEARCH_REGISTRY, capabilities);
 
-  // Set once a 4135 is seen, and honoured for the rest of this provider's pass.
+  // Set once a 4135 is seen, and honoured for the rest of this health system's pass.
   // Deliberately *not* carried across a chunk boundary: the only entry that reads
   // it and is not itself a document type is `Binary`, which is mode "read" and
   // therefore never searched, so a fresh chunk starting with `reached: false`
@@ -343,8 +346,11 @@ async function refreshProvider(
     if (budgetSpent(pass.budget)) return true;
     pass.budget.processed += 1;
     if (documentCap.reached && DOCUMENT_TYPES.has(entry.resourceType)) {
-      ctx.log.info("refresh.documents.capped", { providerId, resourceType: entry.resourceType });
-      await repos.fhirSyncState.record(providerId, entry.resourceType, {
+      ctx.log.info("refresh.documents.capped", {
+        healthSystemId,
+        resourceType: entry.resourceType,
+      });
+      await repos.fhirSyncState.record(healthSystemId, entry.resourceType, {
         ok: false,
         errorCode: `epic_${EPIC_DOCUMENT_CAP}`,
       });
@@ -355,7 +361,7 @@ async function refreshProvider(
   return false;
 }
 
-/** One (provider, resource type) pass. Failures are recorded, never rethrown. */
+/** One (health system, resource type) pass. Failures are recorded, never rethrown. */
 async function refreshResourceType(
   ctx: Ctx,
   repos: Repos,
@@ -365,7 +371,7 @@ async function refreshResourceType(
   state: RunState,
   documentCap: { reached: boolean },
 ): Promise<void> {
-  const providerId = target.provider.id;
+  const healthSystemId = target.healthSystem.id;
   try {
     const { resources, warnings } = await fetchEntry(session, entry);
     if (warnings.some((warning) => warning.epicCode === EPIC_DOCUMENT_CAP)) {
@@ -377,7 +383,7 @@ async function refreshResourceType(
     }
     if (resources.length > 0) {
       const report = await repos.fhirCache.upsertMany(
-        providerId,
+        healthSystemId,
         resources.map((resource) => ({
           ...resource,
           resourceType: resource.resourceType,
@@ -387,13 +393,13 @@ async function refreshResourceType(
       );
       state.summary.resourcesCached += report.written + report.unchanged;
     }
-    await repos.fhirSyncState.record(providerId, entry.resourceType, {
+    await repos.fhirSyncState.record(healthSystemId, entry.resourceType, {
       ok: true,
       errorCode: null,
       warnings: countCodes(warnings),
     });
     ctx.log.info("refresh.type", {
-      providerId,
+      healthSystemId,
       resourceType: entry.resourceType,
       count: resources.length,
       warnings: warnings.length,
@@ -401,17 +407,17 @@ async function refreshResourceType(
   } catch (error) {
     if (epicCodesOf(error).includes(EPIC_DOCUMENT_CAP)) documentCap.reached = true;
     const code = codeOf(error);
-    await repos.fhirSyncState.record(providerId, entry.resourceType, {
+    await repos.fhirSyncState.record(healthSystemId, entry.resourceType, {
       ok: false,
       errorCode: code,
     });
     ctx.log.warn("refresh.type_failed", {
-      providerId,
+      healthSystemId,
       resourceType: entry.resourceType,
       ...errorFields(error),
     });
     // A rate limit is the one failure that must escape this level: it concerns
-    // every resource type and every provider, not just this pass.
+    // every resource type and every health system, not just this pass.
     if (rateLimitOf(error) !== null) throw error;
   }
 }

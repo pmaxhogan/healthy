@@ -29,7 +29,7 @@ export function normalizePatient(resource: fhir4.Patient, ctx: NormalizeCtx): No
   return {
     resourceType: "Patient",
     id: resource.id ?? "",
-    provider: ctx.provider,
+    healthSystem: ctx.healthSystem,
     ...(resource.meta?.lastUpdated && { lastUpdated: resource.meta.lastUpdated }),
     ...(name && { name }),
     ...(resource.birthDate && { birthDate: resource.birthDate }),

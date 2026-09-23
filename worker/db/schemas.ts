@@ -1,9 +1,9 @@
 /**
  * Schemas for every JSON-bearing D1 column, and the settings catalogue.
  *
- * SQLite has no JSON type, so `settings.value_json`, `providers.config_json`,
+ * SQLite has no JSON type, so `settings.value_json`, `health_systems.config_json`,
  * `run_log.summary_json`, `fhir_sync_state.warnings_json` and
- * `mcp_audit.providers_json` are all TEXT. Parsing them through zod at the
+ * `mcp_audit.health_systems_json` are all TEXT. Parsing them through zod at the
  * boundary is what keeps a hand-edited row, or a shape left behind by an older
  * deploy, from becoming an `undefined` three layers up.
  *
@@ -54,7 +54,7 @@ export const settingSchemas = {
   timezone: z.string().min(1).nullable(),
   /** Google calendar the sync writes to. "primary" means the owner's own. */
   calendar_id: z.string().min(1),
-  /** Fallback event title template; a provider may override it. */
+  /** Fallback event title template; a health system may override it. */
   default_title_template: z.string().min(1),
   /** Fallback Google colorId, or null to leave the calendar's default. */
   default_color_id: z.string().min(1).nullable(),
@@ -149,17 +149,17 @@ export function encodeSetting<K extends SettingKey>(key: K, value: Settings[K]):
 }
 
 // ---------------------------------------------------------------------------
-// providers.config_json
+// health systems.config_json
 // ---------------------------------------------------------------------------
 
 const offsetMinutes = z.number().int().min(0).max(1440);
 
 /**
- * Per-provider overrides. Every field is optional: an absent one means "use the
+ * Per-health system overrides. Every field is optional: an absent one means "use the
  * matching `settings` default", which is why nothing here has a value baked in
  * except `enabled`.
  */
-export const providerConfigSchema = z.object({
+export const healthSystemConfigSchema = z.object({
   title_template: z.string().min(1).optional(),
   color_id: z.string().min(1).optional(),
   arrival_offset_min: offsetMinutes.optional(),
@@ -170,9 +170,9 @@ export const providerConfigSchema = z.object({
   enabled: z.boolean().default(true),
 });
 
-export type ProviderConfig = z.infer<typeof providerConfigSchema>;
+export type HealthSystemConfig = z.infer<typeof healthSystemConfigSchema>;
 /** What a caller may pass: the defaulted fields are optional on the way in. */
-export type ProviderConfigInput = z.input<typeof providerConfigSchema>;
+export type HealthSystemConfigInput = z.input<typeof healthSystemConfigSchema>;
 
 // ---------------------------------------------------------------------------
 // run_log.summary_json
@@ -185,14 +185,14 @@ const count = z.number().int().nonnegative().default(0);
  * or an organisation -- the run log is the one table an operator reads casually.
  */
 export const runSummarySchema = z.object({
-  providers: count,
+  healthSystems: count,
   inserted: count,
   patched: count,
   ghosted: count,
   restored: count,
   unchanged: count,
   resources: count,
-  /** Stable error codes, one per provider that failed. */
+  /** Stable error codes, one per health system that failed. */
   errors: z.array(z.string()).default([]),
   /** OperationOutcome codes an org returned, e.g. "4119" -- which, not how many. */
   warnings: z.array(z.string()).default([]),
@@ -224,7 +224,7 @@ export type RunSummary = z.infer<typeof runSummarySchema>;
 export type RunSummaryInput = z.input<typeof runSummarySchema>;
 
 // ---------------------------------------------------------------------------
-// fhir_sync_state.warnings_json and mcp_audit.providers_json
+// fhir_sync_state.warnings_json and mcp_audit.health_systems_json
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -268,5 +268,5 @@ export const syncWarningsSchema = z.array(
 
 export type SyncWarning = z.infer<typeof syncWarningsSchema>[number];
 
-/** `mcp_audit.providers_json`: which providers a tool call touched. */
-export const providerIdsSchema = z.array(z.string());
+/** `mcp_audit.health_systems_json`: which health systems a tool call touched. */
+export const healthSystemIdsSchema = z.array(z.string());

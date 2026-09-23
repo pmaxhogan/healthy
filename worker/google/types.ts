@@ -57,14 +57,14 @@ export interface EventDateTime {
  * considers events that carry it, so an event the owner created by hand can
  * never be touched. The other three exist so a sync run can diff without
  * re-reading anything else: `key` identifies the appointment, `fp` is the
- * fingerprint of the mapped fields, `provider` says which connection produced
+ * fingerprint of the mapped fields, `health_system` says which connection produced
  * it.
  */
 interface HealthyEventProperties {
   healthy: "1";
   key: string;
   fp: string;
-  provider: string;
+  healthSystem: string;
   [extra: string]: string;
 }
 
@@ -121,8 +121,8 @@ export interface CalendarEventModel {
    * its fields explicitly -- and only read by the row writer, which blinds it.
    */
   encounterId: string;
-  /** Provider id, for per-provider diffing and cleanup. */
-  provider: string;
+  /** Health system id, for per-health system diffing and cleanup. */
+  healthSystem: string;
   title: string;
   description: string;
   location?: string;

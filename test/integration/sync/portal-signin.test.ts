@@ -12,7 +12,7 @@ import { seedPortalAccount } from "../portal/helpers.ts";
 import {
   fhirServer,
   resetSyncDb,
-  seedConnectedProvider,
+  seedConnectedHealthSystem,
   stubUpstreams,
   syncCtx,
   syncRepos,
@@ -28,24 +28,29 @@ const HOST = "fhir.a.example.test";
 
 interface Fixture {
   ctx: Ctx;
-  providerId: string;
+  healthSystemId: string;
   upstreams: Upstreams;
   deps: PortalDeps;
 }
 
 async function fixture(): Promise<Fixture> {
   const ctx = syncCtx({ trello: true });
-  const provider = await seedConnectedProvider(ctx, {
+  const healthSystem = await seedConnectedHealthSystem(ctx, {
     host: HOST,
     displayName: "A Example Health",
   });
-  await seedPortalAccount(ctx, provider.providerId);
-  const upstreams = stubUpstreams({ [HOST]: fhirServer({ patientId: provider.patientId }) });
-  return { ctx, providerId: provider.providerId, upstreams, deps: portalDeps(upstreams.deps) };
+  await seedPortalAccount(ctx, healthSystem.healthSystemId);
+  const upstreams = stubUpstreams({ [HOST]: fhirServer({ patientId: healthSystem.patientId }) });
+  return {
+    ctx,
+    healthSystemId: healthSystem.healthSystemId,
+    upstreams,
+    deps: portalDeps(upstreams.deps),
+  };
 }
 
 async function miss(fix: Fixture, code = "portal_2fa_required"): Promise<void> {
-  await failSignIn(fix.ctx, fix.providerId, code, fix.deps);
+  await failSignIn(fix.ctx, fix.healthSystemId, code, fix.deps);
 }
 
 describe("a verification code that never arrives", () => {
@@ -55,7 +60,7 @@ describe("a verification code that never arrives", () => {
     await miss(fix);
 
     expect(fix.upstreams.trelloCards).toStrictEqual([]);
-    expect(await syncRepos(fix.ctx).alerts.getOpen(`portal:${fix.providerId}`)).toBeNull();
+    expect(await syncRepos(fix.ctx).alerts.getOpen(`portal:${fix.healthSystemId}`)).toBeNull();
   });
 
   it("opens one reconnect card on the second miss in a row, and no more after that", async () => {
@@ -69,7 +74,7 @@ describe("a verification code that never arrives", () => {
       "Reconnect A Example Health MyChart to Healthy",
     );
     expect(fix.upstreams.trelloCards[0]?.desc).toContain("portal_2fa_required");
-    expect(await syncRepos(fix.ctx).alerts.getOpen(`portal:${fix.providerId}`)).not.toBeNull();
+    expect(await syncRepos(fix.ctx).alerts.getOpen(`portal:${fix.healthSystemId}`)).not.toBeNull();
 
     await miss(fix);
     expect(fix.upstreams.trelloCards).toHaveLength(1);
@@ -79,7 +84,7 @@ describe("a verification code that never arrives", () => {
     const fix = await fixture();
 
     await miss(fix);
-    await syncRepos(fix.ctx).portalAccounts.markActive(fix.providerId);
+    await syncRepos(fix.ctx).portalAccounts.markActive(fix.healthSystemId);
     await miss(fix);
 
     expect(fix.upstreams.trelloCards).toStrictEqual([]);

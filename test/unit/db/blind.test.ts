@@ -121,7 +121,7 @@ describe("the named blinds", () => {
     expect(blinded).toBe(await blindCalendarId(BLINDER, "owner@example.test"));
   });
 
-  it("keeps an event key's provider prefix and portal marker, and nothing upstream", async () => {
+  it("keeps an event key's health system prefix and portal marker, and nothing upstream", async () => {
     const fhir = await blindEventKey(BLINDER, "p1:eAbc123");
     const portal = await blindEventKey(BLINDER, "p1:csn:WP-24x");
 
@@ -135,7 +135,7 @@ describe("the named blinds", () => {
     expect(isBlindedEventKey("p1:csn:WP-24x")).toBe(false);
   });
 
-  it("refuses an event key with no provider prefix", async () => {
+  it("refuses an event key with no health system prefix", async () => {
     await expect(blindEventKey(BLINDER, "no-prefix")).rejects.toMatchObject({ code: "crypto" });
   });
 });

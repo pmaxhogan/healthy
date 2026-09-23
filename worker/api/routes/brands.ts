@@ -1,5 +1,5 @@
 /**
- * `GET /api/brands?q=` -- the type-ahead behind "add a provider".
+ * `GET /api/brands?q=` -- the type-ahead behind "add a health system".
  *
  * Served out of the committed `data/epic-brands.json` (see `worker/brands.ts`), so
  * it is a pure function of the query with no upstream call and no cache to warm.

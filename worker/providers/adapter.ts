@@ -79,7 +79,7 @@ export interface ProviderAdapter {
   /**
    * Parse `{base}/.well-known/smart-configuration`.
    *
-   * Cached by the caller (7 days per provider); an organisation can move its
+   * Cached by the caller (7 days per health system); an organisation can move its
    * authorize/token endpoints without changing its FHIR base.
    */
   discover(fhirBaseUrl: string): Promise<SmartConfig>;

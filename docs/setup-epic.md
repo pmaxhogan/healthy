@@ -97,24 +97,24 @@ does not commit to a number.)** If authorisation fails immediately after
 completing these steps, wait and retry before assuming something is
 misconfigured.
 
-## 2. Add a provider in the admin UI
+## 2. Add a health system in the admin UI
 
 Once the app is registered (sandbox is enough to start):
 
-1. Open the admin UI → **Providers** → **Add provider**.
+1. Open the admin UI → **Health systems** → **Add health system**.
 2. Either pick your health system from the searchable list — sourced from
    `data/epic-brands.json`, a slimmed copy of Epic's own published directory
    of FHIR endpoints — or enter a FHIR base URL manually. A manual URL is
-   verified with a live SMART discovery request before the provider is
+   verified with a live SMART discovery request before the health system is
    saved; an endpoint that is not really an Epic FHIR server is rejected at
    that point rather than silently stored.
 3. Choose the **environment**: `sandbox` while testing, `prod` for a real
    organisation.
-4. Save, then open the provider and set its **client secret** — the one
+4. Save, then open the health system and set its **client secret** — the one
    provisioned for your app at that organisation in the previous section.
    This is write-only: once saved, the admin UI never displays it again. With
    no live browser session against that environment, `npm run
-set-provider-secret -- --provider <id> --remote` sets the same value from
+set-health-system-secret -- --health-system <id> --remote` sets the same value from
    the command line instead — see the README's secrets section.
 5. Click **Connect**. You are redirected through `/oauth/epic/start`, land
    on that organisation's own sign-in and consent screen, and are returned

@@ -3,10 +3,10 @@
  *
  * ### Why this exists
  *
- * `POST /api/providers/:id/full-refresh` answers 202 and used to hand the whole
+ * `POST /api/health-systems/:id/full-refresh` answers 202 and used to hand the whole
  * refresh to `ctx.waitUntil`. Work in `waitUntil` is cancelled about thirty seconds
  * after the response is written -- mid-`await`, with the invocation still reported
- * as `ok` -- so a provider whose record takes longer than that got half a cache, no
+ * as `ok` -- so a health system whose record takes longer than that got half a cache, no
  * `last_full_refresh_at`, and a `run_log` row left open forever. Nothing inside a
  * cancelled invocation can clean up after itself: there is no `catch`, no `finally`
  * and no alarm, because there is no isolate.
@@ -21,13 +21,13 @@
  * lost, and reaching it needs no HTTP and therefore no second front door past
  * Cloudflare Access.
  *
- * ### One object per provider
+ * ### One object per health system
  *
- * The object is addressed by provider id, so two providers refresh independently
- * and pressing the button twice for the *same* provider is a no-op rather than two
+ * The object is addressed by health system id, so two health systems refresh independently
+ * and pressing the button twice for the *same* health system is a no-op rather than two
  * interleaved refreshes of one record. `start` says which happened.
  *
- * Nothing personal is stored: a job is provider ids, a run id, counts and Epic
+ * Nothing personal is stored: a job is health system ids, a run id, counts and Epic
  * codes. Same rule as the run log, for the same reason.
  */
 
@@ -53,7 +53,7 @@ const JOB_KEY = "job";
  * fetch.
  *
  * `runFullRefreshChunk` guarantees forward progress every chunk it is handed --
- * `fhirSyncState.record` stamps every (provider, resource type) pair it attempts
+ * `fhirSyncState.record` stamps every (health system, resource type) pair it attempts
  * as done for the cycle, on failure exactly as on success, so a chunk that does
  * not finish the whole job still shrinks what is left of it. A record with an
  * unusually large history (or, now that FHIR search paging has no page cap
@@ -78,16 +78,16 @@ export interface RefreshStarted {
 
 export class FullRefreshRunner extends DurableObject<Env> {
   /**
-   * Queue a refresh for this object's provider and return.
+   * Queue a refresh for this object's health system and return.
    *
    * Fast by construction -- a storage write and an alarm -- so the route can await
    * it and still answer 202 well inside any deadline.
    */
-  async start(providerIds: readonly string[]): Promise<RefreshStarted> {
+  async start(healthSystemIds: readonly string[]): Promise<RefreshStarted> {
     const existing = await this.ctx.storage.get<StoredJob>(JOB_KEY);
     if (existing !== undefined) return { started: false };
     await this.ctx.storage.put<StoredJob>(JOB_KEY, {
-      pending: [...providerIds],
+      pending: [...healthSystemIds],
       cycleStartedAt: nowSeconds(),
       runId: null,
       state: null,
@@ -154,7 +154,7 @@ async function closeGivenUp(ctx: Ctx, runId: string, state: RunStateSnapshot): P
 }
 
 /**
- * Hand one provider's full refresh to its runner.
+ * Hand one health system's full refresh to its runner.
  *
  * This is what the admin API calls. It is not `runFullRefresh`: it returns as soon
  * as the job is durable, and the refresh itself happens in alarm invocations that
@@ -162,8 +162,8 @@ async function closeGivenUp(ctx: Ctx, runId: string, state: RunStateSnapshot): P
  */
 export async function startFullRefresh(
   ctx: Ctx,
-  options: { providerId: string },
+  options: { healthSystemId: string },
 ): Promise<RefreshStarted> {
-  const stub = ctx.env.FULL_REFRESH.getByName(options.providerId);
-  return stub.start([options.providerId]);
+  const stub = ctx.env.FULL_REFRESH.getByName(options.healthSystemId);
+  return stub.start([options.healthSystemId]);
 }

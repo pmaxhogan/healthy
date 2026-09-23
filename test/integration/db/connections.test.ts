@@ -7,7 +7,7 @@ import {
   column,
   rawColumn,
   resetDb,
-  seedProvider,
+  seedHealthSystem,
   testRepos,
 } from "./helpers.ts";
 
@@ -16,9 +16,9 @@ beforeEach(resetDb);
 describe("connections.upsertTokens", () => {
   it("creates the row on first write and seals every secret column", async () => {
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
+    const healthSystemId = await seedHealthSystem(repos);
 
-    const connection = await repos.connections.upsertTokens(providerId, {
+    const connection = await repos.connections.upsertTokens(healthSystemId, {
       patientFhirId: "patient-identifier-one",
       accessToken: "access-token-one",
       refreshToken: "refresh-token-one",
@@ -27,7 +27,7 @@ describe("connections.upsertTokens", () => {
       status: "connected",
     });
 
-    expect(connection.provider_id).toBe(providerId);
+    expect(connection.health_system_id).toBe(healthSystemId);
     expect(connection.status).toBe("connected");
     expect(connection.access_expires_at).toBe(T0 + 3600);
     expect(await repos.connections.getSecrets(connection.id)).toStrictEqual({
@@ -47,10 +47,10 @@ describe("connections.upsertTokens", () => {
 
   it("reuses the same row, and the same id, on a second write", async () => {
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
+    const healthSystemId = await seedHealthSystem(repos);
 
-    const first = await repos.connections.upsertTokens(providerId, { accessToken: "a" });
-    const second = await repos.connections.upsertTokens(providerId, { accessToken: "b" });
+    const first = await repos.connections.upsertTokens(healthSystemId, { accessToken: "a" });
+    const second = await repos.connections.upsertTokens(healthSystemId, { accessToken: "b" });
 
     expect(second.id).toBe(first.id);
     await expect(repos.connections.getSecrets(first.id)).resolves.toMatchObject({
@@ -63,13 +63,13 @@ describe("connections.upsertTokens", () => {
 
   it("leaves the columns it was not given alone", async () => {
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
+    const healthSystemId = await seedHealthSystem(repos);
 
-    const connection = await repos.connections.upsertTokens(providerId, {
+    const connection = await repos.connections.upsertTokens(healthSystemId, {
       accessToken: "access-1",
       refreshToken: "refresh-1",
     });
-    await repos.connections.upsertTokens(providerId, { accessToken: "access-2" });
+    await repos.connections.upsertTokens(healthSystemId, { accessToken: "access-2" });
 
     expect(await repos.connections.getSecrets(connection.id)).toStrictEqual({
       patientFhirId: null,
@@ -80,8 +80,8 @@ describe("connections.upsertTokens", () => {
 
   it("cannot be opened with the wrong key", async () => {
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
-    const connection = await repos.connections.upsertTokens(providerId, { accessToken: "a" });
+    const healthSystemId = await seedHealthSystem(repos);
+    const connection = await repos.connections.upsertTokens(healthSystemId, { accessToken: "a" });
 
     await expect(
       testRepos({ dataKey: OTHER_DATA_KEY }).connections.getSecrets(connection.id),
@@ -92,8 +92,8 @@ describe("connections.upsertTokens", () => {
     // The AAD includes the column, not just the row, so an access token pasted
     // into the refresh column does not open.
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
-    const connection = await repos.connections.upsertTokens(providerId, { accessToken: "a" });
+    const healthSystemId = await seedHealthSystem(repos);
+    const connection = await repos.connections.upsertTokens(healthSystemId, { accessToken: "a" });
     const sealed = await rawColumn("connections", "access_token_enc", "id = ?", connection.id);
 
     await repos.ctx.db
@@ -111,8 +111,10 @@ describe("the connection status machine", () => {
   it("records a re-auth need with its code, its clock and a failure count", async () => {
     const time = clock();
     const repos = testRepos({ now: time.now });
-    const providerId = await seedProvider(repos);
-    const connection = await repos.connections.upsertTokens(providerId, { status: "connected" });
+    const healthSystemId = await seedHealthSystem(repos);
+    const connection = await repos.connections.upsertTokens(healthSystemId, {
+      status: "connected",
+    });
 
     expect(await repos.connections.markNeedsReauth(connection.id, "invalid_grant")).toBe(true);
     time.advance(3600);
@@ -129,8 +131,8 @@ describe("the connection status machine", () => {
 
   it("clears the error, the clock and the failure count on reconnect", async () => {
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
-    const connection = await repos.connections.upsertTokens(providerId, {});
+    const healthSystemId = await seedHealthSystem(repos);
+    const connection = await repos.connections.upsertTokens(healthSystemId, {});
     await repos.connections.markNeedsReauth(connection.id, "invalid_grant");
 
     expect(await repos.connections.markConnected(connection.id)).toBe(true);
@@ -145,8 +147,8 @@ describe("the connection status machine", () => {
 
   it("records a transient error without losing the tokens", async () => {
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
-    const connection = await repos.connections.upsertTokens(providerId, { accessToken: "a" });
+    const healthSystemId = await seedHealthSystem(repos);
+    const connection = await repos.connections.upsertTokens(healthSystemId, { accessToken: "a" });
 
     expect(await repos.connections.markError(connection.id, "upstream_unavailable")).toBe(true);
 
@@ -158,8 +160,8 @@ describe("the connection status machine", () => {
 
   it("forgets the tokens on disconnect but keeps the row", async () => {
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
-    const connection = await repos.connections.upsertTokens(providerId, {
+    const healthSystemId = await seedHealthSystem(repos);
+    const connection = await repos.connections.upsertTokens(healthSystemId, {
       accessToken: "a",
       refreshToken: "r",
       patientFhirId: "p",
@@ -186,8 +188,8 @@ describe("the connection status machine", () => {
   it("stamps the right clock per kind of sync", async () => {
     const time = clock();
     const repos = testRepos({ now: time.now });
-    const providerId = await seedProvider(repos);
-    const connection = await repos.connections.upsertTokens(providerId, {});
+    const healthSystemId = await seedHealthSystem(repos);
+    const connection = await repos.connections.upsertTokens(healthSystemId, {});
 
     await repos.connections.recordSync(connection.id, "calendar");
     time.advance(600);
@@ -201,16 +203,16 @@ describe("the connection status machine", () => {
 });
 
 describe("connections.listActive", () => {
-  it("returns connected connections whose provider is still live", async () => {
+  it("returns connected connections whose health system is still live", async () => {
     const repos = testRepos();
-    const live = await seedProvider(repos, { displayName: "A Example Health" });
-    const broken = await seedProvider(repos, { displayName: "B Example Health" });
-    const deleted = await seedProvider(repos, { displayName: "C Example Health" });
+    const live = await seedHealthSystem(repos, { displayName: "A Example Health" });
+    const broken = await seedHealthSystem(repos, { displayName: "B Example Health" });
+    const deleted = await seedHealthSystem(repos, { displayName: "C Example Health" });
 
     const liveConnection = await repos.connections.upsertTokens(live, { status: "connected" });
     await repos.connections.upsertTokens(broken, { status: "needs_reauth" });
     await repos.connections.upsertTokens(deleted, { status: "connected" });
-    await repos.providers.softDelete(deleted);
+    await repos.healthSystems.softDelete(deleted);
 
     expect(await column(repos.connections.listActive(), "id")).toStrictEqual([liveConnection.id]);
   });
@@ -219,7 +221,7 @@ describe("connections.listActive", () => {
     const repos = testRepos();
 
     expect(await repos.connections.getSecrets("NOPE")).toBeNull();
-    expect(await repos.connections.getForProvider("NOPE")).toBeNull();
+    expect(await repos.connections.getForHealthSystem("NOPE")).toBeNull();
   });
 });
 
@@ -229,8 +231,8 @@ describe("the connection lease", () => {
     // the moment it is redeemed, so two concurrent refreshes end with a dead
     // connection; only one caller may proceed.
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
-    const connection = await repos.connections.upsertTokens(providerId, {});
+    const healthSystemId = await seedHealthSystem(repos);
+    const connection = await repos.connections.upsertTokens(healthSystemId, {});
 
     const results = await Promise.all([
       repos.connections.acquireLease(connection.id, "worker-a", 30_000),
@@ -243,8 +245,8 @@ describe("the connection lease", () => {
   it("blocks a second holder until the TTL passes", async () => {
     const time = clock();
     const repos = testRepos({ now: time.now });
-    const providerId = await seedProvider(repos);
-    const connection = await repos.connections.upsertTokens(providerId, {});
+    const healthSystemId = await seedHealthSystem(repos);
+    const connection = await repos.connections.upsertTokens(healthSystemId, {});
 
     expect(await repos.connections.acquireLease(connection.id, "worker-a", 30_000)).toBe(true);
     expect(await repos.connections.acquireLease(connection.id, "worker-b", 30_000)).toBe(false);
@@ -262,8 +264,8 @@ describe("the connection lease", () => {
   it("rounds a sub-second TTL up rather than to zero", async () => {
     const time = clock();
     const repos = testRepos({ now: time.now });
-    const providerId = await seedProvider(repos);
-    const connection = await repos.connections.upsertTokens(providerId, {});
+    const healthSystemId = await seedHealthSystem(repos);
+    const connection = await repos.connections.upsertTokens(healthSystemId, {});
 
     await repos.connections.acquireLease(connection.id, "worker-a", 250);
 
@@ -274,8 +276,8 @@ describe("the connection lease", () => {
 
   it("releases only for the owner that holds it", async () => {
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
-    const connection = await repos.connections.upsertTokens(providerId, {});
+    const healthSystemId = await seedHealthSystem(repos);
+    const connection = await repos.connections.upsertTokens(healthSystemId, {});
     await repos.connections.acquireLease(connection.id, "worker-a", 30_000);
 
     expect(await repos.connections.releaseLease(connection.id, "worker-b")).toBe(false);
@@ -299,8 +301,8 @@ describe("a token write under the lease", () => {
   it("refuses the loser whose lease expired while its refresh was in flight", async () => {
     const time = clock();
     const repos = testRepos({ now: time.now });
-    const providerId = await seedProvider(repos);
-    const connection = await repos.connections.upsertTokens(providerId, {
+    const healthSystemId = await seedHealthSystem(repos);
+    const connection = await repos.connections.upsertTokens(healthSystemId, {
       accessToken: "access-0",
       refreshToken: "refresh-0",
     });
@@ -312,7 +314,7 @@ describe("a token write under the lease", () => {
     time.advance(31);
     expect(await repos.connections.acquireLease(connection.id, "worker-b", 30_000)).toBe(true);
     expect(
-      await repos.connections.upsertTokensLeased(providerId, "worker-b", {
+      await repos.connections.upsertTokensLeased(healthSystemId, "worker-b", {
         accessToken: "access-b",
         refreshToken: "refresh-b",
       }),
@@ -322,7 +324,7 @@ describe("a token write under the lease", () => {
     // A wakes up last. Its write must not land: refresh-b is the only token the
     // organisation will accept, and overwriting it costs the owner a re-auth.
     expect(
-      await repos.connections.upsertTokensLeased(providerId, "worker-a", {
+      await repos.connections.upsertTokensLeased(healthSystemId, "worker-a", {
         accessToken: "access-a",
         refreshToken: "refresh-a",
       }),
@@ -342,20 +344,20 @@ describe("a token write under the lease", () => {
   it("refuses an unleased write while a refresh holds the lease, and allows it after", async () => {
     const time = clock();
     const repos = testRepos({ now: time.now });
-    const providerId = await seedProvider(repos);
-    const connection = await repos.connections.upsertTokens(providerId, { refreshToken: "r0" });
+    const healthSystemId = await seedHealthSystem(repos);
+    const connection = await repos.connections.upsertTokens(healthSystemId, { refreshToken: "r0" });
     await repos.connections.acquireLease(connection.id, "worker-a", 30_000);
 
     // The authorization callback holds no lease, so all it can do is refuse.
     await expect(
-      repos.connections.upsertTokens(providerId, { refreshToken: "from-callback" }),
+      repos.connections.upsertTokens(healthSystemId, { refreshToken: "from-callback" }),
     ).rejects.toMatchObject({ code: "conflict" });
 
     // An expired lease blocks nothing: a Worker that died holding one leaves
     // `lease_owner` set, and reconnecting must not be hostage to it.
     time.advance(31);
     await expect(
-      repos.connections.upsertTokens(providerId, { refreshToken: "from-callback" }),
+      repos.connections.upsertTokens(healthSystemId, { refreshToken: "from-callback" }),
     ).resolves.toMatchObject({ id: connection.id });
     await expect(repos.connections.getSecrets(connection.id)).resolves.toMatchObject({
       refreshToken: "from-callback",

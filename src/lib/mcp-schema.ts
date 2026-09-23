@@ -2,7 +2,7 @@
 // into a starting point for the "Try a tool" panel's argument editor.
 //
 // Only `required` properties are prefilled. Every tool in this server accepts
-// far more optional arguments than required ones (`providers`, `raw`, `limit`,
+// far more optional arguments than required ones (`health_systems`, `raw`, `limit`,
 // a date window -- see worker/mcp/args.ts), and a skeleton that included all of
 // them would be a wall of placeholders the owner has to delete, not a starting
 // point. What must be filled in is what is worth showing.

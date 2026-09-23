@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 
 import { blindEventKey, blinderFor } from "../../../worker/db/blind.ts";
-import { providerConfigSchema } from "../../../worker/db/schemas.ts";
+import { healthSystemConfigSchema } from "../../../worker/db/schemas.ts";
 import { AppError } from "../../../worker/lib/errors.ts";
 import { formatInZone } from "../../../worker/lib/time.ts";
 import {
@@ -27,7 +27,7 @@ import {
 import type { NormalizedAppointmentView } from "../../../worker/fhir/normalize/types.ts";
 import type { MappingInput, MappingSettings } from "../../../worker/sync/mapping.ts";
 
-const PROVIDER_ID = "prov-1";
+const HEALTH_SYSTEM_ID = "prov-1";
 const START = "2026-10-01T15:30:00Z";
 const NOW = "2026-09-30T12:00:00Z";
 const PORTAL = "https://portal.example.test/mychart";
@@ -48,7 +48,7 @@ const SETTINGS: MappingSettings = {
 };
 
 function config(overrides: Record<string, unknown> = {}) {
-  return providerConfigSchema.parse(overrides);
+  return healthSystemConfigSchema.parse(overrides);
 }
 
 function input(
@@ -59,8 +59,8 @@ function input(
   } = {},
 ): MappingInput {
   return {
-    provider: {
-      id: PROVIDER_ID,
+    healthSystem: {
+      id: HEALTH_SYSTEM_ID,
       displayName: "Example Health",
       portalUrl: overrides.portalUrl === undefined ? PORTAL : overrides.portalUrl,
       config: config(overrides.config),
@@ -84,7 +84,7 @@ type ViewOverrides = {
 
 function view(overrides: ViewOverrides = {}): NormalizedAppointmentView {
   const base = {
-    provider: PROVIDER_ID,
+    healthSystem: HEALTH_SYSTEM_ID,
     encounterId: "enc-1",
     status: "planned",
     start: START,
@@ -108,18 +108,21 @@ function view(overrides: ViewOverrides = {}): NormalizedAppointmentView {
 }
 
 describe("eventKey", () => {
-  it("round-trips a provider and encounter id", () => {
-    const key = eventKey(PROVIDER_ID, "enc-1");
+  it("round-trips a health system and encounter id", () => {
+    const key = eventKey(HEALTH_SYSTEM_ID, "enc-1");
 
     expect(key).toBe("prov-1:enc-1");
-    expect(parseEventKey(key)).toStrictEqual({ providerId: PROVIDER_ID, encounterId: "enc-1" });
+    expect(parseEventKey(key)).toStrictEqual({
+      healthSystemId: HEALTH_SYSTEM_ID,
+      encounterId: "enc-1",
+    });
   });
 
   it("keeps a colon inside an encounter id", () => {
     // Epic ids are opaque; nothing guarantees they have no colon, and splitting
     // on the last one instead of the first would move the boundary.
     expect(parseEventKey("prov-1:a:b")).toStrictEqual({
-      providerId: PROVIDER_ID,
+      healthSystemId: HEALTH_SYSTEM_ID,
       encounterId: "a:b",
     });
   });
@@ -185,22 +188,22 @@ describe("renderTitle", () => {
 });
 
 describe("arrivalOffsetFor", () => {
-  it("prefers a visit-type override over the provider default", () => {
-    const provider = config({
+  it("prefers a visit-type override over the health system default", () => {
+    const healthSystem = config({
       arrival_offset_min: 10,
       arrival_offsets_by_visit_type: { "office visit": 25 },
     });
 
-    expect(arrivalOffsetFor("Office Visit", provider, 0)).toBe(25);
+    expect(arrivalOffsetFor("Office Visit", healthSystem, 0)).toBe(25);
   });
 
   it("matches a visit type without regard to case or padding", () => {
-    const provider = config({ arrival_offsets_by_visit_type: { "Office Visit": 25 } });
+    const healthSystem = config({ arrival_offsets_by_visit_type: { "Office Visit": 25 } });
 
-    expect(arrivalOffsetFor("  office visit ", provider, 0)).toBe(25);
+    expect(arrivalOffsetFor("  office visit ", healthSystem, 0)).toBe(25);
   });
 
-  it("falls back to the provider default, then the global one", () => {
+  it("falls back to the health system default, then the global one", () => {
     expect(arrivalOffsetFor("Other", config({ arrival_offset_min: 10 }), 45)).toBe(10);
     expect(arrivalOffsetFor("Other", config(), 45)).toBe(45);
     expect(arrivalOffsetFor(undefined, config(), 45)).toBe(45);
@@ -214,7 +217,7 @@ describe("buildCalendarModel", () => {
 
     expect(model.key).toBe(await blindEventKey(BLINDER, "prov-1:enc-1"));
     expect(model.encounterId).toBe("enc-1");
-    expect(model.provider).toBe(PROVIDER_ID);
+    expect(model.healthSystem).toBe(HEALTH_SYSTEM_ID);
     expect(model.title).toBe("Office Visit · Casey Example");
     expect(model.start).toBe(START);
     expect(model.end).toBe("2026-10-01T16:00:00.000Z");
@@ -355,7 +358,7 @@ describe("description", () => {
     );
   });
 
-  it("falls back to the provider display name when the org is unknown", async () => {
+  it("falls back to the health system display name when the org is unknown", async () => {
     const { model } = await buildCalendarModel(view({ org: undefined }), input());
 
     expect(model.description).toContain("Example Health");
@@ -373,15 +376,15 @@ describe("description", () => {
 });
 
 describe("colorId", () => {
-  it("prefers the provider's colour, then the global default, then none", async () => {
-    const provider = await buildCalendarModel(
+  it("prefers the health system's colour, then the global default, then none", async () => {
+    const healthSystem = await buildCalendarModel(
       view(),
       input({ config: { color_id: "4" }, settings: { defaultColorId: "9" } }),
     );
     const global = await buildCalendarModel(view(), input({ settings: { defaultColorId: "9" } }));
     const neither = await buildCalendarModel(view(), input());
 
-    expect(provider.model.colorId).toBe("4");
+    expect(healthSystem.model.colorId).toBe("4");
     expect(global.model.colorId).toBe("9");
     expect(neither.model.colorId).toBeUndefined();
   });
@@ -446,7 +449,7 @@ describe("ghostModel", () => {
     // The original details survive: a ghost is history, not a tombstone.
     expect(ghost.description).toContain("Casey Example — Cardiology");
     expect(ghost.description).toContain(
-      `No longer on the provider's schedule as of ${formatInZone(GHOSTED_AT, "UTC")}.`,
+      `No longer on the health system's schedule as of ${formatInZone(GHOSTED_AT, "UTC")}.`,
     );
     expect(ghost.fingerprint).not.toBe(model.fingerprint);
   });
@@ -522,10 +525,10 @@ describe("formatApptTime", () => {
 });
 
 describe("keyed key and fingerprint", () => {
-  it("blinds the event key: the provider prefix stays, the upstream id does not", async () => {
+  it("blinds the event key: the health system prefix stays, the upstream id does not", async () => {
     const { model } = await buildCalendarModel(view(), input());
 
-    expect(model.key.startsWith(`${PROVIDER_ID}:~`)).toBe(true);
+    expect(model.key.startsWith(`${HEALTH_SYSTEM_ID}:~`)).toBe(true);
     expect(model.key).not.toContain("enc-1");
   });
 

@@ -19,7 +19,7 @@ import {
   call,
   freshOwner,
   resetPorts,
-  seedProvider,
+  seedHealthSystem,
   stubFetch,
   testCtx,
   testRepos,
@@ -73,11 +73,11 @@ function recordingSync(): { synced: unknown[]; resolved: unknown[] } {
 
 describe("GET /oauth/epic/start", () => {
   it("redirects to the organisation's authorize endpoint with PKCE, state and aud", async () => {
-    const id = await seedProvider({ clientSecret: SECRET });
+    const id = await seedHealthSystem({ clientSecret: SECRET });
     const stub = stubEpic();
     usePorts({ fetch: stub.fetchImpl });
 
-    const response = await call(`/oauth/epic/start?provider=${id}`, {
+    const response = await call(`/oauth/epic/start?healthSystem=${id}`, {
       headers: { cookie: owner().cookie },
     });
 
@@ -97,10 +97,10 @@ describe("GET /oauth/epic/start", () => {
   });
 
   it("asks for the SMART base scopes and a scope per registry resource type", async () => {
-    const id = await seedProvider();
+    const id = await seedHealthSystem();
     usePorts({ fetch: stubEpic().fetchImpl });
 
-    const response = await call(`/oauth/epic/start?provider=${id}`, {
+    const response = await call(`/oauth/epic/start?healthSystem=${id}`, {
       headers: { cookie: owner().cookie },
     });
 
@@ -116,10 +116,10 @@ describe("GET /oauth/epic/start", () => {
   });
 
   it("writes the state row before it redirects, sealed and with a ten-minute expiry", async () => {
-    const id = await seedProvider();
+    const id = await seedHealthSystem();
     usePorts({ fetch: stubEpic().fetchImpl });
 
-    const response = await call(`/oauth/epic/start?provider=${id}`, {
+    const response = await call(`/oauth/epic/start?healthSystem=${id}`, {
       headers: { cookie: owner().cookie },
     });
     const state = new URL(response.headers.get("location") ?? "").searchParams.get("state") ?? "";
@@ -129,23 +129,23 @@ describe("GET /oauth/epic/start", () => {
       .bind(state)
       .first<{
         kind: string;
-        provider_id: string;
+        health_system_id: string;
         code_verifier_enc: string;
         expires_at: number;
         created_at: number;
       }>();
 
     expect(row?.kind).toBe("epic");
-    expect(row?.provider_id).toBe(id);
+    expect(row?.health_system_id).toBe(id);
     // The verifier is the second half of the PKCE proof, so it is never stored in
     // the clear.
     expect(row?.code_verifier_enc.startsWith("v1:")).toBe(true);
     expect((row?.expires_at ?? 0) - (row?.created_at ?? 0)).toBe(600);
   });
 
-  it("uses the production client id for a production provider", async () => {
+  it("uses the production client id for a production health system", async () => {
     const repos = testRepos();
-    const provider = await repos.providers.create({
+    const healthSystem = await repos.healthSystems.create({
       vendor: "epic",
       displayName: "Example Health",
       fhirBaseUrl: TEST_FHIR_BASE,
@@ -153,7 +153,7 @@ describe("GET /oauth/epic/start", () => {
     });
     usePorts({ fetch: stubEpic().fetchImpl });
 
-    const response = await call(`/oauth/epic/start?provider=${provider.id}`, {
+    const response = await call(`/oauth/epic/start?healthSystem=${healthSystem.id}`, {
       headers: { cookie: owner().cookie },
     });
 
@@ -162,14 +162,14 @@ describe("GET /oauth/epic/start", () => {
     );
   });
 
-  it("renders a 404 page for an unknown or deleted provider", async () => {
-    const id = await seedProvider();
-    await testRepos().providers.softDelete(id);
+  it("renders a 404 page for an unknown or deleted health system", async () => {
+    const id = await seedHealthSystem();
+    await testRepos().healthSystems.softDelete(id);
 
-    const missing = await call("/oauth/epic/start?provider=NOPE", {
+    const missing = await call("/oauth/epic/start?healthSystem=NOPE", {
       headers: { cookie: owner().cookie },
     });
-    const deleted = await call(`/oauth/epic/start?provider=${id}`, {
+    const deleted = await call(`/oauth/epic/start?healthSystem=${id}`, {
       headers: { cookie: owner().cookie },
     });
 
@@ -181,20 +181,20 @@ describe("GET /oauth/epic/start", () => {
   });
 
   it("needs a session, and keeps the whole URL in ?next so the flow resumes", async () => {
-    const id = await seedProvider();
+    const id = await seedHealthSystem();
 
-    const response = await call(`/oauth/epic/start?provider=${id}`);
+    const response = await call(`/oauth/epic/start?healthSystem=${id}`);
     const html = await response.text();
 
     expect(response.status).toBe(401);
     expect(html).toContain('name="password"');
-    expect(html).toContain("provider");
+    expect(html).toContain("healthSystem");
   });
 });
 
 /** Drive a start and hand back the state it minted. */
-async function startFlow(providerId: string): Promise<string> {
-  const response = await call(`/oauth/epic/start?provider=${providerId}`, {
+async function startFlow(healthSystemId: string): Promise<string> {
+  const response = await call(`/oauth/epic/start?healthSystem=${healthSystemId}`, {
     headers: { cookie: owner().cookie },
   });
   return new URL(response.headers.get("location") ?? "").searchParams.get("state") ?? "";
@@ -206,7 +206,7 @@ function swallow(): void {
 
 describe("GET /oauth/callback", () => {
   it("exchanges the code, connects, and redirects to the dashboard", async () => {
-    const id = await seedProvider({ clientSecret: SECRET });
+    const id = await seedHealthSystem({ clientSecret: SECRET });
     const stub = stubEpic();
     usePorts({ fetch: stub.fetchImpl });
     // `setPorts` merges, so the sync override below keeps the stubbed fetch.
@@ -224,7 +224,7 @@ describe("GET /oauth/callback", () => {
     expect(response.headers.get("location")).toBe(`/?connected=${id}`);
 
     const repos = testRepos();
-    const connection = await repos.connections.getForProvider(id);
+    const connection = await repos.connections.getForHealthSystem(id);
     expect(connection?.status).toBe("connected");
     expect(connection?.scope).toBe(tokenResponse.scope);
     // Milliseconds in, unix seconds out.
@@ -245,15 +245,15 @@ describe("GET /oauth/callback", () => {
       `redirect_uri=${encodeURIComponent("https://healthy.example/oauth/callback")}`,
     );
 
-    expect(recorded.resolved).toStrictEqual([{ providerId: id }]);
-    expect(recorded.synced).toStrictEqual([{ providerIds: [id], trigger: "manual" }]);
+    expect(recorded.resolved).toStrictEqual([{ healthSystemId: id }]);
+    expect(recorded.synced).toStrictEqual([{ healthSystemIds: [id], trigger: "manual" }]);
   });
 
   it("skips the post-connect sync when Google is not connected yet", async () => {
-    // The normal order on first setup: a provider is connected before Google is.
-    // `seedProvider`/`testRepos` never touch `google_account`, so it is left at
+    // The normal order on first setup: a health system is connected before Google is.
+    // `seedHealthSystem`/`testRepos` never touch `google_account`, so it is left at
     // its migrated `disconnected` default -- no `seedGoogle` call here.
-    const id = await seedProvider({ clientSecret: SECRET });
+    const id = await seedHealthSystem({ clientSecret: SECRET });
     usePorts({ fetch: stubEpic().fetchImpl });
     const recorded = recordingSync();
     const logSpy = vi.spyOn(console, "log").mockImplementation(swallow);
@@ -267,15 +267,16 @@ describe("GET /oauth/callback", () => {
     expect(response.headers.get("location")).toBe(`/?connected=${id}`);
     // The connection itself still succeeded; only the sync it would have kicked
     // off is skipped.
-    const connection = await testRepos().connections.getForProvider(id);
+    const connection = await testRepos().connections.getForHealthSystem(id);
     expect(connection?.status).toBe("connected");
     expect(recorded.synced).toStrictEqual([]);
     expect(
       logSpy.mock.calls.some(([line]) => {
         if (typeof line !== "string") return false;
-        const parsed = JSON.parse(line) as { event?: string; providerId?: string };
+        const parsed = JSON.parse(line) as { event?: string; healthSystemId?: string };
         return (
-          parsed.event === "oauth.epic.sync_skipped_google_disconnected" && parsed.providerId === id
+          parsed.event === "oauth.epic.sync_skipped_google_disconnected" &&
+          parsed.healthSystemId === id
         );
       }),
     ).toBe(true);
@@ -283,7 +284,7 @@ describe("GET /oauth/callback", () => {
   });
 
   it("still fires the post-connect sync once Google is connected", async () => {
-    const id = await seedProvider({ clientSecret: SECRET });
+    const id = await seedHealthSystem({ clientSecret: SECRET });
     usePorts({ fetch: stubEpic().fetchImpl });
     const recorded = recordingSync();
     await seedGoogle(testCtx());
@@ -293,11 +294,11 @@ describe("GET /oauth/callback", () => {
       headers: { cookie: owner().cookie },
     });
 
-    expect(recorded.synced).toStrictEqual([{ providerIds: [id], trigger: "manual" }]);
+    expect(recorded.synced).toStrictEqual([{ healthSystemIds: [id], trigger: "manual" }]);
   });
 
   it("consumes the state, so a replayed callback is refused", async () => {
-    const id = await seedProvider({ clientSecret: SECRET });
+    const id = await seedHealthSystem({ clientSecret: SECRET });
     usePorts({ fetch: stubEpic().fetchImpl });
     recordingSync();
     const state = await startFlow(id);
@@ -349,18 +350,18 @@ describe("GET /oauth/callback", () => {
   });
 
   it("renders a friendly page for an error= redirect, without burning the state", async () => {
-    const id = await seedProvider({ clientSecret: SECRET });
+    const id = await seedHealthSystem({ clientSecret: SECRET });
     usePorts({ fetch: stubEpic().fetchImpl });
     const state = await startFlow(id);
 
-    const refused = await call(`/oauth/callback?error=access_denied&provider=${id}`, {
+    const refused = await call(`/oauth/callback?error=access_denied&healthSystem=${id}`, {
       headers: { cookie: owner().cookie },
     });
     const html = await refused.text();
 
     expect(refused.status).toBe(400);
     expect(html).toContain("access_denied");
-    expect(html).toContain(`/oauth/epic/start?provider=${id}`);
+    expect(html).toContain(`/oauth/epic/start?healthSystem=${id}`);
     // The state survived, so the owner can simply try again.
     const row = await testRepos()
       .ctx.db.prepare("SELECT count(*) AS n FROM oauth_states WHERE state = ?")
@@ -370,7 +371,7 @@ describe("GET /oauth/callback", () => {
   });
 
   it("explains that the per-organisation client secret is missing", async () => {
-    const id = await seedProvider();
+    const id = await seedHealthSystem();
     usePorts({ fetch: stubEpic().fetchImpl });
     const state = await startFlow(id);
 
@@ -383,11 +384,11 @@ describe("GET /oauth/callback", () => {
     expect(html).toContain("client secret");
     expect(html).toContain("client_secret_missing");
     // Nothing was connected.
-    expect(await testRepos().connections.getForProvider(id)).toBeNull();
+    expect(await testRepos().connections.getForHealthSystem(id)).toBeNull();
   });
 
   it("clears a prior needs_reauth state rather than only overwriting the tokens", async () => {
-    const id = await seedProvider({ clientSecret: SECRET });
+    const id = await seedHealthSystem({ clientSecret: SECRET });
     const repos = testRepos();
     const existing = await repos.connections.upsertTokens(id, { accessToken: "old" });
     await repos.connections.markNeedsReauth(existing.id, "invalid_grant");
@@ -408,8 +409,8 @@ describe("GET /oauth/callback", () => {
 });
 
 describe("GET /oauth/reconnect/:connectionId", () => {
-  it("redirects a connection id to that provider's start URL", async () => {
-    const id = await seedProvider();
+  it("redirects a connection id to that health system's start URL", async () => {
+    const id = await seedHealthSystem();
     const connection = await testRepos().connections.upsertTokens(id, { accessToken: "a" });
 
     const response = await call(`/oauth/reconnect/${connection.id}`, {
@@ -417,15 +418,15 @@ describe("GET /oauth/reconnect/:connectionId", () => {
     });
 
     expect(response.status).toBe(302);
-    expect(response.headers.get("location")).toBe(`/oauth/epic/start?provider=${id}`);
+    expect(response.headers.get("location")).toBe(`/oauth/epic/start?healthSystem=${id}`);
   });
 
-  it("accepts a provider id too, which is what an alert subject encodes", async () => {
-    const id = await seedProvider();
+  it("accepts a health system id too, which is what an alert subject encodes", async () => {
+    const id = await seedHealthSystem();
 
     const response = await call(`/oauth/reconnect/${id}`, { headers: { cookie: owner().cookie } });
 
-    expect(response.headers.get("location")).toBe(`/oauth/epic/start?provider=${id}`);
+    expect(response.headers.get("location")).toBe(`/oauth/epic/start?healthSystem=${id}`);
   });
 
   it("sends the literal google to the Google flow", async () => {

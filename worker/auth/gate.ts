@@ -48,10 +48,10 @@ function wantsJson(pathname: string): boolean {
   // page there is a parse error at the other end rather than a prompt.
   //
   // /oauth deliberately is NOT in this list: every route under it is a top-level
-  // browser navigation redirected back from a provider, so the right answer to a
+  // browser navigation redirected back from a health system, so the right answer to a
   // missing session is the login form with `?next=` pointing at the full callback
   // URL. (The machine-facing /oauth/token and /oauth/register are served by
-  // @cloudflare/workers-oauth-provider, outside this app and outside this gate.)
+  // @cloudflare/workers-oauth-health system, outside this app and outside this gate.)
   return pathname === "/api" || pathname.startsWith("/api/");
 }
 

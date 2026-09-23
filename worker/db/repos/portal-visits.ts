@@ -15,7 +15,7 @@
  *     identifiers, and the same visit listed by two organisations' portals
  *     blinds to two unrelated values.
  *   - `payload_enc` is the whole parsed visit, sealed against
- *     `portal_visits.payload_enc.<providerId>:<csn>` with the stored (blinded)
+ *     `portal_visits.payload_enc.<healthSystemId>:<csn>` with the stored (blinded)
  *     `csn` -- the composite row id, because the primary key is composite. The
  *     real visit number and start time are only in here.
  *   - `content_hash` is a keyed digest of the plaintext, for the same reason
@@ -57,16 +57,16 @@ const PORTAL_VISIT_RETENTION_SECONDS = 365 * 24 * 3600;
 export const EXPIRY_BUCKET_SECONDS = 30 * 24 * 3600;
 
 /** The AAD for one stored visit, by the id the row is stored under. */
-const portalVisitAad = (providerId: string, storedCsn: string): string =>
-  aadFor("portal_visits", "payload_enc", `${providerId}:${storedCsn}`);
+const portalVisitAad = (healthSystemId: string, storedCsn: string): string =>
+  aadFor("portal_visits", "payload_enc", `${healthSystemId}:${storedCsn}`);
 
 /** The stored digest of one plaintext payload. */
 function portalVisitDigest(
   blinder: Blinder,
-  providerId: string,
+  healthSystemId: string,
   plaintext: string,
 ): Promise<string> {
-  return blinder.digest("portal_visits.content_hash", `${providerId}\u{0}${plaintext}`);
+  return blinder.digest("portal_visits.content_hash", `${healthSystemId}\u{0}${plaintext}`);
 }
 
 /** `expires_at` for a visit starting at `start`, seen at `now`. */
@@ -77,7 +77,7 @@ function portalVisitExpiry(start: number, now: number): number {
 
 /** A stored visit, opened. */
 export interface StoredPortalVisit {
-  providerId: string;
+  healthSystemId: string;
   /** The portal's real visit number, from the payload. */
   csn: string;
   visit: PortalVisit;
@@ -113,7 +113,7 @@ function startSeconds(visit: PortalVisit): number | null {
 function byStart(a: StoredPortalVisit, b: StoredPortalVisit): number {
   const apart = (startSeconds(a.visit) ?? 0) - (startSeconds(b.visit) ?? 0);
   if (apart !== 0) return apart;
-  if (a.providerId !== b.providerId) return a.providerId < b.providerId ? -1 : 1;
+  if (a.healthSystemId !== b.healthSystemId) return a.healthSystemId < b.healthSystemId ? -1 : 1;
   if (a.csn === b.csn) return 0;
   return a.csn < b.csn ? -1 : 1;
 }
@@ -121,15 +121,17 @@ function byStart(a: StoredPortalVisit, b: StoredPortalVisit): number {
 export function makePortalVisitsRepo(ctx: Ctx) {
   const blinder = blinderFor(ctx.env);
 
-  const openPayload = async (row: Pick<PortalVisitRow, "provider_id" | "csn" | "payload_enc">) =>
+  const openPayload = async (
+    row: Pick<PortalVisitRow, "health_system_id" | "csn" | "payload_enc">,
+  ) =>
     JSON.parse(
-      await open(ctx.env, row.payload_enc, portalVisitAad(row.provider_id, row.csn)),
+      await open(ctx.env, row.payload_enc, portalVisitAad(row.health_system_id, row.csn)),
     ) as PortalVisit;
 
   const decode = async (row: PortalVisitRow): Promise<StoredPortalVisit> => {
     const visit = await openPayload(row);
     return {
-      providerId: row.provider_id,
+      healthSystemId: row.health_system_id,
       csn: visit.csn,
       visit,
       state: row.state,
@@ -144,7 +146,7 @@ export function makePortalVisitsRepo(ctx: Ctx) {
    * and it is nowhere but in the payload.
    */
   const stillAhead = async (
-    rows: readonly Pick<PortalVisitRow, "provider_id" | "csn" | "payload_enc">[],
+    rows: readonly Pick<PortalVisitRow, "health_system_id" | "csn" | "payload_enc">[],
     now: number,
   ): Promise<string[]> => {
     const ahead: string[] = [];
@@ -164,21 +166,21 @@ export function makePortalVisitsRepo(ctx: Ctx) {
      * visit only has its timestamps moved.
      */
     async record(
-      providerId: string,
+      healthSystemId: string,
       visits: readonly PortalVisit[],
       options: RecordVisitsOptions,
     ): Promise<RecordVisitsReport> {
       const now = ctx.now();
       const report: RecordVisitsReport = { written: 0, unchanged: 0, missing: 0 };
       const known = await all<
-        Pick<PortalVisitRow, "provider_id" | "csn" | "content_hash" | "state" | "payload_enc">
+        Pick<PortalVisitRow, "health_system_id" | "csn" | "content_hash" | "state" | "payload_enc">
       >(
         ctx.db
           .prepare(
-            `SELECT provider_id, csn, content_hash, state, payload_enc FROM portal_visits
-              WHERE provider_id = ?`,
+            `SELECT health_system_id, csn, content_hash, state, payload_enc FROM portal_visits
+              WHERE health_system_id = ?`,
           )
-          .bind(providerId),
+          .bind(healthSystemId),
       );
       const existing = new Map(known.map((row) => [row.csn, row]));
 
@@ -186,7 +188,8 @@ export function makePortalVisitsRepo(ctx: Ctx) {
       // two buckets of the same payload, and two upserts of one key in a batch
       // would only make the report lie. Keyed by the stored (blinded) number.
       const byCsn = new Map<string, PortalVisit>();
-      for (const visit of visits) byCsn.set(await blindCsn(blinder, providerId, visit.csn), visit);
+      for (const visit of visits)
+        byCsn.set(await blindCsn(blinder, healthSystemId, visit.csn), visit);
 
       const statements: D1PreparedStatement[] = [];
       for (const [storedCsn, visit] of byCsn) {
@@ -194,7 +197,7 @@ export function makePortalVisitsRepo(ctx: Ctx) {
         if (start === null) continue;
         const expiresAt = portalVisitExpiry(start, now);
         const plaintext = JSON.stringify(visit);
-        const hash = await portalVisitDigest(blinder, providerId, plaintext);
+        const hash = await portalVisitDigest(blinder, healthSystemId, plaintext);
         const prior = existing.get(storedCsn);
 
         if (prior?.content_hash === hash && prior.state === "active") {
@@ -203,23 +206,27 @@ export function makePortalVisitsRepo(ctx: Ctx) {
             ctx.db
               .prepare(
                 `UPDATE portal_visits SET fetched_at = ?, expires_at = ?
-                  WHERE provider_id = ? AND csn = ?`,
+                  WHERE health_system_id = ? AND csn = ?`,
               )
-              .bind(now, expiresAt, providerId, storedCsn),
+              .bind(now, expiresAt, healthSystemId, storedCsn),
           );
           continue;
         }
 
         report.written += 1;
-        const payloadEnc = await seal(ctx.env, plaintext, portalVisitAad(providerId, storedCsn));
+        const payloadEnc = await seal(
+          ctx.env,
+          plaintext,
+          portalVisitAad(healthSystemId, storedCsn),
+        );
         statements.push(
           ctx.db
             .prepare(
               `INSERT INTO portal_visits
-                 (provider_id, csn, payload_enc, content_hash, status, state,
+                 (health_system_id, csn, payload_enc, content_hash, status, state,
                   missing_since, fetched_at, expires_at)
                VALUES (?, ?, ?, ?, ?, 'active', NULL, ?, ?)
-               ON CONFLICT (provider_id, csn) DO UPDATE SET
+               ON CONFLICT (health_system_id, csn) DO UPDATE SET
                  payload_enc = excluded.payload_enc,
                  content_hash = excluded.content_hash,
                  status = excluded.status,
@@ -228,7 +235,7 @@ export function makePortalVisitsRepo(ctx: Ctx) {
                  fetched_at = excluded.fetched_at,
                  expires_at = excluded.expires_at`,
             )
-            .bind(providerId, storedCsn, payloadEnc, hash, visit.status, now, expiresAt),
+            .bind(healthSystemId, storedCsn, payloadEnc, hash, visit.status, now, expiresAt),
         );
       }
 
@@ -243,24 +250,24 @@ export function makePortalVisitsRepo(ctx: Ctx) {
             ctx.db
               .prepare(
                 `UPDATE portal_visits SET state = 'missing', missing_since = ?
-                  WHERE provider_id = ? AND csn = ?`,
+                  WHERE health_system_id = ? AND csn = ?`,
               )
-              .bind(now, providerId, storedCsn),
+              .bind(now, healthSystemId, storedCsn),
           );
         }
       }
 
       for (const page of chunk(statements, BATCH_CHUNK)) await batch(ctx.db, page);
-      ctx.log.info("portal_visits.recorded", { providerId, ...report });
+      ctx.log.info("portal_visits.recorded", { healthSystemId, ...report });
       return report;
     },
 
-    /** Every live visit for one provider, earliest first. */
-    async list(providerId: string): Promise<StoredPortalVisit[]> {
+    /** Every live visit for one health system, earliest first. */
+    async list(healthSystemId: string): Promise<StoredPortalVisit[]> {
       const rows = await all<PortalVisitRow>(
         ctx.db
-          .prepare(`SELECT * FROM portal_visits WHERE provider_id = ? AND expires_at > ?`)
-          .bind(providerId, ctx.now()),
+          .prepare(`SELECT * FROM portal_visits WHERE health_system_id = ? AND expires_at > ?`)
+          .bind(healthSystemId, ctx.now()),
       );
       const decoded = await Promise.all(rows.map((row) => decode(row)));
       // Sorted in place: `decoded` is this call's own array. The start is sealed, so
@@ -270,15 +277,15 @@ export function makePortalVisitsRepo(ctx: Ctx) {
     },
 
     /**
-     * Every live visit of every provider but one: what the portal pass compares a
-     * provider's visits against to find the ones another organisation's record
+     * Every live visit of every health system but one: what the portal pass compares a
+     * health system's visits against to find the ones another organisation's record
      * already covers (`worker/sync/portal-dedupe.ts`).
      */
-    async listExcept(providerId: string): Promise<StoredPortalVisit[]> {
+    async listExcept(healthSystemId: string): Promise<StoredPortalVisit[]> {
       const rows = await all<PortalVisitRow>(
         ctx.db
-          .prepare(`SELECT * FROM portal_visits WHERE provider_id <> ? AND expires_at > ?`)
-          .bind(providerId, ctx.now()),
+          .prepare(`SELECT * FROM portal_visits WHERE health_system_id <> ? AND expires_at > ?`)
+          .bind(healthSystemId, ctx.now()),
       );
       const decoded = await Promise.all(rows.map((row) => decode(row)));
       // Sorted in place: `decoded` is this call's own array. The start is sealed, so
@@ -295,10 +302,10 @@ export function makePortalVisitsRepo(ctx: Ctx) {
       return changes;
     },
 
-    /** Forget every stored visit for one provider, e.g. on disconnect. */
-    async clearProvider(providerId: string): Promise<number> {
+    /** Forget every stored visit for one health system, e.g. on disconnect. */
+    async clearHealthSystem(healthSystemId: string): Promise<number> {
       const { changes } = await run(
-        ctx.db.prepare("DELETE FROM portal_visits WHERE provider_id = ?").bind(providerId),
+        ctx.db.prepare("DELETE FROM portal_visits WHERE health_system_id = ?").bind(healthSystemId),
       );
       return changes;
     },

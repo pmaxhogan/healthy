@@ -51,7 +51,7 @@ export interface TokenSet {
 /**
  * The fields of `.well-known/smart-configuration` this project needs.
  *
- * Cached by the caller (7 days, per provider) -- nothing in here is fetched on
+ * Cached by the caller (7 days, per health system) -- nothing in here is fetched on
  * a hot path.
  */
 export interface SmartConfig {
@@ -76,7 +76,7 @@ export interface CapabilityResource {
 /**
  * A compact, JSON-serialisable index of one organisation's CapabilityStatement.
  *
- * Plain objects and arrays on purpose: wave 2 caches this per provider in D1,
+ * Plain objects and arrays on purpose: wave 2 caches this per health system in D1,
  * and a Map or a Set would not survive the round trip.
  */
 export interface CapabilityIndex {

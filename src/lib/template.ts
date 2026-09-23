@@ -1,5 +1,5 @@
 // A client-side mirror of the title-template renderer, for the live preview in
-// the provider editor.
+// the health system editor.
 //
 // This is a PREVIEW ONLY. The Worker owns the real rendering at sync time; this
 // exists so the owner can see the shape of a title while typing one, without a
@@ -37,7 +37,7 @@ export const SAMPLE_VIEW: Readonly<Required<TemplateView>> = Object.freeze({
   apptTime: "11:30",
 });
 
-/** The template used when a provider has not been given one of its own. */
+/** The template used when a health system has not been given one of its own. */
 export const DEFAULT_TITLE_TEMPLATE = "{visitType} · {practitioner}";
 
 const TOKEN = /\{(?<name>[A-Za-z]+)\}/gu;

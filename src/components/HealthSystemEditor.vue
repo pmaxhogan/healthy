@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// One provider's configuration and the operations that can be run against it.
+// One health system's configuration and the operations that can be run against it.
 //
 // The editor holds a draft and saves on demand rather than on every keystroke:
 // a title template is half-invalid while it is being typed, and a PATCH per
@@ -21,10 +21,10 @@ import PortalAccountCard from "./PortalAccountCard.vue";
 import StatusPill from "./StatusPill.vue";
 import TitleTemplateField from "./TitleTemplateField.vue";
 
-import type { ColorOptionDto, ProviderDto, SettingsDto } from "@shared/types.ts";
+import type { ColorOptionDto, HealthSystemDto, SettingsDto } from "@shared/types.ts";
 
 const props = defineProps<{
-  provider: ProviderDto;
+  healthSystem: HealthSystemDto;
   colors: ColorOptionDto[];
   settings: SettingsDto;
 }>();
@@ -42,20 +42,20 @@ interface Draft {
   enabled: boolean;
 }
 
-function draftFrom(provider: ProviderDto): Draft {
+function draftFrom(healthSystem: HealthSystemDto): Draft {
   return {
-    displayName: provider.displayName,
-    orgShort: provider.config.orgShort ?? "",
-    portalUrl: provider.portalUrl ?? "",
-    titleTemplate: provider.config.titleTemplate ?? "",
-    colorId: provider.config.colorId ?? null,
-    arrivalOffsetMin: provider.config.arrivalOffsetMin ?? null,
-    arrivalOffsets: { ...provider.config.arrivalOffsetsByVisitType },
-    enabled: provider.config.enabled !== false,
+    displayName: healthSystem.displayName,
+    orgShort: healthSystem.config.orgShort ?? "",
+    portalUrl: healthSystem.portalUrl ?? "",
+    titleTemplate: healthSystem.config.titleTemplate ?? "",
+    colorId: healthSystem.config.colorId ?? null,
+    arrivalOffsetMin: healthSystem.config.arrivalOffsetMin ?? null,
+    arrivalOffsets: { ...healthSystem.config.arrivalOffsetsByVisitType },
+    enabled: healthSystem.config.enabled !== false,
   };
 }
 
-const draft = reactive<Draft>(draftFrom(props.provider));
+const draft = reactive<Draft>(draftFrom(props.healthSystem));
 const secret = ref("");
 const showSecret = ref(false);
 const confirming = ref(false);
@@ -68,14 +68,14 @@ const removal = useAction();
 // A reload elsewhere on the page (a sync finished, say) brings a fresh DTO; an
 // untouched editor should follow it rather than sit on a stale copy.
 watch(
-  () => props.provider,
+  () => props.healthSystem,
   (next) => {
     if (!save.busy.value) Object.assign(draft, draftFrom(next));
   },
 );
 
-const status = computed(() => props.provider.connection?.status ?? "disconnected");
-const href = computed(() => reconnectHref(props.provider));
+const status = computed(() => props.healthSystem.connection?.status ?? "disconnected");
+const href = computed(() => reconnectHref(props.healthSystem));
 const effectiveTemplate = computed(() =>
   draft.titleTemplate === ""
     ? props.settings.defaultTitleTemplate || DEFAULT_TITLE_TEMPLATE
@@ -87,7 +87,7 @@ async function onSave(): Promise<void> {
   const orgShort = draft.orgShort.trim();
   const portal = draft.portalUrl.trim();
   const ok = await save.run(async () => {
-    await endpoints.updateProvider(props.provider.id, {
+    await endpoints.updateHealthSystem(props.healthSystem.id, {
       displayName: draft.displayName.trim(),
       portalUrl: portal === "" ? null : portal,
       // The config is replaced wholesale, and every optional field is rejected
@@ -112,7 +112,7 @@ async function onSetSecret(): Promise<void> {
   const value = secret.value;
   if (value === "") return;
   const ok = await secretAction.run(async () => {
-    await endpoints.setProviderSecret(props.provider.id, value);
+    await endpoints.setHealthSystemSecret(props.healthSystem.id, value);
     toastSuccess("Client secret stored.");
   });
   if (!ok) {
@@ -134,8 +134,8 @@ async function run(label: string, fn: () => Promise<unknown>): Promise<void> {
 
 async function onRemove(): Promise<void> {
   const ok = await removal.run(async () => {
-    await endpoints.deleteProvider(props.provider.id);
-    toastSuccess("Provider removed.");
+    await endpoints.deleteHealthSystem(props.healthSystem.id);
+    toastSuccess("Health system removed.");
   });
   confirming.value = false;
   if (ok) emit("removed");
@@ -145,18 +145,18 @@ async function onRemove(): Promise<void> {
 <template>
   <section class="card">
     <div class="row">
-      <h3>{{ provider.displayName }}</h3>
-      <span v-if="provider.environment === 'sandbox'" class="chip">sandbox</span>
+      <h3>{{ healthSystem.displayName }}</h3>
+      <span v-if="healthSystem.environment === 'sandbox'" class="chip">sandbox</span>
       <StatusPill :status="status" />
-      <span v-if="provider.connection?.lastErrorCode" class="chip danger-text">
-        {{ humanizeCode(provider.connection.lastErrorCode) }}
+      <span v-if="healthSystem.connection?.lastErrorCode" class="chip danger-text">
+        {{ humanizeCode(healthSystem.connection.lastErrorCode) }}
       </span>
     </div>
 
     <p class="muted">
-      Last sync {{ relativeTime(provider.connection?.lastSyncAt) }} · token
-      {{ relativeTime(provider.connection?.accessExpiresAt) }} ·
-      {{ provider.hasClientSecret ? "secret set" : "no client secret" }}
+      Last sync {{ relativeTime(healthSystem.connection?.lastSyncAt) }} · token
+      {{ relativeTime(healthSystem.connection?.accessExpiresAt) }} ·
+      {{ healthSystem.hasClientSecret ? "secret set" : "no client secret" }}
     </p>
 
     <div class="fields two">
@@ -209,26 +209,28 @@ async function onRemove(): Promise<void> {
       <button
         class="small"
         :disabled="operation.busy.value"
-        @click="run('Sync started.', () => endpoints.syncProvider(provider.id))"
+        @click="run('Sync started.', () => endpoints.syncHealthSystem(healthSystem.id))"
       >
         Sync now
       </button>
       <button
         class="small"
         :disabled="operation.busy.value"
-        @click="run('Token refreshed.', () => endpoints.refreshProviderToken(provider.id))"
+        @click="run('Token refreshed.', () => endpoints.refreshHealthSystemToken(healthSystem.id))"
       >
         Refresh token
       </button>
       <button
         class="small"
         :disabled="operation.busy.value"
-        @click="run('Full refresh started.', () => endpoints.fullRefreshProvider(provider.id))"
+        @click="
+          run('Full refresh started.', () => endpoints.fullRefreshHealthSystem(healthSystem.id))
+        "
       >
         Full refresh
       </button>
       <button class="small" @click="showSecret = !showSecret">
-        {{ provider.hasClientSecret ? "Replace secret" : "Set secret" }}
+        {{ healthSystem.hasClientSecret ? "Replace secret" : "Set secret" }}
       </button>
       <button class="small danger spacer" @click="confirming = true">Remove</button>
     </div>
@@ -251,13 +253,13 @@ async function onRemove(): Promise<void> {
       </button>
     </div>
 
-    <PortalAccountCard :provider-id="provider.id" :portal-url="provider.portalUrl" />
+    <PortalAccountCard :health-system-id="healthSystem.id" :portal-url="healthSystem.portalUrl" />
 
     <ConfirmDialog
       v-if="confirming"
-      :title="`Remove ${provider.displayName}?`"
+      :title="`Remove ${healthSystem.displayName}?`"
       body="The local connection and its cached data go away. Calendar events already written are left alone."
-      :require-text="provider.displayName"
+      :require-text="healthSystem.displayName"
       :busy="removal.busy.value"
       @cancel="confirming = false"
       @confirm="onRemove"

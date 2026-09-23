@@ -3,20 +3,20 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { AUDIT_RETENTION_DAYS } from "../../../worker/db/repos/mcp-audit.ts";
 import { DAY_SECONDS } from "../../../worker/lib/time.ts";
 
-import { T0, clock, column, resetDb, seedProvider, testRepos } from "./helpers.ts";
+import { T0, clock, column, resetDb, seedHealthSystem, testRepos } from "./helpers.ts";
 
 beforeEach(resetDb);
 
 describe("mcp_audit.insert", () => {
   it("records a call with its metadata and nothing else", async () => {
     const repos = testRepos();
-    const providerId = await seedProvider(repos);
+    const healthSystemId = await seedHealthSystem(repos);
 
     const id = await repos.mcpAudit.insert({
       tool: "get_appointments",
       clientId: "client-1",
       grantId: "grant-1",
-      providers: [providerId],
+      healthSystems: [healthSystemId],
       resultCount: 4,
       durationMs: 37,
     });
@@ -27,7 +27,7 @@ describe("mcp_audit.insert", () => {
       clientId: "client-1",
       grantId: "grant-1",
       tool: "get_appointments",
-      providers: [providerId],
+      healthSystems: [healthSystemId],
       resultCount: 4,
       ok: true,
       errorCode: null,
@@ -35,13 +35,13 @@ describe("mcp_audit.insert", () => {
     });
   });
 
-  it("defaults to a successful call with no providers and no results", async () => {
+  it("defaults to a successful call with no health systems and no results", async () => {
     const repos = testRepos();
 
-    const id = await repos.mcpAudit.insert({ tool: "list_providers" });
+    const id = await repos.mcpAudit.insert({ tool: "list_health_systems" });
 
     expect(await repos.mcpAudit.get(id)).toMatchObject({
-      providers: [],
+      healthSystems: [],
       resultCount: 0,
       ok: true,
       clientId: null,
@@ -92,11 +92,11 @@ describe("mcp_audit.listRecent and countsByTool", () => {
 
     await repos.mcpAudit.insert({ tool: "get_vitals" });
     await repos.mcpAudit.insert({ tool: "get_vitals", ok: false, errorCode: "internal" });
-    await repos.mcpAudit.insert({ tool: "list_providers" });
+    await repos.mcpAudit.insert({ tool: "list_health_systems" });
 
     expect(await repos.mcpAudit.countsByTool()).toStrictEqual([
       { tool: "get_vitals", calls: 2, failures: 1 },
-      { tool: "list_providers", calls: 1, failures: 0 },
+      { tool: "list_health_systems", calls: 1, failures: 0 },
     ]);
   });
 
@@ -196,7 +196,7 @@ describe("mcp_policy", () => {
       "tool",
     ]);
     expect(await repos.mcpPolicy.targetsOf("resource")).toStrictEqual(["DocumentReference"]);
-    expect(await repos.mcpPolicy.targetsOf("provider")).toStrictEqual([]);
+    expect(await repos.mcpPolicy.targetsOf("health_system")).toStrictEqual([]);
   });
 
   it("removes by id and reports whether anything went", async () => {

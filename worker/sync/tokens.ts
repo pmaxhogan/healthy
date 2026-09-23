@@ -47,7 +47,7 @@ import { clientIdFor, getSmartConfig } from "./discovery.ts";
 import type { SyncDeps } from "./deps.ts";
 import type { Ctx } from "../db/client.ts";
 import type { Repos } from "../db/index.ts";
-import type { ConnectionRow, ProviderRow } from "../db/rows.ts";
+import type { ConnectionRow, HealthSystemRow } from "../db/rows.ts";
 import type { SmartConfig } from "../fhir/types.ts";
 import type { ProviderAdapter } from "../providers/adapter.ts";
 import type { FhirClient } from "../providers/epic/fhir-client.ts";
@@ -62,7 +62,7 @@ const LEASE_WAIT_MS = 400;
 
 /** Everything a sync needs about one connection, plus the token getter. */
 export interface AccessTokenHandle {
-  provider: ProviderRow;
+  healthSystem: HealthSystemRow;
   connection: ConnectionRow;
   /** The organisation's R4 Patient id, from the token response. */
   patientId: string;
@@ -88,7 +88,7 @@ interface Credentials {
 async function loadCredentials(
   ctx: Ctx,
   repos: Repos,
-  provider: ProviderRow,
+  healthSystem: HealthSystemRow,
   connection: ConnectionRow,
 ): Promise<Credentials> {
   const secrets = await repos.connections.getSecrets(connection.id);
@@ -97,17 +97,17 @@ async function loadCredentials(
   const patientFhirId = secrets?.patientFhirId ?? null;
   if (patientFhirId === null) {
     throw new AppError("not_connected", "the connection has no stored patient id", {
-      providerId: provider.id,
+      healthSystemId: healthSystem.id,
     });
   }
-  const clientSecret = await repos.providers.getClientSecret(provider.id);
+  const clientSecret = await repos.healthSystems.getClientSecret(healthSystem.id);
   if (clientSecret === null) {
-    throw new AppError("not_connected", "the provider has no client secret", {
-      providerId: provider.id,
+    throw new AppError("not_connected", "the health system has no client secret", {
+      healthSystemId: healthSystem.id,
     });
   }
   return {
-    clientId: clientIdFor(ctx, provider),
+    clientId: clientIdFor(ctx, healthSystem),
     clientSecret,
     patientId: patientFhirId,
     refreshToken: secrets?.refreshToken ?? null,
@@ -122,44 +122,44 @@ function codeOf(error: unknown): string {
 }
 
 /**
- * Open a token session for one provider.
+ * Open a token session for one health system.
  *
  * Does the D1 and discovery work once, up front, and hands back a getter that a
  * whole sync (or one MCP tool call) can lean on.
  */
 export async function withAccessToken(
   ctx: Ctx,
-  providerId: string,
+  healthSystemId: string,
   deps: SyncDeps = {},
 ): Promise<AccessTokenHandle> {
   const resolved = resolveDeps(deps);
   const repos = makeRepos(ctx);
   const nowMs = (): number => ctx.now() * 1000;
 
-  const provider = await repos.providers.get(providerId);
-  if (provider === null) {
-    throw new AppError("not_found", "no such provider", { providerId });
+  const healthSystem = await repos.healthSystems.get(healthSystemId);
+  if (healthSystem === null) {
+    throw new AppError("not_found", "no such health system", { healthSystemId });
   }
-  if (provider.deleted_at !== null) {
-    throw new AppError("not_found", "the provider has been removed", { providerId });
+  if (healthSystem.deleted_at !== null) {
+    throw new AppError("not_found", "the health system has been removed", { healthSystemId });
   }
-  const connection = await repos.connections.getForProvider(providerId);
+  const connection = await repos.connections.getForHealthSystem(healthSystemId);
   if (connection === null || connection.status === "disconnected") {
-    throw new AppError("not_connected", "the provider is not connected", { providerId });
+    throw new AppError("not_connected", "the health system is not connected", { healthSystemId });
   }
   if (connection.status === "needs_reauth") {
     throw new AppError("needs_reauth", "the connection needs the owner to reconnect", {
-      providerId,
+      healthSystemId,
     });
   }
 
-  const adapter = adapterFor(provider.vendor, {
+  const adapter = adapterFor(healthSystem.vendor, {
     fetchImpl: resolved.fetchImpl,
     logger: ctx.log,
     now: nowMs,
   });
-  const smart = await getSmartConfig(ctx, repos, provider, adapter);
-  const credentials = await loadCredentials(ctx, repos, provider, connection);
+  const smart = await getSmartConfig(ctx, repos, healthSystem, adapter);
+  const credentials = await loadCredentials(ctx, repos, healthSystem, connection);
 
   // Mutable, because a refresh replaces all three. Held in one object rather than
   // three `let`s so it is obvious that they move together.
@@ -182,11 +182,11 @@ export async function withAccessToken(
       await resolved.sleep(LEASE_WAIT_MS);
       const row = await repos.connections.get(connection.id);
       if (row === null) {
-        throw new AppError("not_connected", "the connection disappeared", { providerId });
+        throw new AppError("not_connected", "the connection disappeared", { healthSystemId });
       }
       if (row.status === "needs_reauth") {
         throw new AppError("needs_reauth", "the connection needs the owner to reconnect", {
-          providerId,
+          healthSystemId,
         });
       }
       if ((row.access_expires_at ?? 0) * 1000 - nowMs() <= REFRESH_SKEW_MS) continue;
@@ -197,21 +197,21 @@ export async function withAccessToken(
       state.accessToken = token;
       state.expiresAtMs = (row.access_expires_at ?? 0) * 1000;
       state.refreshToken = secrets?.refreshToken ?? state.refreshToken;
-      ctx.log.debug("sync.token.lease_followed", { providerId });
+      ctx.log.debug("sync.token.lease_followed", { healthSystemId });
       return token;
     }
     // Deliberately `upstream_unavailable`: the run records it and moves on to the
-    // next provider, and the next scheduled run tries again.
+    // next health system, and the next scheduled run tries again.
     throw new AppError("upstream_unavailable", "another refresh holds the connection lease", {
-      providerId,
+      healthSystemId,
     });
   };
 
   const performRefresh = async (): Promise<string> => {
     if (state.refreshToken === null) {
       await repos.connections.markNeedsReauth(connection.id, "no_refresh_token");
-      await openReconnectAlert(ctx, { providerId }, "no_refresh_token", deps);
-      throw new AppError("needs_reauth", "the connection has no refresh token", { providerId });
+      await openReconnectAlert(ctx, { healthSystemId }, "no_refresh_token", deps);
+      throw new AppError("needs_reauth", "the connection has no refresh token", { healthSystemId });
     }
     const owner = newToken();
     if (!(await repos.connections.acquireLease(connection.id, owner, LEASE_TTL_MS))) {
@@ -231,7 +231,7 @@ export async function withAccessToken(
       // The write carries the lease: if this refresh outlasted its TTL and another
       // one has since stored *its* rotated refresh token, ours must not land on
       // top -- that is how both end up invalid and the owner has to reconnect.
-      const stored = await repos.connections.upsertTokensLeased(providerId, owner, {
+      const stored = await repos.connections.upsertTokensLeased(healthSystemId, owner, {
         accessToken: tokens.accessToken,
         accessExpiresAt: Math.floor(tokens.expiresAt / 1000),
         ...(tokens.refreshToken !== null && { refreshToken: tokens.refreshToken }),
@@ -241,21 +241,21 @@ export async function withAccessToken(
         // Discard what we just obtained and follow whoever holds the lease now.
         // Nothing else is stamped either: marking the connection connected or
         // resolving its alert would be claiming credit for someone else's write.
-        ctx.log.warn("sync.token.lease_lost", { providerId });
+        ctx.log.warn("sync.token.lease_lost", { healthSystemId });
         return await awaitOtherRefresh();
       }
       await repos.connections.markConnected(connection.id);
       state.accessToken = tokens.accessToken;
       state.expiresAtMs = tokens.expiresAt;
       state.refreshToken = tokens.refreshToken ?? state.refreshToken;
-      ctx.log.info("sync.token.refreshed", { providerId });
-      await resolveReconnectAlert(ctx, { providerId }, deps);
+      ctx.log.info("sync.token.refreshed", { healthSystemId });
+      await resolveReconnectAlert(ctx, { healthSystemId }, deps);
       return tokens.accessToken;
     } catch (error) {
       const code = codeOf(error);
       if (code === "needs_reauth") {
         await repos.connections.markNeedsReauth(connection.id, code);
-        await openReconnectAlert(ctx, { providerId }, code, deps);
+        await openReconnectAlert(ctx, { healthSystemId }, code, deps);
       } else {
         // Keeps the tokens: a transient token-endpoint failure is not a reason to
         // throw away a refresh token that is probably still good.
@@ -278,7 +278,7 @@ export async function withAccessToken(
   };
 
   return {
-    provider,
+    healthSystem,
     connection,
     patientId: credentials.patientId,
     smart,
@@ -296,7 +296,7 @@ export interface FhirSession extends AccessTokenHandle {
 }
 
 /**
- * A ready FHIR client for one provider.
+ * A ready FHIR client for one health system.
  *
  * The 401 hook is `getAccessToken({ forceRefresh: true })`, which is the single
  * -flight refresh: several pages racing a mid-run expiry all wait on one refresh
@@ -304,13 +304,13 @@ export interface FhirSession extends AccessTokenHandle {
  */
 export async function getFhirClientFor(
   ctx: Ctx,
-  providerId: string,
+  healthSystemId: string,
   deps: SyncDeps = {},
 ): Promise<FhirSession> {
   const resolved = resolveDeps(deps);
-  const handle = await withAccessToken(ctx, providerId, deps);
+  const handle = await withAccessToken(ctx, healthSystemId, deps);
   const client = createFhirClient({
-    baseUrl: handle.provider.fhir_base_url,
+    baseUrl: handle.healthSystem.fhir_base_url,
     getAccessToken: () => handle.getAccessToken(),
     onUnauthorized: () => handle.getAccessToken({ forceRefresh: true }),
     fetchImpl: resolved.fetchImpl,

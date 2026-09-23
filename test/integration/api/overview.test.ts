@@ -13,7 +13,7 @@ import {
   freshOwner,
   json,
   resetPorts,
-  seedProvider,
+  seedHealthSystem,
   testRepos,
   usePorts,
 } from "./helpers.ts";
@@ -30,7 +30,7 @@ describe("GET /api/overview", () => {
   it("answers with every panel on an empty deployment", async () => {
     const dto = await json<OverviewDto>(await owner().get("/api/overview"));
 
-    expect(dto.providers).toStrictEqual([]);
+    expect(dto.healthSystems).toStrictEqual([]);
     expect(dto.openAlerts).toStrictEqual([]);
     expect(dto.lastRuns).toStrictEqual([]);
     expect(dto.cacheCounts).toStrictEqual([]);
@@ -41,12 +41,12 @@ describe("GET /api/overview", () => {
   });
 
   it("counts active and ghosted calendar events separately", async () => {
-    const id = await seedProvider();
+    const id = await seedHealthSystem();
     const repos = testRepos();
     for (const key of ["a", "b", "c"]) {
       await repos.calendarEvents.upsert({
         eventKey: await blindKey(`${id}:${key}`),
-        providerId: id,
+        healthSystemId: id,
         encounterId: key,
         calendarId: "primary",
         googleEventId: `gcal-${key}`,
@@ -60,8 +60,8 @@ describe("GET /api/overview", () => {
     expect(dto.calendarEvents).toStrictEqual({ active: 2, ghost: 1 });
   });
 
-  it("counts cached resources per provider and type, without decrypting any of them", async () => {
-    const id = await seedProvider();
+  it("counts cached resources per health system and type, without decrypting any of them", async () => {
+    const id = await seedHealthSystem();
     await testRepos().fhirCache.upsertMany(
       id,
       [
@@ -75,8 +75,8 @@ describe("GET /api/overview", () => {
     const dto = await json<OverviewDto>(await owner().get("/api/overview"));
 
     expect(dto.cacheCounts).toStrictEqual([
-      { providerId: id, resourceType: "Condition", count: 1 },
-      { providerId: id, resourceType: "Encounter", count: 2 },
+      { healthSystemId: id, resourceType: "Condition", count: 1 },
+      { healthSystemId: id, resourceType: "Encounter", count: 2 },
     ]);
     // Counts only: no payload, no ciphertext.
     expect(JSON.stringify(dto)).not.toContain("payload");
@@ -86,7 +86,7 @@ describe("GET /api/overview", () => {
     // `fhir_cache` also holds one `_smart` and one `_capability` row per provider --
     // a discovery document and an indexed CapabilityStatement. Counting those would
     // report two cached "records" for a provider that has never been synced.
-    const id = await seedProvider();
+    const id = await seedHealthSystem();
     await testRepos().fhirCache.upsertMany(
       id,
       [
@@ -100,7 +100,7 @@ describe("GET /api/overview", () => {
     const dto = await json<OverviewDto>(await owner().get("/api/overview"));
 
     expect(dto.cacheCounts).toStrictEqual([
-      { providerId: id, resourceType: "Encounter", count: 1 },
+      { healthSystemId: id, resourceType: "Encounter", count: 1 },
     ]);
   });
 
@@ -152,8 +152,8 @@ describe("GET /api/overview", () => {
     expect(dto.mcp.grants).toBe(0);
   });
 
-  it("includes each provider with its connection and no secrets", async () => {
-    const id = await seedProvider({ clientSecret: "the-secret" });
+  it("includes each health system with its connection and no secrets", async () => {
+    const id = await seedHealthSystem({ clientSecret: "the-secret" });
     await testRepos().connections.upsertTokens(id, {
       accessToken: "access",
       refreshToken: "refresh",
@@ -164,10 +164,10 @@ describe("GET /api/overview", () => {
     const body = await response.text();
     const dto = JSON.parse(body) as OverviewDto;
 
-    expect(dto.providers).toHaveLength(1);
-    expect(dto.providers[0]?.hasClientSecret).toBe(true);
-    expect(dto.providers[0]?.connection?.status).toBe("connected");
-    expect(dto.providers[0]?.connection?.hasRefreshToken).toBe(true);
+    expect(dto.healthSystems).toHaveLength(1);
+    expect(dto.healthSystems[0]?.hasClientSecret).toBe(true);
+    expect(dto.healthSystems[0]?.connection?.status).toBe("connected");
+    expect(dto.healthSystems[0]?.connection?.hasRefreshToken).toBe(true);
     for (const secret of ["the-secret", "access", "refresh"]) {
       expect(body).not.toContain(`"${secret}"`);
     }

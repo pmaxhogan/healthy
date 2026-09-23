@@ -10,7 +10,7 @@
 //
 //   1. Hono matches in registration order, so the catch-all 404 is LAST. A route
 //      added below it is dead code that answers `{"error":"not_found"}`.
-//   2. `/sync` is mounted before nothing in particular, but `/providers` must be
+//   2. `/sync` is mounted before nothing in particular, but `/health-systems` must be
 //      mounted before the catch-all for its nested `/:id/...` actions to resolve.
 //
 // The error handler is registered on this sub-app rather than left to app.ts, so
@@ -23,11 +23,11 @@ import { NO_STORE, apiErrorHandler } from "./http.ts";
 import { alertsRouter } from "./routes/alerts.ts";
 import { brandsRouter } from "./routes/brands.ts";
 import { googleRouter } from "./routes/google.ts";
+import { healthSystemsRouter, syncRouter } from "./routes/health-systems.ts";
 import { mailRouter } from "./routes/mail.ts";
 import { mcpRouter } from "./routes/mcp.ts";
 import { overviewRouter } from "./routes/overview.ts";
 import { portalRouter } from "./routes/portal.ts";
-import { providersRouter, syncRouter } from "./routes/providers.ts";
 import { runsRouter } from "./routes/runs.ts";
 import { settingsRouter } from "./routes/settings.ts";
 
@@ -49,12 +49,12 @@ apiRouter.onError(apiErrorHandler);
 apiRouter.get("/whoami", (c) => c.json({ ok: true }, 200, NO_STORE));
 
 apiRouter.route("/overview", overviewRouter);
-// Two routers under /providers. The portal routes are a separate file because they
+// Two routers under /health systems. The portal routes are a separate file because they
 // are a separate subsystem -- a scrape with its own credentials, its own Durable
 // Object and its own failure vocabulary -- and `/:id` never matches `/:id/portal`,
 // so the two cannot shadow each other whichever order they are mounted in.
-apiRouter.route("/providers", portalRouter);
-apiRouter.route("/providers", providersRouter);
+apiRouter.route("/health-systems", portalRouter);
+apiRouter.route("/health-systems", healthSystemsRouter);
 apiRouter.route("/sync", syncRouter);
 apiRouter.route("/google", googleRouter);
 apiRouter.route("/settings", settingsRouter);

@@ -14,7 +14,7 @@
  * `worker/mcp/deps-d1.ts` is the one real implementation.
  */
 
-import type { ConnectionStatus, ProviderEnvironment } from "../db/rows.ts";
+import type { ConnectionStatus, HealthSystemEnvironment } from "../db/rows.ts";
 import type { SyncWarning } from "../db/schemas.ts";
 import type { Logger } from "../lib/log.ts";
 import type { PolicyRules } from "../policy/rules.ts";
@@ -27,13 +27,13 @@ export const BINARY_TEXT_TYPE = "_binary_text";
 export const BINARY_TEXT_TTL_MS = 30 * 24 * 3600 * 1000;
 
 /** A connected (or connectable) health system, as the MCP sees it. */
-export interface ProviderInfo {
+export interface HealthSystemInfo {
   id: string;
   /** What every item is tagged with. Never an id in the model-facing output. */
   displayName: string;
-  environment: ProviderEnvironment;
+  environment: HealthSystemEnvironment;
   portalUrl: string | null;
-  /** `providers.config_json.enabled`: sync on/off without disconnecting. */
+  /** `health_systems.config_json.enabled`: sync on/off without disconnecting. */
   enabled: boolean;
   status: ConnectionStatus | "not_connected";
   /** Unix seconds, or null when it has never happened. */
@@ -60,20 +60,20 @@ export interface CachedRow {
 export interface PortalVisitRecord {
   visit: PortalVisit;
   missing: boolean;
-  /** Unix seconds the portal pass last saw it. A stale copy loses cross-provider ties. */
+  /** Unix seconds the portal pass last saw it. A stale copy loses cross-health system ties. */
   fetchedAt: number;
 }
 
 /** Live row counts, for `get_health_summary` and the admin overview. */
 export interface CacheCount {
-  providerId: string;
+  healthSystemId: string;
   resourceType: string;
   count: number;
 }
 
-/** Per-provider, per-resource-type freshness, for `get_sync_status`. */
+/** Per-health system, per-resource-type freshness, for `get_sync_status`. */
 export interface SyncStatusEntry {
-  providerId: string;
+  healthSystemId: string;
   resourceType: string;
   lastFullAt: number | null;
   lastOk: boolean;
@@ -82,7 +82,7 @@ export interface SyncStatusEntry {
 }
 
 export interface DocumentTextRequest {
-  providerId: string;
+  healthSystemId: string;
   /** The DocumentReference id, as `get_documents` reported it. */
   documentId: string;
 }
@@ -113,7 +113,7 @@ export interface AuditRecord {
   tool: string;
   clientId: string | null;
   grantId: string | null;
-  providerIds: string[];
+  healthSystemIds: string[];
   resultCount: number;
   ok: boolean;
   errorCode: string | null;
@@ -146,21 +146,21 @@ export interface ToolDeps {
   mcpEnabled(): Promise<boolean>;
   /** The exposure deny-list, parsed. Resolved at most once per tool call. */
   rules(): Promise<PolicyRules>;
-  /** Every provider that has not been soft-deleted, deny-list not yet applied. */
-  providers(): Promise<ProviderInfo[]>;
-  /** Cached resources of one type for one provider, most recently updated first. */
-  resources(providerId: string, resourceType: string): Promise<CachedRow[]>;
+  /** Every health system that has not been soft-deleted, deny-list not yet applied. */
+  healthSystems(): Promise<HealthSystemInfo[]>;
+  /** Cached resources of one type for one health system, most recently updated first. */
+  resources(healthSystemId: string, resourceType: string): Promise<CachedRow[]>;
   /**
    * The Practitioner / Location / Organization / PractitionerRole / Medication
-   * rows one provider's references resolve against, for `mapResolver`.
+   * rows one health system's references resolve against, for `mapResolver`.
    */
-  referencePool(providerId: string): Promise<unknown[]>;
+  referencePool(healthSystemId: string): Promise<unknown[]>;
   /**
-   * The upcoming visits the patient-portal pass last stored for one provider
+   * The upcoming visits the patient-portal pass last stored for one health system
    * (`portal_visits`), earliest first. Epic's FHIR view never returns a visit
    * before it happens, so this is where `get_appointments` finds them.
    */
-  portalVisits(providerId: string): Promise<PortalVisitRecord[]>;
+  portalVisits(healthSystemId: string): Promise<PortalVisitRecord[]>;
   counts(): Promise<CacheCount[]>;
   syncStatus(): Promise<SyncStatusEntry[]>;
   /**

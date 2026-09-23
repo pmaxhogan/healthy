@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // Open (and, on /alerts, recently resolved) reconnect alerts.
 //
-// An alert's subject is `provider:<id>` or `google`, so the list needs the
-// provider names to say anything useful; it takes a lookup rather than fetching
+// An alert's subject is `health_system:<id>` or `google`, so the list needs the
+// health system names to say anything useful; it takes a lookup rather than fetching
 // them itself.
 
 import { formatDateTime, relativeTime } from "../lib/format.ts";
@@ -13,18 +13,18 @@ const props = withDefaults(
   defineProps<{
     alerts: AlertDto[];
     timezone: string | null;
-    /** providerId -> display name, for subjects that name a provider. */
-    providerNames?: Record<string, string>;
+    /** healthSystemId -> display name, for subjects that name a health system. */
+    healthSystemNames?: Record<string, string>;
   }>(),
-  { providerNames: () => ({}) },
+  { healthSystemNames: () => ({}) },
 );
 
 function subjectLabel(alert: AlertDto): string {
-  if (alert.providerId === null)
+  if (alert.healthSystemId === null)
     return alert.subject === "google" ? "Google Calendar" : alert.subject;
-  return Object.hasOwn(props.providerNames, alert.providerId)
-    ? (props.providerNames[alert.providerId] ?? alert.providerId)
-    : alert.providerId;
+  return Object.hasOwn(props.healthSystemNames, alert.healthSystemId)
+    ? (props.healthSystemNames[alert.healthSystemId] ?? alert.healthSystemId)
+    : alert.healthSystemId;
 }
 </script>
 

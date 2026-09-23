@@ -28,7 +28,7 @@ are largely in place; hardening and the first real deployment are ongoing.
   questions about medications, labs, conditions, and appointments across
   every connected health system — without ever being handed a credential.
   A server-side deny-list can withhold whole tools, resource types,
-  providers, or individual fields before anything is serialised.
+  health systems, or individual fields before anything is serialised.
 - **Re-auth alerts.** When a connection's refresh token stops working, opens
   a Trello card with a one-click reconnect link, and closes it automatically
   once the connection is restored.
@@ -63,7 +63,7 @@ are largely in place; hardening and the first real deployment are ongoing.
 
                  Trello  (re-auth alert cards, opened by the sync engine)
 
-  Storage:  D1 "healthy"      — providers, connections, FHIR cache, audit, run log, settings
+  Storage:  D1 "healthy"      — health_systems, connections, FHIR cache, audit, run log, settings
             Workers KV "OAUTH_KV" — MCP OAuth client registrations and grants
   Cron:     hourly  "7 * * * *"   — token keepalive, then an Encounter-only appointment sync
             daily   "23 6 * * *"  — full-scope FHIR refresh that repopulates the MCP cache
@@ -72,7 +72,7 @@ are largely in place; hardening and the first real deployment are ongoing.
 
 One Worker does everything. Requests arrive at a custom domain behind
 Cloudflare Access, pass a password gate, and are handled by a Hono app that
-serves the admin API and the built SPA. `@cloudflare/workers-oauth-provider`
+serves the admin API and the built SPA. `@cloudflare/workers-oauth-health_system`
 sits in front of the same Worker and owns the MCP-facing OAuth surface
 (`/mcp*`, `/oauth/token`, `/oauth/register`, `/.well-known/*`), so an AI
 client — which cannot complete an interactive Access login — never has to.
@@ -84,7 +84,7 @@ The MCP server itself lives in a SQLite-backed Durable Object.
 - **Long work.** A calendar sync fits in the request's `waitUntil`. A full
   refresh of a large record does not — `waitUntil` is cancelled about thirty
   seconds after the response — so the manual refresh button queues the work on
-  a per-provider Durable Object whose alarm does one bounded chunk per
+  a per-health system Durable Object whose alarm does one bounded chunk per
   invocation and re-arms until the record is walked. The nightly refresh runs
   straight through, because a cron invocation has the wall clock for it.
 - **Encryption.** Tokens, per-organisation client secrets, patient
@@ -148,10 +148,10 @@ development (one `NAME=value` line each).
 Per-organisation Epic client secrets are **not** Worker secrets: they are
 entered in the admin UI and stored encrypted in D1, one per health system,
 rotated independently. When the admin UI is not an option (no live browser
-session against that environment), `npm run set-provider-secret -- --provider
+session against that environment), `npm run set-health-system-secret -- --health-system
 <id> --remote` sets the same column from the command line: it seals the value
 exactly as the Worker does and writes it with `wrangler d1 execute`. The
-secret is read from the `PROVIDER_CLIENT_SECRET` environment variable, or
+secret is read from the `HEALTH_SYSTEM_CLIENT_SECRET` environment variable, or
 from stdin if that is unset, so it is never a command-line argument or in
 shell history, and the command never prints it back.
 
@@ -163,7 +163,7 @@ sealed cookie jar — which carries the "trust this device" cookie, and is
 therefore treated as being exactly as sensitive as the password — and,
 optionally, an address to email a verification code to, for the rare
 deployment whose own login flow will not say. `npm run
-set-portal-credentials -- --provider <id> --remote` is the no-browser
+set-portal-credentials -- --health-system <id> --remote` is the no-browser
 equivalent of the admin UI's portal card. The username comes from
 `PORTAL_USERNAME` or the first line of stdin and the password from
 `PORTAL_PASSWORD` or the rest of it, so neither is ever a command-line argument
@@ -172,7 +172,7 @@ also set that email address:
 
 ```sh
 { echo "$portal_user"; echo "$portal_pass"; } |
-  npm run set-portal-credentials -- --provider <id> --remote
+  npm run set-portal-credentials -- --health-system <id> --remote
 ```
 
 Storing credentials this way resets the session state and drops any stored
@@ -205,8 +205,8 @@ Then, in the admin UI: add your health systems and connect each one
 
 ### MyChart portal (optional)
 
-For a health system that also has a patient portal, the **Providers** page
-shows a **MyChart portal** card under that provider: a portal login URL
+For a health system that also has a patient portal, the **Health systems** page
+shows a **MyChart portal** card under that health system: a portal login URL
 (prefilled when one is already known), a username, a password and, optionally,
 an email address to send verification codes to when it differs from the login
 and the domain those codes arrive from — most deployments never need either of
@@ -231,13 +231,13 @@ and the sign-in can pick it up on its own. Add the sending domain to the
 allowlist there — the shipped list is Gmail's own confirmation sender and
 nothing else — and the first code the portal accepts binds that sender to this
 account, so nobody else's message can ever be claimed as its code. Once a session is established, the
-hourly sync picks up that provider's upcoming portal visits the same way it
+hourly sync picks up that health system's upcoming portal visits the same way it
 does FHIR encounters.
 
 ## Documentation
 
 - **[docs/setup-epic.md](docs/setup-epic.md)** — registering the app on
-  fhir.epic.com, and connecting a provider.
+  fhir.epic.com, and connecting a health system.
 - **[docs/setup-google.md](docs/setup-google.md)** — the GCP project, OAuth
   consent screen, and calendar scopes.
 - **[docs/setup-cloudflare.md](docs/setup-cloudflare.md)** — D1/KV/DO,

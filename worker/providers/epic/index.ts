@@ -1,5 +1,5 @@
 /**
- * The Epic provider adapter: discovery, the standalone patient launch, and the
+ * The Epic health system adapter: discovery, the standalone patient launch, and the
  * token endpoint.
  *
  * Epic-specific behaviour this encodes:
@@ -94,7 +94,7 @@ function namesOf(value: unknown, key: string): string[] {
  * PKCE verifier; the authorize endpoint receives the owner's browser. Both come
  * out of a document fetched from the organisation, so a tampered or simply
  * misconfigured one pointing at `http:` would put all of that on the wire in
- * clear. The API layer already requires `https:` on the FHIR base a provider is
+ * clear. The API layer already requires `https:` on the FHIR base a health system is
  * created with; this is the same rule one layer in, where the values are not the
  * owner's to vouch for.
  */

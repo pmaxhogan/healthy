@@ -7,7 +7,7 @@ its published test patients (e.g. `fhircamila` / `epicepic1` -- see Epic's
 person, no real health system, and no real clinical data anywhere in this
 directory.
 
-**A response recorded from a real provider -- a real MyChart organisation, a
+**A response recorded from a real health system -- a real MyChart organisation, a
 real patient, a real clinician -- must never be committed here, or anywhere
 else in this repository.** See `CLAUDE.md` and `SECURITY.md` for the project's
 full rule on personal data; this directory has no exception to it. If you are

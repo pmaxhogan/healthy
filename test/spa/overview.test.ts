@@ -9,7 +9,7 @@ import {
   fakeResponse,
   installFakeApi,
   overview,
-  provider,
+  healthSystem,
   testRouter,
 } from "./helpers.ts";
 
@@ -33,7 +33,7 @@ describe("OverviewView", () => {
     expect(wrapper.text()).not.toContain("Loading the overview");
   });
 
-  it("renders one card per provider with its status pill", async () => {
+  it("renders one card per health system with its status pill", async () => {
     const wrapper = await mountOverview(overview());
 
     const cards = wrapper.findAll(".cards > .card");
@@ -44,7 +44,7 @@ describe("OverviewView", () => {
     expect(cards[1]?.find(".pill").text()).toBe("needs re-auth");
   });
 
-  it("marks a sandbox provider and one with no client secret", async () => {
+  it("marks a sandbox health system and one with no client secret", async () => {
     const wrapper = await mountOverview(overview());
     const second = wrapper.findAll(".cards > .card")[1];
     expect(second?.text()).toContain("sandbox");
@@ -62,10 +62,12 @@ describe("OverviewView", () => {
     );
   });
 
-  it("falls back to the epic start route for a provider that never connected", async () => {
-    const wrapper = await mountOverview(overview({ providers: [provider({ connection: null })] }));
+  it("falls back to the epic start route for a health system that never connected", async () => {
+    const wrapper = await mountOverview(
+      overview({ healthSystems: [healthSystem({ connection: null })] }),
+    );
     const link = wrapper.find('.cards > .card a.btn[href^="/oauth"]');
-    expect(link.attributes("href")).toBe("/oauth/epic/start?provider=prov-1");
+    expect(link.attributes("href")).toBe("/oauth/epic/start?healthSystem=prov-1");
     expect(link.text()).toBe("Connect");
   });
 
@@ -100,17 +102,17 @@ describe("OverviewView", () => {
     expect(googleLink[0]?.text()).toBe("Connect");
   });
 
-  it("builds the cache table as resource rows across provider columns", async () => {
+  it("builds the cache table as resource rows across health system columns", async () => {
     const wrapper = await mountOverview(overview());
     const rows = wrapper.findAll("tbody tr");
     const cacheRows = rows.filter((row) => row.text().includes("Condition"));
     expect(cacheRows).toHaveLength(1);
     const cells = cacheRows[0]?.findAll("td").map((cell) => cell.text());
-    // Condition: 7 for the first provider, 3 for the second.
+    // Condition: 7 for the first health system, 3 for the second.
     expect(cells).toEqual(["Condition", "7", "3"]);
   });
 
-  it("shows zero for a provider that has nothing cached of a type", async () => {
+  it("shows zero for a health system that has nothing cached of a type", async () => {
     const wrapper = await mountOverview(overview());
     const observationRow = wrapper
       .findAll("tbody tr")
@@ -131,14 +133,14 @@ describe("OverviewView", () => {
   it("falls back to empty states when nothing is configured", async () => {
     const wrapper = await mountOverview(
       overview({
-        providers: [],
+        healthSystems: [],
         openAlerts: [],
         lastRuns: [],
         cacheCounts: [],
       }),
     );
     const text = wrapper.text();
-    expect(text).toContain("No providers yet");
+    expect(text).toContain("No health systems yet");
     expect(text).toContain("Nothing needs re-authenticating");
     expect(text).toContain("Nothing has run yet");
     expect(text).toContain("The cache is empty");
@@ -158,10 +160,10 @@ describe("OverviewView", () => {
     expect(wrapper.find("button").text()).toBe("Try again");
   });
 
-  it("toasts after an OAuth callback says a provider connected", async () => {
+  it("toasts after an OAuth callback says a health system connected", async () => {
     toasts.length = 0;
     await mountOverview(overview(), "/?connected=prov-1");
-    expect(toasts.map((toast) => toast.text)).toContain("Provider connected.");
+    expect(toasts.map((toast) => toast.text)).toContain("Health system connected.");
   });
 
   it("toasts after the Google callback", async () => {
@@ -184,14 +186,14 @@ describe("OverviewView", () => {
     expect(wrapper.text()).toContain("~1");
   });
 
-  it("renders a disconnected provider without a token expiry", async () => {
+  it("renders a disconnected health system without a token expiry", async () => {
     const dormant = connection({
       status: "disconnected",
       accessExpiresAt: null,
       lastSyncAt: null,
     });
     const wrapper = await mountOverview(
-      overview({ providers: [provider({ connection: dormant })] }),
+      overview({ healthSystems: [healthSystem({ connection: dormant })] }),
     );
     expect(wrapper.find(".pill").text()).toBe("disconnected");
     expect(wrapper.text()).toContain("never");

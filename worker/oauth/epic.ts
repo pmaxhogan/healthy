@@ -7,7 +7,7 @@
  *  - **`aud` is the FHIR base, byte for byte.** Epic compares it as a string. A
  *    trailing slash added or removed produces an authorize page that never
  *    redirects back, with no error anywhere the owner can see. The value goes
- *    straight from `providers.fhir_base_url` to the URL, untouched.
+ *    straight from `health_systems.fhir_base_url` to the URL, untouched.
  *  - **The redirect URI is locked.** `/oauth/callback` -- exactly what is
  *    registered in the Epic developer portal, for both the deployed origin and
  *    `http://localhost:8787`. It is built from the request's own origin so both
@@ -30,7 +30,7 @@ import { Hono } from "hono";
 
 import { afterResponse } from "../api/http.ts";
 import { getPorts } from "../api/ports.ts";
-import { isLiveProvider } from "../api/routes/providers.ts";
+import { isLiveHealthSystem } from "../api/routes/health-systems.ts";
 import { reposFor } from "../db/index.ts";
 import { SEARCH_REGISTRY } from "../fhir/search-registry.ts";
 import { AppError } from "../lib/errors.ts";
@@ -42,7 +42,7 @@ import { discoverCached } from "./discovery.ts";
 import { invalidStatePage, oauthPage, providerRefusedPage } from "./pages.ts";
 
 import type { AppHonoEnv } from "../auth/gate.ts";
-import type { ProviderRow } from "../db/rows.ts";
+import type { HealthSystemRow } from "../db/rows.ts";
 import type { Env } from "../env.ts";
 import type { Context } from "hono";
 
@@ -62,13 +62,13 @@ function allResourceTypes(): string[] {
 }
 
 /**
- * The client id for one provider's Epic environment.
+ * The client id for one health system's Epic environment.
  *
  * Missing is a deployment fault, not a user error, so it renders a 500 page: there
  * is nothing the owner can do in the UI about an unset Worker secret, and a 400
  * would suggest there was.
  */
-function clientIdFor(env: Env, environment: ProviderRow["environment"]): string {
+function clientIdFor(env: Env, environment: HealthSystemRow["environment"]): string {
   const clientId = environment === "sandbox" ? env.EPIC_CLIENT_ID_NONPROD : env.EPIC_CLIENT_ID_PROD;
   if (clientId === undefined || clientId === "") {
     throw new AppError("internal", "epic_client_id_not_configured", { environment });
@@ -101,7 +101,7 @@ function clientIdMissingPage(c: Context<AppHonoEnv>): Response {
 }
 
 /**
- * `GET /oauth/epic/start?provider=<id>`
+ * `GET /oauth/epic/start?healthSystem=<id>`
  *
  * Ends in a 302 to the organisation's authorize endpoint. Everything before that
  * redirect is preparation that must be durable, because the browser leaves: the
@@ -109,36 +109,36 @@ function clientIdMissingPage(c: Context<AppHonoEnv>): Response {
  */
 epicRouter.get("/epic/start", async (c) => {
   const nonce = c.get("nonce");
-  const providerId = c.req.query("provider") ?? "";
+  const healthSystemId = c.req.query("healthSystem") ?? c.req.query("provider") ?? "";
   const repos = reposFor(c.env.DB, c.env, { log: makeLogger({ src: "oauth.epic" }) });
 
-  const provider = providerId === "" ? null : await repos.providers.get(providerId);
-  if (!isLiveProvider(provider)) {
+  const healthSystem = healthSystemId === "" ? null : await repos.healthSystems.get(healthSystemId);
+  if (!isLiveHealthSystem(healthSystem)) {
     return oauthPage({
       nonce,
       heading: "No such connection",
       detail:
         "That connection does not exist, or it has been removed. Add it again from the dashboard.",
-      code: "provider_not_found",
+      code: "health_system_not_found",
       status: 404,
     });
   }
 
   let clientId: string;
   try {
-    clientId = clientIdFor(c.env, provider.environment);
+    clientId = clientIdFor(c.env, healthSystem.environment);
   } catch {
     return clientIdMissingPage(c);
   }
 
   const ports = getPorts();
-  const config = await discoverCached(provider.vendor, provider.fhir_base_url, {
+  const config = await discoverCached(healthSystem.vendor, healthSystem.fhir_base_url, {
     fetchImpl: ports.fetch,
   });
   const pkce = await createPkce();
   const state = await repos.oauthStates.put({
     kind: "epic",
-    providerId: provider.id,
+    healthSystemId: healthSystem.id,
     codeVerifier: pkce.verifier,
     ttlMs: STATE_TTL_MS,
   });
@@ -151,7 +151,7 @@ epicRouter.get("/epic/start", async (c) => {
     state,
     codeChallenge: pkce.challenge,
     // Exactly as stored. See the module comment.
-    aud: provider.fhir_base_url,
+    aud: healthSystem.fhir_base_url,
   });
   return c.redirect(authorizeUrl, 302);
 });
@@ -160,19 +160,21 @@ epicRouter.get("/epic/start", async (c) => {
  * `GET /oauth/callback` -- Epic's redirect back.
  *
  * The order of the failure checks is the order of increasing trust: an `error`
- * parameter is handled before the state is consumed, so a provider that refused the
+ * parameter is handled before the state is consumed, so a health system that refused the
  * request does not burn the owner's state row for a flow they may retry.
  */
 epicRouter.get("/callback", async (c) => {
   const nonce = c.get("nonce");
   const error = c.req.query("error");
-  const providerHint = c.req.query("provider") ?? "";
+  const healthSystemHint = c.req.query("healthSystem") ?? c.req.query("provider") ?? "";
   if (error !== undefined && error !== "") {
     // The code only. `error_description` is third-party text landing in a document.
     return providerRefusedPage(
       nonce,
       error,
-      providerHint === "" ? "/" : `/oauth/epic/start?provider=${encodeURIComponent(providerHint)}`,
+      healthSystemHint === ""
+        ? "/"
+        : `/oauth/epic/start?healthSystem=${encodeURIComponent(healthSystemHint)}`,
     );
   }
 
@@ -185,29 +187,29 @@ epicRouter.get("/callback", async (c) => {
   const consumed = await repos.oauthStates.consume(state);
   // `kind` is checked as well as existence: a Google state must not be redeemable
   // at the Epic callback, even though only this app ever mints either.
-  if (consumed?.kind !== "epic" || consumed.providerId === null) {
+  if (consumed?.kind !== "epic" || consumed.healthSystemId === null) {
     return invalidStatePage(nonce);
   }
 
-  const provider = await repos.providers.get(consumed.providerId);
-  if (!isLiveProvider(provider)) {
+  const healthSystem = await repos.healthSystems.get(consumed.healthSystemId);
+  if (!isLiveHealthSystem(healthSystem)) {
     return oauthPage({
       nonce,
       heading: "No such connection",
       detail: "That connection was removed while the sign-in was in progress.",
-      code: "provider_not_found",
+      code: "health_system_not_found",
       status: 404,
     });
   }
 
   let clientId: string;
   try {
-    clientId = clientIdFor(c.env, provider.environment);
+    clientId = clientIdFor(c.env, healthSystem.environment);
   } catch {
     return clientIdMissingPage(c);
   }
 
-  const clientSecret = await repos.providers.getClientSecret(provider.id);
+  const clientSecret = await repos.healthSystems.getClientSecret(healthSystem.id);
   if (clientSecret === null) {
     return oauthPage({
       nonce,
@@ -221,7 +223,7 @@ epicRouter.get("/callback", async (c) => {
   }
 
   const ports = getPorts();
-  const config = await discoverCached(provider.vendor, provider.fhir_base_url, {
+  const config = await discoverCached(healthSystem.vendor, healthSystem.fhir_base_url, {
     fetchImpl: ports.fetch,
   });
   const tokens = await epicAdapter(ports.fetch).exchangeCode({
@@ -235,7 +237,7 @@ epicRouter.get("/callback", async (c) => {
     tokenAuthMethods: config.tokenAuthMethods,
   });
 
-  const connection = await repos.connections.upsertTokens(provider.id, {
+  const connection = await repos.connections.upsertTokens(healthSystem.id, {
     patientFhirId: tokens.patientId,
     accessToken: tokens.accessToken,
     // TokenSet.expiresAt is epoch milliseconds; the column is a unix second.
@@ -250,25 +252,28 @@ epicRouter.get("/callback", async (c) => {
   // Trello outage nor an unwired sync engine is a reason to tell the owner that
   // reconnecting failed when it did not.
   try {
-    await ports.sync.resolveReconnectAlert(repos.ctx, { providerId: provider.id });
+    await ports.sync.resolveReconnectAlert(repos.ctx, { healthSystemId: healthSystem.id });
   } catch {
-    log.warn("oauth.epic.alert_not_resolved", { providerId: provider.id });
+    log.warn("oauth.epic.alert_not_resolved", { healthSystemId: healthSystem.id });
   }
 
   // A calendar sync with nowhere to write is not a failed sync -- it is not a sync
-  // at all. Without this, connecting a provider before Google (the normal order on
+  // at all. Without this, connecting a health system before Google (the normal order on
   // first setup) kicked off a run that could only ever fail with
   // `sync.google_unavailable`, so the first thing the owner saw after a successful
   // connect was a red run. Mirrors the backoff skip in calendar-sync.ts: no run
   // row for work that could not start, just a note that it was skipped.
   const google = await repos.google.get();
   if (google.status === "disconnected") {
-    log.info("oauth.epic.sync_skipped_google_disconnected", { providerId: provider.id });
+    log.info("oauth.epic.sync_skipped_google_disconnected", { healthSystemId: healthSystem.id });
   } else {
     afterResponse(c, "oauth.epic.sync", () =>
-      ports.sync.runCalendarSync(repos.ctx, { providerIds: [provider.id], trigger: "manual" }),
+      ports.sync.runCalendarSync(repos.ctx, {
+        healthSystemIds: [healthSystem.id],
+        trigger: "manual",
+      }),
     );
   }
 
-  return c.redirect(`/?connected=${encodeURIComponent(provider.id)}`, 302);
+  return c.redirect(`/?connected=${encodeURIComponent(healthSystem.id)}`, 302);
 });

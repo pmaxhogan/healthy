@@ -38,7 +38,7 @@ describe("normalizeCondition", () => {
     expect(result).toMatchObject({
       resourceType: "Condition",
       id: "cond-1",
-      provider: "example-provider",
+      healthSystem: "example-health_system",
       code: {
         text: "Essential hypertension",
         system: "https://snomed.info/sct",

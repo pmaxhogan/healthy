@@ -31,7 +31,7 @@ import { z } from "zod";
 
 import { collectAppointments } from "../appointment-items.ts";
 import { WINDOW_ARGS, toolArgs } from "../args.ts";
-import { effectiveLimit, selectProviders } from "../collect.ts";
+import { effectiveLimit, selectHealthSystems } from "../collect.ts";
 import { respond } from "../respond.ts";
 
 import { readTool } from "./register.ts";
@@ -63,7 +63,11 @@ export function registerAppointmentTools(server: McpServer, deps: ToolDeps): voi
       schema: APPOINTMENT_ARGS,
     },
     async (args, run) => {
-      const providers = selectProviders(await deps.providers(), run.rules, args.providers);
+      const healthSystems = selectHealthSystems(
+        await deps.healthSystems(),
+        run.rules,
+        args.healthSystems,
+      );
       const upcomingOnly = args.from === undefined && args.includePast !== true;
       // `from` wins when the caller gave one: an explicit window is an explicit
       // request for history, whatever `includePast` says.
@@ -71,7 +75,7 @@ export function registerAppointmentTools(server: McpServer, deps: ToolDeps): voi
         args.from ??
         (args.includePast === true ? undefined : new Date(run.now * 1000).toISOString());
 
-      const collected = await collectAppointments(deps, providers, {
+      const collected = await collectAppointments(deps, healthSystems, {
         from,
         to: args.to,
         raw: args.raw,
@@ -84,7 +88,7 @@ export function registerAppointmentTools(server: McpServer, deps: ToolDeps): voi
         items: collected.items,
         ...(args.raw === true && { rawItems: collected.rawItems }),
         limit: effectiveLimit(args.limit),
-        providerIds: collected.providerIds,
+        healthSystemIds: collected.healthSystemIds,
         warnings: [
           ...collected.warnings,
           ...(upcomingOnly ? ["window_defaults_to_upcoming_only"] : []),

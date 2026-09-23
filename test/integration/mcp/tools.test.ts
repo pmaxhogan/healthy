@@ -63,19 +63,19 @@ const INLINE_NOTE = {
 };
 
 interface Seeded {
-  providerA: string;
-  providerB: string;
+  healthSystemA: string;
+  healthSystemB: string;
 }
 
 async function seed(): Promise<Seeded> {
   const db = repos();
-  const a = await db.providers.create({
+  const a = await db.healthSystems.create({
     vendor: "epic",
     displayName: NAME_A,
     fhirBaseUrl: "https://a.fhir.example.test/R4",
     environment: "sandbox",
   });
-  const b = await db.providers.create({
+  const b = await db.healthSystems.create({
     vendor: "epic",
     displayName: NAME_B,
     fhirBaseUrl: "https://b.fhir.example.test/R4",
@@ -132,7 +132,7 @@ async function seed(): Promise<Seeded> {
     8 * day,
   );
 
-  return { providerA: a.id, providerB: b.id };
+  return { healthSystemA: a.id, healthSystemB: b.id };
 }
 
 async function connect(): Promise<Client> {
@@ -190,7 +190,7 @@ async function call(
 
 /** The world each test starts from. A holder, so `beforeEach` assigns a property. */
 const world: { seeded: Seeded; client: Client } = {
-  seeded: { providerA: "", providerB: "" },
+  seeded: { healthSystemA: "", healthSystemB: "" },
   client: undefined as unknown as Client,
 };
 
@@ -201,10 +201,10 @@ beforeEach(async () => {
 });
 
 describe("reading the real cache", () => {
-  it("decrypts and normalizes across both providers", async () => {
+  it("decrypts and normalizes across both health systems", async () => {
     const answer = await call(world.client, "get_conditions");
 
-    expect(answer.items.map((item) => item.provider)).toStrictEqual([NAME_A, NAME_B]);
+    expect(answer.items.map((item) => item.healthSystem)).toStrictEqual([NAME_A, NAME_B]);
     expect(answer.items.map((item) => (item.code as { text?: string }).text)).toStrictEqual([
       "Seasonal allergic rhinitis",
       "Migraine without aura",
@@ -248,8 +248,8 @@ describe("reading the real cache", () => {
 
     expect(counts).toContainEqual({
       kind: "count",
-      provider: NAME_A,
-      providerId: world.seeded.providerA,
+      healthSystem: NAME_A,
+      healthSystemId: world.seeded.healthSystemA,
       resourceType: "Condition",
       count: 1,
     });
@@ -257,13 +257,13 @@ describe("reading the real cache", () => {
 });
 
 describe("policy rows in D1", () => {
-  it("hides a denied provider everywhere", async () => {
-    await repos().mcpPolicy.add("provider", world.seeded.providerB, "test");
+  it("hides a denied health system everywhere", async () => {
+    await repos().mcpPolicy.add("health_system", world.seeded.healthSystemB, "test");
 
-    for (const tool of ["list_providers", "get_conditions", "get_health_summary"]) {
+    for (const tool of ["list_health_systems", "get_conditions", "get_health_summary"]) {
       const answer = await call(world.client, tool);
       expect(answer.text, tool).not.toContain(NAME_B);
-      expect(answer.text, tool).not.toContain(world.seeded.providerB);
+      expect(answer.text, tool).not.toContain(world.seeded.healthSystemB);
       expect(answer.text, tool).not.toContain("Migraine");
     }
   });
@@ -294,7 +294,7 @@ describe("policy rows in D1", () => {
     // (normalized) answer and the `raw: true` projection must lose the value.
     const day = 24 * 3600 * 1000;
     await repos().fhirCache.upsertMany(
-      world.seeded.providerA,
+      world.seeded.healthSystemA,
       [
         {
           resourceType: "Observation",
@@ -312,9 +312,9 @@ describe("policy rows in D1", () => {
     );
 
     // Sentinel values, not "120"/"80": a short digit run occasionally turns up
-    // inside a randomly generated provider id too, and this test used to assert
+    // inside a randomly generated health system id too, and this test used to assert
     // it absent from the *whole* serialised text, which is exactly where a
-    // provider id also lives. These have a decimal point, which Crockford
+    // health system id also lives. These have a decimal point, which Crockford
     // base32 (what a ULID is made of) can never contain, so no id can ever
     // collide with one.
     const before = await call(world.client, "get_vitals", { raw: true });
@@ -369,7 +369,7 @@ function upcomingRow(csn: string, iso: string): Record<string, unknown> {
     Instant: wcf(iso),
     TimeZone: "UTC",
     VisitType: "Follow-up",
-    ProviderName: "P. Portal, MD",
+    HealthSystemName: "P. Portal, MD",
     DepartmentName: "Portal Example Clinic",
   };
 }
@@ -379,7 +379,7 @@ function upcomingRow(csn: string, iso: string): Record<string, unknown> {
  * months, parsed by the real parser and stored by the real repo -- the path the
  * hourly portal pass takes.
  */
-async function storeSevenMonths(providerId: string): Promise<void> {
+async function storeSevenMonths(healthSystemId: string): Promise<void> {
   const parsed = parseUpcoming(
     {
       InProgressVisits: [upcomingRow("csn-1", "2026-06-01T01:00:00Z")],
@@ -396,12 +396,12 @@ async function storeSevenMonths(providerId: string): Promise<void> {
     },
     "UTC",
   );
-  await repos().portalVisits.record(providerId, parsed.visits, { complete: true });
+  await repos().portalVisits.record(healthSystemId, parsed.visits, { complete: true });
 }
 
 describe("portal visits through the MCP", () => {
   it("returns every stored upcoming visit, soonest first, however far out", async () => {
-    await storeSevenMonths(world.seeded.providerA);
+    await storeSevenMonths(world.seeded.healthSystemA);
 
     const answer = await call(world.client, "get_appointments");
 
@@ -426,7 +426,9 @@ describe("portal visits through the MCP", () => {
       { NextNDaysVisits: [upcomingRow("csn-dup", "2026-07-01T09:02:00Z")] },
       "UTC",
     );
-    await repos().portalVisits.record(world.seeded.providerA, parsed.visits, { complete: true });
+    await repos().portalVisits.record(world.seeded.healthSystemA, parsed.visits, {
+      complete: true,
+    });
 
     const answer = await call(world.client, "get_appointments");
 
@@ -439,10 +441,10 @@ describe("portal visits through the MCP", () => {
     });
   });
 
-  it("narrows to the providers asked for and to the window", async () => {
-    await storeSevenMonths(world.seeded.providerA);
+  it("narrows to the health systems asked for and to the window", async () => {
+    await storeSevenMonths(world.seeded.healthSystemA);
 
-    const other = await call(world.client, "get_appointments", { providers: [NAME_B] });
+    const other = await call(world.client, "get_appointments", { healthSystems: [NAME_B] });
     const summer = await call(world.client, "get_appointments", {
       from: "2026-08-01",
       to: "2026-09-30",
@@ -453,7 +455,7 @@ describe("portal visits through the MCP", () => {
   });
 
   it("strips a denied field from portal items, and never serves their payload as raw", async () => {
-    await storeSevenMonths(world.seeded.providerA);
+    await storeSevenMonths(world.seeded.healthSystemA);
     await repos().mcpPolicy.add("field", "Encounter.practitioner");
 
     const answer = await call(world.client, "get_appointments", { raw: true });
@@ -470,7 +472,7 @@ describe("portal visits through the MCP", () => {
   });
 
   it("drops portal items with a resource rule on Encounter", async () => {
-    await storeSevenMonths(world.seeded.providerA);
+    await storeSevenMonths(world.seeded.healthSystemA);
     await repos().mcpPolicy.add("resource", "Encounter");
 
     const answer = await call(world.client, "get_appointments");
@@ -480,7 +482,7 @@ describe("portal visits through the MCP", () => {
   });
 
   it("puts the next portal visits at the head of the summary's appointments", async () => {
-    await storeSevenMonths(world.seeded.providerA);
+    await storeSevenMonths(world.seeded.healthSystemA);
 
     const answer = await call(world.client, "get_health_summary");
     const appointments = answer.items.filter(
@@ -501,7 +503,7 @@ describe("no cap on how much comes back", () => {
   it("returns more than 200 cached resources when the caller passes no limit", async () => {
     const day = 24 * 3600 * 1000;
     await repos().fhirCache.upsertMany(
-      world.seeded.providerA,
+      world.seeded.healthSystemA,
       Array.from({ length: 250 }, (_, index) => ({
         resourceType: "Encounter",
         id: `gen-enc-${String(index)}`,
@@ -541,7 +543,7 @@ describe("the master switch in settings", () => {
 });
 
 describe("the audit trail", () => {
-  it("writes one row per call, with the tool, the caller and the providers", async () => {
+  it("writes one row per call, with the tool, the caller and the health systems", async () => {
     await call(world.client, "get_conditions");
 
     const rows = await repos().mcpAudit.listRecent(10);
@@ -555,7 +557,10 @@ describe("the audit trail", () => {
       ok: true,
       errorCode: null,
     });
-    expect(rows[0]?.providers).toStrictEqual([world.seeded.providerA, world.seeded.providerB]);
+    expect(rows[0]?.healthSystems).toStrictEqual([
+      world.seeded.healthSystemA,
+      world.seeded.healthSystemB,
+    ]);
   });
 
   it("records a refusal with its code", async () => {
@@ -584,11 +589,11 @@ describe("the audit trail", () => {
 describe("get_document_text", () => {
   it("decodes an inline attachment and caches the text for the next call", async () => {
     const first = await call(world.client, "get_document_text", {
-      provider: world.seeded.providerA,
+      healthSystem: world.seeded.healthSystemA,
       id: "doc-inline",
     });
     const second = await call(world.client, "get_document_text", {
-      provider: world.seeded.providerA,
+      healthSystem: world.seeded.healthSystemA,
       id: "doc-inline",
     });
 
@@ -599,7 +604,7 @@ describe("get_document_text", () => {
 
   it("caches under the synthetic resource type, not as a FHIR resource", async () => {
     await call(world.client, "get_document_text", {
-      provider: world.seeded.providerA,
+      healthSystem: world.seeded.healthSystemA,
       id: "doc-inline",
     });
 
@@ -612,7 +617,7 @@ describe("get_document_text", () => {
 
   it("keeps the cached text encrypted at rest", async () => {
     await call(world.client, "get_document_text", {
-      provider: world.seeded.providerA,
+      healthSystem: world.seeded.healthSystemA,
       id: "doc-inline",
     });
 
@@ -628,7 +633,7 @@ describe("get_document_text", () => {
     // Id in: the tool is called with the DocumentReference's real id. Id out: the
     // answer names the same id. In between, D1 never holds it as a key.
     const answer = await call(world.client, "get_document_text", {
-      provider: world.seeded.providerA,
+      healthSystem: world.seeded.healthSystemA,
       id: "doc-inline",
     });
 
@@ -645,7 +650,7 @@ describe("get_document_text", () => {
 
   it("answers not_found for a document that is not in the cache", async () => {
     const answer = await call(world.client, "get_document_text", {
-      provider: world.seeded.providerA,
+      healthSystem: world.seeded.healthSystemA,
       id: "nope",
     });
 
@@ -654,7 +659,7 @@ describe("get_document_text", () => {
 
   it("does not report its own text cache as a resource type in the summary", async () => {
     await call(world.client, "get_document_text", {
-      provider: world.seeded.providerA,
+      healthSystem: world.seeded.healthSystemA,
       id: "doc-inline",
     });
 

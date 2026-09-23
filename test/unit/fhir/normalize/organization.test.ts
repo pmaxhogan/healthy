@@ -12,7 +12,7 @@ describe("normalizeOrganization", () => {
       resourceType: "Organization",
       id: "org-9",
       name: "Example Health System",
-      type: [{ text: "Healthcare Provider" }],
+      type: [{ text: "Healthcare Health system" }],
       address: [{ city: "Example City", state: "EX" }],
       telecom: [{ system: "phone", value: "555-010-0100", use: "work" }],
     };
@@ -23,7 +23,7 @@ describe("normalizeOrganization", () => {
       resourceType: "Organization",
       id: "org-9",
       name: "Example Health System",
-      type: "Healthcare Provider",
+      type: "Healthcare Health system",
       phone: "555-010-0100",
     });
     expect(result.address).toEqual({ city: "Example City", state: "EX" });
