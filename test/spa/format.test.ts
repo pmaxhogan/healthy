@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  formatBytes,
   formatDate,
   formatDateTime,
   formatDuration,
@@ -126,5 +127,17 @@ describe("humanizeCode", () => {
   it("turns a snake_case code into words", () => {
     expect(humanizeCode("invalid_grant")).toBe("invalid grant");
     expect(humanizeCode(null)).toBe("—");
+  });
+});
+
+describe("formatBytes", () => {
+  it("shows whole bytes under 1000", () => {
+    expect(formatBytes(0)).toBe("0 B");
+    expect(formatBytes(999)).toBe("999 B");
+  });
+
+  it("shows one decimal of KB at 1000 and above", () => {
+    expect(formatBytes(1000)).toBe("1.0 KB");
+    expect(formatBytes(15_400)).toBe("15.4 KB");
   });
 });

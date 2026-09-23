@@ -114,3 +114,8 @@ export function maskCalendarId(id: string): string {
 export function humanizeCode(code: string | null): string {
   return code ? code.replaceAll("_", " ") : "—";
 }
+
+/** "412 B" / "3.1 KB" -- the size of one MCP tool call's request or result JSON. */
+export function formatBytes(bytes: number): string {
+  return bytes < 1000 ? `${String(bytes)} B` : `${(bytes / 1000).toFixed(1)} KB`;
+}

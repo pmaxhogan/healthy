@@ -10,14 +10,26 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { TOOL_CATALOG } from "../../../worker/api/tool-catalog.ts";
 import { AppError } from "../../../worker/lib/errors.ts";
+import { TOOL_NAMES } from "../../../worker/mcp/tools/index.ts";
 
-import { freshOwner, json, resetPorts, testRepos, usePorts } from "./helpers.ts";
+import {
+  CSRF,
+  ORIGIN,
+  call,
+  freshOwner,
+  json,
+  resetPorts,
+  testRepos,
+  usePorts,
+} from "./helpers.ts";
 
 import type {
   ApiError,
   McpAuditDto,
   McpGrantDto,
+  McpToolCallResponse,
   McpToolInfoDto,
+  McpToolSchemaDto,
   PolicyRuleDto,
 } from "@shared/types.ts";
 
@@ -281,5 +293,103 @@ describe("GET /api/mcp/tools", () => {
 
     expect(tools).toHaveLength(TOOL_CATALOG.length);
     expect(tools.map((tool) => tool.name)).toContain("get_appointments");
+  });
+});
+
+describe("GET /api/mcp/tools/schema", () => {
+  it("requires a session", async () => {
+    const response = await call("/api/mcp/tools/schema");
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("x-healthy-auth")).toBe("required");
+  });
+
+  it("answers with every tool's real, live JSON input schema", async () => {
+    const tools = await json<McpToolSchemaDto[]>(await owner().get("/api/mcp/tools/schema"));
+
+    expect(new Set(tools.map((tool) => tool.name))).toStrictEqual(new Set(TOOL_NAMES));
+    for (const tool of tools) {
+      expect(tool.description.length, tool.name).toBeGreaterThan(0);
+      expect(tool.inputSchema.type, tool.name).toBe("object");
+    }
+    const documentText = tools.find((tool) => tool.name === "get_document_text");
+    expect(documentText?.inputSchema.required).toStrictEqual(["provider", "id"]);
+  });
+});
+
+describe("POST /api/mcp/tools/:name/call", () => {
+  it("requires a session", async () => {
+    const response = await call("/api/mcp/tools/list_providers/call", {
+      method: "POST",
+      headers: { origin: ORIGIN, ...CSRF, "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("x-healthy-auth")).toBe("required");
+  });
+
+  it("404s a name nothing on the server registers", async () => {
+    const response = await owner().send("POST", "/api/mcp/tools/not_a_real_tool/call", {});
+    const body = await json<ApiError>(response);
+
+    expect(response.status).toBe(404);
+    expect(body.error).toBe("not_found");
+  });
+
+  it("400s with issues when the arguments fail the tool's real input schema", async () => {
+    // `limit` is a number in every tool's shared arguments (worker/mcp/args.ts);
+    // the tool never runs, so this is a request-level rejection, not a `result`.
+    const response = await owner().send("POST", "/api/mcp/tools/get_conditions/call", {
+      limit: "ten",
+    });
+    const body = await json<ApiError>(response);
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("bad_request");
+    expect(body.details?.issues).toBeInstanceOf(Array);
+  });
+
+  it("400s a body that is not a JSON object", async () => {
+    const response = await owner().send("POST", "/api/mcp/tools/list_providers/call", [1, 2, 3]);
+
+    expect(response.status).toBe(400);
+  });
+
+  it("runs a real tool with no providers connected, and echoes the exact request sent", async () => {
+    const response = await owner().send("POST", "/api/mcp/tools/list_providers/call", {});
+    const body = await json<McpToolCallResponse>(response);
+
+    expect(response.status).toBe(200);
+    expect(body.request).toStrictEqual({ name: "list_providers", arguments: {} });
+    expect(body.result.isError).toBe(false);
+    expect(body.result.data).toMatchObject({ items: [] });
+    expect(typeof body.durationMs).toBe("number");
+  });
+
+  it("applies the exposure policy, and audits the call as the admin console, not an OAuth client", async () => {
+    await testRepos().mcpPolicy.add("tool", "get_conditions");
+
+    const response = await owner().send("POST", "/api/mcp/tools/get_conditions/call", {});
+    const body = await json<McpToolCallResponse>(response);
+
+    expect(response.status).toBe(200);
+    expect(body.result.isError).toBe(true);
+    expect(body.result.data).toMatchObject({ error: "policy_denied" });
+
+    const rows = await testRepos().mcpAudit.listRecent(10);
+    expect(rows[0]).toMatchObject({
+      tool: "get_conditions",
+      clientId: "admin-console",
+      ok: false,
+      errorCode: "policy_denied",
+    });
+  });
+
+  it("does not audit a call that never reached the tool", async () => {
+    await owner().send("POST", "/api/mcp/tools/get_conditions/call", { limit: "ten" });
+
+    const rows = await testRepos().mcpAudit.listRecent(10);
+    expect(rows).toStrictEqual([]);
   });
 });

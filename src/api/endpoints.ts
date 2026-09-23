@@ -24,7 +24,9 @@ import type {
   MailSettingsDto,
   McpAuditDto,
   McpGrantDto,
+  McpToolCallResponse,
   McpToolInfoDto,
+  McpToolSchemaDto,
   OverviewDto,
   PolicyRuleDto,
   PortalAccountStatusDto,
@@ -141,6 +143,12 @@ export const endpoints = {
     api.delete(`/api/mcp/grants/${encodeURIComponent(id)}`),
   mcpAudit: (limit: number, signal?: AbortSignal): Promise<McpAuditDto[]> =>
     api.get(`/api/mcp/audit?limit=${String(limit)}`, signal),
+  /** Every tool's real, live JSON input schema -- for the "Try a tool" panel. */
+  mcpToolSchemas: (signal?: AbortSignal): Promise<McpToolSchemaDto[]> =>
+    api.get("/api/mcp/tools/schema", signal),
+  /** Runs one tool exactly as an MCP client would: same validation, same policy, same audit. */
+  callMcpTool: (name: string, args: Record<string, unknown>): Promise<McpToolCallResponse> =>
+    api.post(`/api/mcp/tools/${encodeURIComponent(name)}/call`, args),
 
   alerts: (signal?: AbortSignal): Promise<AlertDto[]> => api.get("/api/alerts", signal),
   sendTestAlert: (): Promise<AlertTestResponse> => api.post("/api/alerts/test"),

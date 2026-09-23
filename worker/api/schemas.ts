@@ -184,6 +184,17 @@ export const policyRuleSchema = z.strictObject({
   note: z.string().max(500).optional(),
 });
 
+/**
+ * `POST /api/mcp/tools/:name/call`.
+ *
+ * Not strict, and not shaped to any one tool: the real shape is a different zod
+ * object per tool, enforced by the MCP server itself when the call reaches it
+ * (`worker/mcp/admin-call.ts`). All this schema does is what the JSON body has to
+ * be before that check is even possible -- a plain object, not an array, a string
+ * or a bare number.
+ */
+export const mcpToolCallArgsSchema = z.record(z.string(), z.unknown());
+
 /** `POST /api/sync/run` and `POST /api/providers/:id/full-refresh`. */
 export const syncRequestSchema = z.strictObject({
   providerIds: z.array(z.string().min(1).max(64)).max(50).optional(),

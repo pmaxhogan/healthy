@@ -246,6 +246,43 @@ export interface McpToolInfoDto {
   resourceTypes: string[];
 }
 
+/**
+ * One tool's real, live input schema -- draft-07 JSON Schema, generated from the
+ * same zod schema the MCP server validates arguments against. Backs the admin
+ * console's "Try a tool" panel: the tool picker's descriptions and the argument
+ * editor's skeleton and live validation all come from this, not from the
+ * hand-maintained {@link McpToolInfoDto} list (which has no schema to give).
+ */
+export interface McpToolSchemaDto {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}
+
+/**
+ * `POST /api/mcp/tools/:name/call`.
+ *
+ * The whole point is transparency: the exact arguments sent and the exact answer
+ * the tool gave, so the owner can see what an MCP client would see. `result.data`
+ * is the tool's JSON envelope (`{ items, warnings, truncated, ... }` on success, or
+ * `{ error, message }` on a tool-level failure such as `policy_denied`) -- both
+ * shapes are valid outcomes of a call that reached the tool, which is why they
+ * share one 200 response rather than one being an HTTP error. A request that never
+ * reached the tool at all (an unknown name, arguments that fail the input schema)
+ * is a 4xx `ApiError` instead; see `worker/api/routes/mcp.ts`.
+ */
+export interface McpToolCallResponse {
+  request: {
+    name: string;
+    arguments: Record<string, unknown>;
+  };
+  result: {
+    isError: boolean;
+    data: unknown;
+  };
+  durationMs: number;
+}
+
 export interface OverviewDto {
   providers: ProviderDto[];
   google: GoogleAccountDto;

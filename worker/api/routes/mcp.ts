@@ -21,15 +21,29 @@
 import { Hono } from "hono";
 
 import { AppError } from "../../lib/errors.ts";
+import { adminCaller, callMcpTool, listMcpTools } from "../../mcp/admin-call.ts";
+import { makeToolDeps } from "../../mcp/deps-d1.ts";
 import { ALLOW_PREFIX, fieldRuleResolves, parseFieldTarget } from "../../policy/rules.ts";
 import { toAuditDto, toPolicyRuleDto } from "../dto.ts";
-import { NO_STORE, apiContext, limitQuerySchema, readJson, readQuery } from "../http.ts";
-import { policyRuleSchema } from "../schemas.ts";
+import {
+  NO_STORE,
+  apiContext,
+  limitQuerySchema,
+  readJson,
+  readOptionalJson,
+  readQuery,
+} from "../http.ts";
+import { mcpToolCallArgsSchema, policyRuleSchema } from "../schemas.ts";
 import { TOOL_CATALOG } from "../tool-catalog.ts";
 
 import type { AppHonoEnv } from "../../auth/gate.ts";
 import type { GrantLike } from "../ports.ts";
-import type { CreatePolicyRuleRequest, McpGrantDto } from "@shared/types.ts";
+import type {
+  CreatePolicyRuleRequest,
+  McpGrantDto,
+  McpToolCallResponse,
+  McpToolSchemaDto,
+} from "@shared/types.ts";
 
 /** Audit rows per page when the caller does not say. */
 const DEFAULT_AUDIT_LIMIT = 100;
@@ -136,3 +150,78 @@ mcpRouter.get("/audit", async (c) => {
 
 /** Static: see the note at the top of `worker/api/tool-catalog.ts`. */
 mcpRouter.get("/tools", (c) => c.json([...TOOL_CATALOG], 200, NO_STORE));
+
+// --- the admin console's own tool caller ------------------------------------
+//
+// Both routes below go through `worker/mcp/admin-call.ts`, which connects a real
+// McpServer (the real `registerTools`, the real zod schemas, the real exposure
+// policy, the real audit wrapper) to the SDK's own in-memory transport. Nothing
+// here re-validates an argument or re-applies a policy rule; see that module's
+// header for why that is the point.
+
+/**
+ * Every tool's real, live JSON input schema -- for the "Try a tool" panel's
+ * picker and its argument editor's skeleton and validation. Distinct from
+ * `GET /api/mcp/tools`: that one is the hand-maintained FHIR-resource-type index
+ * policy targets are written against, and has no schema to give.
+ */
+mcpRouter.get("/tools/schema", async (c) => {
+  const deps = makeToolDeps({ env: c.env, caller: adminCaller() });
+  const tools = await listMcpTools(deps);
+  return c.json<McpToolSchemaDto[]>(
+    tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+    })),
+    200,
+    NO_STORE,
+  );
+});
+
+/**
+ * Call one tool as the admin console, not an OAuth client -- `adminCaller()` is
+ * what `mcp_audit.client_id` reads for a call made from here.
+ *
+ * A `CallToolResult` that is real tool output is always the JSON envelope
+ * `respond()`/`toolError()` serialise (`worker/mcp/respond.ts`): `{ items, ... }`
+ * on success, `{ error, message, ... }` on a tool-level failure such as
+ * `policy_denied`. Both are audited, because the tool ran either way, and both
+ * are reported here as one 200 -- the caller's fault ends where the tool starts.
+ *
+ * A `CallToolResult` whose text does NOT parse as JSON never reached the tool at
+ * all: it is the MCP SDK's own plain-English rejection of `args` against the
+ * real input schema, thrown before `withAudit` runs (so there is no audit row for
+ * it either). That is the caller's fault, and is answered as a 400 instead.
+ */
+mcpRouter.post("/tools/:name/call", async (c) => {
+  const name = c.req.param("name");
+  const args = await readOptionalJson(c, mcpToolCallArgsSchema);
+  const deps = makeToolDeps({ env: c.env, caller: adminCaller() });
+
+  const startedMs = Date.now();
+  const result = await callMcpTool(deps, name, args);
+  if (result === null) throw new AppError("not_found", "no such MCP tool", { tool: name });
+  const durationMs = Date.now() - startedMs;
+
+  const first = result.content[0];
+  const text = first?.type === "text" ? first.text : "";
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new AppError("bad_request", "the arguments did not match the tool's input schema", {
+      issues: [text],
+    });
+  }
+
+  return c.json<McpToolCallResponse>(
+    {
+      request: { name, arguments: args },
+      result: { isError: result.isError === true, data },
+      durationMs,
+    },
+    200,
+    NO_STORE,
+  );
+});

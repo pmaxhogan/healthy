@@ -8,6 +8,7 @@
 import { computed, ref, watch } from "vue";
 
 import { endpoints, mcpToolsOrNone } from "../api/endpoints.ts";
+import McpToolTester from "../components/McpToolTester.vue";
 import PolicyRuleForm from "../components/PolicyRuleForm.vue";
 import StateBlock from "../components/StateBlock.vue";
 import { formatDateTime, formatDuration, relativeTime } from "../lib/format.ts";
@@ -236,6 +237,8 @@ async function onRevoke(id: string): Promise<void> {
         </div>
       </StateBlock>
     </section>
+
+    <McpToolTester />
 
     <section class="card">
       <div class="row">
