@@ -200,6 +200,12 @@ const CODE_MESSAGES: Record<string, string> = {
   portal_attempts_exhausted:
     "Too many sign-in attempts today. Try again tomorrow, or sign in on the portal's own site.",
   portal_discovery_failed: "Could not find MyChart at that address. Check the URL and try again.",
+  portal_redirected_offsite:
+    "That address sent us to a different site. Check where it went, and paste that address instead if you recognise it.",
+  portal_insecure_redirect:
+    "That address (or something it redirected to) is not https. A portal password is never sent over an unencrypted connection.",
+  portal_origin_unconfirmed:
+    "The portal is no longer at the address you confirmed. Review where it is now and save again.",
 };
 
 /**

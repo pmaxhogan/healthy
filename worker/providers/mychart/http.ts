@@ -25,6 +25,29 @@
  * GET, which lands on a page that is not signed in and therefore fails loudly
  * instead of leaking a credential to wherever the chain pointed.
  *
+ * **A redirect may not leave the site, and may never leave https.** Where the
+ * chain ends is what `portal_accounts.base_url` becomes, and that origin is
+ * where the owner's portal password is POSTed on every later sign-in. A vanity
+ * alias that is dropped and re-registered, or a CDN in the chain that is taken
+ * over, would otherwise silently relocate the credential. So a hop to a
+ * different registrable domain is `portal_redirected_offsite` (with the landed
+ * origin in `details`, for the admin UI to show -- it never reaches a log line,
+ * because `errorFields` does not carry `details`), and a hop to anything but
+ * `https:` is `portal_insecure_redirect`. The recovery for a deployment that
+ * genuinely federates across sites is for the owner to paste the origin the
+ * error names, confirm it, and have that be the site the chain may move within.
+ *
+ * **A body-level redirect may not even leave the origin.** A `<meta refresh>` or
+ * a `window.location` in a 200 body is content, not an HTTP redirect, and a
+ * cross-origin one is simply not followed -- discovery then reports that it
+ * found no login page, which is the fail-closed answer.
+ *
+ * **Caller headers are dropped once the origin changes.** `request.headers`
+ * carries the antiforgery token on the visits calls, and would carry an
+ * `Authorization` header the day one is added. A hop that has left the origin
+ * gets the browser-shaped headers and the jar's cookies for that host, and
+ * nothing the caller supplied.
+ *
  * **Nothing here logs a URL, a host, a mount or a body.** A mount path and a
  * hostname both identify the organisation, and the body is the chart. Log lines
  * and `AppError.details` carry the stable endpoint label, the HTTP status and
@@ -34,6 +57,7 @@
 import { AppError } from "../../lib/errors.ts";
 
 import { bodyMentions, bodyRedirectTarget } from "./html.ts";
+import { sameRegistrableSite } from "./site.ts";
 import {
   ACCEPT_HTML,
   ACCEPT_JSON,
@@ -145,7 +169,9 @@ interface Hop {
 function headersFor(request: PortalRequest, hop: Hop, jar: CookieJar | undefined): Headers {
   const headers = new Headers(BROWSER_HEADERS);
   headers.set("accept", request.accept === "json" ? ACCEPT_JSON : ACCEPT_HTML);
-  const extra = Object.entries(request.headers ?? {});
+  // Only while the hop is still on the origin the caller asked for: see the
+  // module comment. The cookie header below is computed per host either way.
+  const extra = sameOrigin(hop.url, request.url) ? Object.entries(request.headers ?? {}) : [];
   for (const [key, value] of extra) headers.set(key, value);
   // Only ever set for a request that actually has a body: see the module comment.
   if (hop.bodyContentType !== undefined) headers.set("content-type", hop.bodyContentType);
@@ -154,8 +180,43 @@ function headersFor(request: PortalRequest, hop: Hop, jar: CookieJar | undefined
   return headers;
 }
 
+/** Whether two absolute URLs share an origin. False if either is unparseable. */
+function sameOrigin(a: string, b: string): boolean {
+  try {
+    return new URL(a).origin === new URL(b).origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Refuse a redirect that would leave https, or leave the site.
+ *
+ * Both are the same failure in different clothes -- the chain deciding where a
+ * credential goes -- and both are refused rather than reported, because there is
+ * no safe way to carry on from either. See the module comment.
+ */
+function requireSameSiteHttps(target: URL, current: Hop, endpoint: string): void {
+  if (target.protocol !== "https:") {
+    throw new AppError("portal_insecure_redirect", "the portal redirected away from https", {
+      endpoint,
+      // A scheme, not a host: this one is safe to log.
+      scheme: target.protocol,
+    });
+  }
+  if (!sameRegistrableSite(current.url, target.href)) {
+    throw new AppError("portal_redirected_offsite", "the portal redirected to another site", {
+      endpoint,
+      // The one place this module puts a host in an error: the admin UI has to
+      // be able to tell the owner where they were sent. `errorFields` never
+      // carries `details`, so it cannot reach a log line from here.
+      landedOrigin: target.origin,
+    });
+  }
+}
+
 /** The next hop a response asks for, or null when it is the final answer. */
-function nextHop(response: Response, current: Hop): Hop | null {
+function nextHop(response: Response, current: Hop, endpoint: string): Hop | null {
   const location = response.headers.get("location");
   if (location === null || location === "") return null;
   if (!DOWNGRADE_TO_GET.has(response.status) && !KEEPS_METHOD.has(response.status)) return null;
@@ -165,6 +226,7 @@ function nextHop(response: Response, current: Hop): Hop | null {
   } catch {
     return null;
   }
+  requireSameSiteHttps(target, current, endpoint);
   if (DOWNGRADE_TO_GET.has(response.status)) {
     return { url: target.href, method: "GET", body: undefined, bodyContentType: undefined };
   }
@@ -180,20 +242,30 @@ function nextHop(response: Response, current: Hop): Hop | null {
     : { url: target.href, method: "GET", body: undefined, bodyContentType: undefined };
 }
 
-/** A `<meta refresh>` / `window.location` redirect in a 200 body, resolved. */
+/**
+ * A `<meta refresh>` / `window.location` redirect in a 200 body, resolved.
+ *
+ * Null when it would leave the origin. A body redirect is content the page
+ * chose, not an HTTP redirect, and it is the one this client will not follow
+ * across an origin at all -- not even within the site -- because it is also the
+ * cheapest thing for a compromised page to inject.
+ */
 function bodyHop(body: string, current: Hop): Hop | null {
   const target = bodyRedirectTarget(body);
   if (target === null) return null;
+  let absolute: URL;
   try {
-    return {
-      url: new URL(target, current.url).href,
-      method: "GET",
-      body: undefined,
-      bodyContentType: undefined,
-    };
+    absolute = new URL(target, current.url);
   } catch {
     return null;
   }
+  if (!sameOrigin(absolute.href, current.url)) return null;
+  return {
+    url: absolute.href,
+    method: "GET",
+    body: undefined,
+    bodyContentType: undefined,
+  };
 }
 
 function retryAfterMs(response: Response): number | undefined {
@@ -231,14 +303,16 @@ function rejectIfBlocked(response: Response, body: string, endpoint: string): vo
  * One portal request, redirects followed, cookies applied and recorded.
  *
  * Throws `portal_unreachable` for a transport failure, `portal_bot_blocked` for a
- * WAF, and `portal_parse_failed` when the redirect chain does not terminate.
- * Every other status comes back in the result.
+ * WAF, `portal_parse_failed` when the redirect chain does not terminate, and
+ * `portal_redirected_offsite` / `portal_insecure_redirect` when it tries to
+ * leave the site or leave https. Every other status comes back in the result.
  */
 export async function portalFetch(
   deps: PortalHttpDeps,
   request: PortalRequest,
 ): Promise<PortalResponse> {
   const limit = deps.maxRedirects ?? MAX_REDIRECTS;
+  requireHttps(request.url, request.endpoint);
   let hop: Hop = { url: request.url, method: request.method ?? "GET", ...firstBody(request) };
 
   for (let hops = 0; hops <= limit; hops++) {
@@ -262,7 +336,7 @@ export async function portalFetch(
     }
     deps.jar?.setFromResponse(hop.url, response);
 
-    const headerHop = nextHop(response, hop);
+    const headerHop = nextHop(response, hop, request.endpoint);
     if (headerHop !== null) {
       // The redirect's own body is never the answer, and reading it would only
       // put chart markup somewhere it does not need to be.
@@ -296,6 +370,28 @@ export async function portalFetch(
     endpoint: request.endpoint,
     hops: limit,
   });
+}
+
+/**
+ * Refuse a first hop that is not https, before anything is sent.
+ *
+ * The URL comes from a stored endpoint or from what the owner pasted, and both
+ * are validated where they enter -- this is the backstop that means no code path
+ * into this module can send a portal request in cleartext.
+ */
+export function requireHttps(url: string, endpoint: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new AppError("portal_parse_failed", "the portal URL is not a URL", { endpoint });
+  }
+  if (parsed.protocol !== "https:") {
+    throw new AppError("portal_insecure_redirect", "the portal URL is not https", {
+      endpoint,
+      scheme: parsed.protocol,
+    });
+  }
 }
 
 /** The lower-cased path of a URL, or "" when it is not one. Never logged. */

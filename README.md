@@ -203,16 +203,30 @@ Then, in the admin UI: add your health systems and connect each one
 
 For a health system that also has a patient portal, the **Providers** page
 shows a **MyChart portal** card under that provider: a portal login URL
-(prefilled when one is already known), a username, a password and,
-optionally, an email address to send verification codes to when it differs
-from the login — most deployments never need that last field. Save it, then
-**Sign in now** — the card polls while the sign-in is in progress and shows
-what it is waiting on.
+(prefilled when one is already known), a username, a password and, optionally,
+an email address to send verification codes to when it differs from the login
+and the domain those codes arrive from — most deployments never need either of
+those last two.
+
+**Saving takes two clicks, on purpose.** **Save** probes the URL without
+sending anything and reports where the portal actually is — a login URL often
+redirects, sometimes to a different host — and **Confirm and save** stores the
+login against _that_ origin. It is the origin your portal password is sent to
+on every later sign-in, so it is worth reading before you agree to it. (A
+redirect that leaves the site you pasted, or leaves https, is refused outright
+rather than confirmed.) Changing only the password against a portal already
+stored needs no second click.
+
+Then **Sign in now** — the card polls while the sign-in is in progress and
+shows what it is waiting on.
 
 If the portal asks for an emailed verification code, that code has to reach
 this Worker, not just your inbox: set up the one-time Gmail forwarding filter
 on the **Mail** page first ([docs/mail.md](docs/mail.md)) so the code arrives
-and the sign-in can pick it up on its own. Once a session is established, the
+and the sign-in can pick it up on its own. Add the sending domain to the
+allowlist there — the shipped list is Gmail's own confirmation sender and
+nothing else — and the first code the portal accepts binds that sender to this
+account, so nobody else's message can ever be claimed as its code. Once a session is established, the
 hourly sync picks up that provider's upcoming portal visits the same way it
 does FHIR encounters.
 

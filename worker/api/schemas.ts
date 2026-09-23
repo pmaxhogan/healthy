@@ -14,7 +14,11 @@ import { z } from "zod";
 
 import { isHttpsUrl } from "@shared/url.ts";
 
-import type { PutPortalAccountRequest, SetProviderSecretRequest } from "@shared/types.ts";
+import type {
+  PortalDiscoverRequest,
+  PutPortalAccountRequest,
+  SetProviderSecretRequest,
+} from "@shared/types.ts";
 
 // Re-exported so `test/unit/api/schemas.test.ts` -- and anything else that
 // already imports the predicate from here -- keeps working. The definition
@@ -209,6 +213,15 @@ export const portalAccountSchema: z.ZodType<PutPortalAccountRequest> = z.strictO
   mountHint: z.string().min(1).max(200).optional(),
   mfaContact: z.email().max(320).optional(),
   otpSenderDomain: senderDomain.optional(),
+  // Required, and an https URL like `baseUrl`: the handler keeps its origin and
+  // refuses to seal a credential unless discovery lands on exactly that.
+  confirmedOrigin: httpsUrl,
+});
+
+/** `POST /api/providers/:id/portal/discover`. Probe only -- nothing is stored. */
+export const portalDiscoverSchema: z.ZodType<PortalDiscoverRequest> = z.strictObject({
+  baseUrl: httpsUrl,
+  mountHint: z.string().min(1).max(200).optional(),
 });
 
 /** `PUT /api/mail/settings`. Replaces the whole allowlist -- there is only one field. */

@@ -4,6 +4,13 @@
 // path `/api/providers/prov-1/portal`, so `installPortal` below branches on
 // the method of the *last recorded call* rather than registering three routes
 // that `installFakeApi` (which keys on path only) could not tell apart.
+//
+// Saving is two calls, deliberately: Save probes (`POST .../portal/discover`),
+// the card shows the origin the probe landed on, and only Confirm sends the PUT
+// with that origin echoed back. The origin the chain settles on is where the
+// owner's portal password gets POSTed, so a human agrees to it first -- see
+// `worker/api/routes/portal.ts`. The one exception is a password change against
+// the origin already stored, which needs no probe.
 
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -15,7 +22,11 @@ import { toasts } from "../../src/lib/toasts.ts";
 import { fakeResponse, installFakeApi, portalAccount } from "./helpers.ts";
 
 import type { FakeFetch } from "./helpers.ts";
-import type { PortalAccountStatusDto, PortalSignInPhase } from "@shared/types.ts";
+import type {
+  PortalAccountStatusDto,
+  PortalDiscoveryDto,
+  PortalSignInPhase,
+} from "@shared/types.ts";
 
 const PORTAL_PATH = "/api/providers/prov-1/portal";
 
@@ -24,7 +35,15 @@ interface PortalRoutes {
   get?: (n: number) => PortalAccountStatusDto;
   put?: () => Response;
   signIn?: () => Response;
+  discover?: () => Response;
 }
+
+/** What the fake `POST .../portal/discover` reports unless a test says otherwise. */
+const DISCOVERED: PortalDiscoveryDto = {
+  origin: "https://portal.example.test",
+  mountPath: "/MyChart/",
+  flavor: "classic",
+};
 
 function installPortal(routes: PortalRoutes = {}): FakeFetch {
   let loadCount = 0;
@@ -46,6 +65,8 @@ function installPortal(routes: PortalRoutes = {}): FakeFetch {
         routes.signIn ??
         (() => fakeResponse({ status: 202, body: { accepted: true, started: true } }))
       )(),
+    [`${PORTAL_PATH}/discover`]: () =>
+      (routes.discover ?? (() => fakeResponse({ body: DISCOVERED })))(),
     [`${PORTAL_PATH}/session`]: () => fakeResponse({ status: 204 }),
     [`${PORTAL_PATH}/sync`]: () => fakeResponse({ status: 202, body: { accepted: true } }),
   });
@@ -89,6 +110,37 @@ function phaseSequence(phases: PortalSignInPhase[], signInCode: string | null = 
         updatedAt: null,
       },
     });
+}
+
+/** Click a button by its exact label. */
+async function click(wrapper: ReturnType<typeof mount>, label: string): Promise<void> {
+  await wrapper
+    .findAll("button")
+    .find((b) => b.text() === label)
+    ?.trigger("click");
+  await flushPromises();
+}
+
+/** The body of the one PUT the card sent, parsed. */
+function putBody(api: FakeFetch): Record<string, unknown> {
+  const put = api.calls.find((call) => call.url === PORTAL_PATH && call.method === "PUT");
+  return JSON.parse(put?.body ?? "null") as Record<string, unknown>;
+}
+
+/** Fill the credential fields a save needs. */
+async function fillLogin(
+  wrapper: ReturnType<typeof mount>,
+  extra: { baseUrl?: string; mfaContact?: string; otpSenderDomain?: string } = {},
+): Promise<void> {
+  if (extra.baseUrl !== undefined) await wrapper.find('input[type="url"]').setValue(extra.baseUrl);
+  await wrapper.find("input[autocomplete='username']").setValue("alice");
+  await wrapper.find('input[type="password"]').setValue("hunter2");
+  if (extra.mfaContact !== undefined) {
+    await wrapper.find('input[type="email"]').setValue(extra.mfaContact);
+  }
+  if (extra.otpSenderDomain !== undefined) {
+    await wrapper.find('input[name="otpSenderDomain"]').setValue(extra.otpSenderDomain);
+  }
 }
 
 async function clickSignIn(wrapper: ReturnType<typeof mount>): Promise<void> {
@@ -169,41 +221,85 @@ describe("PortalAccountCard: credentials", () => {
     expect(saveButton?.attributes("disabled")).toBeUndefined();
   });
 
-  it("PUTs username, password and the trimmed base URL once, then clears the password field", async () => {
+  it("probes first, shows where the portal is, and PUTs nothing until Confirm", async () => {
     const { wrapper, api } = await mountLoaded({ get: () => portalAccount({ baseUrl: null }) });
 
-    await wrapper.find('input[type="url"]').setValue("https://portal.example.test");
-    await wrapper.find("input[autocomplete='username']").setValue("alice");
-    await wrapper.find('input[type="password"]').setValue("hunter2");
-    const saveButton = wrapper.findAll("button").find((b) => b.text() === "Save");
-    await saveButton?.trigger("click");
-    await flushPromises();
+    await fillLogin(wrapper, { baseUrl: "https://portal.example.test" });
+    await click(wrapper, "Save");
+
+    // Step one: a probe, and no credential anywhere near it.
+    const discover = api.calls.find((call) => call.url === `${PORTAL_PATH}/discover`);
+    expect(discover?.method).toBe("POST");
+    expect(JSON.parse(discover?.body ?? "null")).toEqual({
+      baseUrl: "https://portal.example.test",
+    });
+    expect(api.calls.some((call) => call.method === "PUT")).toBe(false);
+    expect(wrapper.text()).toContain("Portal found at");
+    expect(wrapper.text()).toContain("https://portal.example.test");
+    expect(wrapper.text()).toContain("classic");
+
+    // Step two: the owner agrees to that origin, and only now is anything stored.
+    await click(wrapper, "Confirm and save");
 
     const put = api.calls.find((call) => call.url === PORTAL_PATH && call.method === "PUT");
-    expect(put).toBeDefined();
     expect(put?.headers.get("x-healthy-csrf")).toBe("1");
-    expect(JSON.parse(put?.body ?? "null")).toEqual({
+    expect(putBody(api)).toEqual({
       username: "alice",
       password: "hunter2",
       baseUrl: "https://portal.example.test",
+      confirmedOrigin: "https://portal.example.test",
     });
-
     expect((wrapper.find('input[type="password"]').element as HTMLInputElement).value).toBe("");
     expect(toasts.map((t) => t.text)).toContain("Portal login saved.");
+    // The confirmation line goes with it: there is nothing left to confirm.
+    expect(wrapper.text()).not.toContain("Portal found at");
+  });
+
+  it("confirms the origin the probe reported, not the one that was typed", async () => {
+    // Discovery follows redirects, so these two genuinely differ -- and the one
+    // that matters is where the password will be sent.
+    const { wrapper, api } = await mountLoaded({
+      get: () => portalAccount({ baseUrl: null }),
+      discover: () =>
+        fakeResponse({ body: { ...DISCOVERED, origin: "https://real.example.test" } }),
+    });
+
+    await fillLogin(wrapper, { baseUrl: "https://vanity.example.test" });
+    await click(wrapper, "Save");
+    expect(wrapper.text()).toContain("https://real.example.test");
+    await click(wrapper, "Confirm and save");
+
+    expect(putBody(api).confirmedOrigin).toBe("https://real.example.test");
+  });
+
+  it("skips the probe and saves straight away when only the password is changing", async () => {
+    const { wrapper, api } = await mountLoaded({
+      get: () => portalAccount({ baseUrl: "https://portal.saved.test" }),
+    });
+
+    await fillLogin(wrapper);
+    await click(wrapper, "Save");
+
+    // Re-probing a portal already stored is several unauthenticated requests to a
+    // host with bot protection, for an answer the owner already confirmed.
+    expect(api.calls.some((call) => call.url === `${PORTAL_PATH}/discover`)).toBe(false);
+    expect(putBody(api)).toEqual({
+      username: "alice",
+      password: "hunter2",
+      baseUrl: "https://portal.saved.test",
+      confirmedOrigin: "https://portal.saved.test",
+    });
   });
 
   it("omits baseUrl from the payload when it is left blank", async () => {
     const { wrapper, api } = await mountLoaded({ get: () => portalAccount({ baseUrl: null }) });
 
-    await wrapper.find("input[autocomplete='username']").setValue("alice");
-    await wrapper.find('input[type="password"]').setValue("hunter2");
-    const saveButton = wrapper.findAll("button").find((b) => b.text() === "Save");
-    await saveButton?.trigger("click");
-    await flushPromises();
+    await fillLogin(wrapper);
+    await click(wrapper, "Save");
+    await click(wrapper, "Confirm and save");
 
-    const put = api.calls.find((call) => call.url === PORTAL_PATH && call.method === "PUT");
-    const payload = JSON.parse(put?.body ?? "null") as Record<string, unknown>;
-    expect(Object.keys(payload).toSorted((a, b) => a.localeCompare(b))).toEqual([
+    expect(Object.keys(putBody(api)).toSorted((a, b) => a.localeCompare(b))).toEqual([
+      "confirmedOrigin",
       "password",
       "username",
     ]);
@@ -212,17 +308,14 @@ describe("PortalAccountCard: credentials", () => {
   it("includes mfaContact in the payload when filled, and omits it when blank", async () => {
     const { wrapper, api } = await mountLoaded({ get: () => portalAccount({ baseUrl: null }) });
 
-    await wrapper.find("input[autocomplete='username']").setValue("alice");
-    await wrapper.find('input[type="password"]').setValue("hunter2");
-    await wrapper.find('input[type="email"]').setValue("owner@example.test");
-    const saveButton = wrapper.findAll("button").find((b) => b.text() === "Save");
-    await saveButton?.trigger("click");
-    await flushPromises();
+    await fillLogin(wrapper, { mfaContact: "owner@example.test" });
+    await click(wrapper, "Save");
+    await click(wrapper, "Confirm and save");
 
-    const put = api.calls.find((call) => call.url === PORTAL_PATH && call.method === "PUT");
-    expect(JSON.parse(put?.body ?? "null")).toEqual({
+    expect(putBody(api)).toEqual({
       username: "alice",
       password: "hunter2",
+      confirmedOrigin: DISCOVERED.origin,
       mfaContact: "owner@example.test",
     });
   });
@@ -234,17 +327,14 @@ describe("PortalAccountCard: credentials", () => {
 
     expect(wrapper.text()).toContain("Sender of your verification-code emails");
 
-    await wrapper.find("input[autocomplete='username']").setValue("alice");
-    await wrapper.find('input[type="password"]').setValue("hunter2");
-    await wrapper.find('input[name="otpSenderDomain"]').setValue("mail.example.test");
-    const saveButton = wrapper.findAll("button").find((b) => b.text() === "Save");
-    await saveButton?.trigger("click");
-    await flushPromises();
+    await fillLogin(wrapper, { otpSenderDomain: "mail.example.test" });
+    await click(wrapper, "Save");
+    await click(wrapper, "Confirm and save");
 
-    const put = api.calls.find((call) => call.url === PORTAL_PATH && call.method === "PUT");
-    expect(JSON.parse(put?.body ?? "null")).toEqual({
+    expect(putBody(api)).toEqual({
       username: "alice",
       password: "hunter2",
+      confirmedOrigin: DISCOVERED.origin,
       otpSenderDomain: "mail.example.test",
     });
   });
@@ -264,15 +354,46 @@ describe("PortalAccountCard: credentials", () => {
   it("omits mfaContact from the payload when it is left blank", async () => {
     const { wrapper, api } = await mountLoaded({ get: () => portalAccount({ baseUrl: null }) });
 
-    await wrapper.find("input[autocomplete='username']").setValue("alice");
-    await wrapper.find('input[type="password"]').setValue("hunter2");
-    const saveButton = wrapper.findAll("button").find((b) => b.text() === "Save");
-    await saveButton?.trigger("click");
-    await flushPromises();
+    await fillLogin(wrapper);
+    await click(wrapper, "Save");
+    await click(wrapper, "Confirm and save");
 
-    const put = api.calls.find((call) => call.url === PORTAL_PATH && call.method === "PUT");
-    const payload = JSON.parse(put?.body ?? "null") as Record<string, unknown>;
-    expect(payload.mfaContact).toBeUndefined();
+    expect(putBody(api).mfaContact).toBeUndefined();
+  });
+
+  it("stores nothing when the probe fails, and offers no Confirm", async () => {
+    const { wrapper, api } = await mountLoaded({
+      get: () => portalAccount({ baseUrl: null }),
+      // Message equal to the code, as `worker/api/http.ts` answers when there is
+      // nothing safe to add: `errorMessage` then reaches for the mapped sentence.
+      discover: () =>
+        fakeResponse({
+          status: 400,
+          body: { error: "portal_redirected_offsite", message: "portal_redirected_offsite" },
+        }),
+    });
+
+    await fillLogin(wrapper, { baseUrl: "https://vanity.example.test" });
+    await click(wrapper, "Save");
+
+    expect(api.calls.some((call) => call.method === "PUT")).toBe(false);
+    expect(wrapper.findAll("button").some((b) => b.text() === "Confirm and save")).toBe(false);
+    // `useAction` surfaces a failure as a toast, so that is where the mapped
+    // sentence for the new code lands.
+    expect(toasts.map((t) => t.text).join(" ")).toContain("different site");
+  });
+
+  it("drops a pending confirmation as soon as the base URL is edited again", async () => {
+    const { wrapper } = await mountLoaded({ get: () => portalAccount({ baseUrl: null }) });
+
+    await fillLogin(wrapper, { baseUrl: "https://portal.example.test" });
+    await click(wrapper, "Save");
+    expect(wrapper.text()).toContain("Portal found at");
+
+    // The origin on screen would no longer be the one being agreed to.
+    await wrapper.find('input[type="url"]').setValue("https://elsewhere.example.test");
+    await flushPromises();
+    expect(wrapper.text()).not.toContain("Portal found at");
   });
 });
 
@@ -419,6 +540,9 @@ describe("portal error codes: human messages", () => {
     ["portal_unreachable", "could not be reached"],
     ["portal_attempts_exhausted", "Too many sign-in attempts"],
     ["portal_discovery_failed", "Could not find MyChart"],
+    ["portal_redirected_offsite", "different site"],
+    ["portal_insecure_redirect", "not https"],
+    ["portal_origin_unconfirmed", "no longer at the address you confirmed"],
   ])("maps %s to a human sentence", (code, fragment) => {
     expect(codeMessage(code)).toContain(fragment);
   });

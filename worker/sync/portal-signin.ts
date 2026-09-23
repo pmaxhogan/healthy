@@ -56,6 +56,8 @@
  * username, never the code, never a byte of portal markup.
  */
 
+import { isHttpsUrl } from "@shared/url.ts";
+
 import { makeRepos } from "../db/index.ts";
 import { getSetting } from "../db/settings.ts";
 import { AppError, isAppError } from "../lib/errors.ts";
@@ -154,6 +156,17 @@ export async function openPortalSession(
   if (row === null) throw new AppError("conflict", "this provider has no portal account");
   if (row.base_url === null || row.mount_path === null) {
     throw new AppError("conflict", "the portal endpoint is not known yet", { providerId });
+  }
+  // Fail closed rather than sign in over cleartext. `base_url` is what
+  // `fallbackEndpoint` builds from and what every mounted URL is joined onto, so
+  // a row that predates the https checks (or one written by hand) stops here
+  // instead of carrying the owner's password to an `http://` origin.
+  if (!isHttpsUrl(row.base_url)) {
+    throw new AppError(
+      "portal_discovery_failed",
+      "the stored portal origin is not https; re-save the portal login",
+      { providerId },
+    );
   }
   const secrets = await repos.portalAccounts.getSecrets(providerId);
   const username = secrets?.username ?? null;

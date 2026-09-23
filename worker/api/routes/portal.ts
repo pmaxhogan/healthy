@@ -7,19 +7,29 @@
  * under `/api/providers` alongside that router; `/:id` and `/:id/portal` are
  * different path shapes, so neither can shadow the other.
  *
- * ### The four behaviours worth reading before changing anything
+ * ### The five behaviours worth reading before changing anything
  *
- * **Discovery happens before anything is written.** `PUT` probes the host for a
- * login page and stores the endpoint the probe settled on, exactly as
- * `POST /api/providers` proves a FHIR base before inserting a row. Sealing a
- * password against a URL that turns out to host no portal produces an account that
- * can never sign in and a reconnect card that can never be cleared. The whole
- * discovery result is stored, opaquely -- it says *how* to sign in to that
- * deployment, not merely where it is.
+ * **Storing a login takes two calls, and the owner decides between them.**
+ * `POST .../portal/discover` probes the host for a login page and reports the
+ * origin, mount and flavour it found, storing **nothing**. `PUT .../portal` then
+ * has to echo that origin back as `confirmedOrigin`, and refuses with
+ * `portal_origin_unconfirmed` when the probe lands anywhere else. That split is
+ * the whole point: discovery deliberately follows redirects, so the origin it
+ * settles on may not be the host the owner typed -- and that origin is where the
+ * portal password is POSTed on every later sign-in. A vanity alias that is
+ * dropped and re-registered would otherwise relocate the credential with no
+ * human in the loop. (`portalFetch` additionally refuses to leave the site or
+ * leave https at all; this is the second gate, not the first.)
  *
- * **Discovery is skipped when nothing about the endpoint changed.** Re-saving a
- * password against a portal that is already known must not re-probe: that is
- * several unauthenticated requests to a host with bot protection, for nothing.
+ * **Discovery is still skipped when nothing about the endpoint changed.**
+ * Re-saving a password against the origin already stored -- which the owner
+ * confirmed when it was stored -- must not re-probe: that is several
+ * unauthenticated requests to a host with bot protection, for nothing.
+ *
+ * **Sealing a password against a URL that hosts no portal** produces an account
+ * that can never sign in and a reconnect card that can never be cleared, which is
+ * why the probe comes first at all. The whole discovery result is stored,
+ * opaquely -- it says *how* to sign in to that deployment, not merely where it is.
  *
  * **The password is write-only, in both directions.** It is sealed by the repo and
  * no response here echoes it, not even as a length. `PortalAccountDto` reports
@@ -45,7 +55,7 @@ import { nowSeconds } from "../../lib/time.ts";
 import { portalAdapterFor } from "../../providers/mychart/index.ts";
 import { closeAlert, portalSubject } from "../close-alert.ts";
 import { NO_STORE, apiContext, readJson } from "../http.ts";
-import { portalAccountSchema } from "../schemas.ts";
+import { portalAccountSchema, portalDiscoverSchema } from "../schemas.ts";
 
 import { isLiveProvider } from "./providers.ts";
 
@@ -53,7 +63,11 @@ import type { AppHonoEnv } from "../../auth/gate.ts";
 import type { ProviderRow } from "../../db/rows.ts";
 import type { PortalEndpoint } from "../../providers/mychart/index.ts";
 import type { ApiContext } from "../http.ts";
-import type { PortalAccountDto, PortalAccountStatusDto } from "@shared/types.ts";
+import type {
+  PortalAccountDto,
+  PortalAccountStatusDto,
+  PortalDiscoveryDto,
+} from "@shared/types.ts";
 
 /** The only portal vendor today. `worker/providers/mychart/index.ts` holds the map. */
 const PORTAL_VENDOR = "mychart";
@@ -153,7 +167,7 @@ function mountHintFromPath(url: string): string | undefined {
 }
 
 /**
- * Probe for the portal and store what was found.
+ * Probe for the portal. Stores nothing.
  *
  * Every failure is reported as one code -- `portal_discovery_failed`, 400 -- with
  * the underlying code in `details.reason`. The admin UI has one thing to say
@@ -161,35 +175,54 @@ function mountHintFromPath(url: string): string | undefined {
  * and the underlying codes (`portal_parse_failed`, `portal_bot_blocked`,
  * `portal_unreachable`) are about a host the owner typed, which makes them the
  * request's fault however the portal phrased it.
+ *
+ * The one detail that is passed through rather than reduced is
+ * `portal_redirected_offsite`'s landed origin: "that URL sent us to
+ * somewhere-else.example" is the one thing the owner can act on, and it is the
+ * only host this surface ever reports. It goes in the response body, never in a
+ * log line -- `errorFields` does not carry `details`.
  */
-async function discover(
+async function probeEndpoint(
   api: ApiContext,
-  providerId: string,
   input: { baseUrl: string; mountHint?: string | undefined },
-): Promise<void> {
+): Promise<PortalEndpoint> {
   const adapter = portalAdapterFor(PORTAL_VENDOR);
-  let endpoint: PortalEndpoint;
   try {
-    endpoint = await adapter.discover(input, {
+    return await adapter.discover(input, {
       fetchImpl: api.ports.fetch,
       logger: makeLogger({ src: "api.portal" }),
       now: nowSeconds,
     });
   } catch (error) {
+    const landedOrigin = isAppError(error) ? error.details?.landedOrigin : undefined;
     throw new AppError(
       "portal_discovery_failed",
       "no patient-portal login page answered at that URL",
-      { reason: isAppError(error) ? error.code : "internal" },
+      {
+        reason: isAppError(error) ? error.code : "internal",
+        ...(typeof landedOrigin === "string" && { landedOrigin }),
+      },
       { cause: error },
     );
   }
-  await api.repos.portalAccounts.setEndpoint(providerId, {
-    baseUrl: endpoint.baseUrl,
+}
+
+/** The mount hint to probe with: the owner's own, else the pasted URL's path. */
+function mountHintFor(input: {
+  baseUrl: string;
+  mountHint?: string | undefined;
+}): string | undefined {
+  return input.mountHint ?? mountHintFromPath(input.baseUrl);
+}
+
+/** What `POST .../portal/discover` answers, and what `PUT` has to agree with. */
+function toDiscoveryDto(endpoint: PortalEndpoint): PortalDiscoveryDto {
+  return {
+    origin: endpoint.baseUrl,
     mountPath: endpoint.mountPath,
-    // Stored whole and read back unread: the adapter owns this shape and it says
-    // which login strategy this deployment needs, not just where it lives.
-    endpoint: { ...endpoint },
-  });
+    // Absent means the classic pages -- see `PortalEndpoint.flavor`.
+    flavor: endpoint.flavor ?? "classic",
+  };
 }
 
 portalRouter.get("/:id/portal", async (c) => {
@@ -199,12 +232,35 @@ portalRouter.get("/:id/portal", async (c) => {
 });
 
 /**
- * Store (or replace) the portal login.
+ * Probe for the portal and report where it is. Stores nothing, needs no credential.
  *
- * Discovery runs unless the endpoint is already known and `baseUrl` names the same
- * origin -- comparing origins, not the string the owner pasted, because discovery
- * may have followed a vanity host to somewhere else entirely and the stored value
- * is where it landed.
+ * Step one of two. The owner reads the origin out of the response, and step two
+ * (`PUT`) has to echo it back before anything is sealed against it.
+ */
+portalRouter.post("/:id/portal/discover", async (c) => {
+  const api = apiContext(c);
+  await requireProvider(api, c.req.param("id"));
+  const body = await readJson(c, portalDiscoverSchema);
+  const hint = mountHintFor({
+    baseUrl: body.baseUrl,
+    ...(body.mountHint !== undefined && { mountHint: body.mountHint }),
+  });
+  const endpoint = await probeEndpoint(api, {
+    baseUrl: originOf(body.baseUrl),
+    ...(hint !== undefined && { mountHint: hint }),
+  });
+  return c.json<PortalDiscoveryDto>(toDiscoveryDto(endpoint), 200, NO_STORE);
+});
+
+/**
+ * Store (or replace) the portal login, against an origin the owner confirmed.
+ *
+ * Step two of two. `confirmedOrigin` is what `POST .../portal/discover` reported
+ * (or, when only the password is changing, the origin already stored -- which was
+ * confirmed when it was stored). Discovery re-runs unless that origin is exactly
+ * the stored one, and the probe has to land on `confirmedOrigin` or nothing is
+ * written: a chain that has moved since the owner looked is a
+ * `portal_origin_unconfirmed`, not a silent relocation of their password.
  */
 portalRouter.put("/:id/portal", async (c) => {
   const api = apiContext(c);
@@ -213,19 +269,35 @@ portalRouter.put("/:id/portal", async (c) => {
   const stored = await api.repos.portalAccounts.get(row.id);
 
   const known = stored?.base_url ?? null;
-  if (known === null && body.baseUrl === undefined) {
-    throw new AppError("bad_request", "baseUrl is required until the portal has been found once");
-  }
-  const wanted = body.baseUrl === undefined ? known : originOf(body.baseUrl);
-  const unchanged = wanted === known && stored?.endpoint_json !== null;
-  if (!unchanged && wanted !== null) {
-    // The owner's own `mountHint` wins when given; otherwise the pasted URL's
-    // path is the only other place a vanity mount could be named.
-    const mountHint =
-      body.mountHint ?? (body.baseUrl === undefined ? undefined : mountHintFromPath(body.baseUrl));
-    await discover(api, row.id, {
-      baseUrl: wanted,
-      ...(mountHint !== undefined && { mountHint }),
+  const confirmed = originOf(body.confirmedOrigin);
+  // Already stored, already confirmed once, and the whole discovery result is
+  // there: this is a password change, not a move.
+  const unchanged = confirmed === known && (stored?.endpoint_json ?? null) !== null;
+  if (!unchanged) {
+    if (body.baseUrl === undefined) {
+      throw new AppError("bad_request", "baseUrl is required until the portal has been found once");
+    }
+    const hint = mountHintFor({
+      baseUrl: body.baseUrl,
+      ...(body.mountHint !== undefined && { mountHint: body.mountHint }),
+    });
+    const endpoint = await probeEndpoint(api, {
+      baseUrl: originOf(body.baseUrl),
+      ...(hint !== undefined && { mountHint: hint }),
+    });
+    if (endpoint.baseUrl !== confirmed) {
+      throw new AppError(
+        "portal_origin_unconfirmed",
+        "the portal is not at the origin that was confirmed; review it and save again",
+        { landedOrigin: endpoint.baseUrl },
+      );
+    }
+    await api.repos.portalAccounts.setEndpoint(row.id, {
+      baseUrl: endpoint.baseUrl,
+      mountPath: endpoint.mountPath,
+      // Stored whole and read back unread: the adapter owns this shape and it says
+      // which login strategy this deployment needs, not just where it lives.
+      endpoint: { ...endpoint },
     });
   }
 

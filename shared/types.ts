@@ -443,6 +443,44 @@ export interface PutPortalAccountRequest {
    * other allowlisted sender's code from being claimed for this account.
    */
   otpSenderDomain?: string | undefined;
+  /**
+   * The origin `POST .../portal/discover` reported, echoed back by the owner.
+   *
+   * Required. A discovery chain can follow a vanity alias to a different origin,
+   * and that origin is where the portal password is POSTed on every later
+   * sign-in -- so it is not something one unattended call may decide. The Worker
+   * refuses with `portal_origin_unconfirmed` when the origin it lands on is not
+   * this one.
+   */
+  confirmedOrigin: string;
+}
+
+/**
+ * The body of `POST /api/providers/:id/portal/discover`.
+ *
+ * Deliberately carries no credential: this probes for a login page and stores
+ * nothing at all, so the owner can be shown where the portal actually is before
+ * anything is sealed against it.
+ */
+export interface PortalDiscoverRequest {
+  /** Any URL on the portal's host. Only its origin is probed. */
+  baseUrl: string;
+  /** A mount prefix the owner already knows (`/MyChart/`), probed first. */
+  mountHint?: string | undefined;
+}
+
+/**
+ * What discovery found, and nothing more.
+ *
+ * `origin` is the value the owner has to echo back as `confirmedOrigin` before
+ * credentials are stored. `flavor` is which login application drives the
+ * deployment, shown so "the portal moved" and "the portal changed how it signs
+ * you in" do not look like the same thing.
+ */
+export interface PortalDiscoveryDto {
+  origin: string;
+  mountPath: string;
+  flavor: string;
 }
 
 /**

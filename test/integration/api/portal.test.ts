@@ -43,7 +43,12 @@ import {
 
 import type { Ctx } from "../../../worker/db/client.ts";
 import type { FakePortal } from "../portal/helpers.ts";
-import type { ApiError, PortalAccountStatusDto, PortalSignInState } from "@shared/types.ts";
+import type {
+  ApiError,
+  PortalAccountStatusDto,
+  PortalDiscoveryDto,
+  PortalSignInState,
+} from "@shared/types.ts";
 
 const owner = freshOwner();
 
@@ -59,6 +64,18 @@ const LOGIN_PAGE = `<!doctype html><html><body>
     <input type="password" name="Password" value="" />
   </form>
 </body></html>`;
+
+/** A second origin on the same site, for the "it moved" cases below. */
+const MOVED_ORIGIN = "https://moved.example.test";
+
+/**
+ * The portal's own host over plain http.
+ *
+ * Derived rather than written out: a literal `http://` URL in this repository is
+ * rewritten to `https://` by an eslint fixer, which would quietly turn the
+ * downgrade test below into a test of nothing.
+ */
+const INSECURE_ORIGIN = PORTAL_ORIGIN.replace("https://", "http://");
 
 /** A page that is a page, but not a login form. */
 const NOT_A_LOGIN_PAGE = `<!doctype html><html><body><h1>Welcome</h1></body></html>`;
@@ -226,6 +243,7 @@ describe("PUT /api/providers/:id/portal", () => {
     const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
       baseUrl: `${PORTAL_ORIGIN}/somewhere/else`,
       mountHint: PORTAL_MOUNT,
+      confirmedOrigin: PORTAL_ORIGIN,
       username: PORTAL_USERNAME,
       password: PORTAL_PASSWORD,
     });
@@ -255,6 +273,7 @@ describe("PUT /api/providers/:id/portal", () => {
     const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
       baseUrl: PORTAL_ORIGIN,
       mountHint: PORTAL_MOUNT,
+      confirmedOrigin: PORTAL_ORIGIN,
       username: PORTAL_USERNAME,
       password: PORTAL_PASSWORD,
       mfaContact,
@@ -277,6 +296,7 @@ describe("PUT /api/providers/:id/portal", () => {
     await owner().send("PUT", `/api/providers/${providerId}/portal`, {
       baseUrl: PORTAL_ORIGIN,
       mountHint: PORTAL_MOUNT,
+      confirmedOrigin: PORTAL_ORIGIN,
       username: PORTAL_USERNAME,
       password: PORTAL_PASSWORD,
       mfaContact,
@@ -284,6 +304,7 @@ describe("PUT /api/providers/:id/portal", () => {
 
     await owner().send("PUT", `/api/providers/${providerId}/portal`, {
       baseUrl: PORTAL_ORIGIN,
+      confirmedOrigin: PORTAL_ORIGIN,
       username: PORTAL_USERNAME,
       password: "a-new-password",
     });
@@ -299,6 +320,7 @@ describe("PUT /api/providers/:id/portal", () => {
     const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
       baseUrl: PORTAL_ORIGIN,
       mountHint: PORTAL_MOUNT,
+      confirmedOrigin: PORTAL_ORIGIN,
       username: PORTAL_USERNAME,
       password: PORTAL_PASSWORD,
       mfaContact: "not-an-email",
@@ -313,6 +335,7 @@ describe("PUT /api/providers/:id/portal", () => {
 
     await owner().send("PUT", `/api/providers/${providerId}/portal`, {
       baseUrl: PORTAL_ORIGIN,
+      confirmedOrigin: PORTAL_ORIGIN,
       username: PORTAL_USERNAME,
       password: PORTAL_PASSWORD,
     });
@@ -333,6 +356,7 @@ describe("PUT /api/providers/:id/portal", () => {
     // deeper path than the mount, to prove only the first segment is taken.
     const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
       baseUrl: `${PORTAL_ORIGIN}/orgseg/Authentication/Login`,
+      confirmedOrigin: PORTAL_ORIGIN,
       username: PORTAL_USERNAME,
       password: PORTAL_PASSWORD,
     });
@@ -353,6 +377,7 @@ describe("PUT /api/providers/:id/portal", () => {
 
     const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
       baseUrl: PORTAL_ORIGIN,
+      confirmedOrigin: PORTAL_ORIGIN,
       username: PORTAL_USERNAME,
       password: "a-new-password",
     });
@@ -371,6 +396,7 @@ describe("PUT /api/providers/:id/portal", () => {
 
     const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
       baseUrl: PORTAL_ORIGIN,
+      confirmedOrigin: PORTAL_ORIGIN,
       username: PORTAL_USERNAME,
       password: PORTAL_PASSWORD,
     });
@@ -389,6 +415,7 @@ describe("PUT /api/providers/:id/portal", () => {
     const providerId = await seedProvider();
 
     const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
+      confirmedOrigin: PORTAL_ORIGIN,
       username: PORTAL_USERNAME,
       password: PORTAL_PASSWORD,
     });
@@ -396,6 +423,140 @@ describe("PUT /api/providers/:id/portal", () => {
     expect(response.status).toBe(400);
     const body = await json<ApiError>(response);
     expect(body.error).toBe("bad_request");
+  });
+
+  it("refuses a save with no confirmedOrigin at all", async () => {
+    usePorts({ ...idlePorts(), fetch: htmlStub(LOGIN_PAGE).fetchImpl });
+    const providerId = await seedProvider();
+
+    const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
+      baseUrl: PORTAL_ORIGIN,
+      username: PORTAL_USERNAME,
+      password: PORTAL_PASSWORD,
+    });
+
+    expect(response.status).toBe(400);
+    expect(await testRepos().portalAccounts.get(providerId)).toBeNull();
+  });
+
+  it("refuses to seal credentials when the probe lands somewhere the owner did not confirm", async () => {
+    // The whole point of the two-step flow: the probe follows redirects, so the
+    // origin it settles on can change between the owner reading it and pressing
+    // Confirm. Nothing is stored when it does.
+    const stub = stubFetch([
+      {
+        match: /.*/,
+        respond: (request) => {
+          const { origin, pathname } = new URL(request.url);
+          return origin === MOVED_ORIGIN && pathname.endsWith("/Authentication/Login")
+            ? new Response(LOGIN_PAGE, { headers: { "content-type": "text/html; charset=utf-8" } })
+            : new Response(null, {
+                status: 302,
+                headers: { location: `${MOVED_ORIGIN}/MyChart/Authentication/Login` },
+              });
+        },
+      },
+    ]);
+    usePorts({ ...idlePorts(), fetch: stub.fetchImpl });
+    const providerId = await seedProvider();
+
+    const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
+      baseUrl: PORTAL_ORIGIN,
+      confirmedOrigin: PORTAL_ORIGIN,
+      username: PORTAL_USERNAME,
+      password: PORTAL_PASSWORD,
+    });
+
+    expect(response.status).toBe(400);
+    const body = await json<ApiError>(response);
+    expect(body.error).toBe("portal_origin_unconfirmed");
+    expect(body.details?.landedOrigin).toBe(MOVED_ORIGIN);
+    // No endpoint, and above all no credential.
+    expect(await testRepos().portalAccounts.get(providerId)).toBeNull();
+  });
+
+  it("reports an off-site redirect as a discovery failure that names where it went", async () => {
+    const stub = stubFetch([
+      {
+        match: /.*/,
+        respond: () =>
+          new Response(null, {
+            status: 302,
+            headers: { location: "https://attacker.example/MyChart/Authentication/Login" },
+          }),
+      },
+    ]);
+    usePorts({ ...idlePorts(), fetch: stub.fetchImpl });
+    const providerId = await seedProvider();
+
+    const response = await owner().send("PUT", `/api/providers/${providerId}/portal`, {
+      baseUrl: PORTAL_ORIGIN,
+      confirmedOrigin: PORTAL_ORIGIN,
+      username: PORTAL_USERNAME,
+      password: PORTAL_PASSWORD,
+    });
+
+    expect(response.status).toBe(400);
+    const body = await json<ApiError>(response);
+    expect(body.error).toBe("portal_discovery_failed");
+    expect(body.details?.reason).toBe("portal_redirected_offsite");
+    // The one host this surface names, because it is the one thing the owner can
+    // act on -- and it never reaches a log line.
+    expect(body.details?.landedOrigin).toBe("https://attacker.example");
+    expect(await testRepos().portalAccounts.get(providerId)).toBeNull();
+  });
+});
+
+describe("POST /api/providers/:id/portal/discover", () => {
+  it("reports the origin, mount and flavour, and stores nothing at all", async () => {
+    usePorts({ ...idlePorts(), fetch: htmlStub(LOGIN_PAGE).fetchImpl });
+    const providerId = await seedProvider();
+
+    const response = await owner().send("POST", `/api/providers/${providerId}/portal/discover`, {
+      baseUrl: `${PORTAL_ORIGIN}/MyChart/Authentication/Login`,
+    });
+
+    expect(response.status).toBe(200);
+    expect(await json<PortalDiscoveryDto>(response)).toStrictEqual({
+      origin: PORTAL_ORIGIN,
+      mountPath: PORTAL_MOUNT,
+      flavor: "classic",
+    });
+    // A probe, not a write: no row exists until the owner confirms the origin.
+    expect(await testRepos().portalAccounts.get(providerId)).toBeNull();
+  });
+
+  it("takes no credential, and rejects one offered", async () => {
+    usePorts({ ...idlePorts(), fetch: htmlStub(LOGIN_PAGE).fetchImpl });
+    const providerId = await seedProvider();
+
+    const response = await owner().send("POST", `/api/providers/${providerId}/portal/discover`, {
+      baseUrl: PORTAL_ORIGIN,
+      password: PORTAL_PASSWORD,
+    });
+
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects a non-https URL before probing anything", async () => {
+    const stub = htmlStub(LOGIN_PAGE);
+    usePorts({ ...idlePorts(), fetch: stub.fetchImpl });
+    const providerId = await seedProvider();
+
+    const response = await owner().send("POST", `/api/providers/${providerId}/portal/discover`, {
+      baseUrl: INSECURE_ORIGIN,
+    });
+
+    expect(response.status).toBe(400);
+    expect(stub.requests).toStrictEqual([]);
+  });
+
+  it("404s for a provider that does not exist", async () => {
+    usePorts(idlePorts());
+    const response = await owner().send("POST", "/api/providers/nope/portal/discover", {
+      baseUrl: PORTAL_ORIGIN,
+    });
+    expect(response.status).toBe(404);
   });
 });
 

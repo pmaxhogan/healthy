@@ -8,7 +8,7 @@
  * username field was renamed between releases, so the field name has to be read
  * rather than assumed.
  *
- * Two hard rules:
+ * Three hard rules:
  *
  *  - **Credentials are never sent from this module.** Every probe is an
  *    unauthenticated GET of the login page. Whatever a wrong guess reaches, it
@@ -16,6 +16,13 @@
  *  - **No cookie jar.** A probe against the wrong mount (or a redirect chain
  *    through an alias) must not be able to plant a cookie that a later
  *    authenticated session would carry.
+ *  - **The origin this reports is https, and on the site the owner pasted.**
+ *    What comes out of here becomes `portal_accounts.base_url`, which is where
+ *    the owner's portal password is POSTed from then on -- so the chain is not
+ *    allowed to relocate it (`portalFetch` refuses an off-site or non-https hop)
+ *    and the landed origin is re-checked here before it is reported. The owner
+ *    then confirms that origin before any credential is sealed against it; see
+ *    `worker/api/routes/portal.ts`.
  *
  * The mount is taken from where the probe *landed*, not from the candidate that
  * was tried: a root-mounted probe that gets redirected to a prefix has, in one
@@ -25,7 +32,14 @@
 import { AppError } from "../../lib/errors.ts";
 
 import { apiBasePathHint, findAntiforgeryField, inputFields } from "./html.ts";
-import { isOpenIdHandoff, mountedUrl, normaliseMount, originOf, portalFetch } from "./http.ts";
+import {
+  isOpenIdHandoff,
+  mountedUrl,
+  normaliseMount,
+  originOf,
+  portalFetch,
+  requireHttps,
+} from "./http.ts";
 import { ANTIFORGERY_FIELD_NAMES, CANDIDATE_MOUNTS, FIELDS, PATHS } from "./wire.ts";
 
 import type { PortalHttpDeps } from "./http.ts";
@@ -158,6 +172,9 @@ async function probe(mount: string, baseUrl: string, deps: DiscoveryDeps): Promi
     followBodyRedirects: true,
   });
   if (response.status !== 200) return { endpoint: null, reason: "http_error" };
+  // Belt and braces over `portalFetch`'s own per-hop rule: the value below is
+  // about to become the origin a password is sent to.
+  requireHttps(response.url, "Login");
 
   // Before the form checks, because a `custom_oidc` deployment fails all of them:
   // its login page renders no form at all, so without this it would be reported as

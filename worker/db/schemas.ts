@@ -17,6 +17,8 @@
 
 import { z } from "zod";
 
+import { isHttpsUrl } from "@shared/url.ts";
+
 import { AppError } from "../lib/errors.ts";
 import { DEFAULT_MAIL_SENDER_ALLOWLIST_CSV } from "../mail/classify.ts";
 
@@ -234,14 +236,28 @@ export type RunSummaryInput = z.input<typeof runSummarySchema>;
  *
  * Deliberately loose: `worker/providers/mychart/**` owns this shape and adds to
  * it as deployments turn out to differ (which login application to drive, for
- * one). Validating the two fields the db layer and the sign-in actually read, and
+ * one). Validating the fields the db layer and the sign-in actually read, and
  * passing everything else through untouched, is what lets the adapter evolve
  * without a migration or a schema change here. A strict object would silently
  * strip the field that decides how to sign in.
+ *
+ * The two origins are checked as **https URLs**, not merely as non-empty
+ * strings. They are what the sign-in rebuilds a credential-bearing URL from, so
+ * a stored `http://…` (or a stored anything-else) would put the owner's portal
+ * password on the wire in cleartext. A row that fails this makes the sign-in
+ * fail closed -- see `portalAccounts.getEndpoint`.
  */
+const httpsOrigin = z
+  .string()
+  .min(1)
+  .max(2048)
+  .refine(isHttpsUrl, { error: "must be an https URL" });
+
 export const portalEndpointSchema = z.looseObject({
-  baseUrl: z.string().min(1),
+  baseUrl: httpsOrigin,
   mountPath: z.string().min(1),
+  /** `custom_oidc` only, and just as credential-bearing as `baseUrl`. */
+  authBaseUrl: httpsOrigin.optional(),
 });
 
 export type StoredPortalEndpoint = z.infer<typeof portalEndpointSchema>;

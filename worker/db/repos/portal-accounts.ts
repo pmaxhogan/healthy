@@ -197,11 +197,16 @@ export function makePortalAccountsRepo(ctx: Ctx) {
     },
 
     /**
-     * The stored discovery result, or null when there is none to read.
+     * The stored discovery result, or null when the column is NULL.
      *
-     * Tolerant by design, like the cookie jar: an unreadable endpoint costs a
-     * rebuild from `base_url` and `mount_path`, and turning it into a 500 would
-     * take the portal down over a column nothing but discovery ever writes.
+     * **Deliberately not tolerant.** It used to swallow a validation failure and
+     * answer null, which sent the sign-in to `fallbackEndpoint` -- so a stored
+     * endpoint whose `baseUrl` was not an https origin was quietly replaced by
+     * one built from the `base_url` column and used anyway. The schema now
+     * checks both origins as https URLs, and a row that fails it has to stop the
+     * sign-in rather than be worked around: the value decides where a password
+     * is POSTed. Null still means "nothing was ever stored", which is the
+     * pre-0003 row the fallback exists for.
      */
     async getEndpoint(providerId: string): Promise<StoredPortalEndpoint | null> {
       const row = await byProvider(providerId);
@@ -212,9 +217,14 @@ export function makePortalAccountsRepo(ctx: Ctx) {
       } catch (error) {
         ctx.log.warn("portal_accounts.endpoint_unreadable", {
           providerId,
-          code: isAppError(error) ? error.code : "internal",
+          errorCode: isAppError(error) ? error.code : "internal",
         });
-        return null;
+        throw new AppError(
+          "portal_discovery_failed",
+          "the stored portal endpoint is not usable; re-save the portal login",
+          { providerId },
+          { cause: error },
+        );
       }
     },
 

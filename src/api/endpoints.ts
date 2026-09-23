@@ -28,6 +28,8 @@ import type {
   OverviewDto,
   PolicyRuleDto,
   PortalAccountStatusDto,
+  PortalDiscoverRequest,
+  PortalDiscoveryDto,
   PortalSignInPhase,
   ProviderDto,
   PutPortalAccountRequest,
@@ -91,8 +93,14 @@ export const endpoints = {
   portalAccount: (providerId: string, signal?: AbortSignal): Promise<PortalAccountStatusDto> =>
     api.get(`/api/providers/${encodeURIComponent(providerId)}/portal`, signal),
   /**
-   * PUT, not POST: this replaces the login wholesale. `username` and
-   * `password` are both required on every call, never a partial update.
+   * Probe for the portal without storing anything, so the owner can confirm the
+   * origin before a credential is sealed against it. Step one of `savePortalAccount`.
+   */
+  discoverPortal: (providerId: string, body: PortalDiscoverRequest): Promise<PortalDiscoveryDto> =>
+    api.post(`/api/providers/${encodeURIComponent(providerId)}/portal/discover`, body),
+  /**
+   * PUT, not POST: this replaces the login wholesale. `username`, `password` and
+   * `confirmedOrigin` are all required on every call, never a partial update.
    */
   savePortalAccount: (
     providerId: string,

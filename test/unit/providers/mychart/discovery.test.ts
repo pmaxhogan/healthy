@@ -20,12 +20,12 @@ import {
   HOST,
   loginPageNew,
   loginPageOld,
-  META_REDIRECT_PAGE,
+  metaRedirectPage,
   NOT_A_LOGIN_PAGE,
   OPENID_STUB_PAGE,
   redirect,
   routed,
-  SCRIPT_REDIRECT_PAGE,
+  scriptRedirectPage,
   html,
   stubPortal,
   TOKEN,
@@ -33,6 +33,15 @@ import {
 
 import type { PortalFetchStub } from "./fixtures.ts";
 import type { AppError } from "../../../../worker/lib/errors.ts";
+
+/**
+ * `HOST` over plain http.
+ *
+ * Derived rather than written out: a literal `http://` URL in this repository is
+ * rewritten to `https://` by an eslint fixer, which would quietly turn the two
+ * downgrade tests below into tests of nothing.
+ */
+const INSECURE_HOST = HOST.replace("https://", "http://");
 
 function deps(stub: PortalFetchStub, mountHint?: string) {
   return {
@@ -48,10 +57,16 @@ function probeFor(stub: PortalFetchStub): Promise<unknown> {
 }
 
 async function codeOf(promise: Promise<unknown>): Promise<string> {
+  const error = await appErrorOf(promise);
+  return error.code;
+}
+
+/** The `AppError` a promise rejected with, so `details` can be asserted too. */
+async function appErrorOf(promise: Promise<unknown>): Promise<AppError> {
   try {
     await promise;
   } catch (error) {
-    return (error as AppError).code;
+    return error as AppError;
   }
   throw new Error("expected the promise to reject");
 }
@@ -120,16 +135,18 @@ describe("discoverPortal", () => {
     ]);
   });
 
-  it("follows a script redirect to another host and takes the mount from where it landed", async () => {
+  it("follows a same-origin script redirect and takes the mount from where it landed", async () => {
     const stub = stubPortal((call) => {
-      const { origin, pathname } = new URL(call.url);
-      if (origin === ALIAS) return html(SCRIPT_REDIRECT_PAGE);
+      const { pathname } = new URL(call.url);
+      if (pathname === "/MyChart/Authentication/Login") {
+        return html(scriptRedirectPage(`${HOST}/prd/Authentication/Login`));
+      }
       return pathname === "/prd/Authentication/Login"
         ? html(loginPageNew())
         : new Response("not found", { status: 404 });
     });
 
-    await expect(discoverPortal(ALIAS, deps(stub))).resolves.toStrictEqual({
+    await expect(discoverPortal(HOST, deps(stub))).resolves.toStrictEqual({
       baseUrl: HOST,
       mountPath: "/prd/",
       usernameField: "LoginIdentifier",
@@ -138,19 +155,75 @@ describe("discoverPortal", () => {
     });
   });
 
-  it("follows a meta-refresh redirect the same way", async () => {
+  it("follows a same-origin meta-refresh redirect the same way", async () => {
     const stub = stubPortal((call) => {
-      const { origin, pathname } = new URL(call.url);
-      if (origin === ALIAS) return html(META_REDIRECT_PAGE);
+      const { pathname } = new URL(call.url);
+      if (pathname === "/MyChart/Authentication/Login") {
+        return html(metaRedirectPage(`${HOST}/prd/Authentication/Login`));
+      }
       return pathname === "/prd/Authentication/Login"
         ? html(loginPageNew())
         : new Response("not found", { status: 404 });
     });
 
-    await expect(discoverPortal(ALIAS, deps(stub))).resolves.toMatchObject({
+    await expect(discoverPortal(HOST, deps(stub))).resolves.toMatchObject({
       baseUrl: HOST,
       mountPath: "/prd/",
     });
+  });
+
+  it.each([
+    ["a script redirect", scriptRedirectPage],
+    ["a meta refresh", metaRedirectPage],
+  ])("never follows %s across an origin, even to the same site", async (_label, page) => {
+    // A body-level redirect is content the page chose, and it is the cheapest
+    // thing for a compromised page to inject: a `window.location` in a plain 200
+    // used to relocate discovery -- and therefore where the owner's password gets
+    // POSTed -- to any origin at all. Not followed, so the alias simply looks
+    // like a host with no login page on it.
+    const stub = stubPortal((call) => {
+      const { origin, pathname } = new URL(call.url);
+      if (origin === ALIAS) return html(page(`${HOST}/prd/Authentication/Login`));
+      return pathname === "/prd/Authentication/Login"
+        ? html(loginPageNew())
+        : new Response("not found", { status: 404 });
+    });
+
+    const code = await codeOf(discoverPortal(ALIAS, deps(stub)));
+
+    expect(code).toBe("portal_parse_failed");
+    // The real login page was never reached, so nothing about it was learned.
+    const origins = stub.calls.map((call) => new URL(call.url).origin);
+    expect([...new Set(origins)]).toStrictEqual([ALIAS]);
+  });
+
+  it("refuses a Location header that leaves the site, naming where it went", async () => {
+    const stub = stubPortal(() => redirect("https://attacker.example/MyChart/Login"));
+
+    const error = await appErrorOf(discoverPortal(HOST, deps(stub)));
+    // Wrapped by the API route into `portal_discovery_failed`; the adapter itself
+    // reports the specific code and the origin the chain tried to reach, which is
+    // the one host this surface ever names.
+    expect(error.code).toBe("portal_redirected_offsite");
+    expect(error.details?.landedOrigin).toBe("https://attacker.example");
+  });
+
+  it("refuses a Location header that downgrades to http, on the same host", async () => {
+    const stub = stubPortal(() => redirect(`${INSECURE_HOST}/MyChart/Authentication/Login`));
+
+    const error = await appErrorOf(discoverPortal(HOST, deps(stub)));
+    expect(error.code).toBe("portal_insecure_redirect");
+    // A scheme, never a host: this detail does reach the logs.
+    expect(error.details).toStrictEqual({ endpoint: "Login", scheme: "http:" });
+  });
+
+  it("refuses to probe a non-https URL at all", async () => {
+    const stub = stubPortal(() => html(loginPageNew()));
+
+    const code = await codeOf(discoverPortal(INSECURE_HOST, deps(stub)));
+
+    expect(code).toBe("portal_insecure_redirect");
+    expect(stub.calls).toStrictEqual([]);
   });
 
   it("follows a Location header and keeps the mount it landed on", async () => {

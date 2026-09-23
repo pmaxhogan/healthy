@@ -34,7 +34,13 @@ export type ErrorCode =
   // portal itself, so unlike the codes above they really are 4xx: the owner gave
   // a URL that hosts no login page, or asked for one sign-in too many today.
   | "portal_discovery_failed"
-  | "portal_attempts_exhausted";
+  | "portal_attempts_exhausted"
+  // Three more the admin API raises about where a portal *is*, rather than about
+  // what it answered. All 4xx for the same reason as the two above: each one is
+  // about a URL the owner gave, or a redirect chain from it.
+  | "portal_redirected_offsite" // the chain left the site the owner pasted
+  | "portal_insecure_redirect" // the chain left https, or never was https
+  | "portal_origin_unconfirmed"; // credentials offered against an unconfirmed origin
 
 const STATUS: Record<ErrorCode, number> = {
   bad_request: 400,
@@ -67,6 +73,9 @@ const STATUS: Record<ErrorCode, number> = {
   // the daily sign-in budget is this app's own rate limit.
   portal_discovery_failed: 400,
   portal_attempts_exhausted: 429,
+  portal_redirected_offsite: 400,
+  portal_insecure_redirect: 400,
+  portal_origin_unconfirmed: 400,
 };
 
 export interface AppErrorBody {

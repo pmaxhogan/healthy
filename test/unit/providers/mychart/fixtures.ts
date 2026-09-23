@@ -173,15 +173,25 @@ export const HOME_PAGE_WITH_INNOCENT_MARKERS = `<!doctype html><html><body>
   </form>
 </body></html>`;
 
-/** A vanity host that redirects with a script rather than a header. */
-export const SCRIPT_REDIRECT_PAGE = `<!doctype html><html><head><script>
-  window.location.href = "${HOST}/prd/Authentication/Login";
+/**
+ * A page that redirects with a script rather than a header.
+ *
+ * Parameterised on the target because the origin is what decides whether it is
+ * followed at all: a body-level redirect is content the page chose, so
+ * `portalFetch` follows it only within the same origin.
+ */
+export function scriptRedirectPage(target: string): string {
+  return `<!doctype html><html><head><script>
+  window.location.href = "${target}";
 </script></head><body>Redirecting</body></html>`;
+}
 
 /** The same, as a meta refresh. */
-export const META_REDIRECT_PAGE = `<!doctype html><html><head>
-  <meta http-equiv="refresh" content="0;url=${HOST}/prd/Authentication/Login" />
+export function metaRedirectPage(target: string): string {
+  return `<!doctype html><html><head>
+  <meta http-equiv="refresh" content="0;url=${target}" />
 </head><body>Redirecting</body></html>`;
+}
 
 /** A page that is not a login form at all: a marketing landing page. */
 export const NOT_A_LOGIN_PAGE = `<!doctype html><html><body>
