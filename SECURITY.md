@@ -14,46 +14,88 @@ surface, and the MCP surface.
 
 ## Assets and where they live
 
-| Asset                                 | Store          | At rest                                          |
-| ------------------------------------- | -------------- | ------------------------------------------------ |
-| Health-system and Google OAuth tokens | D1             | AES-GCM-256, application layer                   |
-| Per-organisation client secrets       | D1             | AES-GCM-256, application layer                   |
-| Patient identifiers                   | D1             | AES-GCM-256, application layer                   |
-| Cached FHIR resources                 | D1             | AES-GCM-256, application layer                   |
-| Patient-portal upcoming visits        | D1             | AES-GCM-256, application layer                   |
-| MCP access and refresh tokens         | Workers KV     | Managed by `@cloudflare/workers-oauth-provider`  |
-| Admin password                        | Worker secret  | PBKDF2-SHA256, 100k iterations, per-hash salt    |
-| Encryption key, API credentials       | Worker secrets | Cloudflare-managed                               |
-| Configuration (calendar, templates)   | D1 `settings`  | Plaintext (non-sensitive by construction)        |
-| Patient-portal login and cookie jar   | D1             | AES-GCM-256, application layer                   |
-| Portal verification-code sender       | D1             | AES-GCM-256, application layer                   |
-| Inbound mail: code, sender, subject   | D1             | AES-GCM-256, application layer                   |
-| Full-refresh progress                 | Durable Object | Plaintext: provider ids, a run id, counts, codes |
-| Portal sign-in progress               | Durable Object | Plaintext: a provider id, a step, counts, codes  |
+Three treatments, and every column is in exactly one of them:
 
-Four tables hold values that are **plaintext on purpose**, and it is worth
-saying which and why rather than leaving it to be inferred:
+- **Sealed**: AES-GCM-256 in the application, `v1:`/`v2:` envelope, AAD bound to
+  `<table>.<column>.<rowId>` (see below). `v2:` pads the plaintext to a size
+  bucket first (64, 128, 256, ... bytes), so the ciphertext stops giving away a
+  short value's exact length.
+- **Blinded**: a keyed HMAC-SHA256 under a key derived from `DATA_KEY` with HKDF
+  (info `healthy/blind/v1`) — never the AES key itself. Deterministic, so the
+  column is still a primary key, an index and an exact match, but a snapshot
+  reader cannot compute or confirm one without the key. Every input includes the
+  health system's row id, so the same upstream id at two organisations blinds to
+  two unrelated values. Stored as `~` plus base64url (128 bits for an id, 256 for
+  a digest). See `worker/db/blind.ts`.
+- **Plaintext**: listed below, each with the reason.
 
-- `portal_accounts.base_url`, `mount_path` and `endpoint_json`, and the
-  `portal_api_base_path` setting. Each names the organisation, which is the
-  category this repository is otherwise strictest about — but they are also
-  what the sign-in reads on every hop to build a URL, and sealing them would
-  put a decrypt in the path of every request without changing who can read a
-  D1 snapshot that already contains the sealed columns' ciphertext. The
-  credentials, the cookie jar, the MFA contact and the expected code sender in
-  the same row are all sealed.
-- `mail_inbox.kind`, `received_at`, `consumed_at`, `expires_at` and
-  `raw_size`: a classification, three timestamps and a byte count, none of
-  which names anyone. The sender, the subject and the code are sealed. The
-  legacy `from_addr` / `subject` columns are kept only until a migration can
-  drop them and are written empty.
-- `portal_visits.csn`, `start_at`, `status`, `state` and the timestamps: the
-  portal's visit number (already stored the same way as
-  `calendar_events.portal_csn`), the visit's start (as `calendar_events`
-  stores it), a word from a fixed status vocabulary, and bookkeeping. The
-  visit itself — practitioner, department, address, phone — is only in
-  `payload_enc`, sealed against `portal_visits.payload_enc.<providerId>:<csn>`.
-  Rows are purged a year after the visit.
+| Asset                                                                                       | Store          | At rest                                                  |
+| ------------------------------------------------------------------------------------------- | -------------- | -------------------------------------------------------- |
+| Health-system and Google OAuth tokens                                                       | D1             | Sealed                                                   |
+| Per-organisation client secrets                                                             | D1             | Sealed, padded                                           |
+| Health-system identity: name, FHIR base URL, brand, portal URL, config                      | D1 `providers` | Sealed in place, padded                                  |
+| Patient FHIR id on the connection                                                           | D1             | Sealed, padded                                           |
+| Cached FHIR resources (including the Patient)                                               | D1             | Payload sealed; resource id blinded; content hash keyed  |
+| Patient-portal upcoming visits                                                              | D1             | Payload sealed; visit number blinded; content hash keyed |
+| Calendar bookkeeping: event key, encounter, visit number, calendar id                       | D1             | Blinded; fingerprint keyed                               |
+| Calendar bookkeeping: a row's start and real calendar id                                    | D1             | Sealed together, padded (`calendar_events.detail_enc`)   |
+| Google event marker (`extendedProperties.private.key`, `fp`)                                | Google         | The blinded event key and the keyed fingerprint          |
+| Settings that name the owner: calendar id, timezone, mail sender allowlist, portal API path | D1 `settings`  | Sealed in place, padded                                  |
+| Other settings: templates, colour ids, window, offsets, limits, backoff, MCP switch         | D1 `settings`  | Plaintext (names no one; see below)                      |
+| Patient-portal login, MFA contact, expected code sender                                     | D1             | Sealed, padded                                           |
+| Patient-portal cookie jar                                                                   | D1             | Sealed                                                   |
+| Patient-portal location: base URL, mount path, discovered endpoint                          | D1             | Sealed in place, padded                                  |
+| Inbound mail: code, sender, subject                                                         | D1             | Sealed, padded                                           |
+| Login rate-limit key                                                                        | D1             | Keyed digest of the client IP                            |
+| MCP access and refresh tokens                                                               | Workers KV     | Managed by `@cloudflare/workers-oauth-provider`          |
+| Admin password                                                                              | Worker secret  | PBKDF2-SHA256, 100k iterations, per-hash salt            |
+| Encryption key, API credentials                                                             | Worker secrets | Cloudflare-managed                                       |
+| Full-refresh progress                                                                       | Durable Object | Plaintext: provider ids, a run id, counts, codes         |
+| Portal sign-in progress                                                                     | Durable Object | Plaintext: a provider id, a step, counts, codes          |
+
+What is **plaintext on purpose**, table by table. None of it names a person, a
+health system, a practitioner, a place or a visit; what it does disclose is
+listed rather than left to be inferred:
+
+- **Row ids and foreign keys** everywhere (`providers.id`, `provider_id`,
+  `connections.id`, ULIDs): this app's own random ids. A ULID's first ten
+  characters are its creation time, which duplicates a timestamp column next
+  to it.
+- **`providers.vendor`, `environment`, `created_at`, `updated_at`,
+  `deleted_at`**: "epic", "prod" or "sandbox", and bookkeeping.
+- **`connections.scope`, `status`, the lease and failure columns and the
+  timestamps**: the SMART scope string is the same list of US Core categories
+  for every organisation. `google_account.scope` and `status` likewise.
+- **`fhir_cache.provider_id`, `resource_type`, `last_updated`, `fetched_at`,
+  `expires_at`**, and **`fhir_sync_state`**: which types of record exist and
+  how many, and each type's refresh health. Row counts per type and the size
+  class of a sealed payload are accepted leaks (see Known limits).
+- **`calendar_events.provider_id`, `state`, `source`, `first_seen_at`,
+  `last_seen_at`, `ghosted_at`, `updated_at`**: whether a row is live or a
+  ghost, which pass wrote it, and when this app saw it. Not when the
+  appointment is.
+- **`portal_visits.provider_id`, `status`, `state`, `missing_since`,
+  `fetched_at`, `expires_at`**: a word from a fixed status vocabulary and
+  bookkeeping. `expires_at` is rounded up to a 30-day boundary, so it does not
+  date the visit (see "The visit timeline" below).
+- **`portal_accounts.session_state`, the attempt counters and the
+  timestamps**: whether the session is live and how many sign-ins were spent
+  today.
+- **`mail_inbox.kind`, `received_at`, `consumed_at`, `expires_at` and
+  `raw_size`**: a classification, three timestamps and a byte count. The legacy
+  plaintext `from_addr` / `subject` columns were blanked by migration 0007 and
+  are dropped by a later one.
+- **`mcp_audit`, `run_log`**: that a tool ran, by which client, how many rows
+  came back, and each sync run's counts and error codes. The owner's activity
+  times and clinical counts (for example a tool's `result_count`) are visible
+  here; that is accepted.
+- **The other settings** (`default_title_template`, `default_color_id`,
+  `ghost_color_id`, `window_past_days`, `default_arrival_offset_min`,
+  `sync_backoff_until`, `mcp_enabled`, `portal_login_attempt_limit`): generic
+  configuration. A title template is only placeholders unless the owner types
+  a name into it; one that does should go into a health system's config, which
+  is sealed.
+- **`data_migrations`**: which one-shot backfill ran, when, and counts.
 - The two Durable Objects (`FULL_REFRESH`, `PORTAL_SIGNIN`) hold a provider
   id, a step name, counts and stable codes. Never a credential, never an
   emailed code, never a byte of a portal's HTML. `PORTAL_SIGNIN` additionally
@@ -62,12 +104,37 @@ saying which and why rather than leaving it to be inferred:
   before either increments it (and so the second `SendCode` cannot invalidate the
   code the first is waiting for).
 
+### The visit timeline
+
+An appointment's start is sealed wherever it is stored, and each query that
+used to read it plaintext was decided on its own:
+
+- **The calendar window** (`calendar_events`). Both passes already read a
+  health system's rows by `provider_id` (indexed) and narrowed them to the
+  window in memory, so the start moved into the sealed `detail_enc` with no new
+  query and no new round trip: `list` opens each row it reads anyway. No
+  plaintext bucket is kept; the old `start_at` index is dropped.
+- **Ordering** (`calendar_events.list`, `portal_visits.list`): applied after
+  the rows are opened. A health system has tens of rows, not thousands.
+- **"Is this visit over yet"** (`portal_visits.record`): only the rows the
+  portal stopped returning are opened, to read their start.
+- **The purge** (`portal_visits.purgeExpired`): the one query that filters on
+  time in SQL. It uses `expires_at` (indexed), which was the visit's start plus
+  a year to the second, and is now rounded up to a 30-day boundary: the purge
+  still runs within a month of when it would have, and the column no longer
+  says when the visit was. `fhir_cache.expires_at` was never derived from a
+  visit.
+
 **Encryption at rest is applied by the application, not just by the platform.**
 Every sensitive column is sealed before it reaches D1 as
-`v1:base64url(iv || ciphertext)`, with the AES-GCM additional authenticated data
-bound to `<table>.<column>.<rowId>`. That binding means a ciphertext cannot be
-lifted from one row or column and replayed in another: decryption with the wrong
-AAD fails, and there is a test that asserts it does.
+`v1:base64url(iv || ciphertext)` (or `v2:`, the same around a padded plaintext),
+with the AES-GCM additional authenticated data bound to
+`<table>.<column>.<rowId>`. That binding means a ciphertext cannot be lifted from
+one row or column and replayed in another: decryption with the wrong AAD fails,
+and there is a test that asserts it does. Where a row's id is itself blinded
+(`fhir_cache`, `portal_visits`), the AAD uses the stored, blinded id; a calendar
+row's detail is bound to its Google event id, which is the one id that row keeps
+for life.
 
 ## Controls
 
@@ -78,7 +145,7 @@ request header — _and_ a password-derived session. Access alone is not treated
 sufficient, so an Access misconfiguration is not by itself a breach. Sessions are
 HMAC-signed cookies, `SameSite=Lax`, `Secure`, `HttpOnly`. State-changing
 `/api` calls additionally require a custom header and a same-origin `Origin`
-check. Login attempts are rate-limited per client, keyed by a hash of the IP
+check. Login attempts are rate-limited per client, keyed by a keyed HMAC of the IP
 rather than the address itself.
 
 **MCP path scoping.** An AI client cannot complete an interactive Access login,
@@ -151,8 +218,23 @@ history in CI.
 ## Known limits
 
 - `DATA_KEY` has no key id in the envelope, so rotating it invalidates existing
-  sealed columns. Rotation currently means re-authorising every connection and
-  dropping the cache.
+  sealed columns and moves every blinded value. Rotation currently means
+  re-authorising every connection, dropping the cache and letting the calendar
+  re-pair.
+- A blind is deterministic: two rows holding the same value are visibly equal
+  (every calendar row on one calendar has the same `calendar_id`). That is the
+  point -- it is what keeps the lookups indexed -- and it discloses equality,
+  never the value.
+- Row counts, the size class of a sealed clinical payload, and this app's own
+  timestamps are not hidden. Padding applies to short, human-chosen values;
+  cached FHIR resources are not padded.
+- **D1 Time Travel keeps the past.** D1 can restore any point in its retention
+  window (30 days on the Workers Paid plan), which means the plaintext that
+  migration 0007 and its backfill rewrote -- the owner's calendar id, timezone,
+  the health systems' names and URLs, the patient's FHIR ids, visit numbers and
+  times -- stays recoverable by anyone with access to this account's D1 until
+  that window has passed. The same is true of any value any migration
+  overwrites.
 - D1 has no per-row access control; the encryption is what stands in for it.
 - The consent page authorises the whole `health:read` scope. There is no
   per-tool consent granularity beyond the deny-list the owner sets.

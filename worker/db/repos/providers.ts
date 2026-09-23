@@ -9,10 +9,11 @@
  * sealed against `providers.client_secret_enc.<id>`, so it cannot be read from a
  * D1 dump and cannot be moved to another provider's row.
  *
- * The identity columns -- `display_name`, `fhir_base_url`, `brand_key` and
- * `portal_url` -- are sealed in place (0007), padded, against
- * `providers.<column>.<id>`: each one names the organisation, directly or
- * through the public brands index. Nothing filters or orders on them in SQL
+ * The identity columns -- `display_name`, `fhir_base_url`, `brand_key`,
+ * `portal_url` and `config_json` -- are sealed in place (0007), padded, against
+ * `providers.<column>.<id>`: each one names the organisation, directly, through
+ * the public brands index, or (the config's `org_short` and title template) in
+ * words the owner typed. Nothing filters or orders on them in SQL
  * (the `providers_live` index is on `deleted_at, vendor`), so the list is sorted
  * after it is opened. A repo instance opens each row once and reuses the result
  * until the row's `updated_at` moves, so a sync run that reads the same provider
@@ -62,6 +63,7 @@ export const PROVIDER_IDENTITY_COLUMNS = [
   "fhir_base_url",
   "brand_key",
   "portal_url",
+  "config_json",
 ] as const;
 type IdentityColumn = (typeof PROVIDER_IDENTITY_COLUMNS)[number];
 
@@ -88,13 +90,14 @@ export function makeProvidersRepo(ctx: Ctx) {
       row.brand_key === null ? null : await openIdentity("brand_key", row.id, row.brand_key),
     portal_url:
       row.portal_url === null ? null : await openIdentity("portal_url", row.id, row.portal_url),
+    config_json: await openIdentity("config_json", row.id, row.config_json),
   });
 
   const decode = (row: ProviderRow): Promise<ProviderRow> => {
     const cached = opened.get(row.id);
     if (cached?.updatedAt === row.updated_at) {
-      // The deleted/config columns are plaintext and cheap: take them from the
-      // row just read, and only the opened identity from the cache.
+      // The plaintext columns (deletion, timestamps) come from the row just read;
+      // only the opened values come from the cache.
       return withIdentity(row, cached.row);
     }
     const fresh = decodeFresh(row);
@@ -119,6 +122,7 @@ export function makeProvidersRepo(ctx: Ctx) {
       const id = newId();
       const at = ctx.now();
       const config = providerConfigSchema.parse(input.config ?? {});
+      const configEnc = await sealIdentity("config_json", id, JSON.stringify(config));
       const clientSecretEnc =
         input.clientSecret === undefined
           ? null
@@ -140,7 +144,7 @@ export function makeProvidersRepo(ctx: Ctx) {
             await sealNullable("portal_url", id, input.portalUrl ?? null),
             input.environment ?? "prod",
             clientSecretEnc,
-            JSON.stringify(config),
+            configEnc,
             at,
             at,
           ),
@@ -176,7 +180,8 @@ export function makeProvidersRepo(ctx: Ctx) {
       if (patch.config !== undefined) {
         // Replace rather than merge: the admin UI always sends the whole config,
         // and a merge would make removing an override impossible.
-        put("config_json", JSON.stringify(providerConfigSchema.parse(patch.config)));
+        const json = JSON.stringify(providerConfigSchema.parse(patch.config));
+        put("config_json", await sealIdentity("config_json", id, json));
       }
       put("updated_at", ctx.now());
 
@@ -246,15 +251,19 @@ async function withIdentity(row: ProviderRow, opened: Promise<ProviderRow>): Pro
   return { ...row, ...pickIdentity(await opened) };
 }
 
-/** The four opened identity values of a row. */
+/** The opened identity values of a row. */
 function pickIdentity(
   row: ProviderRow,
-): Pick<ProviderRow, "display_name" | "fhir_base_url" | "brand_key" | "portal_url"> {
+): Pick<
+  ProviderRow,
+  "display_name" | "fhir_base_url" | "brand_key" | "portal_url" | "config_json"
+> {
   return {
     display_name: row.display_name,
     fhir_base_url: row.fhir_base_url,
     brand_key: row.brand_key,
     portal_url: row.portal_url,
+    config_json: row.config_json,
   };
 }
 

@@ -145,7 +145,8 @@ async function legacyDatabase(h: Harness): Promise<{ upcomingEventId: string }> 
   await db
     .prepare(
       `UPDATE providers SET display_name = 'A Example Health', fhir_base_url = ?,
-              portal_url = 'https://portal.a.example.test'
+              portal_url = 'https://portal.a.example.test',
+              config_json = '{"arrival_offsets_by_visit_type":{},"enabled":true}'
         WHERE id = ?`,
     )
     .bind(h.provider.fhirBaseUrl, providerId)
@@ -291,7 +292,7 @@ describe("the 0007 backfill", () => {
     expect(completedAt).not.toBeNull();
     expect(counts).toStrictEqual({
       settingsSealed: 2,
-      providerColumnsSealed: 3,
+      providerColumnsSealed: 4,
       portalColumnsSealed: 2,
       shortSealsPadded: 3,
       cacheRowsRekeyed: 1,
