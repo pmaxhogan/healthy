@@ -6,6 +6,9 @@ import { dismissToast, toasts } from "../lib/toasts.ts";
   <div class="stack" aria-live="polite" aria-atomic="false">
     <div v-for="toast in toasts" :key="toast.id" class="toast" :class="toast.tone">
       <span class="text">{{ toast.text }}</span>
+      <button v-if="toast.action" class="small" @click="toast.action.run()">
+        {{ toast.action.label }}
+      </button>
       <button class="close" aria-label="Dismiss" @click="dismissToast(toast.id)">&times;</button>
     </div>
   </div>

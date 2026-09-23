@@ -5,10 +5,17 @@ import { reactive } from "vue";
 
 type ToastTone = "success" | "error" | "info";
 
+/** A button on the toast itself, for a message whose fix is one click away. */
+interface ToastAction {
+  label: string;
+  run: () => void;
+}
+
 export interface Toast {
   id: number;
   tone: ToastTone;
   text: string;
+  action?: ToastAction;
 }
 
 const DISMISS_AFTER_MS = 6000;
@@ -26,13 +33,14 @@ export function dismissToast(id: number): void {
   if (index !== -1) toasts.splice(index, 1);
 }
 
-function push(tone: ToastTone, text: string): void {
+function push(tone: ToastTone, text: string, action?: ToastAction): void {
   const id = sequence.next;
   sequence.next += 1;
-  toasts.push({ id, tone, text });
+  toasts.push({ id, tone, text, ...(action && { action }) });
   // Errors stay until dismissed: a failure the owner blinked past is a failure
   // they will not know about, and this dashboard is the only place it surfaces.
-  if (tone !== "error") {
+  // So does anything that asks the owner to act.
+  if (tone !== "error" && action === undefined) {
     setTimeout(() => {
       dismissToast(id);
     }, DISMISS_AFTER_MS);
@@ -45,4 +53,9 @@ export function toastSuccess(text: string): void {
 
 export function toastError(text: string): void {
   push("error", text);
+}
+
+/** An info toast with one button. Stays until it is used or dismissed. */
+export function toastAction(text: string, action: ToastAction): void {
+  push("info", text, action);
 }

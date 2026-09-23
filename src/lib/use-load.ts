@@ -9,6 +9,7 @@ import { onUnmounted, ref, shallowRef } from "vue";
 import { errorMessage, isAuthRequired } from "../api/client.ts";
 
 import { toastError } from "./toasts.ts";
+import { checkAfterError } from "./version-check.ts";
 
 import type { Ref, ShallowRef } from "vue";
 
@@ -55,6 +56,7 @@ export function useLoad<T>(loader: (signal: AbortSignal) => Promise<T>): Loadabl
     } catch (error_) {
       if (own.signal.aborted || isAuthRequired(error_)) return;
       error.value = errorMessage(error_);
+      checkAfterError(error_);
     } finally {
       if (!own.signal.aborted) loading.value = false;
     }
@@ -98,6 +100,7 @@ export function useAction(): {
         return true;
       } catch (error) {
         if (!isAuthRequired(error)) toastError(errorMessage(error));
+        checkAfterError(error);
         return false;
       } finally {
         busy.value = false;
