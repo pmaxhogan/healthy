@@ -20,6 +20,9 @@ are largely in place; hardening and the first real deployment are ongoing.
   created, patched when details change, and — when an appointment is
   cancelled or simply vanishes from the portal — turned into a greyed-out
   "Cancelled:" ghost rather than deleted, so the calendar keeps its history.
+  The one thing the sync deletes is a duplicate — a second copy of a visit
+  another, better source already has an event for — because that visit is not
+  cancelled and must appear exactly once.
 - **Read-only MCP.** Serves the aggregated record over MCP (Streamable HTTP)
   with its own OAuth flow, so an assistant such as Claude can answer
   questions about medications, labs, conditions, and appointments across

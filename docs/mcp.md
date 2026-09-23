@@ -79,7 +79,7 @@ Encounters:
   payload has shown yet; without one a visit counts as first-hand. The
   calendar sync applies the same rule, so such a visit gets one event; a
   second-hand event already on the calendar when the owner's copy turns up
-  is ghosted, as any duplicate is.
+  is deleted — not ghosted, since the visit is not cancelled.
 
 `get_health_summary`'s appointments section uses the same merge: the five
 appointments nearest to now, upcoming ones first (soonest first), then the

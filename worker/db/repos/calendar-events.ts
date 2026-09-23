@@ -274,6 +274,24 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
       return changes > 0;
     },
 
+    /**
+     * Forget one row entirely.
+     *
+     * The one caller is the portal pass removing a calendared duplicate -- a copy
+     * of a visit another, higher-precedence copy already speaks for -- after it
+     * has deleted the Google event. That is not a ghost: the visit is not
+     * cancelled, it is simply shown once, by the other copy. Dropping the row is
+     * what stops the duplicate being recreated, since a duplicate with no row is
+     * never inserted (see `worker/sync/portal-sync.ts`). True when a row went.
+     */
+    async remove(eventKey: string): Promise<boolean> {
+      const { changes } = await run(
+        ctx.db.prepare("DELETE FROM calendar_events WHERE event_key = ?").bind(eventKey),
+      );
+      if (changes > 0) ctx.log.info("calendar_events.removed", await logSafeKey(eventKey));
+      return changes > 0;
+    },
+
     /** How many of one provider's rows came from one pass and are in one state. */
     async countBySource(
       providerId: string,

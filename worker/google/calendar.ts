@@ -112,9 +112,17 @@ export interface CalendarClient {
     destinationCalendarId: string,
   ): Promise<EventRecord | null>;
   /**
-   * ADMIN CLEANUP ONLY. The sync engine must never call this: vanished
+   * Admin cleanup, plus exactly one sync path. Vanished and cancelled
    * appointments are ghosted (title prefix + transparent + grey), never
    * deleted, so that a cancelled visit stays visible in the owner's history.
+   *
+   * The one exception is a *duplicate*: a portal event for a visit that a
+   * higher-precedence copy (another organisation's own record, or a FHIR
+   * Encounter) already has an event for. That visit is not cancelled -- it is
+   * on the calendar, once -- so a grey "Cancelled:" twin beside it would be
+   * wrong, and the portal pass deletes it instead. It deletes only an event it
+   * has just seen carrying `extendedProperties.private.healthy = "1"` and the
+   * row's own key. See `removeDuplicates` in `worker/sync/portal-sync.ts`.
    */
   deleteEvent(calendarId: string, eventId: string): Promise<boolean>;
 }
@@ -537,7 +545,7 @@ export function createCalendarClient(options: CalendarClientOptions): CalendarCl
     },
 
     async deleteEvent(calendarId, eventId) {
-      // See the interface comment: admin cleanup only, never the sync.
+      // See the interface comment: admin cleanup, and the sync's duplicates only.
       await request(
         "DELETE",
         `${BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,

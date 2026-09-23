@@ -104,7 +104,10 @@ calendar.
 `calendar.events.owned` and a read-only calendar list. The sync additionally
 refuses to read or modify any event that does not carry its own
 `extendedProperties.private.healthy = "1"` marker, so it cannot touch an entry a
-human created, and it never deletes.
+human created. It deletes in exactly one case: a duplicate of a visit another,
+higher-precedence copy already has an event for, which is removed only after the
+event is seen carrying that marker and the duplicate row's own key. A cancelled
+or vanished visit is never deleted; it becomes a grey "Cancelled:" ghost.
 
 **No PHI in logs.** Logs are structured JSON, one object per line, and every
 field passes through a redactor (`worker/lib/log.ts`) before it is written. The

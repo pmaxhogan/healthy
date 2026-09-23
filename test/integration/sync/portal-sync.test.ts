@@ -169,6 +169,8 @@ describe("portal visits on the calendar", () => {
     expect(event?.transparency).toBe("transparent");
     const row = await syncRepos(fix.ctx).calendarEvents.getByKey(portalKey(fix.provider, "csn-1"));
     expect(row?.state).toBe("ghost");
+    // A cancellation keeps its event: only a duplicate is ever deleted.
+    expect(fix.upstreams.calendar.events()).toHaveLength(1);
   });
 
   it("never calendars a visit that is already canceled the first time it is seen", async () => {
@@ -365,12 +367,36 @@ describe("portal visits stored for the MCP", () => {
   });
 });
 
-async function secondOrganisation(fix: Fixture, visits: PortalVisit[]): Promise<void> {
+async function secondOrganisation(fix: Fixture, visits: PortalVisit[]): Promise<SeededProvider> {
   const other = await seedConnectedProvider(fix.ctx, {
     host: "fhir.b.example.test",
     displayName: "B Example Health",
   });
   await syncRepos(fix.ctx).portalVisits.record(other.providerId, visits, { complete: true });
+  return other;
+}
+
+/**
+ * The owning organisation's own event for the visit, as its portal pass would
+ * have written it. Provider B has no portal account in these tests, so nothing
+ * touches it -- which is what lets a test prove the delete aimed at A's copy only.
+ */
+function ownersEvent(fix: Fixture, owner: SeededProvider, csn: string): string {
+  const key = `${owner.providerId}:csn:${csn}`;
+  fix.upstreams.calendar.plant({
+    summary: "Follow-up · A. Example, MD",
+    start: { dateTime: SOON },
+    end: { dateTime: "2026-06-20T15:00:00+00:00" },
+    extendedProperties: { private: { healthy: "1", key } },
+  });
+  return key;
+}
+
+/** Provider A calendars its second-hand copy before any better copy is known. */
+async function calendaredSecondHand(fix: Fixture): Promise<string> {
+  const summary = await portalRun(fix);
+  expect(summary.eventsInserted).toBe(1);
+  return portalKey(fix.provider, "csn-a-view");
 }
 
 const shared = (overrides: Partial<PortalVisit> = {}): PortalVisit =>
@@ -401,6 +427,97 @@ describe("one visit, one event, across organisations", () => {
 
     expect(summary.eventsInserted).toBe(1);
     expect(calendarKeys(fix)).toStrictEqual([portalKey(fix.provider, "csn-a-view")]);
+  });
+
+  it("deletes, rather than ghosts, a second-hand event once the owner's copy turns up", async () => {
+    // The live case this exists for: a second organisation's portal calendared a
+    // visit before the dedupe could tell it was the first organisation's. The visit
+    // is not cancelled, so a grey "Cancelled:" twin would be wrong.
+    const fix = await fixture({ portal: { visits: [shared()] } });
+    const mine = await calendaredSecondHand(fix);
+    const owner = await secondOrganisation(fix, [portalVisit({ csn: "csn-b-own", start: SOON })]);
+    const theirs = ownersEvent(fix, owner, "csn-b-own");
+
+    const summary = await portalRun(fix);
+
+    expect(summary.eventsGhosted).toBe(0);
+    expect(summary.eventsInserted).toBe(0);
+    expect(summary.portalSkipped).toBe(1);
+    expect(calendarKeys(fix)).toStrictEqual([theirs]);
+    expect(await syncRepos(fix.ctx).calendarEvents.getByKey(mine)).toBeNull();
+  });
+
+  it("deletes a second-hand event an earlier run had already ghosted", async () => {
+    const fix = await fixture({ portal: { visits: [shared()] } });
+    const mine = await calendaredSecondHand(fix);
+    // What the build between the dedupe and this fix did: ghosted the copy.
+    fix.portal.visits = [shared({ status: "canceled" })];
+    await portalRun(fix);
+    expect(fix.upstreams.calendar.byKey().get(mine)?.summary).toMatch(/^Cancelled: /u);
+    fix.portal.visits = [shared()];
+    const owner = await secondOrganisation(fix, [portalVisit({ csn: "csn-b-own", start: SOON })]);
+    const theirs = ownersEvent(fix, owner, "csn-b-own");
+
+    const summary = await portalRun(fix);
+
+    expect(summary.eventsRestored).toBe(0);
+    expect(summary.eventsGhosted).toBe(0);
+    expect(calendarKeys(fix)).toStrictEqual([theirs]);
+    expect(await syncRepos(fix.ctx).calendarEvents.getByKey(mine)).toBeNull();
+  });
+
+  it("deletes only an event that still carries the healthy marker", async () => {
+    const fix = await fixture({ portal: { visits: [shared()] } });
+    const mine = await calendaredSecondHand(fix);
+    // The owner took the event over by hand: it no longer says it is ours.
+    const event = fix.upstreams.calendar.byKey().get(mine);
+    expect(event).toBeDefined();
+    if (event !== undefined) event.extendedProperties = { private: { key: mine } };
+    await secondOrganisation(fix, [portalVisit({ csn: "csn-b-own", start: SOON })]);
+
+    await portalRun(fix);
+
+    // Left on the calendar, and no longer tracked -- so never written again.
+    expect(fix.upstreams.calendar.events()).toHaveLength(1);
+    expect(await syncRepos(fix.ctx).calendarEvents.getByKey(mine)).toBeNull();
+  });
+
+  it("is idempotent: later runs neither delete nor recreate anything", async () => {
+    const fix = await fixture({ portal: { visits: [shared()] } });
+    const mine = await calendaredSecondHand(fix);
+    const owner = await secondOrganisation(fix, [portalVisit({ csn: "csn-b-own", start: SOON })]);
+    const theirs = ownersEvent(fix, owner, "csn-b-own");
+    await portalRun(fix);
+    const inserts = fix.upstreams.calendar.inserts;
+    const patches = fix.upstreams.calendar.patches;
+
+    for (const summary of [await portalRun(fix), await portalRun(fix)]) {
+      expect(summary.eventsInserted).toBe(0);
+      expect(summary.eventsGhosted).toBe(0);
+      expect(summary.eventsPatched).toBe(0);
+      expect(summary.portalErrors).toStrictEqual([]);
+    }
+    expect(fix.upstreams.calendar.inserts).toBe(inserts);
+    expect(fix.upstreams.calendar.patches).toBe(patches);
+    expect(calendarKeys(fix)).toStrictEqual([theirs]);
+    expect(await syncRepos(fix.ctx).calendarEvents.getByKey(mine)).toBeNull();
+  });
+
+  it("calendars the second-hand copy again once the owner's copy goes away", async () => {
+    const fix = await fixture({ portal: { visits: [shared()] } });
+    const mine = await calendaredSecondHand(fix);
+    const owner = await secondOrganisation(fix, [portalVisit({ csn: "csn-b-own", start: SOON })]);
+    await portalRun(fix);
+    expect(calendarKeys(fix)).toStrictEqual([]);
+
+    // The owning organisation is disconnected: its stored visits are forgotten.
+    await syncRepos(fix.ctx).portalVisits.clearProvider(owner.providerId);
+    const summary = await portalRun(fix);
+
+    expect(summary.eventsInserted).toBe(1);
+    expect(calendarKeys(fix)).toStrictEqual([mine]);
+    const row = await syncRepos(fix.ctx).calendarEvents.getByKey(mine);
+    expect(row?.state).toBe("active");
   });
 
   it("calendars a visit at the same time as a different one elsewhere", async () => {

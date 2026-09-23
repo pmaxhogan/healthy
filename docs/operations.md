@@ -109,6 +109,18 @@ appointment must never be turned into a ghost because an organisation's own
 API had a temporary filtering problem, so inserts and patches still
 proceed on such a run, but nothing is ghosted until a run comes back clean.
 
+A **duplicate** is not a ghost. When a visit already on the calendar turns
+out to be a second copy of one a higher-precedence source speaks for (a FHIR
+Encounter, or the owning organisation's own portal listing of a visit
+another organisation's portal showed second-hand), the visit is not
+cancelled — it is on the calendar once, under the other copy — so the
+duplicate event is **deleted** and its `calendar_events` row removed, rather
+than left as a "Cancelled:" twin. The sync deletes only an event that
+carries `extendedProperties.private.healthy = "1"` and the row's own key;
+one the owner has taken over is merely forgotten. If the better copy later
+goes away (its organisation is disconnected), the remaining copy is
+calendared again on the next run.
+
 ## Rotating secrets
 
 - **`PASSWORD_HASH`** — `npm run set-password` (prompts twice, uploads the

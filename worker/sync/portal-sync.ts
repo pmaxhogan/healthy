@@ -15,7 +15,7 @@
  * portal is the source for *upcoming* visits and FHIR stays the source for
  * everything else, including history and every clinical resource the MCP serves.
  *
- * ### The four rules that keep one appointment from becoming two events
+ * ### The five rules that keep one appointment from becoming two events
  *
  * **A portal visit the FHIR pass already mapped is skipped.** Matched by the
  * Encounter's own CSN where there is one, and otherwise by a start time within
@@ -34,6 +34,18 @@
  * absence alone would grey out every appointment the owner ever attended, the hour
  * after they attended it. So a past row is left exactly as it is, and only a
  * future one that stopped being returned is ghosted.
+ *
+ * **A duplicate already on the calendar is deleted, not ghosted.** A visit
+ * another, higher-precedence copy speaks for -- a FHIR Encounter, or the owning
+ * organisation's own portal listing of a visit this portal only sees second-hand
+ * (see `portal-dedupe.ts`) -- is not inserted. If an earlier run did insert it
+ * (before the dedupe knew better, or while the better copy was missing), its event
+ * and row are removed; see `removeDuplicates`. That is deliberately *not* the
+ * ghost rule below: a ghost says "this visit is cancelled", and a duplicate's
+ * visit is not -- it is on the calendar, once, under the other copy. A grey
+ * "Cancelled:" twin beside the real event would be both wrong and confusing. Only
+ * an event carrying `healthy=1` and the row's own key is ever deleted. Should the
+ * better copy later go away, the duplicate stops being one and is inserted again.
  *
  * **A canceled or no-show visit is ghosted with its own details.** Those are still
  * *in* the payload, so unlike a vanished one there is a model to render: the event
@@ -258,7 +270,11 @@ async function syncPortalCalendar(
     (row) => row.start_at === null || row.start_at >= input.windowStartSeconds,
   );
 
-  const { candidates, models, ghosts, touched } = await portalPlanInputs(input, builds, rows);
+  const { candidates, models, ghosts, touched, duplicates } = await portalPlanInputs(
+    input,
+    builds,
+    rows,
+  );
   // Portal keys only, not every key this provider owns: the FHIR pass's events
   // have no candidate here, and handing them to the diff would report each one as
   // an orphan. `:csn:` is what makes the two halves distinguishable by key alone.
@@ -266,7 +282,14 @@ async function syncPortalCalendar(
   const events = input.googleEvents.filter((event) =>
     (keyOf(event) ?? "").startsWith(portalPrefix),
   );
-  const plan = planChanges(rows, events, candidates);
+  // Duplicates are taken out of the diff whether or not their removal succeeds:
+  // left in, a row would be ghosted as vanished and its event reported as an
+  // orphan. A removal that failed leaves its row, and the next run tries again.
+  await removeDuplicates(input, providerId, duplicates, events);
+  const dropped = new Set(duplicates.map((row) => row.event_key));
+  const planRows = rows.filter((row) => !dropped.has(row.event_key));
+  const planEvents = events.filter((event) => !dropped.has(keyOf(event) ?? ""));
+  const plan = planChanges(planRows, planEvents, candidates);
   ctx.log.info("portal.plan", {
     providerId,
     inserts: plan.inserts.length,
@@ -279,7 +302,7 @@ async function syncPortalCalendar(
 
   input.state.unchanged += plan.unchanged.length;
   for (const entry of plan.entries) {
-    await applyPortalEntry(input, providerId, entry, models, ghosts, rows);
+    await applyPortalEntry(input, providerId, entry, models, ghosts, planRows);
   }
   // Past visits the portal has stopped returning: not a change, but the rows were
   // looked at and `last_seen_at` has to say so.
@@ -459,7 +482,8 @@ function portalSighting(
  *
  * A visit here that is the same appointment as one of these, and is outranked by
  * it, is treated exactly like a visit the FHIR pass already calendared: not
- * inserted, and ghosted if it had been. That is what keeps a visit two
+ * inserted, and deleted from the calendar if it had been (a duplicate, not a
+ * cancellation -- see the module comment). That is what keeps a visit two
  * organisations' portals both list to one event, while a visit only another
  * organisation's portal lists -- its own portal is not connected, or failing --
  * is still calendared from the copy there is.
@@ -479,7 +503,10 @@ async function otherSightings(
   return sightings;
 }
 
-/** The candidates, the two model maps, and the rows that only need a timestamp. */
+/**
+ * The candidates, the two model maps, the rows that only need a timestamp, and the
+ * rows of calendared duplicates, which the diff never sees.
+ */
 async function portalPlanInputs(
   input: PortalPassInput,
   builds: readonly PortalCandidateBuild[],
@@ -489,22 +516,28 @@ async function portalPlanInputs(
   models: Map<string, CalendarEventModel>;
   ghosts: Map<string, CalendarEventModel>;
   touched: string[];
+  duplicates: CalendarEventRow[];
 }> {
   const models = new Map<string, CalendarEventModel>();
   const ghosts = new Map<string, CalendarEventModel>();
   const candidates: PlanCandidate[] = [];
+  const duplicates: CalendarEventRow[] = [];
   const rowByKey = new Map(rows.map((row) => [row.event_key, row]));
   const now = input.ctx.now();
 
   for (const build of builds) {
     const key = build.mapping.model.key;
     const row = rowByKey.get(key);
-    // A duplicate with no row of its own is simply not calendared. A duplicate
-    // that *does* have a row is one the FHIR pass failed to adopt, so the portal's
-    // copy is the stray one and is ghosted -- with its own details, since there is
-    // a model for it.
-    if (row === undefined && build.duplicate) continue;
-    const offSchedule = build.duplicate || isOffSchedule(build.visit.status);
+    if (build.duplicate) {
+      // A duplicate with no row of its own is simply not calendared. One that
+      // *does* have a row was calendared before a better copy was known (or is one
+      // the FHIR pass failed to adopt): it is removed, not ghosted, because the
+      // visit is not cancelled -- see the module comment. That holds even when
+      // this copy says "canceled": the better copy carries the cancellation.
+      if (row !== undefined) duplicates.push(row);
+      continue;
+    }
+    const offSchedule = isOffSchedule(build.visit.status);
     candidates.push(
       await portalCandidate(input, {
         key,
@@ -518,7 +551,10 @@ async function portalPlanInputs(
     );
   }
 
-  const present = new Set(candidates.map((candidate) => candidate.key));
+  const present = new Set([
+    ...candidates.map((candidate) => candidate.key),
+    ...duplicates.map((row) => row.event_key),
+  ]);
   const touched: string[] = [];
   for (const row of rows) {
     if (present.has(row.event_key)) continue;
@@ -540,7 +576,46 @@ async function portalPlanInputs(
       hasModel: false,
     });
   }
-  return { candidates, models, ghosts, touched };
+  return { candidates, models, ghosts, touched, duplicates };
+}
+
+/**
+ * Delete each calendared duplicate's event and forget its row.
+ *
+ * Not a ghost, and the "ghosts are never deleted" rule does not apply: see the
+ * module comment. The `healthy=1` invariant does. The event is found by its key
+ * among this run's `healthy=1` listing, or -- when the listing does not have it --
+ * fetched by id and deleted only if it still carries `healthy=1` and the row's
+ * key. An event that is gone, or no longer ours, just loses its row.
+ *
+ * Google first, row second, so a failure leaves a row the next run retries. Each
+ * duplicate is on its own: one failed delete must not cost the rest of the plan.
+ */
+async function removeDuplicates(
+  input: PortalPassInput,
+  providerId: string,
+  duplicates: readonly CalendarEventRow[],
+  events: readonly EventRecord[],
+): Promise<void> {
+  if (duplicates.length === 0) return;
+  let removed = 0;
+  for (const row of duplicates) {
+    try {
+      const listed = events.find((event) => keyOf(event) === row.event_key);
+      if (listed === undefined) {
+        const fetched = await input.calendar.getEvent(row.calendar_id, row.google_event_id);
+        if (fetched !== null && keyOf(fetched) === row.event_key) {
+          await input.calendar.deleteEvent(row.calendar_id, fetched.id);
+        }
+      } else {
+        await input.calendar.deleteEvent(input.calendarId, listed.id);
+      }
+      if (await input.repos.calendarEvents.remove(row.event_key)) removed += 1;
+    } catch (error) {
+      input.ctx.log.warn("portal.duplicate_remove_failed", { providerId, ...errorFields(error) });
+    }
+  }
+  input.ctx.log.info("portal.duplicates_removed", { providerId, removed });
 }
 
 /** One mapped visit as a plan candidate, filling the model maps as it goes. */
