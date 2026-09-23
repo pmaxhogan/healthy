@@ -49,9 +49,6 @@ const JSON_CONTENT_TYPE = "application/json";
 /** Page size for both list calls. 250 is Google's documented maximum. */
 const PAGE_SIZE = "250";
 
-/** Pages to follow before giving up: an upstream bug must not spin forever. */
-const MAX_PAGES = 50;
-
 /**
  * `reason` values Google uses for quota exhaustion on a 403. These are
  * transient: the same request succeeds later.
@@ -399,14 +396,20 @@ export function createCalendarClient(options: CalendarClientOptions): CalendarCl
     }
   };
 
-  /** Follow `nextPageToken` until Google stops sending one. */
+  /**
+   * Follow `nextPageToken` until Google stops sending one. No page ceiling: the
+   * owner's calendar is whatever size it is. The one thing that stops this early
+   * is Google handing back a token it already gave us -- a genuine upstream bug,
+   * not a large calendar -- which is reported loudly rather than looped on.
+   */
   const listAll = async (
     build: (pageToken: string | null) => string,
     label: string,
   ): Promise<unknown[]> => {
     const collected: unknown[] = [];
+    const visited = new Set<string>();
     let pageToken: string | null = null;
-    for (let page = 0; page < MAX_PAGES; page++) {
+    for (;;) {
       const body = (await request("GET", build(pageToken))) as {
         items?: unknown;
         nextPageToken?: unknown;
@@ -415,6 +418,10 @@ export function createCalendarClient(options: CalendarClientOptions): CalendarCl
       if (Array.isArray(items)) collected.push(...(items as unknown[]));
       pageToken = asString(body?.nextPageToken);
       if (pageToken === null) break;
+      if (visited.has(pageToken)) {
+        throw new AppError("upstream_error", "google calendar repeated a page token", { label });
+      }
+      visited.add(pageToken);
     }
     log.debug(`google.calendar.${label}`, { count: collected.length });
     return collected;

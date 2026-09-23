@@ -209,6 +209,48 @@ describe("listSyncedEvents", () => {
 
     expect(calls[0]?.url.searchParams.has("timeMax")).toBe(false);
   });
+
+  it("has no page ceiling: it follows dozens of pages of a large calendar", async () => {
+    const totalPages = 40;
+    const { fetchImpl, calls } = recordingFetch((call, index) => {
+      const isLast = index === totalPages - 1;
+      return jsonResponse(200, {
+        items: [{ id: `ev-${String(index)}`, status: "confirmed" }],
+        ...(!isLast && { nextPageToken: `page-${String(index + 1)}` }),
+      });
+    });
+
+    const events = await client(fetchImpl).listSyncedEvents({
+      calendarId: CALENDAR_ID,
+      timeMin: "2026-06-01T00:00:00Z",
+    });
+
+    expect(calls).toHaveLength(totalPages);
+    expect(events).toHaveLength(totalPages);
+  });
+
+  it("throws instead of looping forever when Google repeats a page token", async () => {
+    const { fetchImpl, calls } = recordingFetch((_call, index) =>
+      jsonResponse(200, {
+        items: [{ id: `ev-${String(index)}`, status: "confirmed" }],
+        // Always hands back the same token: a genuine upstream bug, not a large
+        // calendar, and it must not be followed forever.
+        nextPageToken: "page-loop",
+      }),
+    );
+
+    const error = await appErrorFrom(
+      client(fetchImpl).listSyncedEvents({
+        calendarId: CALENDAR_ID,
+        timeMin: "2026-06-01T00:00:00Z",
+      }),
+    );
+
+    expect(error.code).toBe("upstream_error");
+    // First request (no token), then "page-loop" once more before the repeat is
+    // caught -- a third request would mean it looped.
+    expect(calls).toHaveLength(2);
+  });
 });
 
 describe("token handling", () => {

@@ -116,9 +116,6 @@ const ENCOUNTER_TTL_MS = 8 * 24 * 60 * 60 * 1000;
  */
 const GOOGLE_WINDOW_MARGIN_DAYS = 30;
 
-/** Rows to consider per provider. Far above any realistic appointment history. */
-const MAX_ROWS = 2000;
-
 export interface CalendarSyncOptions {
   /** Narrow the run to these providers. The admin "sync now" button's argument. */
   providerIds?: string[];
@@ -366,6 +363,12 @@ async function syncProvider(run: RunContext, target: SyncTarget): Promise<void> 
   const references = collectEncounterReferences(encounters);
   const resolved = await resolveReferences(ctx, repos, providerId, references, session.client);
   run.state.summary.resourcesCached += resolved.resources.length;
+  // Not lost: recomputed and retried from next hour's encounters. But visible on
+  // the Runs page rather than only in the logs -- see `references.ts`.
+  if (resolved.deferred > 0) {
+    run.state.summary.warnings += 1;
+    run.state.warningCodes.add("references_deferred");
+  }
 
   const mappings = await mapAppointments(run, target, encounters, resolved.resources);
   recordSightings(run, providerId, mappings);
@@ -551,7 +554,7 @@ async function cacheEncounters(
  * row nothing ever reconciles.
  */
 async function windowRows(run: RunContext, providerId: string): Promise<CalendarEventRow[]> {
-  const rows = await run.repos.calendarEvents.list({ providerId, limit: MAX_ROWS });
+  const rows = await run.repos.calendarEvents.list({ providerId });
   return rows.filter((row) => row.start_at === null || row.start_at >= run.windowStartSeconds);
 }
 

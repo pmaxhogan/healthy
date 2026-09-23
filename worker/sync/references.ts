@@ -12,10 +12,17 @@
  *   - **30-day cache.** A practitioner's name and a clinic's address change on a
  *     scale of years. Re-reading them hourly would be the single largest source of
  *     upstream requests in the whole app.
- *   - **50 reads per provider per run.** A first sync of a long history can
- *     reference hundreds of clinicians. Without a cap the run would spend its
- *     entire CPU budget on `Practitioner.Read` calls and never write an event;
- *     with one, the first run fills 50 and the next run fills the next 50.
+ *   - **50 reads per provider per run -- a pace, not a ceiling.** This is the
+ *     hourly cron pass, which gets one invocation and no alarm to resume in (the
+ *     Durable Object chunking `full-refresh.ts` uses does not apply here). A first
+ *     sync of a long history, or a wide `window_past_days`, can reference hundreds
+ *     of clinicians in one pass; without a per-run cap the run would spend its
+ *     whole CPU budget on `Practitioner.Read` calls and never write an event. What
+ *     it defers is not lost: `collectEncounterReferences` recomputes the same
+ *     references from the same encounters next hour, so a deferred name or
+ *     address resolves within a few runs rather than never -- and every run that
+ *     defers any says so loudly, both in the logs (`sync.refs.deferred` at `warn`)
+ *     and in the run's own warnings (`references_deferred`), never silently.
  *   - **A failed read is a miss, not a failure.** An organisation that refuses one
  *     Practitioner (Epic's 4118, or a 404 for a clinician who has left) must not
  *     fail the appointment that mentions them -- the event is simply written
@@ -149,7 +156,13 @@ export async function resolveReferences(
     );
   }
   if (report.deferred > 0) {
-    ctx.log.info("sync.refs.deferred", { providerId, deferred: report.deferred, maxReads });
+    // `warn`, not `info`: a deferred reference is a name or an address this run
+    // did not have time to fetch, not a routine event. It is not lost -- the same
+    // reference is collected again from next hour's encounters and resolved then,
+    // one `MAX_REFERENCE_READS` batch at a time -- but the caller has to be able
+    // to see that it happened rather than notice only that an event is missing a
+    // practitioner's name.
+    ctx.log.warn("sync.refs.deferred", { providerId, deferred: report.deferred, maxReads });
   }
   return report;
 }

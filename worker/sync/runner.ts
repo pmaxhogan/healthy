@@ -49,15 +49,22 @@ import type { Env } from "../env.ts";
 const JOB_KEY = "job";
 
 /**
- * How many chunks one refresh may take before it is given up on.
+ * A backstop against a *stuck* alarm, not a ceiling on how much a refresh may
+ * fetch.
  *
- * Thirty chunks of twenty seconds is ten minutes of refreshing for one provider,
- * which is far more than the largest record observed and still a bounded amount of
- * work -- an alarm that re-armed itself without a ceiling would be a loop, not a
- * retry. Reaching it closes the run row as `chunk_limit`, which is a visible,
- * different answer from the sweeper's `aborted`.
+ * `runFullRefreshChunk` guarantees forward progress every chunk it is handed --
+ * `fhirSyncState.record` stamps every (provider, resource type) pair it attempts
+ * as done for the cycle, on failure exactly as on success, so a chunk that does
+ * not finish the whole job still shrinks what is left of it. A record with an
+ * unusually large history (or, now that FHIR search paging has no page cap
+ * either, an unusually large single resource type) legitimately needs more
+ * chunks, and that is not a reason to stop: it is exactly what re-arming the
+ * alarm is for. This number exists only so that a *bug* which somehow broke that
+ * guarantee -- a chunk that spins without ever calling `record` -- eventually
+ * stops re-arming a Durable Object forever rather than running up Cloudflare
+ * billing unnoticed. At twenty seconds a chunk, reaching it is many hours away.
  */
-const MAX_CHUNKS = 30;
+const MAX_CHUNKS = 2000;
 
 /** A job plus how many chunks it has already had. */
 interface StoredJob extends RefreshJob {

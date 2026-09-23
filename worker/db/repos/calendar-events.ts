@@ -169,10 +169,14 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
         values.push(options.startsAfter);
       }
       const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
+      // No `LIMIT` clause at all unless a caller actually wants one: the owner's
+      // whole calendar-events table is what "list" means when nothing narrows it.
+      const limitClause = options.limit === undefined ? "" : " LIMIT ?";
+      const bound = options.limit === undefined ? values : [...values, options.limit];
       return all<CalendarEventRow>(
         ctx.db
-          .prepare(`${SELECT}${where} ORDER BY start_at IS NULL, start_at, event_key LIMIT ?`)
-          .bind(...values, options.limit ?? 1000),
+          .prepare(`${SELECT}${where} ORDER BY start_at IS NULL, start_at, event_key${limitClause}`)
+          .bind(...bound),
       );
     },
 
