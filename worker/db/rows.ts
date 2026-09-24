@@ -189,7 +189,12 @@ export interface CalendarEventRow {
  */
 export interface CalendarEventDbRow extends Omit<CalendarEventRow, "calendar_id" | "start_at"> {
   calendar_id: string;
-  detail_enc: string;
+  /**
+   * Nullable in the schema: 0007 added it with `ADD COLUMN ... TEXT` and a
+   * backfill. A row the backfill missed, or one written by hand, has NULL here,
+   * and the repo skips it rather than failing every list that reaches it.
+   */
+  detail_enc: string | null;
 }
 
 export interface AlertRow {

@@ -284,6 +284,31 @@ describe("calendar_events.list and touch", () => {
     expect(await repos.calendarEvents.list({ limit: 1 })).toHaveLength(1);
   });
 
+  it("skips and warns about a row with a NULL detail_enc instead of failing the list", async () => {
+    // Regression (security review L4): a row the 0007 backfill missed has no
+    // sealed detail. `list` used to hand the NULL to `open`, which threw out of
+    // `Promise.all` and failed every pass that listed the health system.
+    const { log, lines } = recordingLog();
+    const repos = testRepos({ log });
+    const healthSystemId = await seedHealthSystem(repos);
+    const kept = await seedEvent(repos, healthSystemId, { encounterId: "kept" });
+    const broken = await seedEvent(repos, healthSystemId, { encounterId: "broken" });
+    await env.DB.prepare("UPDATE calendar_events SET detail_enc = NULL WHERE event_key = ?")
+      .bind(broken.event_key)
+      .run();
+
+    const rows = await repos.calendarEvents.list({ healthSystemId });
+
+    expect(rows.map((row) => row.event_key)).toStrictEqual([kept.event_key]);
+    expect(await repos.calendarEvents.getByKey(broken.event_key)).toBeNull();
+    const warnings = lines
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((line) => line.event === "calendar_events.detail_missing");
+    expect(warnings.length).toBeGreaterThanOrEqual(1);
+    expect(warnings[0]).toMatchObject({ level: "warn", healthSystemId });
+    expect(JSON.stringify(warnings)).not.toContain("broken");
+  });
+
   it("sorts rows with no start time last rather than first", async () => {
     const repos = testRepos();
     const healthSystemId = await seedHealthSystem(repos);

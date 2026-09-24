@@ -162,8 +162,24 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
   const sealDetail = (googleEventId: string, detail: EventDetail): Promise<string> =>
     sealShort(ctx.env, JSON.stringify(detail), calendarDetailAad(googleEventId));
 
-  const decode = async (row: CalendarEventDbRow): Promise<CalendarEventRow> => {
+  /**
+   * Open one row, or null for a row with no `detail_enc` at all.
+   *
+   * A NULL (a row the 0007 backfill missed, or one written by hand) is skipped
+   * with a warning instead of throwing: one unreadable row must not fail every
+   * pass that lists its health system. The row cannot be acted on without the
+   * calendar id and start it would hold, so skipping it is the only option short
+   * of failing. Only NULL is skipped. A value that is present but will not open
+   * still throws, deliberately: that is what a wrong `DATA_KEY` looks like, and
+   * skipping every row then would make the sync believe it had calendared
+   * nothing and create every event again.
+   */
+  const decode = async (row: CalendarEventDbRow): Promise<CalendarEventRow | null> => {
     const { detail_enc: detailEnc, ...rest } = row;
+    if (detailEnc === null) {
+      ctx.log.warn("calendar_events.detail_missing", await logSafeKey(row.event_key));
+      return null;
+    }
     const detail = JSON.parse(
       await open(ctx.env, detailEnc, calendarDetailAad(row.google_event_id)),
     ) as EventDetail;
@@ -283,7 +299,8 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
       const rows = await all<CalendarEventDbRow>(
         ctx.db.prepare(`${SELECT}${where}`).bind(...values),
       );
-      const decoded = await Promise.all(rows.map((row) => decode(row)));
+      const opened = await Promise.all(rows.map((row) => decode(row)));
+      const decoded = opened.filter((row): row is CalendarEventRow => row !== null);
       const after = options.startsAfter;
       const windowed =
         after === undefined
