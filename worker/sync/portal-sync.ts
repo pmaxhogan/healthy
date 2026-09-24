@@ -27,6 +27,11 @@
  * renamed from `<healthSystemId>:csn:<csn>` to `<healthSystemId>:<encounterId>` and the
  * existing calendar entry is patched in place. Without it the portal event would
  * be ghosted (it is no longer "upcoming") and a duplicate inserted beside it.
+ * Adoption needs an identity match -- the same CSN, or, for an Encounter with
+ * none, the same practitioner at the same time (`sameVisitWithinHealthSystem`).
+ * A start time alone is not enough: a cancelled Encounter at the same time as a
+ * different, live portal visit would otherwise take over its event and grey it
+ * out.
  *
  * **A visit that vanishes while it is still in the future is a cancellation; one
  * that vanishes after its start time is just over.** `LoadUpcoming` only ever
@@ -82,7 +87,12 @@ import { fromIso, toIso } from "../lib/time.ts";
 import { resolveReconnectAlert } from "./alerts.ts";
 import { buildCalendarModel, ghostModel } from "./mapping.ts";
 import { planChanges } from "./plan.ts";
-import { matchAcrossHealthSystems, outranks, portalRank } from "./portal-dedupe.ts";
+import {
+  matchAcrossHealthSystems,
+  outranks,
+  portalRank,
+  sameVisitWithinHealthSystem,
+} from "./portal-dedupe.ts";
 import { SIGN_IN_BUSY_CODE, acquirePortalSignIn, releasePortalSignIn } from "./portal-gate.ts";
 import {
   DEDUPE_WINDOW_SECONDS,
@@ -928,6 +938,7 @@ async function planRenames(
 ): Promise<Map<string, { toKey: string; encounterId: string }>> {
   const renames = new Map<string, { toKey: string; encounterId: string }>();
   const claimed = new Set<string>();
+  const practitioners = await portalPractitioners(input);
   for (const [key, mapping] of input.mappings) {
     if (input.rows.some((row) => row.event_key === key)) continue;
     // The row stores the CSN blinded, so the mapping's is blinded to compare.
@@ -936,7 +947,7 @@ async function planRenames(
         ? undefined
         : await blindCsn(input.blinder, input.healthSystemId, mapping.csn);
     const match = portalRows.find(
-      (row) => !claimed.has(row.event_key) && sameVisit(row, mapping, csn),
+      (row) => !claimed.has(row.event_key) && sameVisit(row, mapping, csn, practitioners),
     );
     if (match === undefined) continue;
     claimed.add(match.event_key);
@@ -946,20 +957,43 @@ async function planRenames(
 }
 
 /**
- * True when a portal row and a FHIR mapping are two sightings of one visit.
- * `blindedCsn` is the mapping's CSN in the form the row stores it.
+ * The practitioner each stored portal visit names, by its CSN in the blinded form
+ * `calendar_events.portal_csn` holds. The row itself does not keep a name, and
+ * the name is the only identity an Encounter without a CSN can be matched on.
+ */
+async function portalPractitioners(input: AdoptPortalInput): Promise<Map<string, string>> {
+  const stored = await input.repos.portalVisits.list(input.healthSystemId);
+  const out = new Map<string, string>();
+  for (const record of stored) {
+    const practitioner = record.visit.practitioner;
+    if (practitioner === undefined || practitioner === "") continue;
+    out.set(await blindCsn(input.blinder, input.healthSystemId, record.csn), practitioner);
+  }
+  return out;
+}
+
+/**
+ * True when a portal row and a FHIR mapping are two sightings of one visit, by
+ * `sameVisitWithinHealthSystem`: the same CSN, or -- when the Encounter has none --
+ * the same practitioner at the same time. A time-only match adopts nothing: the
+ * Encounter may be a different, cancelled visit, and adopting would grey out the
+ * live one. `blindedCsn` is the mapping's CSN in the form the row stores it.
  */
 function sameVisit(
   row: CalendarEventRow,
   mapping: CalendarMapping,
   blindedCsn: string | undefined,
+  practitioners: ReadonlyMap<string, string>,
 ): boolean {
-  // The CSN first: it is the portal's own identifier for the visit, and Epic
-  // publishes the same number on the Encounter, so a match is not a guess.
-  if (blindedCsn !== undefined && row.portal_csn !== null) return row.portal_csn === blindedCsn;
-  if (row.start_at === null) return false;
-  const apart = Math.abs(row.start_at - fromIso(mapping.model.start));
-  return apart <= DEDUPE_WINDOW_SECONDS;
+  return sameVisitWithinHealthSystem(
+    {
+      // No start: only a CSN can match it.
+      start: row.start_at ?? NaN,
+      csn: row.portal_csn ?? undefined,
+      practitioner: row.portal_csn === null ? undefined : practitioners.get(row.portal_csn),
+    },
+    { start: fromIso(mapping.model.start), csn: blindedCsn, practitioner: mapping.practitioner },
+  );
 }
 
 /** A copy of one event carrying its new key, or the event itself. */

@@ -151,6 +151,14 @@ export interface CalendarMapping {
    * reader; everything else about the mapping is indifferent to it.
    */
   csn?: string;
+  /**
+   * The primary practitioner's display name, when the source named one.
+   *
+   * The other identity `portal-sync.ts` accepts when an Encounter carries no CSN:
+   * a FHIR Encounter adopts a portal visit's calendar entry only when both name
+   * the same practitioner (see `sameVisitWithinHealthSystem`).
+   */
+  practitioner?: string;
 }
 
 export interface GhostOptions {
@@ -431,6 +439,7 @@ export async function buildCalendarModel(
     reportedStart,
     arrivalOffsetMin: offsetMin,
     ...(view.csn !== undefined && { csn: view.csn }),
+    ...(view.practitioner !== undefined && { practitioner: view.practitioner }),
   };
 }
 

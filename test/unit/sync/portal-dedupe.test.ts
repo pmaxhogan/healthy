@@ -13,6 +13,7 @@ import {
   outranks,
   portalRank,
   sameVisitAcrossHealthSystems,
+  sameVisitWithinHealthSystem,
 } from "../../../worker/sync/portal-dedupe.ts";
 
 import type { Sighting } from "../../../worker/sync/portal-dedupe.ts";
@@ -93,6 +94,48 @@ describe("matchAcrossHealthSystems", () => {
         sighting({ healthSystemId: "prov_b", practitioner: undefined, department: undefined }),
       ),
     ).toBe("none");
+  });
+});
+
+describe("sameVisitWithinHealthSystem", () => {
+  it("lets the CSN decide when both carry one, whatever the clock says", () => {
+    expect(
+      sameVisitWithinHealthSystem({ start: START, csn: "c1" }, { start: START + 3600, csn: "c1" }),
+    ).toBe(true);
+    expect(
+      sameVisitWithinHealthSystem(
+        { start: START, csn: "c1", practitioner: "Ada Rivers" },
+        { start: START, csn: "c2", practitioner: "Ada Rivers" },
+      ),
+    ).toBe(false);
+  });
+
+  it("matches on the same practitioner within the window when a CSN is missing", () => {
+    expect(
+      sameVisitWithinHealthSystem(
+        { start: START, csn: "c1", practitioner: "Rivers, Ada MD" },
+        { start: START + 120, practitioner: "Dr Ada Rivers" },
+      ),
+    ).toBe(true);
+    expect(
+      sameVisitWithinHealthSystem(
+        { start: START, practitioner: "Ada Rivers" },
+        { start: START + 3600, practitioner: "Ada Rivers" },
+      ),
+    ).toBe(false);
+  });
+
+  it("never matches on a start time alone", () => {
+    expect(sameVisitWithinHealthSystem({ start: START, csn: "c1" }, { start: START })).toBe(false);
+    expect(
+      sameVisitWithinHealthSystem(
+        { start: START, practitioner: "Ada Rivers" },
+        { start: START, practitioner: "Ben Stone" },
+      ),
+    ).toBe(false);
+    expect(
+      sameVisitWithinHealthSystem({ start: START, practitioner: "Ada Rivers" }, { start: START }),
+    ).toBe(false);
   });
 });
 

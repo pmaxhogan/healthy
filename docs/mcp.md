@@ -88,8 +88,10 @@ Encounters:
 
 - **One visit, one item.** A portal visit and an Encounter for the same
   health system are the same appointment when their CSNs match, or — when either
-  side has no CSN — when their starts are within five minutes (the calendar
-  sync's own dedupe rule). The answer then carries the FHIR item, with any
+  side has no CSN — when their starts are within five minutes and both name the
+  same practitioner (the calendar sync's own dedupe rule). A shared start time
+  alone is not enough: a cancelled Encounter would otherwise absorb a different,
+  live visit at the same time. The answer then carries the FHIR item, with any
   field it lacks (practitioner, department, location, end, visit type)
   filled from the portal's copy, and never both.
 - **Every item says where it came from**: `source: "fhir"` or

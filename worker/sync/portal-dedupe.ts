@@ -150,6 +150,42 @@ export function matchAcrossHealthSystems(a: Sighting, b: Sighting): VisitMatch {
     : "none";
 }
 
+/** What {@link sameVisitWithinHealthSystem} compares. */
+export interface VisitIdentity {
+  /** Unix seconds. */
+  start: number;
+  csn?: string | undefined;
+  practitioner?: string | undefined;
+}
+
+/**
+ * True when two sightings from the SAME health system -- a FHIR Encounter and a
+ * portal visit -- are one appointment. The calendar's adoption of a portal row
+ * and the MCP's merge of a portal item both ask this.
+ *
+ * The identity half of {@link matchAcrossHealthSystems}, and nothing weaker:
+ *
+ *  - When both carry a CSN, the CSN decides, whatever the clock says. Within one
+ *    Epic instance it is the visit's own number.
+ *  - Otherwise the starts must be within `DEDUPE_WINDOW_SECONDS` AND both sides
+ *    must name the same practitioner, after normalisation.
+ *
+ * A shared start time alone is never enough, and neither is a shared place. A
+ * cancelled Encounter at the same time as a different, live portal visit is two
+ * appointments; treating it as one handed the live visit's calendar entry to the
+ * cancelled Encounter, which then greyed it out.
+ */
+export function sameVisitWithinHealthSystem(a: VisitIdentity, b: VisitIdentity): boolean {
+  const aCsn = a.csn ?? "";
+  const bCsn = b.csn ?? "";
+  if (aCsn !== "" && bCsn !== "") return aCsn === bCsn;
+  const together =
+    Number.isFinite(a.start) &&
+    Number.isFinite(b.start) &&
+    Math.abs(a.start - b.start) <= DEDUPE_WINDOW_SECONDS;
+  return together && agree(a.practitioner, b.practitioner) === true;
+}
+
 /** True when two sightings from different health systems are one appointment. */
 export function sameVisitAcrossHealthSystems(a: Sighting, b: Sighting): boolean {
   return matchAcrossHealthSystems(a, b) !== "none";

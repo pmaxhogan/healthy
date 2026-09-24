@@ -188,9 +188,17 @@ describe("upcoming portal visits", () => {
 describe("one visit, one item", () => {
   it("merges a portal visit into the FHIR Encounter within the dedupe tolerance", async () => {
     // enc-future starts 2026-07-01T09:00Z; the portal says 09:03, which is the
-    // minute-or-two disagreement the two sources have been seen to have.
+    // minute-or-two disagreement the two sources have been seen to have. With no
+    // CSN on the Encounter, the same practitioner is what makes it one visit.
     world.state.portalVisits.set(HEALTH_SYSTEM_A, [
-      stored(visit({ csn: "csn-dup", start: "2026-07-01T09:03:00+00:00", isVideo: true })),
+      stored(
+        visit({
+          csn: "csn-dup",
+          start: "2026-07-01T09:03:00+00:00",
+          isVideo: true,
+          practitioner: "Rivers, Ada MD",
+        }),
+      ),
     ]);
 
     const answer = await callTool(world.client, "get_appointments");

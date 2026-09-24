@@ -41,6 +41,7 @@ import {
   fhirServer,
   organization,
   recordingLog,
+  referencePool,
   resetSyncDb,
   searchBundle,
   seedConnectedHealthSystem,
@@ -359,9 +360,9 @@ describe("a ghosted FHIR row is not a copy of a live visit (security review L3)"
   });
 
   it("calendars a live portal visit that this run's cancelled Encounter shares a start with", async () => {
-    // The in-run half of the same rule: the FHIR pass's own sightings. (A visit
-    // already calendared is adopted by the Encounter before this rule is reached,
-    // so this pins the first run, where the live visit used to be left out.)
+    // The in-run half of the same rule: the FHIR pass's own sightings. This pins
+    // the first run, where the live visit used to be left out; the next describe
+    // block pins a visit that was already calendared.
     const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1", start: SOON })] } });
     const key = await portalKey(fix.healthSystem, "csn-1");
     withEncounters(fix, [
@@ -374,6 +375,95 @@ describe("a ghosted FHIR row is not a copy of a live visit (security review L3)"
     expect(calendarKeys(fix)).toContain(key);
     const kept = await syncRepos(fix.ctx).calendarEvents.getByKey(key);
     expect(kept?.state).toBe("active");
+  });
+});
+
+/** Let the FHIR host resolve the fixture's practitioners, so an Encounter names one. */
+function withPractitioners(fix: Fixture): void {
+  for (const [reference, resource] of referencePool()) {
+    if (reference.startsWith("Practitioner/")) fix.server.resources.set(reference, resource);
+  }
+}
+
+describe("an Encounter adopts a portal row only on identity", () => {
+  it("never adopts or ghosts a live portal event on a shared start time alone", async () => {
+    // A cancelled Encounter with no CSN, a different practitioner, and the same
+    // start as a live portal visit already on the calendar. It used to take over
+    // the portal's row and event, then grey the event out as cancelled.
+    const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1", start: SOON })] } });
+    await portalRun(fix);
+    const key = await portalKey(fix.healthSystem, "csn-1");
+    expect(calendarKeys(fix)).toStrictEqual([key]);
+    withEncounters(fix, [
+      encounter({
+        id: "enc-cancelled",
+        start: SOON,
+        status: "cancelled",
+        visitType: "Consult",
+        practitionerRef: "Practitioner/prac-2",
+      }),
+    ]);
+    withPractitioners(fix);
+
+    const first = await portalRun(fix, false);
+    const second = await portalRun(fix, false);
+
+    for (const summary of [first, second]) {
+      expect(summary.eventsGhosted).toBe(0);
+      expect(summary.eventsPatched).toBe(0);
+      expect(summary.eventsInserted).toBe(0);
+    }
+    expect(calendarKeys(fix)).toStrictEqual([key]);
+    const event = fix.upstreams.calendar.byKey().get(key);
+    expect(event?.summary).toBe("Follow-up · A. Example, MD");
+    expect(event?.transparency).not.toBe("transparent");
+    const repos = syncRepos(fix.ctx);
+    const row = await repos.calendarEvents.getByKey(key);
+    expect(row?.source).toBe("portal");
+    expect(row?.state).toBe("active");
+    expect(
+      await repos.calendarEvents.getByKey(
+        await sk(`${fix.healthSystem.healthSystemId}:enc-cancelled`),
+      ),
+    ).toBeNull();
+  });
+
+  it("adopts on the same practitioner at the same time when the Encounter has no CSN", async () => {
+    // The fixture's prac-1 renders as "Test Alpha"; the portal writes it its own way.
+    const fix = await fixture({
+      portal: {
+        visits: [portalVisit({ csn: "csn-1", start: SOON, practitioner: "Alpha, Test MD" })],
+      },
+    });
+    await portalRun(fix);
+    expect(fix.upstreams.calendar.inserts).toBe(1);
+
+    withEncounters(fix, [appointment("enc-1", "2026-06-20T14:31:00+00:00")]);
+    withPractitioners(fix);
+    const summary = await portalRun(fix, false);
+
+    expect(fix.upstreams.calendar.inserts).toBe(1);
+    expect(summary.eventsPatched).toBe(1);
+    expect(calendarKeys(fix)).toStrictEqual([await sk(`${fix.healthSystem.healthSystemId}:enc-1`)]);
+  });
+
+  it("still adopts, and ghosts, the portal event of a visit its own CSN says was cancelled", async () => {
+    const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1", start: SOON })] } });
+    await portalRun(fix);
+
+    withEncounters(fix, [
+      {
+        ...encounter({ id: "enc-1", start: SOON, status: "cancelled", visitType: "Office Visit" }),
+        identifier: [{ type: { text: "CSN" }, value: "csn-1" }],
+      },
+    ]);
+    const summary = await portalRun(fix, false);
+
+    expect(fix.upstreams.calendar.inserts).toBe(1);
+    expect(summary.eventsGhosted).toBe(1);
+    const key = await sk(`${fix.healthSystem.healthSystemId}:enc-1`);
+    expect(calendarKeys(fix)).toStrictEqual([key]);
+    expect(fix.upstreams.calendar.byKey().get(key)?.summary).toMatch(/^Cancelled: /u);
   });
 });
 

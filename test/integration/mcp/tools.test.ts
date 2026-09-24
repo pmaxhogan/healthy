@@ -363,13 +363,14 @@ describe("policy rows in D1", () => {
 const wcf = (iso: string): string => `/Date(${String(Date.parse(iso))})/`;
 
 /** One synthetic `LoadUpcoming` row. */
-function upcomingRow(csn: string, iso: string): Record<string, unknown> {
+function upcomingRow(csn: string, iso: string, practitioner?: string): Record<string, unknown> {
   return {
     CSN: csn,
     Instant: wcf(iso),
     TimeZone: "UTC",
     VisitType: "Follow-up",
     HealthSystemName: "P. Portal, MD",
+    ...(practitioner !== undefined && { PrimaryProviderName: practitioner }),
     DepartmentName: "Portal Example Clinic",
   };
 }
@@ -422,8 +423,10 @@ describe("portal visits through the MCP", () => {
   });
 
   it("gives one item for a visit both FHIR and the portal know about", async () => {
+    // No CSN on the Encounter, so the match is the same practitioner at the same
+    // time -- written the portal's way round.
     const parsed = parseUpcoming(
-      { NextNDaysVisits: [upcomingRow("csn-dup", "2026-07-01T09:02:00Z")] },
+      { NextNDaysVisits: [upcomingRow("csn-dup", "2026-07-01T09:02:00Z", "Rivers, Ada MD")] },
       "UTC",
     );
     await repos().portalVisits.record(world.seeded.healthSystemA, parsed.visits, {
@@ -439,6 +442,24 @@ describe("portal visits through the MCP", () => {
       practitioner: "Dr Ada Rivers",
       department: "Portal Example Clinic",
     });
+  });
+
+  it("keeps a portal visit that only shares a start time with an Encounter", async () => {
+    // A different practitioner and no CSN: two appointments. Merging them would
+    // answer the portal's visit with the Encounter's status.
+    const parsed = parseUpcoming(
+      { NextNDaysVisits: [upcomingRow("csn-other", "2026-07-01T09:02:00Z")] },
+      "UTC",
+    );
+    await repos().portalVisits.record(world.seeded.healthSystemA, parsed.visits, {
+      complete: true,
+    });
+
+    const answer = await call(world.client, "get_appointments");
+
+    expect(answer.items).toHaveLength(2);
+    // Soonest first: the Encounter at 09:00, the portal's own visit at 09:02.
+    expect(answer.items.map((item) => item.source)).toStrictEqual(["fhir", "portal"]);
   });
 
   it("narrows to the health systems asked for and to the window", async () => {

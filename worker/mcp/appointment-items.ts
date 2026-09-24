@@ -13,10 +13,13 @@
  *
  * A visit can be in both places -- the FHIR Encounter usually turns up once it
  * has happened, while the portal row is kept for a year. The match is the
- * calendar sync's own rule (`sameVisit` in `worker/sync/portal-sync.ts`): the CSN
- * when both sides carry one, otherwise a start within `DEDUPE_WINDOW_SECONDS` for
- * the same health system. A match yields the FHIR item, with any field it lacks filled
- * from the portal's copy; the portal item is dropped.
+ * calendar sync's own rule (`sameVisitWithinHealthSystem` in
+ * `worker/sync/portal-dedupe.ts`), for the same health system: the CSN when both
+ * sides carry one, otherwise a start within `DEDUPE_WINDOW_SECONDS` AND the same
+ * practitioner. A start alone is not enough -- a cancelled Encounter would absorb a
+ * different, live visit at the same time and answer for it as cancelled. A match
+ * yields the FHIR item, with any field it lacks filled from the portal's copy; the
+ * portal item is dropped.
  *
  * ### Policy
  *
@@ -50,8 +53,9 @@ import {
   outranks,
   portalRank,
   sameVisitAcrossHealthSystems,
+  sameVisitWithinHealthSystem,
 } from "../sync/portal-dedupe.ts";
-import { DEDUPE_WINDOW_SECONDS, portalVisitView } from "../sync/portal-mapping.ts";
+import { portalVisitView } from "../sync/portal-mapping.ts";
 
 import { collect, spec, withinWindow } from "./collect.ts";
 
@@ -106,9 +110,8 @@ interface Entry {
   healthSystemId: string;
   /** Start as unix ms, or NaN when the item has none. */
   start: number;
-  csn: string | undefined;
   portal: boolean;
-  /** What the cross-health system dedupe compares. See `worker/sync/portal-dedupe.ts`. */
+  /** What both dedupes compare. See `worker/sync/portal-dedupe.ts`. */
   sighting: Sighting;
 }
 
@@ -170,7 +173,6 @@ async function fhirEntries(
       raw: collected.rawItems[index] ?? { healthSystem: "", healthSystemId, resource: {} },
       healthSystemId,
       start: startOf(item),
-      csn: stringOf(item, "csn"),
       portal: false,
       sighting: sightingOf(item, healthSystemId, RANK_FHIR),
     };
@@ -208,7 +210,6 @@ function portalEntry(
     raw: { ...tags, resource: { resourceType: "Encounter" } },
     healthSystemId: healthSystem.id,
     start: startOf(item),
-    csn: record.visit.csn,
     portal: true,
     sighting: sightingOf(
       item,
@@ -218,16 +219,16 @@ function portalEntry(
   };
 }
 
-/** True when a FHIR entry and a portal entry are two sightings of one visit. */
+/**
+ * True when a FHIR entry and a portal entry are two sightings of one visit: the
+ * calendar's own rule, `sameVisitWithinHealthSystem`. The sightings carry the
+ * start in seconds already.
+ */
 function sameVisit(fhir: Entry, portal: Entry): boolean {
-  if (fhir.healthSystemId !== portal.healthSystemId) return false;
-  // The CSN first: it is the portal's own identifier for the visit, and Epic
-  // publishes the same number on the Encounter, so a match is not a guess.
-  return fhir.csn !== undefined && portal.csn !== undefined
-    ? fhir.csn === portal.csn
-    : !Number.isNaN(fhir.start) &&
-        !Number.isNaN(portal.start) &&
-        Math.abs(fhir.start - portal.start) <= DEDUPE_WINDOW_SECONDS * 1000;
+  return (
+    fhir.healthSystemId === portal.healthSystemId &&
+    sameVisitWithinHealthSystem(fhir.sighting, portal.sighting)
+  );
 }
 
 /** The FHIR item with whatever it lacks filled in from the portal's copy. */
