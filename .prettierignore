@@ -11,6 +11,11 @@ worker-configuration.d.ts
 # would produce a spurious diff on every run.
 data/
 
+# Vendored verbatim by scripts/build-jq-wasm.mjs; reformatting would break its
+# --check (and the hash in manifest.json).
+worker/mcp/jq/vendor/jq-glue.mjs
+worker/mcp/jq/vendor/manifest.json
+
 # npm owns the formatting of its own lockfile
 package-lock.json
 

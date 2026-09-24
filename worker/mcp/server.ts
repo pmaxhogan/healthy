@@ -32,6 +32,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpAgent } from "agents/mcp";
 
 import { makeToolDeps } from "./deps-d1.ts";
+import { MCP_INSTRUCTIONS } from "./instructions.ts";
 import { registerTools } from "./tools/index.ts";
 
 import type { Env } from "../env.ts";
@@ -72,7 +73,10 @@ type McpEnv = Cloudflare.Env & Env;
 
 // eslint-disable-next-line @typescript-eslint/no-deprecated, sonarjs/deprecation -- see the import: McpAgent is the locked architecture for this Worker.
 export class HealthyMcp extends McpAgent<McpEnv, unknown, HealthyProps> {
-  override server = new McpServer({ name: MCP_SERVER_NAME, version: MCP_SERVER_VERSION });
+  override server = new McpServer(
+    { name: MCP_SERVER_NAME, version: MCP_SERVER_VERSION },
+    { instructions: MCP_INSTRUCTIONS },
+  );
 
   override async init(): Promise<void> {
     registerTools(

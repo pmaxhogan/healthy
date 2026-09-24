@@ -21,6 +21,57 @@ The server registers (in `worker/mcp/tools/index.ts`): `get_health_summary`,
 the underlying FHIR resource (filtered by the same policy as the normalised
 one). The admin UI's MCP page (`/connectors`) lists the live catalogue.
 
+Every answer is the same envelope:
+`{ items, total, matched, warnings, truncated, generatedAt }` (plus `raw` when
+asked for). `total` is how many items the exposure policy let through;
+`matched` is how many there are after `jq` (below) — equal to `total` without
+it; `truncated` is true only when a caller-supplied `limit` cut something.
+
+### Filtering server-side with `jq`
+
+Every tool, `get_document_text` included, takes an optional `jq` argument: a
+real jq program (jq 1.8.2) run on the server before the answer is returned,
+so a model can ask for exactly the slice it needs instead of reading a whole
+history. For example, on `get_lab_results`:
+
+```json
+{ "jq": "[.[] | select(.effective >= \"2026-01-01\") | {code, value, effective}]" }
+```
+
+- **Order.** Exposure policy, then `jq`, then `limit`. jq only ever sees what
+  the policy released: a denied field is simply absent (`.[].deniedField` is
+  `null`), and a denied resource type or health system is not in the input.
+- **Input.** The `items` array. With `raw: true` each item also carries its
+  policy-filtered FHIR resource under `raw` (`.raw.resource`), and the
+  separate `raw` array is not returned, since a program that filters or
+  reshapes `items` would leave it misaligned.
+- **Output.** One output becomes `items` as-is (an array, an object, a number…);
+  several outputs (a stream such as `.[] | .id`) are collected into an array.
+  `limit` applies to an array output; on any other output it cannot, and the
+  warning `jq_output_not_an_array_limit_not_applied` says so.
+- **Dates.** Every date the tools return is an ISO-8601 string, so plain
+  string comparison (`>=`, `<`) orders them correctly.
+- **Honesty.** A compile or runtime error is a tool error, `jq_error`, whose
+  `detail` is jq's own message — never an empty result. When a non-empty input
+  filters down to `[]`, `null` or all-nulls, the answer carries the warning
+  `jq_result_empty`, so the model re-checks its filter before concluding the
+  data is not there.
+- **Cost bounds** (on the program, never on the data): the program may be at
+  most 4096 characters; it runs with a step budget (`jq_budget_exceeded` when
+  it runs out — in practice only a filter that never terminates, like
+  `[repeat(1)]`) and a 64 MiB memory ceiling (`jq_out_of_memory`); nothing is
+  ever truncated. See [SECURITY.md](../SECURITY.md#jq-cost-bounds).
+
+**Engine.** jq-wasm (jq 1.8.2 built with Emscripten), vendored under
+`worker/mcp/jq/vendor/` by `scripts/build-jq-wasm.mjs`, which adds fuel
+metering and the memory ceiling with Binaryen. It was chosen over a jaq
+(Rust) wasm build — no wasm32 toolchain on the build machine, and a
+not-quite-jq dialect — and over pure-JavaScript interpreters, which cannot be
+interrupted once a synchronous loop starts. Measured in Node 26 on synthetic
+lab items: 1.04 MB wasm (361 KB gzipped); a fresh instance per call costs
+~0.5–1 ms; a call takes ~1 ms on 4 KB of input, ~8 ms on 470 KB and
+~40–60 ms on 2.3 MB; metering adds ~10–15%.
+
 ### Appointments: FHIR and the patient portal
 
 Epic's patient-facing FHIR view does not return an Encounter until a visit
@@ -185,7 +236,10 @@ see), `policy_field_removed:<target>`, `sensitive_withheld:<Type.field>`.
 Every tool call writes exactly one row to `mcp_audit`: the tool, the
 calling client and grant id, which health system ids it touched, how many items
 came back, whether it succeeded, and how long it took — never the content
-of the answer. View it in the admin UI's MCP page (`/connectors`), or `GET
+of the answer. A call with a `jq` program also records the program's SHA-256
+and length and how many items went into it and came out — not its text,
+because a filter can name what the caller was looking for
+(`select(.code | test("…"))`). View it in the admin UI's MCP page (`/connectors`), or `GET
 /api/mcp/audit?limit=`. Rows older than 365 days are pruned automatically
 (by the daily cron, and probabilistically on a small fraction of tool
 calls, so an idle deployment does not accumulate them indefinitely either).

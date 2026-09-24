@@ -186,7 +186,7 @@ mcpRouter.get("/tools/schema", async (c) => {
  * A `CallToolResult` that is real tool output is always the JSON envelope
  * `respond()`/`toolError()` serialise (`worker/mcp/respond.ts`): `{ items, ... }`
  * on success, `{ error, message, ... }` on a tool-level failure such as
- * `policy_denied`. Both are audited, because the tool ran either way, and both
+ * `policy_denied` or `jq_error` (whose `detail` is jq's own message). Both are audited, because the tool ran either way, and both
  * are reported here as one 200 -- the caller's fault ends where the tool starts.
  *
  * A `CallToolResult` whose text does NOT parse as JSON never reached the tool at

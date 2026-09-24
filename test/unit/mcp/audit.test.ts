@@ -62,6 +62,7 @@ describe("what a row contains", () => {
       ok: true,
       errorCode: null,
       durationMs: expect.any(Number) as number,
+      jq: null,
     });
   });
 
@@ -91,6 +92,7 @@ describe("what a row contains", () => {
         "errorCode",
         "grantId",
         "healthSystemIds",
+        "jq",
         "ok",
         "resultCount",
         "tool",

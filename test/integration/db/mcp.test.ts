@@ -32,7 +32,27 @@ describe("mcp_audit.insert", () => {
       ok: true,
       errorCode: null,
       durationMs: 37,
+      jq: null,
     });
+  });
+
+  it("records a jq program's fingerprint and counts, from migration 0011's columns", async () => {
+    const repos = testRepos();
+    const jq = { sha256: "a".repeat(64), length: 42, inputCount: 12, outputCount: 3 };
+
+    const ok = await repos.mcpAudit.insert({ tool: "get_vitals", jq });
+    const failed = await repos.mcpAudit.insert({
+      tool: "get_vitals",
+      ok: false,
+      errorCode: "jq_error",
+      jq: { ...jq, outputCount: null },
+    });
+
+    const okRow = await repos.mcpAudit.get(ok);
+    const failedRow = await repos.mcpAudit.get(failed);
+
+    expect(okRow?.jq).toStrictEqual(jq);
+    expect(failedRow?.jq).toStrictEqual({ ...jq, outputCount: null });
   });
 
   it("defaults to a successful call with no health systems and no results", async () => {

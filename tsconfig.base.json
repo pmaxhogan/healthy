@@ -12,6 +12,8 @@
     "useDefineForClassFields": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
+    // Lets `import m from "./x.wasm"` find its types in `x.d.wasm.ts`.
+    "allowArbitraryExtensions": true,
     "forceConsistentCasingInFileNames": true,
 
     // Strictness. These three are the ones that catch the bugs that matter for

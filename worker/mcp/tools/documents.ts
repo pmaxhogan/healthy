@@ -15,7 +15,7 @@
 
 import { z } from "zod";
 
-import { WINDOW_ARGS, toolArgs } from "../args.ts";
+import { JQ_ARGS, WINDOW_ARGS, toolArgs } from "../args.ts";
 import { selectHealthSystems, spec } from "../collect.ts";
 import { respond, toolError } from "../respond.ts";
 
@@ -39,6 +39,7 @@ const DOCUMENT_TEXT_ARGS = z.strictObject({
     .min(1)
     .describe("Health system id, or a case-insensitive substring of its display name."),
   id: z.string().min(1).describe("The DocumentReference id, as get_documents reported it."),
+  ...JQ_ARGS,
 });
 
 export function registerDocumentTools(server: McpServer, deps: ToolDeps): void {
@@ -47,7 +48,8 @@ export function registerDocumentTools(server: McpServer, deps: ToolDeps): void {
     description:
       "Clinical document metadata: type, date, author, description and what " +
       "attachments exist. The text of one document is fetched with " +
-      "get_document_text, which costs the organisation a metered request.",
+      "get_document_text, which costs the organisation a metered request. To keep " +
+      'only what you need, pass `jq`, e.g. `[.[] | select(.date >= "2026-01-01") | {id, type, date}]`.',
     schema: toolArgs(WINDOW_ARGS),
     specs: () => [spec("DocumentReference", { dateOf: (item) => item.date })],
   });
@@ -103,7 +105,7 @@ export function registerDocumentTools(server: McpServer, deps: ToolDeps): void {
             text: result.text,
           },
         ],
-        limit: 1,
+        jq: args.jq,
         healthSystemIds: [healthSystem.id],
         now: run.now,
       });

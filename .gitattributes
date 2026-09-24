@@ -1,0 +1,5 @@
+# The vendored jq engine is checked byte-for-byte against the hashes in its
+# manifest (test/unit/mcp/jq-vendor.test.ts), so no checkout may rewrite it.
+*.wasm binary
+worker/mcp/jq/vendor/jq-glue.mjs -text
+worker/mcp/jq/vendor/manifest.json -text

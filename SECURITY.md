@@ -173,6 +173,38 @@ appointment against the denied systems' own Encounters and portal visits (read
 for matching only, never returned) and drop any that is the same visit. See the
 limits below for what that match cannot catch.
 
+<a id="jq-cost-bounds"></a>**The `jq` argument runs a caller's program, bounded.** Every MCP tool accepts
+an optional jq program (see [docs/mcp.md](docs/mcp.md)), so a third-party model
+can now make this Worker execute code of its choosing. What limits it:
+
+- _It sees only released data._ It runs after the exposure policy, on the
+  filtered items, so it cannot reach a denied field, resource type or health
+  system. A jq error message can quote a value, and that message is returned to
+  the caller (a model cannot fix a filter otherwise) — but only a value from
+  that same policy-filtered input. It is never logged.
+- _It has no capabilities._ Real jq 1.8.2 compiled to wasm (jq-wasm, vendored
+  under `worker/mcp/jq/vendor/`), with no `eval` and no run-time wasm
+  compilation. Its "filesystem" is Emscripten's in-memory one with nothing in
+  it but the input, its `$ENV` is Emscripten's fixed placeholder (no Worker
+  secrets), and it has no network.
+- _It is bounded in time and memory, per call._ The wasm is instrumented
+  (`scripts/build-jq-wasm.mjs`) to burn one unit of fuel per function entry and
+  loop iteration and trap when it runs out; the budget is 100 million units
+  plus 100 per input byte, capped at 2³¹−1 (a few seconds of CPU). Its linear
+  memory is capped at 64 MiB, so an allocation bomb fails that call with
+  `jq_out_of_memory` instead of taking the isolate's 128 MB with it. Each call
+  gets a fresh instance, discarded afterwards, so a trapped run leaves no state
+  behind. Because fuel makes the engine interruptible, no static pattern-matching
+  of "dangerous" programs is attempted — that would be both incomplete and
+  wrong about legitimate uses such as `limit(3; repeat(.))`. The program itself
+  is capped at 4096 characters. The Worker's own CPU limit remains the last
+  backstop. None of these bounds truncates data: a program that exceeds one
+  fails with an explicit error, and the same call without `jq` returns
+  everything.
+- _It is audited without its text._ The audit row keeps the program's SHA-256,
+  its length and the item counts in and out — not the program, which can name
+  what the caller was looking for.
+
 **Read-only by construction.** Every MCP tool is annotated `readOnlyHint` and
 there is no code path from a tool call to a write, to a health system or to the
 calendar.

@@ -111,6 +111,10 @@ Also worth knowing:
   purpose — their APIs churn between releases. Check the pinned version's own
   types before writing against them, and do not let Dependabot bump them
   silently.
+- `jq-wasm` is pinned exactly too: `worker/mcp/jq/vendor/` (the fuel-metered
+  jq wasm plus its glue) is generated from it by `node scripts/build-jq-wasm.mjs`
+  and checked in. After bumping it, re-run that script; a unit test fails until
+  you do.
 - The brands data pipeline (`scripts/slim-brands.mjs`, `scripts/lib/**`,
   `data/**`, `.github/workflows/brands.yml`) is owned separately and has a
   temporary lint carve-out at the bottom of `eslint.config.js`.

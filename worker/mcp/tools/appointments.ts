@@ -59,7 +59,8 @@ export function registerAppointmentTools(server: McpServer, deps: ToolDeps): voi
         "which department, where, and whether it is a video visit. Soonest first. " +
         "Each item says whether it came from the health record (`source: fhir`) or " +
         "the patient portal (`source: portal`). Pass `includePast: true` or a " +
-        "`from` date to see past visits as well (then newest first).",
+        "`from` date to see past visits as well (then newest first). To keep only " +
+        'what you need, pass `jq`, e.g. `[.[] | select(.start < "2026-12-01") | {start, source}]`.',
       schema: APPOINTMENT_ARGS,
     },
     async (args, run) => {
@@ -86,6 +87,7 @@ export function registerAppointmentTools(server: McpServer, deps: ToolDeps): voi
         items: collected.items,
         ...(args.raw === true && { rawItems: collected.rawItems }),
         limit: effectiveLimit(args.limit),
+        jq: args.jq,
         healthSystemIds: collected.healthSystemIds,
         warnings: [
           ...collected.warnings,

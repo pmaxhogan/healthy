@@ -33,6 +33,13 @@ export default tseslint.config(
       "worker-configuration.d.ts",
       "data/",
       ".local/",
+      // Machine-written by scripts/build-jq-wasm.mjs from the pinned jq-wasm
+      // package: Emscripten output, vendored verbatim and never hand-edited.
+      "worker/mcp/jq/vendor/jq-glue.mjs",
+      // Its hand-written types. A `.d.mts` is in no tsconfig `include` (the
+      // compiler reaches it only through the import), so type-aware lint
+      // cannot parse it.
+      "worker/mcp/jq/vendor/jq-glue.d.mts",
       // Agent worktrees are full repo copies; linting them doubles the run and
       // reports their in-progress work as this checkout's failures.
       ".claude/",

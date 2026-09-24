@@ -1,0 +1,8 @@
+{
+  "jqWasmVersion": "3.0.0-jq-1.8.2",
+  "binaryenVersion": "132.0.0",
+  "maxPages": 1024,
+  "sourceWasmSha256": "27d493c06601e9cbc7112ef4198ee71a0dc3e9c9a4a1754e73888841da6c450a",
+  "wasmSha256": "920d3bf25f742721705798d1265cabc54b33d3aa66db5b600a3b8be5923c8fad",
+  "glueSha256": "337cd52438fa74b7a7c433a0cf009d24807191da19b85eef9040ca5d00f6fd14"
+}

@@ -44,6 +44,7 @@ import type {
   MailInboxEntryDto,
   MailSettingsDto,
   McpAuditDto,
+  McpAuditJqDto,
   PolicyRuleDto,
   HealthSystemConfig,
   HealthSystemDto,
@@ -95,6 +96,7 @@ export interface AuditEntryLike {
   ok: boolean;
   errorCode: string | null;
   durationMs: number | null;
+  jq?: McpAuditJqDto | null;
 }
 
 /** A unix second as an ISO instant, passing null through. */
@@ -472,5 +474,6 @@ export function toAuditDto(entry: AuditEntryLike): McpAuditDto {
     ok: entry.ok,
     errorCode: entry.errorCode,
     durationMs: entry.durationMs ?? 0,
+    jq: entry.jq ?? null,
   };
 }

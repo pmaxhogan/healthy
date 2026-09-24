@@ -14,8 +14,10 @@
  *     health system's error body can quote the record that caused it, so no
  *     upstream message and no stack ever reaches the client.
  *  4. Writes exactly one `mcp_audit` row per call: which tool, which health systems by
- *     id, how many items, whether it worked, how long it took. The row has
- *     nowhere to put content and this function never offers it any.
+ *     id, how many items, whether it worked, how long it took -- and, when the
+ *     caller passed a `jq` program, its SHA-256 and length (never its text, see
+ *     `AuditJq`) with the item counts that went into and came out of it. The row
+ *     has nowhere to put content and this function never offers it any.
  *
  * Retention is handled here too, sampled rather than scheduled: roughly one call
  * in eighty also prunes rows past a year. That keeps the daily cron free of a
@@ -24,10 +26,11 @@
 
 import { isAppError } from "../lib/errors.ts";
 import { isToolDenied } from "../policy/rules.ts";
+import { sha256Hex } from "../sync/hash.ts";
 
 import { toolError } from "./respond.ts";
 
-import type { ToolDeps } from "./deps.ts";
+import type { AuditJq, ToolDeps } from "./deps.ts";
 import type { ToolErrorCode, ToolOutcome } from "./respond.ts";
 import type { ErrorCode } from "../lib/errors.ts";
 import type { PolicyRules } from "../policy/rules.ts";
@@ -105,8 +108,24 @@ export function withAudit<Args>(
       outcome = toolError(code);
     }
 
-    await writeAudit(deps, tool, outcome, Date.now() - startedMs);
+    await writeAudit(deps, tool, outcome, Date.now() - startedMs, jqProgramOf(args));
     return outcome.result;
+  };
+}
+
+/** The caller's `jq` program, if the arguments carry one. */
+function jqProgramOf(args: unknown): string | undefined {
+  if (typeof args !== "object" || args === null || !("jq" in args)) return undefined;
+  return typeof args.jq === "string" ? args.jq : undefined;
+}
+
+async function auditJq(program: string | undefined, outcome: ToolOutcome): Promise<AuditJq | null> {
+  if (program === undefined) return null;
+  return {
+    sha256: await sha256Hex(program),
+    length: program.length,
+    inputCount: outcome.jq?.inputCount ?? null,
+    outputCount: outcome.jq?.outputCount ?? null,
   };
 }
 
@@ -115,9 +134,11 @@ async function writeAudit(
   tool: string,
   outcome: ToolOutcome,
   durationMs: number,
+  program: string | undefined,
 ): Promise<void> {
   try {
     await deps.recordAudit({
+      jq: await auditJq(program, outcome),
       tool,
       clientId: deps.caller.clientId,
       grantId: deps.caller.grantId,

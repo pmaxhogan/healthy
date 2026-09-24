@@ -218,6 +218,11 @@ export interface McpAuditRow {
   ok: number;
   error_code: string | null;
   duration_ms: number | null;
+  /** 0011: the `jq` program's fingerprint and counts; all null without one. */
+  jq_sha256: string | null;
+  jq_length: number | null;
+  jq_input_count: number | null;
+  jq_output_count: number | null;
 }
 
 export interface McpPolicyRow {

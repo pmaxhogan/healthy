@@ -586,6 +586,45 @@ describe("the audit trail", () => {
   });
 });
 
+describe("the jq argument, in workerd", () => {
+  // The unit suite covers jq's semantics in Node. This proves the part only
+  // workerd can: the bundled .wasm import loads as a compiled module, the
+  // vendored glue runs without eval, the fuel counter traps, and the audit
+  // columns from migration 0011 are really written to D1.
+  it("filters with real jq after the policy, and audits a fingerprint", async () => {
+    await repos().mcpPolicy.add("field", "Condition.code.text");
+    const program = '[.[] | select(.recorded >= "2026-03-01") | {id, text: .code.text}]';
+
+    const answer = await call(world.client, "get_conditions", { jq: program });
+    const parsed = JSON.parse(answer.text) as { total: number; matched: number };
+    const rows = await repos().mcpAudit.listRecent(1);
+    const { results } = await env.DB.prepare("SELECT * FROM mcp_audit").all();
+
+    expect(answer.isError).toBe(false);
+    expect(answer.items).toStrictEqual([{ id: "cond-a", text: null }]);
+    expect(answer.text).not.toContain("rhinitis");
+    expect(parsed).toMatchObject({ total: 2, matched: 1 });
+    expect(rows[0]?.jq).toMatchObject({ length: program.length, inputCount: 2, outputCount: 1 });
+    expect(rows[0]?.jq?.sha256).toMatch(/^[0-9a-f]{64}$/u);
+    expect(JSON.stringify(results)).not.toContain("select(");
+  });
+
+  it("stops a runaway filter in that call alone", async () => {
+    const runaway = await call(world.client, "get_conditions", { jq: "last(repeat(.))" });
+    const after = await call(world.client, "get_conditions", { jq: "length" });
+
+    expect(runaway.error).toBe("jq_budget_exceeded");
+    expect(JSON.parse(after.text)).toMatchObject({ items: 2 });
+  });
+
+  it("surfaces a jq error with jq's message", async () => {
+    const answer = await call(world.client, "get_conditions", { jq: ".[] | select(" });
+
+    expect(answer.error).toBe("jq_error");
+    expect(answer.text).toContain("syntax error");
+  });
+});
+
 describe("get_document_text", () => {
   it("decodes an inline attachment and caches the text for the next call", async () => {
     const first = await call(world.client, "get_document_text", {

@@ -10,6 +10,9 @@
 
 import { z } from "zod";
 
+/** The longest jq program accepted, in characters. A bound on the program, not the data. */
+const JQ_MAX_LENGTH = 4096;
+
 /** An ISO-8601 date (`2026-01-31`) or instant (`2026-01-31T09:00:00Z`). */
 const instant = z
   .string()
@@ -19,7 +22,31 @@ const instant = z
   });
 
 /**
- * The three arguments every tool takes.
+ * The optional jq program every tool accepts -- including `get_document_text`,
+ * which takes none of the other shared arguments.
+ *
+ * It runs in `respond()` (worker/mcp/respond.ts) on data the exposure policy has
+ * already filtered, and before `limit`. The length ceiling bounds the caller's
+ * program, not any data; worker/mcp/jq/engine.ts has the other bounds.
+ */
+export const JQ_ARGS = {
+  jq: z
+    .string()
+    .min(1)
+    .max(JQ_MAX_LENGTH)
+    .optional()
+    .describe(
+      "Optional jq program (real jq 1.8), run server-side on the result before it is " +
+        "returned. Its input is the `items` array; with `raw: true` each item also " +
+        "carries its FHIR resource under `raw`. A single output becomes `items`; " +
+        "several outputs are collected into an array. `limit` applies to the output. " +
+        "ISO dates compare correctly as strings. Example: " +
+        '`[.[] | select(.date >= "2026-01-01")]`.',
+    ),
+} as const;
+
+/**
+ * The arguments every tool takes.
  *
  * `health_systems` accepts either a health system id (as `list_health_systems` reports it) or a
  * case-insensitive substring of a display name, because a model that has just
@@ -51,6 +78,7 @@ const SHARED_ARGS = {
         "`total` says how many matched and `truncated` says whether this limit " +
         "cut any off.",
     ),
+  ...JQ_ARGS,
 } as const;
 
 /** A date window, on the tools that have one. */
@@ -74,6 +102,7 @@ export interface SharedArgs {
   healthSystems?: string[] | undefined;
   raw?: boolean | undefined;
   limit?: number | undefined;
+  jq?: string | undefined;
 }
 
 /** A window, for the tools that take one. */

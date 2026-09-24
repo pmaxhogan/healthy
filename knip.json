@@ -8,7 +8,8 @@
     "scripts/**/*.{ts,mjs}",
     "test/**/*.ts"
   ],
-  "ignoreDependencies": ["cloudflare"],
+  "ignore": ["worker/mcp/jq/vendor/jq.d.wasm.ts"],
+  "ignoreDependencies": ["cloudflare", "jq-wasm"],
   "vite": { "config": ["vite.config.ts", "vite.sandbox.config.ts"] },
   "vitest": { "config": ["vitest.config.ts"] },
   "wrangler": { "config": ["wrangler.jsonc"] }

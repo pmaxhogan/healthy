@@ -181,6 +181,7 @@ export function registerSummaryTool(server: McpServer, deps: ToolDeps): void {
         rules: run.rules,
         items,
         limit: effectiveLimit(args.limit),
+        jq: args.jq,
         healthSystemIds: healthSystems.map((healthSystem) => healthSystem.id),
         now: run.now,
       });

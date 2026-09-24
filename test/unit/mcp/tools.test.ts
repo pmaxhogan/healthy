@@ -74,13 +74,14 @@ describe("the registered surface", () => {
 });
 
 describe("the envelope", () => {
-  it("carries items, total, warnings, truncated and generatedAt", async () => {
+  it("carries items, total, matched, warnings, truncated and generatedAt", async () => {
     const answer = await callTool(world.client, "get_conditions");
     const parsed = JSON.parse(answer.text) as Record<string, unknown>;
 
     expect(Object.keys(parsed).toSorted((a, b) => a.localeCompare(b))).toStrictEqual([
       "generatedAt",
       "items",
+      "matched",
       "total",
       "truncated",
       "warnings",

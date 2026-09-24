@@ -64,6 +64,7 @@ export function registerHealthSystemTools(server: McpServer, deps: ToolDeps): vo
         rules: run.rules,
         items: healthSystems.map((healthSystem) => healthSystemItem(healthSystem)),
         limit: effectiveLimit(args.limit),
+        jq: args.jq,
         healthSystemIds: healthSystems.map((healthSystem) => healthSystem.id),
         now: run.now,
       });
@@ -118,6 +119,7 @@ export function registerHealthSystemTools(server: McpServer, deps: ToolDeps): vo
         rules: run.rules,
         items,
         limit: effectiveLimit(args.limit),
+        jq: args.jq,
         healthSystemIds: healthSystems.map((healthSystem) => healthSystem.id),
         now: run.now,
       });

@@ -238,6 +238,18 @@ export interface McpAuditDto {
   ok: boolean;
   errorCode: string | null;
   durationMs: number;
+  /**
+   * The call's `jq` program, when it had one: a SHA-256 and a length, never the
+   * text, and how many items went into and came out of it (null when it failed).
+   */
+  jq: McpAuditJqDto | null;
+}
+
+export interface McpAuditJqDto {
+  sha256: string;
+  length: number;
+  inputCount: number | null;
+  outputCount: number | null;
 }
 
 export interface McpToolInfoDto {

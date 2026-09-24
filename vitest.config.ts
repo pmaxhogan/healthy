@@ -6,6 +6,8 @@ import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-worker
 import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "vitest/config";
 
+import type { Plugin } from "vite";
+
 const shared = fileURLToPath(new URL("shared", import.meta.url));
 
 // wrangler.jsonc publishes ./dist as the ASSETS binding. Miniflare resolves
@@ -65,6 +67,26 @@ const TEST_SECRETS: Record<string, string> = {
   TRELLO_DONE_LIST_ID: "test-done-list",
 };
 
+/**
+ * `import module from "./x.wasm"` in plain Node, the way wrangler bundles it for
+ * workerd: a compiled, not-yet-instantiated `WebAssembly.Module`. Vite has no
+ * such rule of its own, and the MCP tools reach the jq engine
+ * (worker/mcp/jq/engine.ts) through `respond()`, so the unit suite needs it.
+ */
+function wasmModule(): Plugin {
+  return {
+    name: "healthy:wasm-module",
+    enforce: "pre",
+    load(id) {
+      const file = id.split("?", 1)[0] ?? id;
+      return file.endsWith(".wasm")
+        ? `import { readFileSync } from "node:fs";\n` +
+            `export default new WebAssembly.Module(readFileSync(${JSON.stringify(file)}));\n`
+        : null;
+    },
+  };
+}
+
 export default defineConfig({
   resolve: { alias: { "@shared": shared } },
   test: {
@@ -72,6 +94,7 @@ export default defineConfig({
       {
         // Plain Node. Everything that is pure logic and does not need a Worker
         // runtime lives here, because it runs an order of magnitude faster.
+        plugins: [wasmModule()],
         resolve: { alias: { "@shared": shared } },
         test: {
           name: "unit",

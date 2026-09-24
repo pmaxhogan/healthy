@@ -24,6 +24,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
+import { MCP_INSTRUCTIONS } from "./instructions.ts";
 import { registerTools } from "./tools/index.ts";
 
 import type { ToolDeps } from "./deps.ts";
@@ -51,7 +52,10 @@ export function adminCaller(): ToolDeps["caller"] {
  * calls from one client -- does not apply to a single admin request.
  */
 async function withClient<T>(deps: ToolDeps, fn: (client: Client) => Promise<T>): Promise<T> {
-  const server = new McpServer({ name: "Healthy", version: "admin-console" });
+  const server = new McpServer(
+    { name: "Healthy", version: "admin-console" },
+    { instructions: MCP_INSTRUCTIONS },
+  );
   registerTools(server, deps);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "admin-console", version: "admin-console" });

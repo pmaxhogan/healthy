@@ -118,6 +118,27 @@ export interface AuditRecord {
   ok: boolean;
   errorCode: string | null;
   durationMs: number;
+  /** Set when the caller passed a `jq` program. See {@link AuditJq}. */
+  jq: AuditJq | null;
+}
+
+/**
+ * What the audit row records about a `jq` program: a fingerprint, never the text.
+ *
+ * A program can carry clinical content as a literal -- `select(.code | test("..."))`
+ * names what the model was looking for -- and this table's invariant is that it
+ * has nowhere to put content. The SHA-256 (of the UTF-8 program) still lets the
+ * owner see that two calls ran the same filter, and match a program they are
+ * shown elsewhere against the row.
+ */
+export interface AuditJq {
+  sha256: string;
+  /** In characters. */
+  length: number;
+  /** Items handed to the program. Null when it never ran (e.g. the tool failed first). */
+  inputCount: number | null;
+  /** Its output count (`matched`). Null when it failed or never ran. */
+  outputCount: number | null;
 }
 
 /** Who is calling, taken from the OAuth grant. Null when the grant said nothing. */

@@ -2,7 +2,9 @@
  * The MCP audit trail: who called which tool, when, and how much came back.
  *
  * Metadata only, by design -- the table has no column a result could be written
- * into, so no future change can quietly start logging content. Retention is one
+ * into, so no future change can quietly start logging content. A `jq` program is
+ * recorded as a SHA-256 and a length for the same reason: its text can name what
+ * the caller was looking for. Retention is one
  * year and `prune` is called from the daily cron.
  *
  * Ids are sortable, so `ORDER BY id DESC` and `ORDER BY ts DESC` agree and the
@@ -27,6 +29,16 @@ interface AuditInput {
   ok?: boolean;
   errorCode?: string | null;
   durationMs?: number | null;
+  /** The `jq` program's fingerprint and counts. Never its text. */
+  jq?: AuditJqFields | null;
+}
+
+/** What a row says about a `jq` program. See `AuditJq` in worker/mcp/deps.ts. */
+interface AuditJqFields {
+  sha256: string;
+  length: number;
+  inputCount: number | null;
+  outputCount: number | null;
 }
 
 export interface AuditEntry {
@@ -40,6 +52,7 @@ export interface AuditEntry {
   ok: boolean;
   errorCode: string | null;
   durationMs: number | null;
+  jq: AuditJqFields | null;
 }
 
 /** How long an audit row lives. Stated in the privacy page. */
@@ -61,6 +74,15 @@ function decode(row: McpAuditRow): AuditEntry {
     ok: row.ok === 1,
     errorCode: row.error_code,
     durationMs: row.duration_ms,
+    jq:
+      row.jq_sha256 === null
+        ? null
+        : {
+            sha256: row.jq_sha256,
+            length: row.jq_length ?? 0,
+            inputCount: row.jq_input_count,
+            outputCount: row.jq_output_count,
+          },
   };
 }
 
@@ -73,8 +95,9 @@ export function makeMcpAuditRepo(ctx: Ctx) {
         ctx.db
           .prepare(
             `INSERT INTO mcp_audit
-               (id, ts, client_id, grant_id, tool, health_systems_json, result_count, ok, error_code, duration_ms)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               (id, ts, client_id, grant_id, tool, health_systems_json, result_count, ok, error_code,
+                duration_ms, jq_sha256, jq_length, jq_input_count, jq_output_count)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .bind(
             id,
@@ -87,6 +110,10 @@ export function makeMcpAuditRepo(ctx: Ctx) {
             (input.ok ?? true) ? 1 : 0,
             input.errorCode ?? null,
             input.durationMs ?? null,
+            input.jq?.sha256 ?? null,
+            input.jq?.length ?? null,
+            input.jq?.inputCount ?? null,
+            input.jq?.outputCount ?? null,
           ),
       );
       return id;

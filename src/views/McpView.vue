@@ -3,7 +3,8 @@
 // policy denies, and what has been called.
 //
 // The audit log records the shape of a call and never its content -- tool,
-// client, health system ids, a result count. That is why it can be shown here at all.
+// client, health system ids, a result count, and a jq program's fingerprint. That is
+// why it can be shown here at all.
 
 import { computed, ref, watch } from "vue";
 
@@ -15,7 +16,7 @@ import { formatDateTime, formatDuration, relativeTime } from "../lib/format.ts";
 import { toastSuccess } from "../lib/toasts.ts";
 import { useAction, useLoad } from "../lib/use-load.ts";
 
-import type { CreatePolicyRuleRequest } from "@shared/types.ts";
+import type { CreatePolicyRuleRequest, McpAuditJqDto } from "@shared/types.ts";
 
 const AUDIT_LIMITS = [25, 50, 100, 250] as const;
 
@@ -46,6 +47,17 @@ const healthSystemNames = computed(
 
 function nameHealthSystem(id: string): string {
   return healthSystemNames.value.get(id) ?? id;
+}
+
+// A jq program is audited as a fingerprint, never its text (a filter can name
+// what the caller was looking for): the hash prefix, its length, and how many
+// items went in and came out.
+function describeJq(jq: McpAuditJqDto | null): string {
+  if (jq === null) return "—";
+  const head = `${jq.sha256.slice(0, 8)} · ${String(jq.length)} ch`;
+  if (jq.inputCount === null) return head;
+  const out = jq.outputCount === null ? "failed" : String(jq.outputCount);
+  return `${head} · ${String(jq.inputCount)} → ${out}`;
 }
 
 // A rule the policy engine cannot parse is stored, listed, and enforcing nothing.
@@ -267,6 +279,7 @@ async function onRevoke(id: string): Promise<void> {
                 <th>Client</th>
                 <th>Health systems</th>
                 <th class="num">Results</th>
+                <th>jq</th>
                 <th>Result</th>
                 <th class="num">Took</th>
               </tr>
@@ -280,6 +293,12 @@ async function onRevoke(id: string): Promise<void> {
                 <td>{{ entry.clientId }}</td>
                 <td>{{ entry.healthSystemIds.map(nameHealthSystem).join(", ") || "—" }}</td>
                 <td class="num">{{ entry.resultCount }}</td>
+                <td
+                  class="nowrap"
+                  :title="entry.jq === null ? undefined : `jq program SHA-256 ${entry.jq.sha256}`"
+                >
+                  {{ describeJq(entry.jq) }}
+                </td>
                 <td class="nowrap" :class="{ 'danger-text': !entry.ok }">
                   {{ entry.ok ? "ok" : (entry.errorCode ?? "error") }}
                 </td>

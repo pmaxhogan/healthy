@@ -123,7 +123,8 @@ export function registerClinicalTools(server: McpServer, deps: ToolDeps): void {
     description:
       "Laboratory observations with their values, units, reference ranges and " +
       "interpretations. Narrow with `code` (a LOINC or local code) or `text` " +
-      "(a substring of the test name).",
+      "(a substring of the test name). To keep only what you need, pass `jq`, e.g. " +
+      '`[.[] | select(.effective >= "2026-01-01") | {code, value, effective}]`.',
     schema: toolArgs({
       ...WINDOW_ARGS,
       code: z.string().min(1).optional().describe("Match this observation code exactly."),
@@ -144,7 +145,8 @@ export function registerClinicalTools(server: McpServer, deps: ToolDeps): void {
     name: "get_vitals",
     description:
       "Vital-sign observations: blood pressure (as systolic/diastolic components), " +
-      "heart rate, temperature, weight, height and the rest.",
+      "heart rate, temperature, weight, height and the rest. To keep only what you " +
+      'need, pass `jq`, e.g. `[.[] | select(.code | test("weight"; "i")) | {effective, value}]`.',
     schema: toolArgs(WINDOW_ARGS),
     specs: () => [
       spec("Observation", {

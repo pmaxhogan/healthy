@@ -230,6 +230,7 @@ export function makeToolDeps(options: ToolDepsOptions): ToolDeps {
         ok: entry.ok,
         errorCode: entry.errorCode,
         durationMs: entry.durationMs,
+        jq: entry.jq,
       });
     },
 
