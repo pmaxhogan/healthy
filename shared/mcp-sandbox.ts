@@ -90,9 +90,21 @@ export type SandboxInboundMessage =
  * parent treats them as untrusted input regardless: they cross a postMessage
  * boundary from a sandboxed document, and the Worker's own input-schema check
  * (`worker/mcp/admin-call.ts`) is the real authority either way.
+ *
+ * `resize` reports the frame's own content height (in CSS pixels), so the
+ * parent can size the `<iframe>` to fit it instead of leaving a fixed-height
+ * box with empty space below, or content clipped and scrolling inside a box
+ * too short for it. Sent on mount and again whenever a `ResizeObserver` on the
+ * frame's root sees its height change (results appearing, a validation error,
+ * the completion popup reserving room -- see `SandboxApp.vue`). The parent
+ * clamps it to a sensible min/max and lets the frame scroll internally past
+ * the max, since a number posted from inside the frame is untrusted input, not
+ * a size the parent must honour exactly.
  */
 export type SandboxOutboundMessage =
-  { type: "ready" } | { type: "run"; name: string; arguments: Record<string, unknown> };
+  | { type: "ready" }
+  | { type: "run"; name: string; arguments: Record<string, unknown> }
+  | { type: "resize"; height: number };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -103,7 +115,10 @@ export function isSandboxOutboundMessage(value: unknown): value is SandboxOutbou
   return (
     isPlainObject(value) &&
     (value.type === "ready" ||
-      (value.type === "run" && typeof value.name === "string" && isPlainObject(value.arguments)))
+      (value.type === "run" && typeof value.name === "string" && isPlainObject(value.arguments)) ||
+      (value.type === "resize" &&
+        typeof value.height === "number" &&
+        Number.isFinite(value.height)))
   );
 }
 

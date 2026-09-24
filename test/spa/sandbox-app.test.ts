@@ -28,11 +28,57 @@ const TOOL_MESSAGE = {
   skeleton: { healthSystem: "", id: "" },
 };
 
+/**
+ * happy-dom has no `ResizeObserver` at all, which SandboxApp.vue already
+ * tolerates (it skips observing rather than throwing) -- exercising the
+ * `resize` message it posts needs a real, if fake, implementation whose
+ * callback the test can trigger itself, the same way the real browser would
+ * once the observed element's box actually changed size.
+ *
+ * CodeMirror's own `EditorView` (inside `JsonEditor`) constructs a couple of
+ * `ResizeObserver`s of its own the moment a global constructor exists to call,
+ * entirely unrelated to the one SandboxApp.vue sets up on its own root -- so
+ * `instances` is not "the" observer, and a test finds the right one by the
+ * element it is watching (`observerFor`), the same way the browser would
+ * dispatch a real resize to whichever observer registered for that element.
+ */
+class FakeResizeObserver {
+  static readonly instances: FakeResizeObserver[] = [];
+  readonly callback: ResizeObserverCallback;
+  readonly targets: Element[] = [];
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+    FakeResizeObserver.instances.push(this);
+  }
+  observe(target: Element): void {
+    this.targets.push(target);
+  }
+  // Neither is exercised: SandboxApp.vue never calls `unobserve`, and its
+  // `disconnect` call on unmount needs nothing behind it for these tests.
+  // eslint-disable-next-line @typescript-eslint/no-empty-function -- a fake only needs to satisfy the ResizeObserver shape, not do anything.
+  unobserve(): void {}
+  // eslint-disable-next-line @typescript-eslint/no-empty-function -- see unobserve above.
+  disconnect(): void {}
+  /** Simulates the browser noticing the observed element's box changed. */
+  fire(): void {
+    this.callback([], this);
+  }
+}
+
+/** The fake instance actually watching `element`, as only the real browser's dispatch would pick out. */
+function observerFor(element: Element): FakeResizeObserver {
+  const found = FakeResizeObserver.instances.find((instance) => instance.targets.includes(element));
+  if (found === undefined) throw new Error("no ResizeObserver is watching this element");
+  return found;
+}
+
 const world: { postMessage: ReturnType<typeof vi.fn> } = { postMessage: vi.fn() };
 
 beforeEach(() => {
   world.postMessage = vi.fn();
   vi.stubGlobal("parent", { postMessage: world.postMessage });
+  FakeResizeObserver.instances.length = 0;
+  vi.stubGlobal("ResizeObserver", FakeResizeObserver);
 });
 
 afterEach(() => {
@@ -201,5 +247,44 @@ describe("SandboxApp", () => {
     expect(wrapper.text()).toContain("The connected health systems.");
     expect(wrapper.text()).not.toContain("Running");
     expect(wrapper.find("button.primary").attributes("disabled")).toBeUndefined();
+  });
+
+  it("reports its height to the parent when its root element resizes", async () => {
+    const wrapper = mount(SandboxApp);
+    await flushPromises();
+    world.postMessage.mockClear();
+
+    observerFor(wrapper.find(".sandbox").element).fire();
+
+    expect(world.postMessage).toHaveBeenCalledWith(
+      { type: "resize", height: expect.any(Number) },
+      "*",
+    );
+  });
+
+  it("reserves extra room, and reports again, while the completion popup is open", async () => {
+    const wrapper = mount(SandboxApp);
+    await flushPromises();
+    sendFromParent(TOOL_MESSAGE);
+    await flushPromises();
+    world.postMessage.mockClear();
+
+    editorOf(wrapper).vm.$emit("completion-open", true);
+    await flushPromises();
+
+    expect(wrapper.find(".completion-reserve").exists()).toBe(true);
+    // The reserve element is in-flow, so the same ResizeObserver that already
+    // covers ordinary content growth (see the mock's docs) sees it too --
+    // simulated here exactly like the plain-resize test above.
+    observerFor(wrapper.find(".sandbox").element).fire();
+    expect(world.postMessage).toHaveBeenCalledWith(
+      { type: "resize", height: expect.any(Number) },
+      "*",
+    );
+
+    editorOf(wrapper).vm.$emit("completion-open", false);
+    await flushPromises();
+
+    expect(wrapper.find(".completion-reserve").exists()).toBe(false);
   });
 });

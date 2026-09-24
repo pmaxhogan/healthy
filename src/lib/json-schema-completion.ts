@@ -748,6 +748,16 @@ export const jsonSchemaCompletionTheme = EditorView.theme({
     color: "var(--accent-text)",
   },
   ".cm-completionDetail": { color: "var(--text-dim)", fontStyle: "normal" },
+  // `--text-dim` (the unselected row's detail colour) is a low-contrast grey
+  // tuned against `--bg-raised`, not against `--accent` -- on the selected
+  // row's teal background it was reading close to invisible (~1.6:1).
+  // `--accent-selected-text` (src/style.css) is chosen for >=4.5:1 (WCAG AA,
+  // body text) against `--accent` specifically -- unlike `--accent-text`
+  // (the row's own label colour, immediately above), which is tuned for a
+  // button's larger/bolder text and only clears ~3.75:1 in light mode.
+  ".cm-tooltip-autocomplete ul li[aria-selected] .cm-completionDetail": {
+    color: "var(--accent-selected-text)",
+  },
   ".cm-tooltip.cm-completionInfo": {
     backgroundColor: "var(--bg-raised)",
     color: "var(--text)",

@@ -232,6 +232,23 @@ describe("McpToolTester", () => {
     );
   });
 
+  it("sizes the iframe to the frame's reported height, clamped to a sensible range", async () => {
+    const wrapper = mountTester();
+    await flushPromises();
+
+    sendFromFrame({ type: "resize", height: 500 });
+    await flushPromises();
+    expect(wrapper.find("iframe").attributes("style")).toContain("height: 500px");
+
+    sendFromFrame({ type: "resize", height: 10 });
+    await flushPromises();
+    expect(wrapper.find("iframe").attributes("style")).toContain("height: 240px");
+
+    sendFromFrame({ type: "resize", height: 5000 });
+    await flushPromises();
+    expect(wrapper.find("iframe").attributes("style")).toContain("height: 1000px");
+  });
+
   it("drops a result for a tool the owner has since switched away from", async () => {
     // The fake API layer resolves synchronously, which leaves no window to
     // switch tools before the fetch settles. Controlling `endpoints.callMcpTool`

@@ -18,7 +18,7 @@
 // `prefers-color-scheme` media query already tracks the OS setting exactly like
 // the rest of the SPA does.
 import { Validator } from "@cfworker/json-schema";
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 import {
   isSandboxInboundMessage,
@@ -59,6 +59,59 @@ const attempt = ref<{ name: string; arguments: Record<string, unknown>; outcome:
 );
 const showSchema = ref(false);
 const insertChoice = ref("");
+
+// Sizes the parent's <iframe> to this page's own content (McpToolTester.vue):
+// fixed at 720px before, the frame either wasted space below a short answer or
+// clipped a long one behind its own scrollbar. `rootEl` is this component's
+// own root -- not `document.documentElement`, whose `min-height: 100%`
+// (src/style.css, shared with the main app's shell) pins it to at least the
+// iframe's *current* height, which would make a reported height that reads
+// off it only ever grow, never shrink back down as the frame did.
+const rootEl = ref<HTMLDivElement | null>(null);
+// The completion popup (CodeMirror's own tooltip) is appended outside this
+// component's DOM subtree and positioned absolutely, so it does not change
+// `rootEl`'s own box and a `ResizeObserver` on `rootEl` never sees it open or
+// close on its own. `.completion-reserve` (the template), an ordinary in-flow
+// element sized by this flag, is what makes that visible to the observer.
+// ~10em of options (the popup's own max-height, jsonSchemaCompletionTheme)
+// plus its border, comfortably covered by round numbers.
+const COMPLETION_RESERVE_PX = 180;
+const completionOpen = ref(false);
+// A property on an object, not a bare top-level `let` (see JsonEditor.vue's
+// `flags` for the same pattern): mutated from inside `onMounted`/
+// `onBeforeUnmount` below, which a top-level variable cannot be.
+const resize = { observer: null as ResizeObserver | null };
+
+function notifyParent(message: SandboxOutboundMessage): void {
+  // "*", not the parent's real origin: this page is loaded with no
+  // `allow-same-origin`, so it has no reliable way to name that origin either
+  // (`document.referrer` and `location.ancestorOrigins` are both untrustworthy
+  // or unavailable under sandboxing). The parent verifies the sender by
+  // `event.source` identity instead -- see McpToolTester.vue's `isFromOurFrame`.
+  // eslint-disable-next-line sonarjs/post-message -- see above; there is no origin string this opaque-origin page could address its parent by.
+  window.parent.postMessage(message, "*");
+}
+
+function reportHeight(): void {
+  const height = rootEl.value?.getBoundingClientRect().height ?? 0;
+  notifyParent({ type: "resize", height: Math.ceil(height) });
+}
+
+onMounted(() => {
+  if (typeof ResizeObserver === "undefined" || rootEl.value === null) return;
+  // A `ResizeObserver` callback fires on `rootEl`'s own box changing, which
+  // covers everything in its normal flow -- the tool description, the editor
+  // growing with its content, a validation error, the result viewer -- plus
+  // `completionReserve` toggling below, all without a separate listener per
+  // cause.
+  resize.observer = new ResizeObserver(reportHeight);
+  resize.observer.observe(rootEl.value);
+});
+
+onBeforeUnmount(() => {
+  resize.observer?.disconnect();
+  resize.observer = null;
+});
 
 const valid = computed(
   () => tool.value !== null && parseError.value === null && schemaIssues.value.length === 0,
@@ -158,14 +211,8 @@ function onArgsChanged(text: string): void {
   validate();
 }
 
-function notifyParent(message: SandboxOutboundMessage): void {
-  // "*", not the parent's real origin: this page is loaded with no
-  // `allow-same-origin`, so it has no reliable way to name that origin either
-  // (`document.referrer` and `location.ancestorOrigins` are both untrustworthy
-  // or unavailable under sandboxing). The parent verifies the sender by
-  // `event.source` identity instead -- see McpToolTester.vue's `isFromOurFrame`.
-  // eslint-disable-next-line sonarjs/post-message -- see above; there is no origin string this opaque-origin page could address its parent by.
-  window.parent.postMessage(message, "*");
+function onCompletionOpen(open: boolean): void {
+  completionOpen.value = open;
 }
 
 function run(): void {
@@ -234,7 +281,7 @@ notifyParent({ type: "ready" });
 </script>
 
 <template>
-  <div class="sandbox">
+  <div ref="rootEl" class="sandbox">
     <template v-if="tool === null">
       <p class="muted">Waiting for a tool…</p>
     </template>
@@ -270,6 +317,7 @@ notifyParent({ type: "ready" });
         :schema="tool.inputSchema"
         @update:model-value="onArgsChanged"
         @run="run"
+        @completion-open="onCompletionOpen"
       />
       <p v-if="parseError" class="warn-text">{{ parseError }}</p>
       <ul v-else-if="schemaIssues.length > 0" class="warn-text issues">
@@ -310,6 +358,19 @@ notifyParent({ type: "ready" });
           </ul>
         </div>
       </template>
+
+      <!-- An in-flow placeholder, not a comment on the popup itself: it exists
+           so the ResizeObserver above (which only sees rootEl's own box) also
+           accounts for the completion popup, which renders outside this
+           subtree and would not otherwise change that box at all. Kept last,
+           after everything the popup could actually be open over, so growing
+           it never shifts the editor, Run or a result already on screen --
+           the iframe's bottom edge moves into blank space instead. -->
+      <div
+        v-if="completionOpen"
+        class="completion-reserve"
+        :style="{ height: `${COMPLETION_RESERVE_PX}px` }"
+      />
     </template>
   </div>
 </template>

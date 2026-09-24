@@ -17,7 +17,7 @@
 // and so the schema -- can change many times over the editor's lifetime; the
 // box is how a later schema reaches a source function CodeMirror already
 // holds a reference to.
-import { acceptCompletion, autocompletion } from "@codemirror/autocomplete";
+import { acceptCompletion, autocompletion, completionStatus } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { foldKeymap } from "@codemirror/language";
 import { forceLinting, linter } from "@codemirror/lint";
@@ -37,7 +37,19 @@ import {
 import type { JsonSchema } from "../lib/json-schema-completion.ts";
 
 const props = defineProps<{ modelValue: string; schema?: JsonSchema | null }>();
-const emit = defineEmits<{ "update:modelValue": [value: string]; run: [] }>();
+const emit = defineEmits<{
+  "update:modelValue": [value: string];
+  run: [];
+  /**
+   * Whether the completion popup is open (or about to be, mid-query --
+   * `completionStatus` is treated as "open" the moment it is not `null`, so
+   * the reserved space below appears before the list itself renders, not
+   * after). SandboxApp.vue turns this into extra room in what it reports
+   * as its own height, since the popup renders outside normal document flow
+   * and would otherwise not be accounted for.
+   */
+  "completion-open": [open: boolean];
+}>();
 
 const hostEl = ref<HTMLDivElement | null>(null);
 const editor = shallowRef<EditorView | null>(null);
@@ -46,7 +58,7 @@ const schemaBox = shallowRef<JsonSchema | null>(props.schema ?? null);
 // programmatic `dispatch` from the `modelValue` watcher, so the update
 // listener below does not echo the parent's own value straight back to it as
 // if the person had typed it.
-const flags = { applyingExternalValue: false };
+const flags = { applyingExternalValue: false, completionOpen: false };
 
 function extensions() {
   return [
@@ -78,6 +90,13 @@ function extensions() {
       if (!flags.applyingExternalValue && update.docChanged) {
         emit("update:modelValue", update.state.doc.toString());
       }
+      // Checked on every update, not just a doc change: the popup opens and
+      // closes on cursor movement and explicit invocation too (e.g. the
+      // keymap above accepting or dismissing it), with no edit involved.
+      const open = completionStatus(update.state) !== null;
+      if (open === flags.completionOpen) return;
+      flags.completionOpen = open;
+      emit("completion-open", open);
     }),
   ];
 }

@@ -12,6 +12,17 @@
   --border: #dde2e8;
   --accent: #0d9488;
   --accent-text: #ffffff;
+  /* Body-size text on an --accent background: --accent-text (white) is only
+     ~3.75:1 against this light theme's --accent, which clears WCAG AA for
+     large/bold text but not body text (needs 4.5:1). --accent is also the
+     button/link colour, so it is not the thing to darken -- that would move
+     contrast everywhere it is used, not just here. This token exists for
+     small text placed directly on --accent (the completion popup's selected
+     row; src/lib/json-schema-completion.ts) and gets there on its own: a
+     near-black chosen for >=4.5:1 against #0d9488, not the accent-text white.
+     Dark mode's own --accent-text already clears AA there (~9.2:1), so this
+     just reuses it. */
+  --accent-selected-text: #001a17;
   --danger: #dc2626;
   --warn: #b45309;
   --ok: #059669;
@@ -29,6 +40,7 @@
     --border: #2c353f;
     --accent: #2dd4bf;
     --accent-text: #06201d;
+    --accent-selected-text: var(--accent-text);
     --danger: #f87171;
     --warn: #fbbf24;
     --ok: #34d399;

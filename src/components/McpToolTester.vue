@@ -43,6 +43,24 @@ const selectedName = ref("");
 const frameEl = ref<HTMLIFrameElement | null>(null);
 const frameReady = ref(false);
 
+// The frame reports its own content height (SandboxApp.vue's `resize`
+// message) instead of this component measuring across the frame boundary,
+// which it cannot do at all for a `sandbox="allow-scripts"` iframe with no
+// `allow-same-origin` -- there is no shared origin to read `contentDocument`
+// through. The value comes from inside the sandbox, so it is clamped rather
+// than trusted outright: `MIN` keeps the frame from collapsing to nothing
+// before the first report (or if one ever claimed a height of 0), and `MAX`
+// caps how much of the page a single tool call can claim, with the frame's
+// own default overflow left to scroll the rest -- see MCP_SANDBOX_PATH's page,
+// which sets no `overflow: hidden` that would prevent that.
+const MIN_FRAME_HEIGHT = 240;
+const MAX_FRAME_HEIGHT = 1000;
+const frameHeight = ref(MIN_FRAME_HEIGHT);
+
+function clampFrameHeight(height: number): number {
+  return Math.min(MAX_FRAME_HEIGHT, Math.max(MIN_FRAME_HEIGHT, height));
+}
+
 watch(
   () => schemas.data.value,
   (list) => {
@@ -145,6 +163,10 @@ function onWindowMessage(event: MessageEvent): void {
       void handleRun(message.name, message.arguments);
       break;
     }
+    case "resize": {
+      frameHeight.value = clampFrameHeight(message.height);
+      break;
+    }
   }
 }
 
@@ -186,6 +208,7 @@ onBeforeUnmount(() => {
     <iframe
       ref="frameEl"
       :src="MCP_SANDBOX_PATH"
+      :style="{ height: `${frameHeight}px` }"
       sandbox="allow-scripts"
       title="Tool arguments and result"
       class="sandbox-frame"
@@ -200,7 +223,6 @@ h2 {
 
 .sandbox-frame {
   width: 100%;
-  height: 720px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-input);

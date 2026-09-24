@@ -51,6 +51,19 @@ describe("isSandboxOutboundMessage", () => {
     expect(isSandboxOutboundMessage({ type: "run", name: "x" })).toBe(false);
   });
 
+  it("accepts a well-formed resize, including zero and a fraction", () => {
+    expect(isSandboxOutboundMessage({ type: "resize", height: 480 })).toBe(true);
+    expect(isSandboxOutboundMessage({ type: "resize", height: 0 })).toBe(true);
+    expect(isSandboxOutboundMessage({ type: "resize", height: 123.5 })).toBe(true);
+  });
+
+  it("refuses a resize whose height is not a finite number", () => {
+    expect(isSandboxOutboundMessage({ type: "resize", height: "480" })).toBe(false);
+    expect(isSandboxOutboundMessage({ type: "resize", height: NaN })).toBe(false);
+    expect(isSandboxOutboundMessage({ type: "resize", height: Infinity })).toBe(false);
+    expect(isSandboxOutboundMessage({ type: "resize" })).toBe(false);
+  });
+
   it("refuses anything with an unrecognised type, or no type at all", () => {
     expect(isSandboxOutboundMessage({ type: "tool" })).toBe(false);
     expect(isSandboxOutboundMessage({})).toBe(false);
