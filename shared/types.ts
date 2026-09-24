@@ -183,21 +183,48 @@ export interface AlertDto {
   resolvedAt: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// The exposure policy
+// ---------------------------------------------------------------------------
+
+/**
+ * What a `field` rule applies to, and what it does. Every scope column is
+ * optional: all three absent is "every item of every tool".
+ */
+export interface FieldRuleSpec {
+  /** `hide` removes the paths; `allow` puts back a field withheld by default. */
+  effect: "hide" | "allow";
+  /** Only this tool's answers, or null for every tool. */
+  tool: string | null;
+  /** Only items of this resource type, or null for every type. */
+  resourceType: string | null;
+  /** Only items from this health system (by id), or null for every health system. */
+  healthSystemId: string | null;
+  /** One or more paths in `shared/policy-path.ts` syntax, e.g. `participants[].name`. */
+  paths: string[];
+}
+
 export interface PolicyRuleDto {
   id: string;
   ruleType: PolicyRuleType;
-  /** tool name | resource type | field path "ResourceType.path.to.field" | health system id */
+  /**
+   * The tool name, resource type or health system id. For a `field` rule, a
+   * signature of `field` below (or a pre-0012 `ResourceType.path` string).
+   */
   target: string;
+  /** The structured `field` rule; null for the other kinds. */
+  field: FieldRuleSpec | null;
+  /** False when the owner switched the rule off; it then enforces nothing. */
+  enabled: boolean;
   note: string | null;
   createdAt: string;
   /**
-   * True when the policy engine could make nothing of this target.
+   * True when the policy engine could make nothing of this rule.
    *
    * A stored rule that parses to nothing is the worst kind of wrong: the owner
-   * believes an exposure is denied and it is not. Only a malformed `field` target
-   * (or a blank one) can land here -- a `tool`, `resource` or `health_system` target is
-   * taken literally, so a valid-looking name that simply matches no tool is not
-   * reported. The admin UI shows a warning next to the row.
+   * believes an exposure is denied and it is not. Only a malformed `field` rule
+   * (or a blank target) can land here -- a `tool`, `resource` or `health_system`
+   * target is taken literally. The admin UI shows a warning next to the row.
    */
   unparsed: boolean;
 }
@@ -206,17 +233,132 @@ export interface PolicyRuleDto {
  * The payload of `POST /api/mcp/policy`: a rule without its server-assigned parts.
  *
  * Mirrors `policyRuleSchema` on the Worker side, which is strict -- an extra key is
- * a 400, and `note` must be absent rather than empty.
+ * a 400, and `note` must be absent rather than empty. A `field` rule carries
+ * `field`; the other kinds carry `target`. (A `field` rule may still be sent as a
+ * legacy `ResourceType.path` `target`, which is converted.)
  */
 export interface CreatePolicyRuleRequest {
   ruleType: PolicyRuleType;
-  target: string;
+  target?: string | undefined;
+  field?: FieldRuleSpec | undefined;
   /**
    * `| undefined` explicitly, under `exactOptionalPropertyTypes`: this is the type
    * the Worker's own parser produces for an absent optional field, and the route
    * is typed against this interface so the two cannot drift.
    */
   note?: string | undefined;
+  enabled?: boolean | undefined;
+}
+
+/** `PATCH /api/mcp/policy/:id`: any subset. `field` only on a `field` rule. */
+export interface UpdatePolicyRuleRequest {
+  enabled?: boolean | undefined;
+  /** Null clears it. */
+  note?: string | null | undefined;
+  target?: string | undefined;
+  field?: FieldRuleSpec | undefined;
+}
+
+/** One node of the policy field tree. Children come from `children` or `type`. */
+export interface PolicyFieldNode {
+  /** The key, or `stem[x]` for a FHIR choice type. */
+  name: string;
+  description?: string;
+  /** The value is an array; the node's children describe each element. */
+  array?: true;
+  /** A datatype in {@link PolicySchemaDto.datatypes} to take children from. */
+  type?: string;
+  children?: PolicyFieldNode[];
+  /** Structure below is not modelled: any deeper path is accepted. */
+  open?: true;
+  /** Withheld by default (`sensitive`); an `allow` rule puts it back. */
+  sensitive?: true;
+  /** For a `stem[x]` node: the concrete keys it covers. */
+  choice?: string[];
+}
+
+export interface PolicyDatatypeDto {
+  name: string;
+  fields: PolicyFieldNode[];
+}
+
+/** One kind of object a tool answers with: a normalized item, a raw resource, a summary row. */
+export interface PolicyShapeDto {
+  id: string;
+  label: string;
+  /** The resource type it belongs to, or null for a tool-specific row. */
+  resourceType: string | null;
+  vocabulary: "normalized" | "raw";
+  fields: PolicyFieldNode[];
+}
+
+export interface PolicyToolShapesDto {
+  name: string;
+  /** Ids of every {@link PolicyShapeDto} this tool can put in its answer. */
+  shapes: string[];
+}
+
+/** `GET /api/mcp/policy/schema`: everything the rule builder's field picker draws from. */
+export interface PolicySchemaDto {
+  datatypes: PolicyDatatypeDto[];
+  shapes: PolicyShapeDto[];
+  resourceTypes: string[];
+  tools: PolicyToolShapesDto[];
+}
+
+/** Which sample a structure or preview request reads: one tool's real answer. */
+export interface PolicySampleRequest {
+  tool: string;
+  /** Keep only items of this resource type. */
+  resourceType?: string | undefined;
+}
+
+/** One key seen in the owner's cached data. Names only -- never a value. */
+export interface PolicyKeyNode {
+  name: string;
+  array?: true;
+  children?: PolicyKeyNode[];
+}
+
+/** `POST /api/mcp/policy/structure`: the key structure of one tool's real answer. */
+export interface PolicyStructureDto {
+  tool: string;
+  /** How many items the structure was read from. */
+  items: number;
+  /** Keys of the answer's items. */
+  item: PolicyKeyNode[];
+  /** Keys of the raw FHIR resources behind them, when the tool offers `raw`. */
+  raw: PolicyKeyNode[];
+}
+
+/** `POST /api/mcp/policy/preview`: a draft rule and the sample to run it on. */
+export interface PolicyPreviewRequest extends PolicySampleRequest {
+  field: FieldRuleSpec;
+}
+
+/** One item before and after the draft rule, and its raw resource when there is one. */
+export interface PolicyPreviewSample {
+  before: unknown;
+  after: unknown;
+  rawBefore?: unknown;
+  rawAfter?: unknown;
+}
+
+export interface PolicyPreviewDto {
+  tool: string;
+  /** Items in the sample answer. */
+  total: number;
+  /** How many of them the draft rule changes. */
+  affected: number;
+  /** The first item it changes -- or the first item, when it changes none. */
+  sample: PolicyPreviewSample | null;
+  /** The warnings the rule would add to the answer. */
+  warnings: string[];
+  /**
+   * True when the sample is a made-up example rather than the owner's data:
+   * `get_document_text` cannot be sampled without spending a metered request.
+   */
+  synthetic: boolean;
 }
 
 export interface McpGrantDto {

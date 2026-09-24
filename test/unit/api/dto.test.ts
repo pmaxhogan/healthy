@@ -413,47 +413,77 @@ describe("toAlertDto", () => {
   });
 });
 
-describe("toPolicyRuleDto and toAuditDto", () => {
-  it("renders a policy rule with an ISO createdAt", () => {
-    const row: McpPolicyRow = {
-      id: "RULE1",
-      rule_type: "field",
-      target: "Observation.valueQuantity",
-      note: null,
-      created_at: T0,
-    };
+/** A policy row as D1 returns it after migration 0012, with nothing scoped. */
+function policyRow(overrides: Partial<McpPolicyRow>): McpPolicyRow {
+  return {
+    id: "RULE1",
+    rule_type: "field",
+    target: "Observation.valueQuantity",
+    note: null,
+    created_at: T0,
+    enabled: 1,
+    effect: "hide",
+    scope_tool: null,
+    scope_resource: null,
+    scope_health_system: null,
+    paths_json: null,
+    ...overrides,
+  };
+}
 
-    expect(toPolicyRuleDto(row)).toStrictEqual({
+describe("toPolicyRuleDto and toAuditDto", () => {
+  it("renders a legacy field rule as a structured one, with an ISO createdAt", () => {
+    expect(toPolicyRuleDto(policyRow({}))).toStrictEqual({
       id: "RULE1",
       ruleType: "field",
       target: "Observation.valueQuantity",
+      field: {
+        effect: "hide",
+        tool: null,
+        resourceType: "Observation",
+        healthSystemId: null,
+        paths: ["valueQuantity"],
+      },
+      enabled: true,
       note: null,
       createdAt: "2026-01-01T00:00:00.000Z",
       unparsed: false,
     });
   });
 
-  it("flags a field rule the policy engine cannot parse", () => {
+  it("renders the 0012 columns, and a disabled rule as disabled", () => {
+    const dto = toPolicyRuleDto(
+      policyRow({
+        target: "sig",
+        enabled: 0,
+        scope_tool: "get_care_team",
+        scope_health_system: "prov_a",
+        paths_json: JSON.stringify(["participants[].name"]),
+      }),
+    );
+
+    expect(dto.enabled).toBe(false);
+    expect(dto.field).toStrictEqual({
+      effect: "hide",
+      tool: "get_care_team",
+      resourceType: null,
+      healthSystemId: "prov_a",
+      paths: ["participants[].name"],
+    });
+    expect(dto.unparsed).toBe(false);
+  });
+
+  it("flags a field rule the policy engine cannot parse, enabled or not", () => {
     // "Observation" alone is a resource type, not a field path: stored, listed, and
     // denying nothing. The DTO says so rather than letting the UI imply otherwise.
+    expect(toPolicyRuleDto(policyRow({ id: "RULE2", target: "Observation" })).unparsed).toBe(true);
     expect(
-      toPolicyRuleDto({
-        id: "RULE2",
-        rule_type: "field",
-        target: "Observation",
-        note: null,
-        created_at: T0,
-      }).unparsed,
+      toPolicyRuleDto(policyRow({ id: "RULE2", target: "Observation", enabled: 0 })).unparsed,
     ).toBe(true);
     // A tool target is taken literally, so it can never be unparsed.
     expect(
-      toPolicyRuleDto({
-        id: "RULE3",
-        rule_type: "tool",
-        target: "anything at all",
-        note: null,
-        created_at: T0,
-      }).unparsed,
+      toPolicyRuleDto(policyRow({ id: "RULE3", rule_type: "tool", target: "anything at all" }))
+        .unparsed,
     ).toBe(false);
   });
 

@@ -12,6 +12,7 @@
 
 import { z } from "zod";
 
+import { MAX_PATH_LENGTH } from "@shared/policy-path.ts";
 import { isHttpsUrl } from "@shared/url.ts";
 
 import type {
@@ -177,11 +178,57 @@ export const settingsPatchSchema = z.strictObject({
   portalLoginAttemptLimit: z.number().int().min(1).max(20).optional(),
 });
 
-/** `POST /api/mcp/policy`. */
-export const policyRuleSchema = z.strictObject({
-  ruleType: z.enum(["tool", "resource", "field", "health_system"]),
-  target: z.string().min(1).max(200),
-  note: z.string().max(500).optional(),
+/**
+ * A structured `field` rule. The shape only: whether the paths name anything,
+ * and whether the tool and health system exist, is `checkFieldSpec`'s job
+ * (`worker/policy/validate.ts`), which can say why in a sentence.
+ */
+const fieldRuleSpecSchema = z.strictObject({
+  effect: z.enum(["hide", "allow"]),
+  tool: z.string().max(100).nullable(),
+  resourceType: z.string().max(100).nullable(),
+  healthSystemId: z.string().max(64).nullable(),
+  paths: z.array(z.string().min(1).max(MAX_PATH_LENGTH)).min(1).max(500),
+});
+
+/** `POST /api/mcp/policy`. A `field` rule carries `field` (or a legacy `target`). */
+export const policyRuleSchema = z
+  .strictObject({
+    ruleType: z.enum(["tool", "resource", "field", "health_system"]),
+    target: z.string().min(1).max(200).optional(),
+    field: fieldRuleSpecSchema.optional(),
+    note: z.string().max(500).optional(),
+    enabled: z.boolean().optional(),
+  })
+  .refine(
+    (body) =>
+      body.ruleType === "field"
+        ? body.field !== undefined || body.target !== undefined
+        : body.target !== undefined && body.field === undefined,
+    {
+      message: "a field rule needs `field`; every other kind needs `target` and no `field`",
+    },
+  );
+
+/** `PATCH /api/mcp/policy/:id`. */
+export const updatePolicyRuleSchema = z.strictObject({
+  enabled: z.boolean().optional(),
+  note: z.string().max(500).nullable().optional(),
+  target: z.string().min(1).max(200).optional(),
+  field: fieldRuleSpecSchema.optional(),
+});
+
+/** `POST /api/mcp/policy/structure`: which tool's real answer to read the keys of. */
+export const policySampleSchema = z.strictObject({
+  tool: z.string().min(1).max(100),
+  resourceType: z.string().min(1).max(100).optional(),
+});
+
+/** `POST /api/mcp/policy/preview`. */
+export const policyPreviewSchema = z.strictObject({
+  tool: z.string().min(1).max(100),
+  resourceType: z.string().min(1).max(100).optional(),
+  field: fieldRuleSpecSchema,
 });
 
 /**

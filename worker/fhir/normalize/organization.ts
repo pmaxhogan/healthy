@@ -4,7 +4,10 @@ import type { FieldAlias, NormalizeCtx, NormalizedOrganization } from "./types.t
 import type * as fhir4 from "fhir/r4";
 
 /** For the MCP policy's `field` rule engine, see `observation.ts`'s comment. */
-export const FIELD_ALIASES: readonly FieldAlias[] = [{ normalized: ["phone"], raw: [["telecom"]] }];
+export const FIELD_ALIASES: readonly FieldAlias[] = [
+  { normalized: ["phone"], raw: [["telecom"]], rendered: true },
+  { normalized: ["address", "lines"], raw: [["address", "line"]], rendered: true },
+];
 
 export function normalizeOrganization(
   resource: fhir4.Organization,

@@ -67,13 +67,14 @@ describe("the policy CRUD", () => {
     expect(await json<PolicyRuleDto[]>(await owner().get("/api/mcp/policy"))).toStrictEqual([]);
   });
 
-  it("reports a field rule the engine cannot read, so a typo is not a silent no-op", async () => {
-    // "Patient" alone is a resource, not a field path, and the engine makes
-    // nothing of it as a `field` target. Stored, listed, denying nothing: the one
-    // way this surface could mislead the owner, so it is reported.
-    const typo = await json<PolicyRuleDto>(
-      await owner().send("POST", "/api/mcp/policy", { ruleType: "field", target: "Patient" }),
-    );
+  it("refuses a field target the engine cannot read, so a typo is never a silent no-op", async () => {
+    // "Patient" alone is a resource, not a field path. It used to be stored and
+    // flagged `unparsed`; now it is refused at the door with a sentence saying
+    // what a field target looks like, and nothing is stored.
+    const typo = await owner().send("POST", "/api/mcp/policy", {
+      ruleType: "field",
+      target: "Patient",
+    });
     const good = await json<PolicyRuleDto>(
       await owner().send("POST", "/api/mcp/policy", {
         ruleType: "field",
@@ -81,12 +82,12 @@ describe("the policy CRUD", () => {
       }),
     );
 
-    expect(typo.unparsed).toBe(true);
+    expect(typo.status).toBe(400);
+    const refusal = await json<ApiError>(typo);
+    expect(refusal.message).toContain("ResourceType.path.to.field");
     expect(good.unparsed).toBe(false);
     const listed = await json<PolicyRuleDto[]>(await owner().get("/api/mcp/policy"));
-    expect(listed.filter((entry) => entry.unparsed).map((entry) => entry.target)).toStrictEqual([
-      "Patient",
-    ]);
+    expect(listed.map((entry) => entry.id)).toStrictEqual([good.id]);
   });
 
   it("adding the same rule twice returns the same row, so the UI can be fire and forget", async () => {
@@ -100,10 +101,21 @@ describe("the policy CRUD", () => {
   });
 
   it("accepts all four rule types and refuses a fifth", async () => {
-    for (const ruleType of ["tool", "resource", "field", "health_system"]) {
+    for (const ruleType of ["tool", "resource", "health_system"]) {
       const response = await owner().send("POST", "/api/mcp/policy", { ruleType, target: "x" });
       expect(response.status, ruleType).toBe(201);
     }
+    const field = await owner().send("POST", "/api/mcp/policy", {
+      ruleType: "field",
+      field: {
+        effect: "hide",
+        tool: null,
+        resourceType: null,
+        healthSystemId: null,
+        paths: ["id"],
+      },
+    });
+    expect(field.status).toBe(201);
 
     const bad = await owner().send("POST", "/api/mcp/policy", {
       ruleType: "everything",

@@ -3,7 +3,7 @@
 // separate Observations, so `components[]` is preserved on the normalized
 // shape even though most labs only ever populate the top-level value.
 
-import { codeText, dedupeStrings, pickDate, quantity } from "./helpers.ts";
+import { codeText, codeTextSources, dedupeStrings, pickDate, quantity } from "./helpers.ts";
 
 import type {
   FieldAlias,
@@ -33,7 +33,27 @@ const VALUE_CHOICE_RAW: readonly (readonly string[])[] = [
  */
 export const FIELD_ALIASES: readonly FieldAlias[] = [
   { normalized: ["value"], raw: VALUE_CHOICE_RAW },
+  {
+    normalized: ["effective"],
+    raw: [["effectiveDateTime"], ["effectivePeriod", "start"]],
+    rendered: true,
+  },
+  // Rendered to one string from the first range's text, or its low and high.
+  {
+    normalized: ["referenceRange"],
+    raw: [
+      ["referenceRange", "[]", "text"],
+      ["referenceRange", "[]", "low"],
+      ["referenceRange", "[]", "high"],
+    ],
+    rendered: true,
+  },
   { normalized: ["components"], raw: [["component"]] },
+  {
+    normalized: ["components", "[]", "code"],
+    raw: codeTextSources("code").map((source) => ["component", "[]", ...source]),
+    rendered: true,
+  },
   {
     normalized: ["components", "[]", "value"],
     raw: VALUE_CHOICE_RAW.map((choice) => ["component", "[]", ...choice]),

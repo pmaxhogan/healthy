@@ -11,6 +11,7 @@ export const FIELD_ALIASES: readonly FieldAlias[] = [
       ["collection", "collectedDateTime"],
       ["collection", "collectedPeriod", "start"],
     ],
+    rendered: true,
   },
 ];
 

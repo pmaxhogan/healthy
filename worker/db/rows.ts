@@ -228,9 +228,26 @@ export interface McpAuditRow {
 export interface McpPolicyRow {
   id: string;
   rule_type: PolicyRuleType;
+  /**
+   * The tool name, resource type or health system id. For a `field` rule, a
+   * canonical signature of the columns below (so the same rule is not stored
+   * twice), or the legacy `ResourceType.path` string on a pre-0012 row.
+   */
   target: string;
   note: string | null;
   created_at: number;
+  /** 0012: 0 switches the rule off without deleting it. */
+  enabled: number;
+  /** 0012, `field` only: `hide`, or `allow` to put back a sensitive field. */
+  effect: "hide" | "allow";
+  /** 0012, `field` only: the tool the rule is limited to, or null for every tool. */
+  scope_tool: string | null;
+  /** 0012, `field` only: the resource type, or null for every type. */
+  scope_resource: string | null;
+  /** 0012, `field` only: the health system id, or null for every health system. */
+  scope_health_system: string | null;
+  /** 0012, `field` only: JSON array of path strings. Null on a legacy row. */
+  paths_json: string | null;
 }
 
 export interface RunLogRow {

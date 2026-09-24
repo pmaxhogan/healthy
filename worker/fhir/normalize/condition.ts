@@ -1,4 +1,4 @@
-import { codeText, dedupeStrings, period, pickDate } from "./helpers.ts";
+import { codeText, codeTextSources, dedupeStrings, period, pickDate } from "./helpers.ts";
 
 import type {
   FieldAlias,
@@ -10,14 +10,21 @@ import type * as fhir4 from "fhir/r4";
 
 /** For the MCP policy's `field` rule engine, see `observation.ts`'s comment. */
 export const FIELD_ALIASES: readonly FieldAlias[] = [
+  // `code.text` is `codeText` of the concept: its text, or its first coding's
+  // display or code.
+  { normalized: ["code", "text"], raw: codeTextSources("code"), rendered: true },
+  { normalized: ["code", "code"], raw: [["code", "coding", "[]", "code"]], rendered: true },
+  { normalized: ["code", "system"], raw: [["code", "coding", "[]", "system"]], rendered: true },
   {
     normalized: ["onset"],
     raw: [["onsetDateTime"], ["onsetPeriod", "start"], ["onsetString"]],
+    rendered: true,
   },
-  { normalized: ["recorded"], raw: [["recordedDate"]] },
+  { normalized: ["recorded"], raw: [["recordedDate"]], rendered: true },
   {
     normalized: ["abatement"],
     raw: [["abatementDateTime"], ["abatementPeriod", "start"], ["abatementString"]],
+    rendered: true,
   },
 ];
 

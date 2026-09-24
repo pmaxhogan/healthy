@@ -1,4 +1,4 @@
-import { codeText, dedupeStrings, pickDate } from "./helpers.ts";
+import { codeText, codeTextSources, dedupeStrings, pickDate } from "./helpers.ts";
 
 import type {
   FieldAlias,
@@ -10,9 +10,24 @@ import type * as fhir4 from "fhir/r4";
 
 /** For the MCP policy's `field` rule engine, see `observation.ts`'s comment. */
 export const FIELD_ALIASES: readonly FieldAlias[] = [
-  { normalized: ["performed"], raw: [["performedDateTime"], ["performedPeriod", "start"]] },
+  {
+    normalized: ["performed"],
+    raw: [["performedDateTime"], ["performedPeriod", "start"]],
+    rendered: true,
+  },
   { normalized: ["performers"], raw: [["performer"]] },
+  {
+    normalized: ["performers", "[]", "name"],
+    raw: [["performer", "[]", "actor", "display"]],
+    rendered: true,
+  },
+  {
+    normalized: ["performers", "[]", "function"],
+    raw: codeTextSources("function").map((source) => ["performer", "[]", ...source]),
+    rendered: true,
+  },
   { normalized: ["reasons"], raw: [["reasonCode"]] },
+  { normalized: ["reasons"], raw: codeTextSources("reasonCode"), rendered: true },
 ];
 
 function toPerformer(

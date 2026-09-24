@@ -18,9 +18,18 @@ export const FIELD_ALIASES: readonly FieldAlias[] = [
   {
     normalized: ["attachments", "[]", "contentType"],
     raw: [["content", "[]", "attachment", "contentType"]],
+    rendered: true,
   },
-  { normalized: ["attachments", "[]", "url"], raw: [["content", "[]", "attachment", "url"]] },
-  { normalized: ["attachments", "[]", "title"], raw: [["content", "[]", "attachment", "title"]] },
+  {
+    normalized: ["attachments", "[]", "url"],
+    raw: [["content", "[]", "attachment", "url"]],
+    rendered: true,
+  },
+  {
+    normalized: ["attachments", "[]", "title"],
+    raw: [["content", "[]", "attachment", "title"]],
+    rendered: true,
+  },
 ];
 
 function toAttachment(

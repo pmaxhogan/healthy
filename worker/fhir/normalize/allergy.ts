@@ -1,4 +1,4 @@
-import { codeText, dedupeStrings, period, pickDate } from "./helpers.ts";
+import { codeText, codeTextSources, dedupeStrings, period, pickDate } from "./helpers.ts";
 
 import type {
   FieldAlias,
@@ -10,10 +10,13 @@ import type * as fhir4 from "fhir/r4";
 
 /** For the MCP policy's `field` rule engine, see `observation.ts`'s comment. */
 export const FIELD_ALIASES: readonly FieldAlias[] = [
+  { normalized: ["substance"], raw: [["code"]] },
+  { normalized: ["substance"], raw: codeTextSources("code"), rendered: true },
   { normalized: ["reactions"], raw: [["reaction"]] },
   {
     normalized: ["onset"],
     raw: [["onsetDateTime"], ["onsetPeriod", "start"], ["onsetString"]],
+    rendered: true,
   },
 ];
 

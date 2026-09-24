@@ -7,7 +7,10 @@
  *
  * `TOOL_NAMES` is the same list as a value, exported so a test can assert that
  * what is registered matches what is documented -- and so the admin UI's policy
- * editor can offer the tool names without hard-coding them a second time.
+ * editor can offer the tool names without hard-coding them a second time. It
+ * lives in `../tool-names.ts`, a module with no imports, so the exposure
+ * policy's field tree can name every tool without importing the tools (which
+ * import the policy filter).
  */
 
 import { registerAppointmentTools } from "./appointments.ts";
@@ -19,33 +22,7 @@ import { registerSummaryTool } from "./summary.ts";
 import type { ToolDeps } from "../deps.ts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-/** Every tool this server registers, in the order a caller would meet them. */
-export const TOOL_NAMES = [
-  "get_health_summary",
-  "list_health_systems",
-  "get_sync_status",
-  "get_patient_profile",
-  "get_appointments",
-  "get_encounters",
-  "get_conditions",
-  "get_medications",
-  "get_medication_fills",
-  "get_allergies",
-  "get_immunizations",
-  "get_lab_results",
-  "get_vitals",
-  "get_social_history",
-  "get_procedures",
-  "get_diagnostic_reports",
-  "get_documents",
-  "get_document_text",
-  "get_care_team",
-  "get_care_plans",
-  "get_goals",
-  "get_devices",
-  "get_coverage",
-  "get_service_requests",
-] as const;
+export { TOOL_NAMES } from "../tool-names.ts";
 
 export function registerTools(server: McpServer, deps: ToolDeps): void {
   registerSummaryTool(server, deps);

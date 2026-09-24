@@ -1,4 +1,4 @@
-import { codeText } from "./helpers.ts";
+import { codeText, codeTextSources } from "./helpers.ts";
 
 import type {
   FieldAlias,
@@ -11,6 +11,16 @@ import type * as fhir4 from "fhir/r4";
 /** For the MCP policy's `field` rule engine, see `observation.ts`'s comment. */
 export const FIELD_ALIASES: readonly FieldAlias[] = [
   { normalized: ["participants"], raw: [["participant"]] },
+  {
+    normalized: ["participants", "[]", "name"],
+    raw: [["participant", "[]", "member", "display"]],
+    rendered: true,
+  },
+  {
+    normalized: ["participants", "[]", "role"],
+    raw: codeTextSources("role").map((source) => ["participant", "[]", ...source]),
+    rendered: true,
+  },
 ];
 
 function toParticipant(

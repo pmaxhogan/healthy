@@ -13,7 +13,14 @@
 //   entry whose `physicalType` text says "department" -- is used as a
 //   best-effort department name.
 
-import { codeText, dedupeStrings, phone, address, period as periodOf } from "./helpers.ts";
+import {
+  codeText,
+  codeTextSources,
+  dedupeStrings,
+  phone,
+  address,
+  period as periodOf,
+} from "./helpers.ts";
 
 import type { RefResolver } from "./refs.ts";
 import type {
@@ -43,20 +50,53 @@ import type * as fhir4 from "fhir/r4";
  * treat `practitioners` and `practitioner` as the same concept (see
  * `normalizedCandidates` in `worker/policy/filter.ts`). `specialty` has no
  * entry: it is read off the referenced Practitioner, not the Encounter.
+ *
+ * The nested entries map a field inside an array to where the raw resource
+ * keeps the same text: a clinician's name is the participant reference's
+ * `display`, a place's name the location reference's. Where the normalized
+ * value came from a referenced resource instead (a Location's address), the
+ * raw Encounter holds only the reference, and there is nothing to alias.
  */
 export const FIELD_ALIASES: readonly FieldAlias[] = [
   { normalized: ["visitType"], raw: [["type"]] },
-  { normalized: ["start"], raw: [["period", "start"]] },
-  { normalized: ["end"], raw: [["period", "end"]] },
+  { normalized: ["visitType"], raw: codeTextSources("type"), rendered: true },
+  { normalized: ["start"], raw: [["period", "start"]], rendered: true },
+  { normalized: ["end"], raw: [["period", "end"]], rendered: true },
   { normalized: ["practitioners"], raw: [["participant"]] },
+  {
+    normalized: ["practitioners", "[]", "name"],
+    raw: [["participant", "[]", "individual", "display"]],
+    rendered: true,
+  },
+  {
+    normalized: ["practitioners", "[]", "role"],
+    raw: codeTextSources("type").map((source) => ["participant", "[]", ...source]),
+    rendered: true,
+  },
+  {
+    normalized: ["location", "name"],
+    raw: [["location", "[]", "location", "display"]],
+    rendered: true,
+  },
   { normalized: ["organization"], raw: [["serviceProvider"]] },
+  { normalized: ["organization"], raw: [["serviceProvider", "display"]], rendered: true },
   { normalized: ["reasons"], raw: [["reasonCode"]] },
+  { normalized: ["reasons"], raw: codeTextSources("reasonCode"), rendered: true },
   { normalized: ["identifiers"], raw: [["identifier"]] },
-  // The appointment view's names for the same raw fields.
+  { normalized: ["identifiers", "csn"], raw: [["identifier", "[]", "value"]], rendered: true },
+  // The appointment view's names for the same raw fields. `practitioner` is the
+  // one clinician's name, so a rule against the raw display text reaches it too.
   { normalized: ["practitioner"], raw: [["participant"]] },
+  {
+    normalized: ["practitioner"],
+    raw: [["participant", "[]", "individual", "display"]],
+    rendered: true,
+  },
   { normalized: ["org"], raw: [["serviceProvider"]] },
+  { normalized: ["org"], raw: [["serviceProvider", "display"]], rendered: true },
   { normalized: ["csn"], raw: [["identifier"]] },
-  { normalized: ["encounterId"], raw: [["id"]] },
+  { normalized: ["csn"], raw: [["identifier", "[]", "value"]], rendered: true },
+  { normalized: ["encounterId"], raw: [["id"]], rendered: true },
 ];
 
 const CSN_TYPE_CODE = "CSN";

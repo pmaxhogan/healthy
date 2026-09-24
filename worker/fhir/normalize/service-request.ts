@@ -1,12 +1,17 @@
-import { codeText, dedupeStrings, pickDate } from "./helpers.ts";
+import { codeText, codeTextSources, dedupeStrings, pickDate } from "./helpers.ts";
 
 import type { FieldAlias, NormalizeCtx, NormalizedServiceRequest } from "./types.ts";
 import type * as fhir4 from "fhir/r4";
 
 /** For the MCP policy's `field` rule engine, see `observation.ts`'s comment. */
 export const FIELD_ALIASES: readonly FieldAlias[] = [
-  { normalized: ["occurrence"], raw: [["occurrenceDateTime"], ["occurrencePeriod", "start"]] },
+  {
+    normalized: ["occurrence"],
+    raw: [["occurrenceDateTime"], ["occurrencePeriod", "start"]],
+    rendered: true,
+  },
   { normalized: ["reasons"], raw: [["reasonCode"]] },
+  { normalized: ["reasons"], raw: codeTextSources("reasonCode"), rendered: true },
 ];
 
 export function normalizeServiceRequest(

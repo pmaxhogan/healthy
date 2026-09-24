@@ -36,6 +36,15 @@ export interface FieldAlias {
    * normalized name -- resolving must try each alternative in turn.
    */
   raw: readonly (readonly string[])[];
+  /**
+   * The normalized side is one value RENDERED from the raw side -- a code's
+   * display text, a reference's name, a date picked out of a period -- rather
+   * than the same structure renamed. A raw path below a match then maps to the
+   * whole normalized field instead of to the same tail below it (which would
+   * name nothing): hiding `code.coding[].display` must hide the text made from
+   * it.
+   */
+  rendered?: true;
 }
 
 /** Fields every normalized output object carries. */

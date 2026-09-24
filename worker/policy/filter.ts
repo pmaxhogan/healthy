@@ -11,27 +11,36 @@
  * Two properties it is built to have, and that the tests assert on the final
  * serialised STRING rather than on the returned object:
  *
- *  1. Removal is total. A denied field is deep-deleted from the normalized item
- *     AND from the raw resource behind it, including inside arrays. A denied
- *     resource type or health system takes every item with it.
+ *  1. Removal is total. A hidden field is deep-deleted from the normalized item
+ *     AND from the raw resource behind it, including inside arrays at any depth.
+ *     A denied resource type or health system takes every item with it.
  *  2. Removal is immutable. Nothing here mutates its input: each item is rebuilt
  *     without the denied parts, so a cached object cannot be left damaged for
  *     the next caller and a half-applied filter cannot leave a field behind.
  *
+ * Redaction REMOVES the key. It never substitutes a marker: a placeholder value
+ * is something a model can mistake for data, and a `jq` program run after the
+ * filter could select it. What the model is told instead is a stable warning,
+ * `policy_field_removed:<ResourceType|*>.<path>`, naming the path and never a
+ * value or a health system. A path that ends in `[]` removes every element of
+ * the array and leaves it empty (`"components": []`).
+ *
  * Sensitive-by-default: an item that names fields in its own `sensitive` array
- * (see `worker/fhir/normalize/types.ts`) loses them unless the owner has added an
- * `allow:` rule. The `sensitive` key is then replaced by `withheld`, so the model
- * is told a field exists and was held back rather than being left to assume the
+ * (see `worker/fhir/normalize/types.ts`) loses them unless an `allow` rule puts
+ * them back. The `sensitive` key is then replaced by `withheld`, so the model is
+ * told a field exists and was held back rather than being left to assume the
  * record is empty.
  */
 
+import { ARRAY_SEGMENT, isChoiceSegment, matchesChoice } from "@shared/policy-path.ts";
+
 import { expandPath } from "./aliases.ts";
 import {
-  ARRAY_SEGMENT,
   fieldRulesFor,
   isHealthSystemDenied,
   isSensitiveAllowed,
   isToolDenied,
+  type ItemScope,
   type PolicyRules,
 } from "./rules.ts";
 
@@ -45,7 +54,7 @@ export interface RawEntry {
 }
 
 export interface ApplyPolicyInput {
-  /** Tool name, for the `tool` rule kind. */
+  /** Tool name, for the `tool` rule kind and tool-scoped field rules. */
   tool: string;
   /** Normalized items, each a plain record carrying `resourceType`. */
   items: readonly unknown[];
@@ -99,23 +108,32 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * level up knows to drop the key (or the array element) entirely. A path that
  * does not exist in `value` leaves it untouched and reports `changed: false`, so
  * an over-broad rule is inert rather than destructive.
+ *
+ * Arrays are stepped into wherever they are met, not only where the path says
+ * `[]`: `participants.name` and `participants[].name` remove the same thing,
+ * because a rule that silently did nothing for want of two brackets would be a
+ * leak the owner cannot see. An explicit `[]` is still how a path says "every
+ * element itself" -- `components[]` empties the array.
  */
 function prune(value: unknown, path: readonly string[]): PruneResult {
   if (path.length === 0) return REMOVE;
   const head = path[0] ?? "";
   const rest = path.slice(1);
-  if (head === ARRAY_SEGMENT) return pruneArray(value, rest);
-  return isRecord(value) && Object.hasOwn(value, head)
-    ? pruneRecord(value, head, rest)
+  if (head === ARRAY_SEGMENT)
+    return Array.isArray(value) ? pruneArray(value, rest) : unchanged(value);
+  if (Array.isArray(value)) return pruneArray(value, path);
+  if (!isRecord(value)) return unchanged(value);
+  if (isChoiceSegment(head)) return pruneRecord(value, (key) => matchesChoice(head, key), rest);
+  return Object.hasOwn(value, head)
+    ? pruneRecord(value, (key) => key === head, rest)
     : unchanged(value);
 }
 
 /** Walk into every element of an array, dropping the ones that come back removed. */
-function pruneArray(value: unknown, rest: readonly string[]): PruneResult {
-  if (!Array.isArray(value)) return unchanged(value);
+function pruneArray(value: readonly unknown[], rest: readonly string[]): PruneResult {
   let changed = false;
   const kept: unknown[] = [];
-  for (const element of value as unknown[]) {
+  for (const element of value) {
     const next = prune(element, rest);
     if (next.remove) {
       changed = true;
@@ -128,7 +146,7 @@ function pruneArray(value: unknown, rest: readonly string[]): PruneResult {
 }
 
 /**
- * Rebuild one record with `head` replaced or gone.
+ * Rebuild one record with the keys `matches` picks replaced or gone.
  *
  * Built from entries rather than by assigning `out[key]`: a computed write with a
  * variable key is exactly the prototype-pollution shape
@@ -137,13 +155,13 @@ function pruneArray(value: unknown, rest: readonly string[]): PruneResult {
  */
 function pruneRecord(
   value: Record<string, unknown>,
-  head: string,
+  matches: (key: string) => boolean,
   rest: readonly string[],
 ): PruneResult {
   let changed = false;
   const entries: [string, unknown][] = [];
   for (const [key, child] of Object.entries(value)) {
-    if (key !== head) {
+    if (!matches(key)) {
       entries.push([key, child]);
       continue;
     }
@@ -159,7 +177,7 @@ function pruneRecord(
 }
 
 /**
- * Apply every field rule that matches `resourceType` to one value.
+ * Apply every hide rule that reaches `scope` to one value.
  *
  * `shape` says which of the two projections `value` is: a rule's `path` is
  * whatever vocabulary the owner wrote it in, which is not necessarily this
@@ -172,28 +190,32 @@ function pruneRecord(
  */
 function applyFieldRules(
   rules: PolicyRules,
-  resourceType: string,
+  scope: ItemScope,
   shape: "normalized" | "raw",
   value: unknown,
   warnings: Set<string>,
 ): unknown {
   let current = value;
-  for (const rule of fieldRulesFor(rules, resourceType)) {
+  for (const rule of fieldRulesFor(rules, scope)) {
     let ruleChanged = false;
     const candidates =
       shape === "normalized"
-        ? normalizedCandidates(resourceType, rule.path)
-        : expandPath(resourceType, rule.path, "toRaw");
+        ? normalizedCandidates(scope.resourceType, rule.path)
+        : expandPath(scope.resourceType, rule.path, "toRaw");
     for (const candidate of candidates) {
       const next = prune(current, candidate);
       // `remove` is unreachable for a parsed (or alias-translated) rule: every
-      // candidate keeps at least one segment, and only an empty path removes
-      // at the top level.
+      // candidate keeps at least one named segment, and only an empty path
+      // removes at the top level.
       if (next.remove) continue;
       if (next.changed) ruleChanged = true;
       current = next.value;
     }
-    if (ruleChanged) warnings.add(`policy_field_removed:${rule.target}`);
+    if (ruleChanged) {
+      // The rule's own resource type, or `*`: never its tool or health system
+      // scope, which are the owner's business and not the model's.
+      warnings.add(`policy_field_removed:${rule.resourceType ?? "*"}.${rule.display}`);
+    }
   }
   return current;
 }
@@ -226,8 +248,13 @@ function normalizedCandidates(
   return [...out.values()];
 }
 
+/** The key sensitive fields are collected under: one resource type at one health system. */
+function sensitiveKey(resourceType: string, healthSystemId: string): string {
+  return `${resourceType}\u{0}${healthSystemId}`;
+}
+
 /**
- * Strip the fields `sensitiveByType` names from one raw resource.
+ * Strip the fields `fields` names from one raw resource.
  *
  * The raw FHIR carries no `sensitive` marker of its own, so without this
  * carry-over from the normalized items `raw: true` would be a way around the
@@ -279,13 +306,13 @@ function stringField(value: unknown, key: string): string {
  */
 function stripSensitive(
   rules: PolicyRules,
-  resourceType: string,
+  scope: ItemScope,
   item: Record<string, unknown>,
   warnings: Set<string>,
 ): Record<string, unknown> {
   const declared = stringArray(item.sensitive);
   if (declared.length === 0) return item;
-  const withheld = declared.filter((field) => !isSensitiveAllowed(rules, resourceType, field));
+  const withheld = declared.filter((field) => !isSensitiveAllowed(rules, scope, field));
 
   const entries: [string, unknown][] = [];
   for (const [key, value] of Object.entries(item)) {
@@ -294,40 +321,49 @@ function stripSensitive(
   }
   if (withheld.length > 0) {
     entries.push(["withheld", withheld]);
-    for (const field of withheld) warnings.add(`sensitive_withheld:${resourceType}.${field}`);
+    for (const field of withheld) warnings.add(`sensitive_withheld:${scope.resourceType}.${field}`);
   }
   return Object.fromEntries(entries);
 }
 
-/** Field names the normalized items declared sensitive, by resource type. */
-function collectSensitive(rules: PolicyRules, items: readonly unknown[]): Map<string, Set<string>> {
-  const byType = new Map<string, Set<string>>();
+/** The scope one normalized item sits in. */
+function itemScope(tool: string, item: unknown): ItemScope {
+  return {
+    tool,
+    resourceType: stringField(item, "resourceType"),
+    healthSystemId: stringField(item, "healthSystemId"),
+  };
+}
+
+/** Field names the normalized items declared sensitive, by resource type and health system. */
+function collectSensitive(
+  rules: PolicyRules,
+  tool: string,
+  items: readonly unknown[],
+): Map<string, Set<string>> {
+  const byKey = new Map<string, Set<string>>();
   for (const item of items) {
     if (!isRecord(item)) continue;
-    const resourceType = stringField(item, "resourceType");
+    const scope = itemScope(tool, item);
     const declared = stringArray(item.sensitive).filter(
-      (field) => !isSensitiveAllowed(rules, resourceType, field),
+      (field) => !isSensitiveAllowed(rules, scope, field),
     );
     if (declared.length === 0) continue;
-    const existing = byType.get(resourceType) ?? new Set<string>();
+    const key = sensitiveKey(scope.resourceType, scope.healthSystemId);
+    const existing = byKey.get(key) ?? new Set<string>();
     for (const field of declared) existing.add(field);
-    byType.set(resourceType, existing);
+    byKey.set(key, existing);
   }
-  return byType;
+  return byKey;
 }
 
 /** Whole-item denials: the resource type, or the health system it came from. */
-function itemDenied(
-  rules: PolicyRules,
-  resourceType: string,
-  healthSystemId: string,
-  warnings: Set<string>,
-): boolean {
-  if (rules.resources.has(resourceType)) {
-    warnings.add(`policy_resource_denied:${resourceType}`);
+function itemDenied(rules: PolicyRules, scope: ItemScope, warnings: Set<string>): boolean {
+  if (rules.resources.has(scope.resourceType)) {
+    warnings.add(`policy_resource_denied:${scope.resourceType}`);
     return true;
   }
-  if (healthSystemId !== "" && isHealthSystemDenied(rules, healthSystemId)) {
+  if (scope.healthSystemId !== "" && isHealthSystemDenied(rules, scope.healthSystemId)) {
     // No health system id in the warning: the deny-list is the owner's business, and a
     // tool's answer is read by a third-party model.
     warnings.add("policy_health_system_denied");
@@ -343,8 +379,8 @@ function itemDenied(
  * and resource-type denies drop whole items (no point filtering fields off
  * something that is leaving); then field rules; then the sensitive default. The
  * sensitive field names are collected from the normalized items BEFORE they are
- * stripped, and reused on the raw resources of the same type -- the raw FHIR
- * carries no `sensitive` marker of its own, so without that carry-over
+ * stripped, and reused on the raw resources of the same type and health system --
+ * the raw FHIR carries no `sensitive` marker of its own, so without that carry-over
  * `raw: true` would be a way around the default.
  */
 export function applyPolicy(input: ApplyPolicyInput): ApplyPolicyResult {
@@ -354,12 +390,12 @@ export function applyPolicy(input: ApplyPolicyInput): ApplyPolicyResult {
   }
 
   const warnings = new Set<string>();
-  const sensitiveByType = collectSensitive(rules, input.items);
+  const sensitive = collectSensitive(rules, tool, input.items);
 
   return {
     denied: false,
-    items: filterItems(rules, input.items, warnings),
-    rawItems: filterRaw(rules, input.rawItems ?? [], sensitiveByType, warnings),
+    items: filterItems(rules, tool, input.items, warnings),
+    rawItems: filterRaw(rules, tool, input.rawItems ?? [], sensitive, warnings),
     warnings: sortedWarnings(warnings),
   };
 }
@@ -367,6 +403,7 @@ export function applyPolicy(input: ApplyPolicyInput): ApplyPolicyResult {
 /** The normalized half: whole-item denials, then field rules, then `sensitive`. */
 function filterItems(
   rules: PolicyRules,
+  tool: string,
   input: readonly unknown[],
   warnings: Set<string>,
 ): unknown[] {
@@ -380,12 +417,10 @@ function filterItems(
       warnings.add("policy_unfilterable_item_dropped");
       continue;
     }
-    const resourceType = stringField(item, "resourceType");
-    if (itemDenied(rules, resourceType, stringField(item, "healthSystemId"), warnings)) continue;
-    const filtered = applyFieldRules(rules, resourceType, "normalized", item, warnings);
-    items.push(
-      isRecord(filtered) ? stripSensitive(rules, resourceType, filtered, warnings) : filtered,
-    );
+    const scope = itemScope(tool, item);
+    if (itemDenied(rules, scope, warnings)) continue;
+    const filtered = applyFieldRules(rules, scope, "normalized", item, warnings);
+    items.push(isRecord(filtered) ? stripSensitive(rules, scope, filtered, warnings) : filtered);
   }
   return items;
 }
@@ -393,18 +428,23 @@ function filterItems(
 /** The raw half, held to the same rules plus the carried-over sensitive fields. */
 function filterRaw(
   rules: PolicyRules,
+  tool: string,
   input: readonly RawEntry[],
-  sensitiveByType: ReadonlyMap<string, ReadonlySet<string>>,
+  sensitive: ReadonlyMap<string, ReadonlySet<string>>,
   warnings: Set<string>,
 ): RawEntry[] {
   const rawItems: RawEntry[] = [];
   for (const entry of input) {
-    const resourceType = stringField(entry.resource, "resourceType");
-    if (itemDenied(rules, resourceType, entry.healthSystemId, warnings)) continue;
-    const filtered = applyFieldRules(rules, resourceType, "raw", entry.resource, warnings);
+    const scope: ItemScope = {
+      tool,
+      resourceType: stringField(entry.resource, "resourceType"),
+      healthSystemId: entry.healthSystemId,
+    };
+    if (itemDenied(rules, scope, warnings)) continue;
+    const filtered = applyFieldRules(rules, scope, "raw", entry.resource, warnings);
     const resource = stripSensitiveRaw(
-      resourceType,
-      sensitiveByType.get(resourceType) ?? EMPTY_FIELDS,
+      scope.resourceType,
+      sensitive.get(sensitiveKey(scope.resourceType, scope.healthSystemId)) ?? EMPTY_FIELDS,
       filtered,
       warnings,
     );

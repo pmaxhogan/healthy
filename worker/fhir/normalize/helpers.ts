@@ -5,6 +5,20 @@ import type * as fhir4 from "fhir/r4";
 
 /** `CodeableConcept` -> the best available human text: `.text`, else the
  * first coding's `.display`, else its `.code`. */
+/**
+ * Where {@link codeText} can have read its answer from, below the element
+ * `field`: for a `FIELD_ALIASES` entry whose normalized side is a code
+ * rendered as text, so a policy rule written against the raw `display` (or
+ * `text`, or `code`) of a coding also removes the normalized text made from it.
+ */
+export function codeTextSources(field: string): string[][] {
+  return [
+    [field, "text"],
+    [field, "coding", "[]", "display"],
+    [field, "coding", "[]", "code"],
+  ];
+}
+
 export function codeText(cc?: fhir4.CodeableConcept): string | undefined {
   if (!cc) {
     return undefined;

@@ -22,7 +22,7 @@
 
 import { toIso } from "../lib/time.ts";
 import { parseAllowlistCsv } from "../mail/classify.ts";
-import { buildRules } from "../policy/rules.ts";
+import { buildRules, fieldSpecOf } from "../policy/rules.ts";
 
 import type {
   AlertRow,
@@ -408,9 +408,13 @@ export function toPolicyRuleDto(row: McpPolicyRow): PolicyRuleDto {
     id: row.id,
     ruleType: row.rule_type,
     target: row.target,
+    field: fieldSpecOf(row),
+    enabled: row.enabled !== 0,
     note: row.note,
     createdAt: toIso(row.created_at),
-    unparsed: buildRules([row]).unparsed.length > 0,
+    // Parsed as if enabled: a switched-off rule that could not be enforced if
+    // it were switched back on is still worth a warning.
+    unparsed: buildRules([{ ...row, enabled: 1 }]).unparsed.length > 0,
   };
 }
 

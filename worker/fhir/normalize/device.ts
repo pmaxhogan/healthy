@@ -6,12 +6,14 @@ import type * as fhir4 from "fhir/r4";
 /** For the MCP policy's `field` rule engine, see `observation.ts`'s comment. */
 export const FIELD_ALIASES: readonly FieldAlias[] = [
   { normalized: ["model"], raw: [["deviceName"]] },
+  { normalized: ["model"], raw: [["deviceName", "[]", "name"]], rendered: true },
   {
     normalized: ["udi"],
     raw: [
       ["udiCarrier", "[]", "carrierHRF"],
       ["udiCarrier", "[]", "deviceIdentifier"],
     ],
+    rendered: true,
   },
 ];
 

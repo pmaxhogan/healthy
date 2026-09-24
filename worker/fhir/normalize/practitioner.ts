@@ -5,7 +5,7 @@ import type * as fhir4 from "fhir/r4";
 
 /** For the MCP policy's `field` rule engine, see `observation.ts`'s comment. */
 export const FIELD_ALIASES: readonly FieldAlias[] = [
-  { normalized: ["qualifications"], raw: [["qualification", "[]", "code"]] },
+  { normalized: ["qualifications"], raw: [["qualification", "[]", "code"]], rendered: true },
 ];
 
 export function normalizePractitioner(

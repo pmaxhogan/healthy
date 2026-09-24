@@ -23,27 +23,16 @@ import { Hono } from "hono";
 import { AppError } from "../../lib/errors.ts";
 import { adminCaller, callMcpTool, listMcpTools } from "../../mcp/admin-call.ts";
 import { makeToolDeps } from "../../mcp/deps-d1.ts";
-import { ALLOW_PREFIX, fieldRuleResolves, parseFieldTarget } from "../../policy/rules.ts";
-import { toAuditDto, toPolicyRuleDto } from "../dto.ts";
-import {
-  NO_STORE,
-  apiContext,
-  limitQuerySchema,
-  readJson,
-  readOptionalJson,
-  readQuery,
-} from "../http.ts";
-import { mcpToolCallArgsSchema, policyRuleSchema } from "../schemas.ts";
+import { toAuditDto } from "../dto.ts";
+import { NO_STORE, apiContext, limitQuerySchema, readOptionalJson, readQuery } from "../http.ts";
+import { mcpToolCallArgsSchema } from "../schemas.ts";
 import { TOOL_CATALOG } from "../tool-catalog.ts";
+
+import { mcpPolicyRouter } from "./mcp-policy.ts";
 
 import type { AppHonoEnv } from "../../auth/gate.ts";
 import type { GrantLike } from "../ports.ts";
-import type {
-  CreatePolicyRuleRequest,
-  McpGrantDto,
-  McpToolCallResponse,
-  McpToolSchemaDto,
-} from "@shared/types.ts";
+import type { McpGrantDto, McpToolCallResponse, McpToolSchemaDto } from "@shared/types.ts";
 
 /** Audit rows per page when the caller does not say. */
 const DEFAULT_AUDIT_LIMIT = 100;
@@ -51,49 +40,11 @@ const DEFAULT_AUDIT_LIMIT = 100;
 export const mcpRouter = new Hono<AppHonoEnv>();
 
 // --- policy ----------------------------------------------------------------
+//
+// Its own module: the rules, the field tree, and the structure and preview
+// windows onto real data. See `mcp-policy.ts`.
 
-mcpRouter.get("/policy", async (c) => {
-  const api = apiContext(c);
-  const rows = await api.repos.mcpPolicy.list();
-  return c.json(
-    rows.map((row) => toPolicyRuleDto(row)),
-    200,
-    NO_STORE,
-  );
-});
-
-mcpRouter.post("/policy", async (c) => {
-  const api = apiContext(c);
-  // Typed against the shared contract as well as the schema, so the SPA's payload
-  // and the Worker's parser cannot drift apart without a compile error.
-  const body: CreatePolicyRuleRequest = await readJson(c, policyRuleSchema);
-  // A `field` target that names nothing in either vocabulary is refused outright
-  // rather than stored as `unparsed`: it parses fine (it is a real dotted path
-  // below a real resource type), so the admin UI's typo signal never fires, and
-  // the owner would otherwise have no way to discover a rule that can never
-  // remove anything. A target that fails to parse at all -- `parseFieldTarget`
-  // returning `null` -- is unaffected; that is still reported via `unparsed`,
-  // as before, not rejected here.
-  if (body.ruleType === "field" && !body.target.startsWith(ALLOW_PREFIX)) {
-    const rule = parseFieldTarget(body.target);
-    if (rule !== null && !fieldRuleResolves(rule)) {
-      throw new AppError(
-        "bad_request",
-        "field rule matches nothing in either the normalized or the raw FHIR vocabulary",
-        { target: body.target },
-      );
-    }
-  }
-  const row = await api.repos.mcpPolicy.add(body.ruleType, body.target, body.note);
-  return c.json(toPolicyRuleDto(row), 201, NO_STORE);
-});
-
-mcpRouter.delete("/policy/:id", async (c) => {
-  const api = apiContext(c);
-  const removed = await api.repos.mcpPolicy.remove(c.req.param("id"));
-  if (!removed) throw new AppError("not_found", "no such policy rule");
-  return c.json({ ok: true }, 200, NO_STORE);
-});
+mcpRouter.route("/policy", mcpPolicyRouter);
 
 // --- grants ----------------------------------------------------------------
 

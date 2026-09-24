@@ -8,9 +8,10 @@ export const FIELD_ALIASES: readonly FieldAlias[] = [
   {
     normalized: ["effective"],
     raw: [["effectiveDateTime"], ["effectivePeriod", "start"]],
+    rendered: true,
   },
-  { normalized: ["resultRefs"], raw: [["result", "[]", "reference"]] },
-  { normalized: ["presentedFormRefs"], raw: [["presentedForm", "[]", "url"]] },
+  { normalized: ["resultRefs"], raw: [["result", "[]", "reference"]], rendered: true },
+  { normalized: ["presentedFormRefs"], raw: [["presentedForm", "[]", "url"]], rendered: true },
 ];
 
 export function normalizeDiagnosticReport(
