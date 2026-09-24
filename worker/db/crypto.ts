@@ -130,9 +130,21 @@ function keyFor(source: KeySource): Promise<CryptoKey> {
   return pending;
 }
 
+/**
+ * UTF-8 bytes over a plain ArrayBuffer. `TextEncoder#encode` is typed
+ * `ArrayBufferLike` under some of this repo's lib settings, which WebCrypto will
+ * not accept once the value passes through a variable; see `fromBase64`.
+ */
+function utf8(text: string): Uint8Array<ArrayBuffer> {
+  const encoded = encoder.encode(text);
+  const out = new Uint8Array(encoded.length);
+  out.set(encoded);
+  return out;
+}
+
 /** What AES-GCM authenticates for a new seal: the version, a NUL, the cell's AAD. */
-function boundAad(version: string, aad: string): Uint8Array {
-  return encoder.encode(`${version}\u{0}${aad}`);
+function boundAad(version: string, aad: string): Uint8Array<ArrayBuffer> {
+  return utf8(`${version}\u{0}${aad}`);
 }
 
 /**
@@ -219,7 +231,7 @@ export async function open(source: KeySource, sealed: string, aad: string): Prom
   }
   const bytes = fromBase64(sealed.slice(separator + 1), "sealed envelope");
   if (bytes.length <= IV_BYTES) throw cryptoError("sealed envelope is too short");
-  const decrypt = (additionalData: Uint8Array): Promise<ArrayBuffer> =>
+  const decrypt = (additionalData: Uint8Array<ArrayBuffer>): Promise<ArrayBuffer> =>
     crypto.subtle.decrypt(
       { name: "AES-GCM", iv: bytes.subarray(0, IV_BYTES), additionalData },
       key,
@@ -232,7 +244,7 @@ export async function open(source: KeySource, sealed: string, aad: string): Prom
     try {
       plaintext = await decrypt(boundAad(version, aad));
     } catch {
-      plaintext = await decrypt(encoder.encode(aad));
+      plaintext = await decrypt(utf8(aad));
     }
   } catch (error) {
     throw cryptoError("open failed: wrong key, wrong AAD, or tampered ciphertext", error);
