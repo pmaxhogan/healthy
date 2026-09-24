@@ -18,7 +18,7 @@
 // `prefers-color-scheme` media query already tracks the OS setting exactly like
 // the rest of the SPA does.
 import { Validator } from "@cfworker/json-schema";
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import {
   isSandboxInboundMessage,
@@ -81,6 +81,21 @@ const completionOpen = ref(false);
 // `flags` for the same pattern): mutated from inside `onMounted`/
 // `onBeforeUnmount` below, which a top-level variable cannot be.
 const resize = { observer: null as ResizeObserver | null };
+// Whichever of the three outcome-kind blocks in the template is currently
+// rendered (pending/ok/error) binds this same ref -- only one exists at a
+// time -- so it always names "the result the owner just ran", for scrolling
+// it into view once it lands (see the `watch` below).
+const resultEl = ref<HTMLElement | null>(null);
+
+// A couple of CSS pixels of slack: `getBoundingClientRect().height` is a
+// sub-pixel float, and at a fractional device pixel ratio the browser's own
+// layout can round the *true* rendered height up by a pixel or two more than
+// a naive `Math.ceil` of that float does. Under-reporting by even one real
+// pixel gives the iframe its own pointless internal scrollbar -- every pixel
+// of content visible, nothing to actually scroll to, but a scrollbar there
+// regardless, which reads as "no result" to anyone who does not think to
+// scroll a few px inside what looks like a fully-sized box.
+const HEIGHT_SLACK_PX = 4;
 
 function notifyParent(message: SandboxOutboundMessage): void {
   // "*", not the parent's real origin: this page is loaded with no
@@ -93,8 +108,15 @@ function notifyParent(message: SandboxOutboundMessage): void {
 }
 
 function reportHeight(): void {
-  const height = rootEl.value?.getBoundingClientRect().height ?? 0;
-  notifyParent({ type: "resize", height: Math.ceil(height) });
+  const el = rootEl.value;
+  if (el === null) return;
+  // `scrollHeight` (an integer the layout engine has already rounded, not a
+  // sub-pixel float) plus `HEIGHT_SLACK_PX`, rather than
+  // `getBoundingClientRect().height` on its own -- see that constant's own
+  // comment for why. `.sandbox` has no overflow of its own (grid children are
+  // all in-flow), so `scrollHeight` here is exactly the content height, not a
+  // scrolled-past-the-box measurement.
+  notifyParent({ type: "resize", height: el.scrollHeight + HEIGHT_SLACK_PX });
 }
 
 onMounted(() => {
@@ -112,6 +134,26 @@ onBeforeUnmount(() => {
   resize.observer?.disconnect();
   resize.observer = null;
 });
+
+// Belt and braces on top of the `ResizeObserver` above: a result or error
+// landing is the one moment the owner is actively waiting to see something,
+// so this reports (and scrolls to) it on its own timeline rather than
+// trusting the observer's own scheduling alone. `nextTick` waits for Vue to
+// have actually patched the DOM with the new outcome; the `requestAnimationFrame`
+// after it catches anything that only settles after that paint -- a web font
+// swap, or CodeMirror's own async measurement in the editor above the result.
+watch(
+  () => attempt.value?.outcome.kind,
+  async (kind) => {
+    if (kind !== "ok" && kind !== "error") return;
+    await nextTick();
+    reportHeight();
+    requestAnimationFrame(() => {
+      reportHeight();
+      resultEl.value?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  },
+);
 
 const valid = computed(
   () => tool.value !== null && parseError.value === null && schemaIssues.value.length === 0,
@@ -340,7 +382,7 @@ notifyParent({ type: "ready" });
         <div v-if="attempt.outcome.kind === 'pending'" class="viewer-block">
           <p class="muted">Running…</p>
         </div>
-        <div v-else-if="attempt.outcome.kind === 'ok'" class="viewer-block">
+        <div v-else-if="attempt.outcome.kind === 'ok'" ref="resultEl" class="viewer-block">
           <div class="row">
             <h3>Result</h3>
             <span :class="attempt.outcome.isError ? 'danger-text' : ''">
@@ -350,7 +392,7 @@ notifyParent({ type: "ready" });
           </div>
           <JsonViewer :value="attempt.outcome.data" />
         </div>
-        <div v-else-if="attempt.outcome.kind === 'error'" class="viewer-block">
+        <div v-else-if="attempt.outcome.kind === 'error'" ref="resultEl" class="viewer-block">
           <h3>Result</h3>
           <p class="warn-text">{{ attempt.outcome.message }}</p>
           <ul v-if="attempt.outcome.issues" class="warn-text issues">

@@ -249,6 +249,44 @@ describe("McpToolTester", () => {
     expect(wrapper.find("iframe").attributes("style")).toContain("height: 1000px");
   });
 
+  it("scrolls the frame into view on the resize that follows a run's result", async () => {
+    const scrollSpy = vi.spyOn(Element.prototype, "scrollIntoView").mockReturnValue(undefined);
+    mountTester({
+      "/api/mcp/tools/list_health_systems/call": () =>
+        fakeResponse({
+          body: { request: {}, result: { isError: false, data: {} }, durationMs: 1 },
+        }),
+    });
+    await flushPromises();
+    sendFromFrame({ type: "ready" });
+    await flushPromises();
+
+    // A resize with no run behind it at all -- e.g. the editor growing as the
+    // owner types -- must not yank the page down to the frame.
+    sendFromFrame({ type: "resize", height: 300 });
+    await flushPromises();
+    expect(scrollSpy).not.toHaveBeenCalled();
+
+    sendFromFrame({ type: "run", name: "list_health_systems", arguments: {} });
+    await flushPromises();
+    // SandboxApp.vue would send this once it has rendered the result; the
+    // frame stub here just needs to send it back to exercise the parent's own
+    // side of that contract.
+    sendFromFrame({ type: "resize", height: 450 });
+    await flushPromises();
+
+    expect(scrollSpy).toHaveBeenCalledWith({ behavior: "smooth", block: "nearest" });
+
+    scrollSpy.mockClear();
+    sendFromFrame({ type: "resize", height: 460 });
+    await flushPromises();
+    // Consumed by the resize right after the run -- a later one (the editor
+    // moving again) is an unrelated event and must not scroll again.
+    expect(scrollSpy).not.toHaveBeenCalled();
+
+    scrollSpy.mockRestore();
+  });
+
   it("drops a result for a tool the owner has since switched away from", async () => {
     // The fake API layer resolves synchronously, which leaves no window to
     // switch tools before the fetch settles. Controlling `endpoints.callMcpTool`

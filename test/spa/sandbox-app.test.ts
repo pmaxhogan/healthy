@@ -287,4 +287,42 @@ describe("SandboxApp", () => {
 
     expect(wrapper.find(".completion-reserve").exists()).toBe(false);
   });
+
+  it("reports height and scrolls the result into view as soon as it renders", async () => {
+    // happy-dom's scrollIntoView is a real, spyable no-op (unlike a browser,
+    // it does not actually move anything) -- exactly what a test that only
+    // cares whether it was *asked for* needs.
+    const scrollSpy = vi.spyOn(Element.prototype, "scrollIntoView").mockReturnValue(undefined);
+    const wrapper = mount(SandboxApp);
+    await flushPromises();
+    sendFromParent(TOOL_MESSAGE);
+    await flushPromises();
+    editorOf(wrapper).vm.$emit(
+      "update:modelValue",
+      JSON.stringify({ healthSystem: "prov-1", id: "doc-1" }),
+    );
+    await flushPromises();
+    editorOf(wrapper).vm.$emit("run");
+    await flushPromises();
+    world.postMessage.mockClear();
+
+    sendFromParent({ type: "result", isError: false, data: { text: "hello" }, durationMs: 7 });
+    await flushPromises();
+    // The watcher's own `nextTick` has now resolved and its first
+    // `reportHeight()` has run; the second pass and the scroll are behind a
+    // `requestAnimationFrame`, which happy-dom schedules on a real timer --
+    // waited out here the same way, rather than assuming any particular
+    // scheduling order against it.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    expect(world.postMessage).toHaveBeenCalledWith(
+      { type: "resize", height: expect.any(Number) },
+      "*",
+    );
+    expect(scrollSpy).toHaveBeenCalledWith({ behavior: "smooth", block: "nearest" });
+
+    scrollSpy.mockRestore();
+  });
 });

@@ -95,6 +95,16 @@ function sendCurrentTool(): void {
 
 watch(selectedName, sendCurrentTool);
 
+// Set right before either answer to a run goes back to the frame, and acted
+// on by the very next "resize" that arrives (see onWindowMessage below): the
+// frame reports a new height right after it renders that result or error
+// (SandboxApp.vue's own watcher), so that next resize is the signal that the
+// answer the owner is waiting on is actually on screen inside the frame now,
+// not before. A property on an object, not a bare top-level `let` -- see
+// JsonEditor.vue's `flags` for the same pattern -- since it is set from
+// `handleRun` and read from `onWindowMessage`.
+const runFlow = { awaitingScroll: false };
+
 /**
  * Runs one tool call on the frame's behalf and posts the answer back.
  *
@@ -109,6 +119,7 @@ async function handleRun(name: string, args: Record<string, unknown>): Promise<v
   try {
     const response = await endpoints.callMcpTool(name, args);
     if (!isStillSelected()) return;
+    runFlow.awaitingScroll = true;
     postToFrame({
       type: "result",
       isError: response.result.isError,
@@ -130,6 +141,7 @@ async function handleRun(name: string, args: Record<string, unknown>): Promise<v
       issues !== undefined && error instanceof ApiRequestError
         ? error.message
         : errorMessage(error);
+    runFlow.awaitingScroll = true;
     postToFrame({ type: "call-error", message, ...(issues && { issues }) });
   }
 }
@@ -165,6 +177,15 @@ function onWindowMessage(event: MessageEvent): void {
     }
     case "resize": {
       frameHeight.value = clampFrameHeight(message.height);
+      if (runFlow.awaitingScroll) {
+        runFlow.awaitingScroll = false;
+        // Brings the frame into view on the *admin page*, in case the owner
+        // had scrolled away from it (e.g. down to the audit log) while a slow
+        // call was in flight; the frame's own scroll, to the result inside
+        // it, is SandboxApp.vue's job, since only it can reach its own
+        // document.
+        frameEl.value?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
       break;
     }
   }
