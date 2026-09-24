@@ -24,7 +24,7 @@
 export const ARRAY_SEGMENT = "[]";
 
 /** The suffix marking a FHIR choice type: `value[x]` is every `value<Type>` key. */
-export const CHOICE_SUFFIX = "[x]";
+const CHOICE_SUFFIX = "[x]";
 
 /** Longest path the policy accepts, in characters. Generous; paths are short. */
 export const MAX_PATH_LENGTH = 300;

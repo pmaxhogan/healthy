@@ -154,7 +154,7 @@ function onlyType(answer: Answer, resourceType: string | undefined): Answer {
 }
 
 /** The stored rules a preview's baseline keeps: which items exist, nothing else. */
-export function baselineRules(rows: readonly McpPolicyRow[]): PolicyRules {
+function baselineRules(rows: readonly McpPolicyRow[]): PolicyRules {
   return buildRules(
     rows.filter((row) => row.rule_type === "resource" || row.rule_type === "health_system"),
   );

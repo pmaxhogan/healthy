@@ -82,7 +82,9 @@ async function checkedColumns(api: ApiContext, spec: FieldRuleSpec): Promise<Fie
   const healthSystems = await api.repos.healthSystems.list();
   const check = checkFieldSpec(spec, new Set(healthSystems.map((row) => row.id)));
   if (!check.ok) {
-    throw new AppError("bad_request", check.issues.join(" "), { issues: check.issues });
+    // `problems`, not `issues`: the SPA shows `details.issues` appended to the
+    // message, and these sentences already are the message.
+    throw new AppError("bad_request", check.issues.join(" "), { problems: check.issues });
   }
   return { target: fieldSignature(check.spec), ...check.spec };
 }

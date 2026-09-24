@@ -46,7 +46,7 @@ export { ARRAY_SEGMENT } from "@shared/policy-path.ts";
 export const ALLOW_PREFIX = "allow:";
 
 /** What a `field` rule does to the paths it names. */
-export type FieldEffect = "hide" | "allow";
+type FieldEffect = "hide" | "allow";
 
 /** One path of one `field` rule, with the scope it applies in. */
 export interface FieldRule {

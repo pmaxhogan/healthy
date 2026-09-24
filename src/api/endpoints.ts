@@ -28,7 +28,12 @@ import type {
   McpToolInfoDto,
   McpToolSchemaDto,
   OverviewDto,
+  PolicyPreviewDto,
+  PolicyPreviewRequest,
   PolicyRuleDto,
+  PolicySampleRequest,
+  PolicySchemaDto,
+  PolicyStructureDto,
   PortalAccountStatusDto,
   PortalDiscoverRequest,
   PortalDiscoveryDto,
@@ -39,6 +44,7 @@ import type {
   SettingsDto,
   SettingsPatch,
   UpdateHealthSystemRequest,
+  UpdatePolicyRuleRequest,
 } from "@shared/types.ts";
 
 /** The 202 body of every route whose work outlives the response. */
@@ -139,8 +145,19 @@ export const endpoints = {
     api.get("/api/mcp/policy", signal),
   createPolicyRule: (body: CreatePolicyRuleRequest): Promise<PolicyRuleDto> =>
     api.post("/api/mcp/policy", body),
+  updatePolicyRule: (id: string, patch: UpdatePolicyRuleRequest): Promise<PolicyRuleDto> =>
+    api.patch(`/api/mcp/policy/${encodeURIComponent(id)}`, patch),
   deletePolicyRule: (id: string): Promise<void> =>
     api.delete(`/api/mcp/policy/${encodeURIComponent(id)}`),
+  /** The field tree every rule is built from. Static per deployment. */
+  policySchema: (signal?: AbortSignal): Promise<PolicySchemaDto> =>
+    api.get("/api/mcp/policy/schema", signal),
+  /** Key names (never values) of one tool's real answer, to overlay on the tree. */
+  policyStructure: (body: PolicySampleRequest): Promise<PolicyStructureDto> =>
+    api.post("/api/mcp/policy/structure", body),
+  /** A draft field rule run over one tool's real answer: before and after. */
+  policyPreview: (body: PolicyPreviewRequest): Promise<PolicyPreviewDto> =>
+    api.post("/api/mcp/policy/preview", body),
 
   mcpGrants: (signal?: AbortSignal): Promise<McpGrantDto[]> => api.get("/api/mcp/grants", signal),
   revokeMcpGrant: (id: string): Promise<void> =>

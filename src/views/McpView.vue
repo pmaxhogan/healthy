@@ -10,19 +10,18 @@ import { computed, ref, watch } from "vue";
 
 import { endpoints, mcpToolsOrNone } from "../api/endpoints.ts";
 import McpToolTester from "../components/McpToolTester.vue";
-import PolicyRuleForm from "../components/PolicyRuleForm.vue";
+import PolicySection from "../components/PolicySection.vue";
 import StateBlock from "../components/StateBlock.vue";
 import { formatDateTime, formatDuration, relativeTime } from "../lib/format.ts";
 import { toastSuccess } from "../lib/toasts.ts";
 import { useAction, useLoad } from "../lib/use-load.ts";
 
-import type { CreatePolicyRuleRequest, McpAuditJqDto } from "@shared/types.ts";
+import type { McpAuditJqDto } from "@shared/types.ts";
 
 const AUDIT_LIMITS = [25, 50, 100, 250] as const;
 
 const settings = useLoad((signal) => endpoints.settings(signal));
 const grants = useLoad((signal) => endpoints.mcpGrants(signal));
-const rules = useLoad((signal) => endpoints.policyRules(signal));
 const healthSystems = useLoad((signal) => endpoints.healthSystems(signal));
 const tools = useLoad((signal) => mcpToolsOrNone(signal));
 
@@ -33,7 +32,6 @@ watch(auditLimit, () => {
 });
 
 const toggle = useAction();
-const addRule = useAction();
 const mutate = useAction();
 
 const enabled = computed(() => settings.data.value?.mcpEnabled ?? false);
@@ -60,12 +58,6 @@ function describeJq(jq: McpAuditJqDto | null): string {
   return `${head} · ${String(jq.inputCount)} → ${out}`;
 }
 
-// A rule the policy engine cannot parse is stored, listed, and enforcing nothing.
-// That is the one way this page can mislead -- the owner reads the row and
-// believes the exposure is denied -- so it is called out rather than left to be
-// noticed. Only a malformed `field` target can get here; see PolicyRuleDto.
-const unparsedRules = computed(() => (rules.data.value ?? []).filter((rule) => rule.unparsed));
-
 async function setEnabled(next: boolean): Promise<void> {
   const ok = await toggle.run(async () => {
     const saved = await endpoints.saveSettings({ mcpEnabled: next });
@@ -73,22 +65,6 @@ async function setEnabled(next: boolean): Promise<void> {
     toastSuccess(next ? "MCP enabled." : "MCP disabled.");
   });
   if (!ok) await settings.reload();
-}
-
-async function onAddRule(rule: CreatePolicyRuleRequest): Promise<void> {
-  const ok = await addRule.run(async () => {
-    await endpoints.createPolicyRule(rule);
-    toastSuccess("Rule added.");
-  });
-  if (ok) await rules.reload();
-}
-
-async function onDeleteRule(id: string): Promise<void> {
-  const ok = await mutate.run(async () => {
-    await endpoints.deletePolicyRule(id);
-    toastSuccess("Rule removed.");
-  });
-  if (ok) await rules.reload();
 }
 
 async function onRevoke(id: string): Promise<void> {
@@ -178,77 +154,10 @@ async function onRevoke(id: string): Promise<void> {
       </StateBlock>
     </section>
 
-    <section class="card">
-      <h2>Exposure policy</h2>
-      <p class="muted">
-        Everything is exposed unless a rule below denies it. A field rule written as
-        <code>allow:Patient.telecom</code> does the opposite: it re-permits a field that is withheld
-        by default.
-      </p>
-
-      <PolicyRuleForm
-        :tools="tools.data.value ?? []"
-        :health-systems="healthSystems.data.value ?? []"
-        :busy="addRule.busy.value"
-        @submit="onAddRule"
-      />
-
-      <p v-if="unparsedRules.length > 0" class="warn-text">
-        {{ unparsedRules.length === 1 ? "One rule below denies" : "Some rules below deny" }}
-        nothing: the policy engine could not read
-        {{ unparsedRules.map((rule) => rule.target).join(", ") }}. A field rule has to be
-        <code>ResourceType.path.to.field</code> (or <code>allow:</code> one). Delete and re-add it —
-        until then that exposure is open.
-      </p>
-
-      <StateBlock
-        :loading="rules.loading.value"
-        :error="rules.error.value"
-        :empty="(rules.data.value ?? []).length === 0"
-        empty-text="No rules. Everything the tools can reach is exposed."
-        @retry="rules.reload()"
-      >
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Type</th>
-                <th>Target</th>
-                <th>Note</th>
-                <th>Added</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="rule in rules.data.value ?? []" :key="rule.id">
-                <td class="nowrap">{{ rule.ruleType }}</td>
-                <td>
-                  <code>{{ rule.target }}</code>
-                  <span
-                    v-if="rule.unparsed"
-                    class="warn-text"
-                    title="The policy engine cannot read this target, so the rule denies nothing."
-                  >
-                    — not enforced
-                  </span>
-                </td>
-                <td>{{ rule.note ?? "—" }}</td>
-                <td class="nowrap">{{ relativeTime(rule.createdAt) }}</td>
-                <td class="nowrap">
-                  <button
-                    class="small danger"
-                    :disabled="mutate.busy.value"
-                    @click="onDeleteRule(rule.id)"
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </StateBlock>
-    </section>
+    <PolicySection
+      :tools="tools.data.value ?? []"
+      :health-systems="healthSystems.data.value ?? []"
+    />
 
     <McpToolTester />
 
@@ -315,11 +224,6 @@ async function onRevoke(id: string): Promise<void> {
 <style scoped>
 h2 {
   font-size: 1.05rem;
-}
-
-.warn-text {
-  color: var(--warn);
-  font-size: 0.88rem;
 }
 
 .toggle {

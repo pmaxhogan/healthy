@@ -124,12 +124,12 @@ describe("structured field rules", () => {
 
   it("refuses a path that matches nothing for the scope, saying where and suggesting a fix", async () => {
     const response = await create(field(["participants[].nmae"], { tool: "get_care_team" }));
-    const body = await json<ApiError & { details?: { issues?: string[] } }>(response);
+    const body = await json<ApiError & { details?: { problems?: string[] } }>(response);
 
     expect(response.status).toBe(400);
     expect(body.message).toContain('there is no "nmae" under participants[]');
     expect(body.message).toContain('Did you mean "name"?');
-    expect(body.details?.issues).toHaveLength(1);
+    expect(body.details?.problems).toHaveLength(1);
     expect(await json<PolicyRuleDto[]>(await owner().get("/api/mcp/policy"))).toStrictEqual([]);
   });
 

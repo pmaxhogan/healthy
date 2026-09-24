@@ -337,7 +337,7 @@ export interface PolicyPreviewRequest extends PolicySampleRequest {
 }
 
 /** One item before and after the draft rule, and its raw resource when there is one. */
-export interface PolicyPreviewSample {
+interface PolicyPreviewSample {
   before: unknown;
   after: unknown;
   rawBefore?: unknown;
