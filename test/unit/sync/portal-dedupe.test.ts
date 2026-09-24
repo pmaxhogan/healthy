@@ -8,6 +8,7 @@ import { parseUpcoming } from "../../../worker/ehr/mychart/visits.ts";
 import {
   RANK_FHIR,
   STALE_SECONDS,
+  matchAcrossHealthSystems,
   normalizeLabel,
   outranks,
   portalRank,
@@ -48,6 +49,50 @@ describe("normalizeLabel", () => {
   it("is empty for nothing at all", () => {
     expect(normalizeLabel(undefined)).toBe("");
     expect(normalizeLabel(" , MD ")).toBe("");
+  });
+});
+
+describe("matchAcrossHealthSystems", () => {
+  // Security review L3: the calendar deletes only on an `identity` match.
+  it("calls a shared CSN or practitioner an identity match", () => {
+    const b = sighting({ healthSystemId: "prov_b", practitioner: "Dr A Example" });
+    const csn = sighting({ healthSystemId: "prov_b", csn: "csn-1", practitioner: "Q. Other" });
+
+    expect(matchAcrossHealthSystems(sighting(), b)).toBe("identity");
+    expect(matchAcrossHealthSystems(sighting({ csn: "csn-1" }), csn)).toBe("identity");
+  });
+
+  it("calls a department or location shared with no practitioner to compare a place match", () => {
+    const a = sighting({ practitioner: undefined });
+    const b = sighting({ healthSystemId: "prov_b" });
+    const byLocation = sighting({
+      healthSystemId: "prov_b",
+      department: undefined,
+      location: "Example Tower",
+    });
+
+    expect(matchAcrossHealthSystems(a, b)).toBe("place");
+    expect(
+      matchAcrossHealthSystems(
+        sighting({ practitioner: undefined, department: undefined, location: "Example Tower" }),
+        byLocation,
+      ),
+    ).toBe("place");
+  });
+
+  it("calls two clinicians, or no shared label, no match", () => {
+    expect(
+      matchAcrossHealthSystems(
+        sighting(),
+        sighting({ healthSystemId: "prov_b", practitioner: "Q. Other" }),
+      ),
+    ).toBe("none");
+    expect(
+      matchAcrossHealthSystems(
+        sighting({ practitioner: undefined, department: undefined }),
+        sighting({ healthSystemId: "prov_b", practitioner: undefined, department: undefined }),
+      ),
+    ).toBe("none");
   });
 });
 

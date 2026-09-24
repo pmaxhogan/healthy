@@ -467,7 +467,10 @@ function recordSightings(
   const sightings: Sighting[] = [];
   for (const mapping of mappings.values()) {
     if (mapping.csn !== undefined) csns.add(mapping.csn);
-    starts.push(fromIso(mapping.model.start));
+    // A cancelled Encounter's start is not a live appointment: a portal visit at
+    // the same time is not its copy, and must not be deleted as one (security
+    // review L3; the stored-row half is the `state: "active"` in portal-sync.ts).
+    if (!mapping.offSchedule) starts.push(fromIso(mapping.model.start));
     sightings.push({
       healthSystemId,
       start: fromIso(mapping.reportedStart),

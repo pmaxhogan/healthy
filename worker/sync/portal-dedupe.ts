@@ -118,21 +118,41 @@ function agree(a: string | undefined, b: string | undefined): boolean | null {
   return left === "" || right === "" ? null : left === right;
 }
 
-/** True when two sightings from different health systems are one appointment. */
-export function sameVisitAcrossHealthSystems(a: Sighting, b: Sighting): boolean {
+/**
+ * How two sightings from different health systems match, if they do.
+ *
+ *  - `identity`: the same CSN, or the same practitioner. Strong enough to act on
+ *    destructively -- the calendar sync deletes an event it had already written
+ *    for the weaker copy.
+ *  - `place`: only a shared department or location, with neither side naming a
+ *    practitioner the other contradicts. Two same-time visits at two
+ *    organisations that share a generic label ("Laboratory", "Imaging") look like
+ *    this, so it is only ever enough to *not insert* a second copy, never to
+ *    delete one that is already on the calendar (security review L3).
+ *  - `none`: two appointments.
+ */
+export type VisitMatch = "identity" | "place" | "none";
+
+export function matchAcrossHealthSystems(a: Sighting, b: Sighting): VisitMatch {
   if (
     a.healthSystemId === b.healthSystemId ||
     !Number.isFinite(a.start) ||
     !Number.isFinite(b.start) ||
     Math.abs(a.start - b.start) > DEDUPE_WINDOW_SECONDS
   )
-    return false;
-  if (a.csn !== undefined && a.csn !== "" && a.csn === b.csn) return true;
+    return "none";
+  if (a.csn !== undefined && a.csn !== "" && a.csn === b.csn) return "identity";
   // A practitioner both sides name decides it; otherwise a shared place does.
-  return (
-    agree(a.practitioner, b.practitioner) ??
-    (agree(a.department, b.department) === true || agree(a.location, b.location) === true)
-  );
+  const practitioner = agree(a.practitioner, b.practitioner);
+  if (practitioner !== null) return practitioner ? "identity" : "none";
+  return agree(a.department, b.department) === true || agree(a.location, b.location) === true
+    ? "place"
+    : "none";
+}
+
+/** True when two sightings from different health systems are one appointment. */
+export function sameVisitAcrossHealthSystems(a: Sighting, b: Sighting): boolean {
+  return matchAcrossHealthSystems(a, b) !== "none";
 }
 
 /** True when `a` speaks for the visit over `b`. */

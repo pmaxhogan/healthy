@@ -47,6 +47,12 @@
  * an event carrying `healthy=1` and the row's own key is ever deleted. Should the
  * better copy later go away, the duplicate stops being one and is inserted again.
  *
+ * Deleting is reserved for a match that is not a guess (security review L3): the
+ * same CSN, a live (not ghosted) FHIR row or Encounter of this health system at
+ * the same time, or -- across health systems -- the same CSN or practitioner. A
+ * match on a shared department or location alone only stops a *new* copy being
+ * inserted; an event already written for that visit is kept and maintained.
+ *
  * **A canceled or no-show visit is ghosted with its own details.** Those are still
  * *in* the payload, so unlike a vanished one there is a model to render: the event
  * is patched to the grey, transparent, "Cancelled:" variant rather than merely
@@ -76,7 +82,7 @@ import { fromIso, toIso } from "../lib/time.ts";
 import { resolveReconnectAlert } from "./alerts.ts";
 import { buildCalendarModel, ghostModel } from "./mapping.ts";
 import { planChanges } from "./plan.ts";
-import { outranks, portalRank, sameVisitAcrossHealthSystems } from "./portal-dedupe.ts";
+import { matchAcrossHealthSystems, outranks, portalRank } from "./portal-dedupe.ts";
 import { SIGN_IN_BUSY_CODE, acquirePortalSignIn, releasePortalSignIn } from "./portal-gate.ts";
 import {
   DEDUPE_WINDOW_SECONDS,
@@ -121,7 +127,7 @@ import type { CalendarEventModel, EventRecord } from "../google/types.ts";
 export interface FhirSighting {
   /** CSNs the Encounters published. The exact match when both sides have one. */
   csns: Set<string>;
-  /** Shifted starts of the events the FHIR pass mapped, as unix seconds. */
+  /** Shifted starts of the events the FHIR pass mapped that are still on the schedule, as unix seconds. */
   starts: number[];
   /**
    * The same Encounters as the cross-health system dedupe sees them: real (unshifted)
@@ -178,8 +184,14 @@ export interface PortalPassInput {
 interface PortalCandidateBuild {
   visit: PortalVisit;
   mapping: CalendarMapping;
-  /** True when the FHIR pass already covers this appointment. */
+  /** True when a better copy already covers this appointment: do not insert it. */
   duplicate: boolean;
+  /**
+   * True when that match is strong enough to delete an event already written
+   * for this copy. See the module comment: a place-only match across health
+   * systems is not.
+   */
+  deletable: boolean;
 }
 
 /**
@@ -448,9 +460,12 @@ async function buildPortalCandidates(
   const seen = input.fhirSeen.get(healthSystem.id);
   // Rows the FHIR pass wrote, whenever it wrote them: the Encounter for a visit
   // may have been mapped in an earlier run and not returned in this one.
+  // Active only: a ghost is a visit that is off the schedule, so a live portal
+  // visit at the same time is not its copy, and must not be deleted as one.
   const fhirRows = await input.repos.calendarEvents.list({
     healthSystemId: healthSystem.id,
     source: "fhir",
+    state: "active",
   });
   const starts = [
     ...(seen?.starts ?? []),
@@ -477,11 +492,16 @@ async function buildPortalCandidates(
     });
     const start = fromIso(mapping.model.start);
     const mine = portalSighting(healthSystem.id, visit, now, now);
-    const duplicate =
+    const sameHealthSystem =
       (seen?.csns.has(visit.csn) ?? false) ||
-      starts.some((other) => Math.abs(other - start) <= DEDUPE_WINDOW_SECONDS) ||
-      others.some((other) => sameVisitAcrossHealthSystems(other, mine) && outranks(other, mine));
-    builds.push({ visit, mapping, duplicate });
+      starts.some((other) => Math.abs(other - start) <= DEDUPE_WINDOW_SECONDS);
+    const across = new Set(
+      others
+        .filter((other) => outranks(other, mine))
+        .map((other) => matchAcrossHealthSystems(other, mine)),
+    );
+    const deletable = sameHealthSystem || across.has("identity");
+    builds.push({ visit, mapping, duplicate: deletable || across.has("place"), deletable });
   }
 
   const skipped = builds.filter((build) => build.duplicate).length;
@@ -562,12 +582,16 @@ async function portalPlanInputs(
   for (const build of builds) {
     const key = build.mapping.model.key;
     const row = rowByKey.get(key);
-    if (build.duplicate) {
+    if (build.duplicate && (row === undefined || build.deletable)) {
       // A duplicate with no row of its own is simply not calendared. One that
       // *does* have a row was calendared before a better copy was known (or is one
       // the FHIR pass failed to adopt): it is removed, not ghosted, because the
       // visit is not cancelled -- see the module comment. That holds even when
       // this copy says "canceled": the better copy carries the cancellation.
+      //
+      // Only on a match that is not a guess, though. A place-only match with a
+      // row falls through and is kept as an ordinary candidate: never deleted,
+      // and not left out of `present` either, which would ghost it below.
       if (row !== undefined) duplicates.push(row);
       continue;
     }

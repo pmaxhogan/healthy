@@ -325,6 +325,58 @@ describe("portal visits that FHIR also knows about", () => {
   });
 });
 
+describe("a ghosted FHIR row is not a copy of a live visit (security review L3)", () => {
+  it("keeps a calendared portal visit that a ghosted FHIR row shares a start with", async () => {
+    // A cancelled Encounter at the same time as a live, different portal visit
+    // used to count as covering it: the live event was deleted and only the grey
+    // ghost was left.
+    const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1", start: SOON })] } });
+    await portalRun(fix);
+    const key = await portalKey(fix.healthSystem, "csn-1");
+    const repos = syncRepos(fix.ctx);
+    const live = await repos.calendarEvents.getByKey(key);
+    expect(live?.start_at).toBeTypeOf("number");
+
+    const ghostKey = await sk(`${fix.healthSystem.healthSystemId}:enc-cancelled`);
+    await repos.calendarEvents.upsert({
+      eventKey: ghostKey,
+      healthSystemId: fix.healthSystem.healthSystemId,
+      encounterId: "enc-cancelled",
+      calendarId: "primary",
+      googleEventId: "fhir-ghost-event",
+      fingerprint: "ghost",
+      startAt: live?.start_at ?? null,
+      source: "fhir",
+    });
+    await repos.calendarEvents.markGhost(ghostKey);
+
+    const summary = await portalRun(fix);
+
+    expect(summary.portalSkipped).toBe(0);
+    expect(calendarKeys(fix)).toStrictEqual([key]);
+    const kept = await repos.calendarEvents.getByKey(key);
+    expect(kept?.state).toBe("active");
+  });
+
+  it("calendars a live portal visit that this run's cancelled Encounter shares a start with", async () => {
+    // The in-run half of the same rule: the FHIR pass's own sightings. (A visit
+    // already calendared is adopted by the Encounter before this rule is reached,
+    // so this pins the first run, where the live visit used to be left out.)
+    const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1", start: SOON })] } });
+    const key = await portalKey(fix.healthSystem, "csn-1");
+    withEncounters(fix, [
+      encounter({ id: "enc-cancelled", start: SOON, status: "cancelled", visitType: "Consult" }),
+    ]);
+
+    const summary = await portalRun(fix, false);
+
+    expect(summary.portalSkipped).toBe(0);
+    expect(calendarKeys(fix)).toContain(key);
+    const kept = await syncRepos(fix.ctx).calendarEvents.getByKey(key);
+    expect(kept?.state).toBe("active");
+  });
+});
+
 describe("portal visits stored for the MCP", () => {
   it("stores every visit the portal returned, including one FHIR already calendared", async () => {
     const fix = await fixture({
@@ -543,6 +595,40 @@ describe("one visit, one event, across organisations", () => {
     expect(calendarKeys(fix)).toStrictEqual([mine]);
     const row = await syncRepos(fix.ctx).calendarEvents.getByKey(mine);
     expect(row?.state).toBe("active");
+  });
+
+  it("never deletes an event on a department-only match (security review L3)", async () => {
+    // The better copy names no practitioner, so all the two share is a label
+    // ("Example Clinic") -- which two different same-time visits at two
+    // organisations can share. That may stop a second copy being inserted; it
+    // must not delete the event already written for this one.
+    const fix = await fixture({ portal: { visits: [shared()] } });
+    const mine = await calendaredSecondHand(fix);
+    const theirs = portalVisit({ csn: "csn-b-own", start: SOON });
+    delete theirs.practitioner;
+    const owner = await secondOrganisation(fix, [theirs]);
+    const theirsKey = await ownersEvent(fix, owner, "csn-b-own");
+
+    const summary = await portalRun(fix);
+
+    expect(summary.eventsGhosted).toBe(0);
+    expect(summary.eventsInserted).toBe(0);
+    expect(calendarKeys(fix)).toStrictEqual([mine, theirsKey]);
+    const row = await syncRepos(fix.ctx).calendarEvents.getByKey(mine);
+    expect(row?.state).toBe("active");
+  });
+
+  it("still does not insert a copy on a department-only match", async () => {
+    const fix = await fixture({ portal: { visits: [shared()] } });
+    const theirs = portalVisit({ csn: "csn-b-own", start: SOON });
+    delete theirs.practitioner;
+    await secondOrganisation(fix, [theirs]);
+
+    const summary = await portalRun(fix);
+
+    expect(summary.eventsInserted).toBe(0);
+    expect(summary.portalSkipped).toBe(1);
+    expect(calendarKeys(fix)).toStrictEqual([]);
   });
 
   it("calendars a visit at the same time as a different one elsewhere", async () => {
