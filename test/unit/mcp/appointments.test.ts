@@ -472,3 +472,126 @@ describe("one visit, one item, across organisations", () => {
     expect(day[0]).toMatchObject({ source: "fhir", healthSystemId: HEALTH_SYSTEM_A });
   });
 });
+
+function denyA(): void {
+  world.state.rules = rules({ rule_type: "health_system", target: HEALTH_SYSTEM_A });
+}
+
+function onDay(items: readonly Record<string, unknown>[], day: string): Record<string, unknown>[] {
+  return items.filter((item) => String(item.start).startsWith(day));
+}
+
+describe("a health_system deny rule reaches another organisation's copy (security review M1)", () => {
+  // Health system A is denied. B's portal lists A's visit through a shared record,
+  // stored and tagged as B's. The copy is A's data and must not be answered.
+  const ownCopy = visit({ csn: "csn-a1", start: "2026-06-10T15:00:00+00:00" });
+
+  it("drops B's marked copy of a denied visit", async () => {
+    denyA();
+    world.state.portalVisits.set(HEALTH_SYSTEM_A, [stored(ownCopy)]);
+    world.state.portalVisits.set(HEALTH_SYSTEM_B, [
+      stored(visit({ csn: "csn-b9", start: "2026-06-10T15:01:00+00:00", external: true })),
+    ]);
+
+    const answer = await callTool(world.client, "get_appointments");
+
+    expect(onDay(answer.items, "2026-06-10")).toStrictEqual([]);
+    expect(answer.text).not.toContain("csn-b9");
+    expect(answer.text).not.toContain("csn-a1");
+  });
+
+  it("drops B's copy even when nothing marks it as second-hand", async () => {
+    // The external flag is a guess; an undetected copy arrives as first-party.
+    denyA();
+    world.state.portalVisits.set(HEALTH_SYSTEM_A, [stored(ownCopy)]);
+    world.state.portalVisits.set(HEALTH_SYSTEM_B, [
+      stored(visit({ csn: "csn-b9", start: "2026-06-10T15:01:00+00:00" })),
+    ]);
+
+    const answer = await callTool(world.client, "get_appointments");
+
+    expect(onDay(answer.items, "2026-06-10")).toStrictEqual([]);
+    expect(answer.text).not.toContain("csn-b9");
+  });
+
+  it("drops B's copy when the denied organisation's own copy is stale and would have lost", async () => {
+    denyA();
+    world.state.portalVisits.set(HEALTH_SYSTEM_A, [stored(ownCopy, false, NOW - 5 * 86_400)]);
+    world.state.portalVisits.set(HEALTH_SYSTEM_B, [
+      stored(visit({ csn: "csn-b9", start: "2026-06-10T15:01:00+00:00", external: true })),
+    ]);
+
+    const answer = await callTool(world.client, "get_appointments");
+
+    expect(onDay(answer.items, "2026-06-10")).toStrictEqual([]);
+  });
+
+  it("drops B's copy of a denied organisation's cached Encounter, matched by CSN", async () => {
+    denyA();
+    world.state.pools.get(HEALTH_SYSTEM_A)?.Encounter?.push({
+      resourceType: "Encounter",
+      id: "enc-denied",
+      status: "planned",
+      class: { code: "AMB" },
+      identifier: [{ type: { text: "CSN" }, value: "csn-denied" }],
+      period: { start: "2026-06-12T15:00:00Z" },
+    });
+    world.state.portalVisits.set(HEALTH_SYSTEM_B, [
+      stored(visit({ csn: "csn-denied", start: "2026-06-12T15:00:00+00:00", external: true })),
+    ]);
+
+    const answer = await callTool(world.client, "get_appointments");
+
+    expect(onDay(answer.items, "2026-06-12")).toStrictEqual([]);
+    expect(answer.text).not.toContain("csn-denied");
+  });
+
+  it("drops the copy from get_health_summary's appointments too", async () => {
+    denyA();
+    world.state.portalVisits.set(HEALTH_SYSTEM_A, [stored(ownCopy)]);
+    world.state.portalVisits.set(HEALTH_SYSTEM_B, [
+      stored(visit({ csn: "csn-b9", start: "2026-06-10T15:01:00+00:00", external: true })),
+    ]);
+
+    const answer = await callTool(world.client, "get_health_summary");
+
+    expect(answer.text).not.toContain("csn-b9");
+    expect(answer.text).not.toContain("csn-a1");
+    expect(answer.text).not.toContain(NAME_A);
+  });
+
+  it("keeps B's own, different visit at the same time", async () => {
+    denyA();
+    world.state.portalVisits.set(HEALTH_SYSTEM_A, [stored(ownCopy)]);
+    world.state.portalVisits.set(HEALTH_SYSTEM_B, [
+      stored(
+        visit({
+          csn: "csn-b2",
+          start: "2026-06-10T15:00:00+00:00",
+          practitioner: "Q. Other, DO",
+          department: "Other Clinic Dermatology",
+          locationName: "Other Building",
+        }),
+      ),
+    ]);
+
+    const answer = await callTool(world.client, "get_appointments");
+
+    expect(onDay(answer.items, "2026-06-10").map((item) => item.csn)).toStrictEqual(["csn-b2"]);
+  });
+
+  it("keeps a copy it cannot attribute: the denied organisation has no record of it", async () => {
+    // The documented residual gap (SECURITY.md): the copy does not say whose it
+    // is, and the denied organisation has nothing stored to match it against.
+    denyA();
+    world.state.portalVisits.set(HEALTH_SYSTEM_B, [
+      stored(visit({ csn: "csn-b9", start: "2026-06-10T15:01:00+00:00", external: true })),
+    ]);
+
+    const answer = await callTool(world.client, "get_appointments");
+
+    expect(onDay(answer.items, "2026-06-10")).toMatchObject([
+      { healthSystemId: HEALTH_SYSTEM_B, firstParty: false, via: HEALTH_SYSTEM_B },
+    ]);
+  });
+});

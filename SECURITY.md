@@ -166,7 +166,12 @@ server-side filter before serialisation, which applies the deny-list (by tool,
 resource type, field path, or health system) held in the `mcp_policy` table. Filtering
 happens on the server, never in the client or the prompt, and applies equally to
 normalised output and to raw FHIR passthrough. Tests assert that denied data does
-not appear in a response.
+not appear in a response. A denied health system's visit can also reach an
+allowed one's patient portal through a shared record, stored under the allowed
+system; `get_appointments` and `get_health_summary` therefore match every
+appointment against the denied systems' own Encounters and portal visits (read
+for matching only, never returned) and drop any that is the same visit. See the
+limits below for what that match cannot catch.
 
 **Read-only by construction.** Every MCP tool is annotated `readOnlyHint` and
 there is no code path from a tool call to a write, to a health system or to the
@@ -283,6 +288,16 @@ history in CI.
   times -- stays recoverable by anyone with access to this account's D1 until
   that window has passed. The same is true of any value any migration
   overwrites.
+- **A `health_system` deny rule cannot catch a copy it cannot attribute.** When
+  an allowed health system's portal lists a denied one's visit, the copy is
+  dropped only if the denied system has its own record of that visit stored (a
+  cached Encounter or a portal visit) to match it against. A portal copy does
+  not say which organisation owns it -- at most a guessed "external" flag, and
+  `via` is the portal that listed it, not the owner -- so if the denied system
+  is not connected, or its portal pass has never stored the visit, the copy is
+  answered as the listing system's. The match is also the cross-organisation
+  dedupe's, so it errs the safe way: an allowed visit at the same time and
+  department as a denied one is hidden as well.
 - D1 has no per-row access control; the encryption is what stands in for it.
 - The consent page authorises the whole `health:read` scope. There is no
   per-tool consent granularity beyond the deny-list the owner sets.

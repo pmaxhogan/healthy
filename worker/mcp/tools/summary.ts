@@ -15,7 +15,13 @@
 
 import { collectAppointments } from "../appointment-items.ts";
 import { WINDOW_ARGS, toolArgs } from "../args.ts";
-import { collect, effectiveLimit, selectHealthSystems, spec } from "../collect.ts";
+import {
+  collect,
+  deniedHealthSystems,
+  effectiveLimit,
+  selectHealthSystems,
+  spec,
+} from "../collect.ts";
 import { BINARY_TEXT_TYPE } from "../deps.ts";
 import { LABORATORY, hasCategory } from "../match.ts";
 import { respond } from "../respond.ts";
@@ -65,15 +71,17 @@ const SECTIONS: { section: string; specs: () => CollectSpec[] }[] = [
  * the patient portal's upcoming visits are here too -- they are the only
  * upcoming appointments there are, because Epic's FHIR view never returns one
  * before it happens. "Most recent" by start date alone would fill the section
- * with the furthest-out visits and hide next week's.
+ * with the furthest-out visits and hide next week's. `denied` is what keeps a
+ * denied health system's visit out when an allowed one's portal lists it.
  */
 async function nearestAppointments(
   deps: ToolDeps,
   healthSystems: readonly HealthSystemInfo[],
+  denied: readonly HealthSystemInfo[],
   now: number,
   perSection: number,
 ): Promise<TaggedItem[]> {
-  const { items } = await collectAppointments(deps, healthSystems, { order: "asc" });
+  const { items } = await collectAppointments(deps, healthSystems, { denied, order: "asc" });
   const nowMs = now * 1000;
   const isUpcoming = (item: TaggedItem): boolean =>
     typeof item.start === "string" && Date.parse(item.start) >= nowMs;
@@ -103,11 +111,12 @@ function perSectionLimit(limit: number | undefined): number {
 async function recentItems(
   deps: ToolDeps,
   healthSystems: readonly HealthSystemInfo[],
+  denied: readonly HealthSystemInfo[],
   now: number,
   perSection: number,
 ): Promise<TaggedItem[]> {
   const out: TaggedItem[] = [];
-  const appointments = await nearestAppointments(deps, healthSystems, now, perSection);
+  const appointments = await nearestAppointments(deps, healthSystems, denied, now, perSection);
   out.push(...appointments.map((item) => ({ ...item, kind: "recent", section: "appointments" })));
   for (const entry of SECTIONS) {
     const collected = await collect(deps, healthSystems, { specs: entry.specs() });
@@ -136,11 +145,8 @@ export function registerSummaryTool(server: McpServer, deps: ToolDeps): void {
       schema: toolArgs(WINDOW_ARGS),
     },
     async (args, run) => {
-      const healthSystems = selectHealthSystems(
-        await deps.healthSystems(),
-        run.rules,
-        args.healthSystems,
-      );
+      const all = await deps.healthSystems();
+      const healthSystems = selectHealthSystems(all, run.rules, args.healthSystems);
       const names = new Map(
         healthSystems.map((healthSystem) => [healthSystem.id, healthSystem.displayName]),
       );
@@ -160,7 +166,15 @@ export function registerSummaryTool(server: McpServer, deps: ToolDeps): void {
           count: count.count,
         });
       }
-      items.push(...(await recentItems(deps, healthSystems, run.now, perSectionLimit(args.limit))));
+      const denied = deniedHealthSystems(all, run.rules);
+      const recent = await recentItems(
+        deps,
+        healthSystems,
+        denied,
+        run.now,
+        perSectionLimit(args.limit),
+      );
+      items.push(...recent);
 
       return respond({
         tool: "get_health_summary",

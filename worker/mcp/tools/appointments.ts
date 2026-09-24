@@ -31,7 +31,7 @@ import { z } from "zod";
 
 import { collectAppointments } from "../appointment-items.ts";
 import { WINDOW_ARGS, toolArgs } from "../args.ts";
-import { effectiveLimit, selectHealthSystems } from "../collect.ts";
+import { deniedHealthSystems, effectiveLimit, selectHealthSystems } from "../collect.ts";
 import { respond } from "../respond.ts";
 
 import { readTool } from "./register.ts";
@@ -63,11 +63,8 @@ export function registerAppointmentTools(server: McpServer, deps: ToolDeps): voi
       schema: APPOINTMENT_ARGS,
     },
     async (args, run) => {
-      const healthSystems = selectHealthSystems(
-        await deps.healthSystems(),
-        run.rules,
-        args.healthSystems,
-      );
+      const all = await deps.healthSystems();
+      const healthSystems = selectHealthSystems(all, run.rules, args.healthSystems);
       const upcomingOnly = args.from === undefined && args.includePast !== true;
       // `from` wins when the caller gave one: an explicit window is an explicit
       // request for history, whatever `includePast` says.
@@ -76,6 +73,7 @@ export function registerAppointmentTools(server: McpServer, deps: ToolDeps): voi
         (args.includePast === true ? undefined : new Date(run.now * 1000).toISOString());
 
       const collected = await collectAppointments(deps, healthSystems, {
+        denied: deniedHealthSystems(all, run.rules),
         from,
         to: args.to,
         raw: args.raw,

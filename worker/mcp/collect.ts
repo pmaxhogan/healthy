@@ -136,6 +136,20 @@ export function selectHealthSystems(
 }
 
 /**
+ * The health systems a `health_system` rule denies to this caller.
+ *
+ * Never read from for an answer. `collectAppointments` uses them only to
+ * recognise a denied organisation's visit when an allowed organisation's portal
+ * lists a copy of it, so the copy can be dropped too (security review M1).
+ */
+export function deniedHealthSystems(
+  all: readonly HealthSystemInfo[],
+  rules: PolicyRules,
+): HealthSystemInfo[] {
+  return all.filter((healthSystem) => isHealthSystemDenied(rules, healthSystem.id));
+}
+
+/**
  * A caller's `limit`, made safe to slice with -- or `undefined` for "no limit
  * at all", which is what an absent `limit` means.
  *

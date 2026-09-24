@@ -30,6 +30,18 @@
  * therefore a bare `{ resourceType: "Encounter" }` placeholder -- one per item, so
  * `items` and `raw` stay index-aligned through the filter -- and the answer
  * carries the {@link PORTAL_RAW_WARNING} warning.
+ *
+ * A `health_system` deny rule removes the denied organisation before anything is
+ * read -- but another organisation's portal can list the denied one's visit
+ * (shared records), stored and tagged as the *listing* organisation's. So the
+ * denied organisations' own sightings (their cached Encounters and stored portal
+ * visits) are read as well, used only for matching, and any answer that is the
+ * same visit as one of them is dropped, whichever copy would have outranked the
+ * other (security review M1). Two limits, both in SECURITY.md: the match is the
+ * cross-organisation one, so an allowed visit at the same time and place as a
+ * denied one is hidden too -- the safe direction -- and a copy of a denied
+ * organisation's visit that it has no stored record of itself cannot be
+ * recognised, because the copy does not say whose it is.
  */
 
 import { appointmentViewFromEncounter, mapResolver } from "../fhir/normalize/index.ts";
@@ -66,6 +78,12 @@ const NO_REFS = mapResolver([]);
 const ENRICHED_FIELDS = ["practitioner", "department", "location", "end", "visitType"] as const;
 
 export interface AppointmentOptions {
+  /**
+   * The health systems a `health_system` rule denies to this caller. Read only to
+   * recognise their visits in an allowed organisation's portal; never answered
+   * from. See the module comment.
+   */
+  denied: readonly HealthSystemInfo[];
   from?: string | undefined;
   to?: string | undefined;
   raw?: boolean | undefined;
@@ -272,6 +290,29 @@ function collapseAcrossHealthSystems(entries: readonly Entry[]): Entry[] {
   return kept;
 }
 
+/**
+ * Every sighting a denied health system has of its own visits: its cached
+ * Encounters and its stored portal visits. For matching only.
+ */
+async function deniedSightings(
+  deps: ToolDeps,
+  denied: readonly HealthSystemInfo[],
+  now: number,
+): Promise<Sighting[]> {
+  if (denied.length === 0) return [];
+  // Unmerged on purpose: a portal copy the FHIR item would absorb still carries
+  // its own CSN and labels, and every one of them is something to match on.
+  const encounters = await fhirEntries(deps, denied, false);
+  const sightings = encounters.map((entry) => entry.sighting);
+  for (const healthSystem of denied) {
+    const records = await deps.portalVisits(healthSystem.id);
+    for (const record of records) {
+      sightings.push(portalEntry(healthSystem, record, now).sighting);
+    }
+  }
+  return sightings;
+}
+
 function compare(order: "asc" | "desc"): (a: Entry, b: Entry) => number {
   return (a, b) => {
     const aMissing = Number.isNaN(a.start);
@@ -295,11 +336,17 @@ export async function collectAppointments(
   options: AppointmentOptions,
 ): Promise<Appointments> {
   const raw = options.raw === true;
+  const now = deps.now();
   const entries = await fhirEntries(deps, healthSystems, raw);
-  await mergePortal(deps, healthSystems, entries, deps.now());
+  await mergePortal(deps, healthSystems, entries, now);
+  const denied = await deniedSightings(deps, options.denied, now);
 
-  const kept = collapseAcrossHealthSystems(entries).filter((entry) =>
-    withinWindow(stringOf(entry.item, "start"), options.from, options.to),
+  // After the collapse, and regardless of rank: a denied organisation's own
+  // copy may be stale and lose to the allowed one, which must still go.
+  const kept = collapseAcrossHealthSystems(entries).filter(
+    (entry) =>
+      denied.every((sighting) => !sameVisitAcrossHealthSystems(sighting, entry.sighting)) &&
+      withinWindow(stringOf(entry.item, "start"), options.from, options.to),
   );
   kept.sort(compare(options.order));
 
