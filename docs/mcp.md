@@ -189,52 +189,132 @@ browser tab it opens.
 The model is **allow-all with a deny-list**. On a fresh database, every
 tool answers with everything it can reach. Rules only ever remove; nothing
 in this system can be used to grant _more_ than a tool would otherwise
-return, except the one `allow:` exception below.
+return, except "show a withheld field", below.
 
 Manage rules from the admin UI's **MCP → Exposure policy** section
 (`/connectors` — it moved off `/mcp` because `/mcp` is the transport, not a
-page), or via `POST /api/mcp/policy` and `DELETE /api/mcp/policy/:id`. Each
-rule has a `ruleType` and a `target`:
+page). There are four kinds:
 
-| `ruleType`      | `target`                                 | Effect                                                                                                                                                                                                               |
-| --------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tool`          | a tool name, e.g. `get_lab_results`      | That tool answers `policy_denied` and reads nothing at all.                                                                                                                                                          |
-| `resource`      | a FHIR resource type, e.g. `Observation` | Every item of that type disappears from every tool, the raw projection, and the cross-health system summary.                                                                                                         |
-| `health_system` | a health system id                       | That health system disappears everywhere, `list_health_systems` included, and is never even queried.                                                                                                                 |
-| `field`         | a dotted path, see below                 | The named field is deep-deleted from the normalised item and the raw FHIR resource behind it; the path may be written in either vocabulary, and a path that names nothing in both is refused with `400 bad_request`. |
+| Kind            | What it names                            | Effect                                                                                                            |
+| --------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `tool`          | a tool name, e.g. `get_lab_results`      | That tool answers `policy_denied` and reads nothing at all.                                                       |
+| `resource`      | a FHIR resource type, e.g. `Observation` | Every item of that type disappears from every tool, the raw projection, and the summary's counts and sections.    |
+| `health_system` | a health system                          | That health system disappears everywhere, `list_health_systems` included, and is never even queried.              |
+| `field`         | a scope and one or more field paths      | Each path is removed from every item the scope reaches — the normalised item and the raw FHIR resource behind it. |
 
-**Field paths** are `ResourceType.path.to.field`, or `*.path.to.field` to
-apply to every resource type. For `Encounter` there are three vocabularies:
-the raw FHIR resource, the normalized Encounter (`get_encounters`), and the
-flat appointment view (`get_appointments`, `get_health_summary`) with its own
-names — `practitioner`, `specialty`, `org`, `csn`, `encounterId`, `source`,
-`firstParty`, `via`. A
-rule naming a field in any of them removes every name that field has in the
-others: `Encounter.practitioner`, `Encounter.practitioners` and
-`Encounter.participant` all remove the practitioner from both tools and from
-the raw resource. A path segment of `[]` — on its own, or as a
-suffix on the segment before it (`components[]` and `components.[]` mean
-the same thing) — steps into every element of an array, so
-`Observation.component[].valueQuantity.value` removes that one value from
-every component of every Observation.
+Every rule has an on/off switch: a rule switched off is kept, listed, and
+enforces nothing until it is switched back on.
 
-**The one rule that adds rather than removes** is a `field` rule whose
-target starts with `allow:` and names exactly two segments —
-`allow:Patient.birthDate` or `allow:*.subscriberId`. Some fields are
-withheld by default because the resource itself marks them sensitive
-(currently `Patient.birthDate` and `Coverage.subscriberId`); an `allow:`
-rule is the only way to put one back. Everywhere a `sensitive`-marked field
-is withheld, the item's `sensitive` array is replaced with a `withheld`
-array in the response, so the model is told a field exists and was held
-back rather than left to assume the record is simply empty.
+### Field rules: the builder
 
-Rules are evaluated in a fixed order: a tool deny short-circuits everything
-first; then health system and resource-type denies drop whole items; then field
-rules; then the sensitive-by-default stripping. Every warning the policy
-produces is stable and free of values — `policy_tool_denied:<tool>`,
-`policy_resource_denied:<Type>`, `policy_health_system_denied` (deliberately
-without the id — the deny-list itself is not for a third-party model to
-see), `policy_field_removed:<target>`, `sensitive_withheld:<Type.field>`.
+A field rule is built, not typed:
+
+1. **Scope.** Every tool, one tool, or one resource type — and, optionally,
+   one health system. With one tool you can also narrow to that tool's items
+   of one type (the summary carries several).
+2. **Fields.** An expandable tree of the real structure of those answers: the
+   normalised item and, separately, the raw FHIR resource (`raw: true`), with
+   nested objects and arrays, a short description where one is known, and a
+   search box that matches names and descriptions. Arrays are marked "list":
+   a field picked under one is removed from _every_ element. Fields present in
+   your own cached data carry a dot; fields your data has that the model does
+   not know are added and marked "not modelled" (names only are read — never
+   values). Tick as many fields as you like: they become one rule. A path the
+   tree does not show can be typed under **Type a path instead**, with
+   autocomplete from the tree.
+3. **Preview.** Before saving, the draft runs over one tool's real answer and
+   shows the first item it changes before and after — removed keys struck
+   through — for the item and the raw FHIR, and how many items it changes.
+   The preview is the live check too: a draft that would be refused on save is
+   refused here, with the reason. It is for your eyes only: the sample is
+   fetched by the admin API behind Access and the password, is not audited or
+   logged, and `get_document_text` is previewed on a made-up item rather than
+   spending a metered document request.
+
+The rule list reads each rule as a sentence — "Hide participants → name in
+get_appointments at all health systems" — grouped by what it applies to,
+with the tools it changes, the switch, edit and delete.
+
+### Field paths
+
+A path names a key below the root of one answer item (or one raw resource),
+one segment per level:
+
+| Path                               | Meaning                                                                   |
+| ---------------------------------- | ------------------------------------------------------------------------- |
+| `location.address.lines`           | nested objects                                                            |
+| `participants[].name`              | `[]`: the `name` of every element of `participants`                       |
+| `code.coding[].display`            | a raw FHIR coding's display text, in every coding                         |
+| `component[].referenceRange[].low` | arrays inside arrays: the low bound of every range of every component     |
+| `value[x]`                         | `[x]`: every FHIR choice-type variant — `valueQuantity`, `valueString`, … |
+| `components[]`                     | a path _ending_ in `[]` removes every element, leaving `"components": []` |
+
+`participants.[].name` is the same path, and so is `participants.name`: a
+named segment that meets an array steps into every element whether or not the
+path says `[]`, so two missing brackets can never turn a rule into a silent
+no-op. The builder stores the canonical spelling.
+
+**One rule, both vocabularies.** The normalised items rename things (`value`
+is the raw `valueQuantity`, `practitioners[].name` is the raw
+`participant[].individual.display`, `address.lines` is `address.line`), and
+many normalised fields are a raw element _rendered_ to text (a code's
+`display`, a reference's `display`, a date picked out of a period). A rule in
+either vocabulary is translated through those renames
+(`worker/fhir/normalize/<type>.ts` `FIELD_ALIASES`, plus the same-name
+renderings the field tree implies), so hiding a coding's raw `display` also
+removes the normalised text made from it, and hiding a normalised
+practitioner name also removes the raw display and the appointment view's
+`practitioner`. Where a normalised value came from another, referenced
+resource (a location's address on an Encounter), the raw resource holds only
+the reference, and there is nothing to translate.
+
+**Refused, with a reason.** A path that matches nothing in any shape the
+rule's scope reaches — in either vocabulary — is refused with `400
+bad_request` and a sentence saying where it stopped, what was there, and a
+suggestion for a near miss (`there is no "nmae" under participants[] (there:
+name, role). Did you mean "name"?`). So is a tool that does not exist, a
+health system that does not exist, and a tool/resource-type pair that never
+meet. Structure the model does not describe (extensions, for instance) is
+accepted below that point, because it cannot be proven wrong.
+
+**Redaction removes the key.** It never substitutes a marker: a placeholder
+is something a model can mistake for data, and something a `jq` filter could
+select. The answer's `warnings` say what went instead:
+`policy_field_removed:<Type or *>.<path>`.
+
+### Show a withheld field
+
+Some fields are withheld by default because the resource marks them
+sensitive (currently `Patient.birthDate` and `Coverage.subscriberId`). A
+field rule with the effect **show** (the builder's "Show a withheld field";
+`effect: "allow"`) is the only way to put one back, and only such a field can
+be named; it can be scoped like any other field rule. Everywhere a withheld
+field is held back, the item's `sensitive` array is replaced with `withheld`,
+so the model is told a field exists rather than left to assume it is empty.
+
+### Order, and warnings
+
+A tool deny short-circuits everything first; then health system and
+resource-type denies drop whole items; then field rules; then the
+sensitive-by-default stripping; then the caller's `jq`; then `limit`. Every
+warning the policy produces is stable and free of values —
+`policy_tool_denied:<tool>`, `policy_resource_denied:<Type>`,
+`policy_health_system_denied` (deliberately without the id — the deny-list
+itself is not for a third-party model to see, which is also why a field
+rule's warning never names its tool or health system scope),
+`policy_field_removed:<Type or *>.<path>`, `sensitive_withheld:<Type.field>`.
+
+### The API
+
+`GET /api/mcp/policy` lists the rules; `POST` adds one (`{ ruleType, target }`,
+or for a field rule `{ ruleType: "field", field: { effect, tool, resourceType,
+healthSystemId, paths } }` — a legacy `ResourceType.path` `target` is still
+accepted and converted); `PATCH /api/mcp/policy/:id` switches, edits or
+re-notes one; `DELETE` removes one. `GET /api/mcp/policy/schema` is the field
+tree; `POST /api/mcp/policy/structure` (key names of one tool's real answer)
+and `POST /api/mcp/policy/preview` (a draft's before and after) read real data
+and so are POSTs behind the CSRF guard. Rules stored before migration 0012 as
+one `ResourceType.path` string are converted by the migration.
 
 ## The audit log
 

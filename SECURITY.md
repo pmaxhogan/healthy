@@ -167,7 +167,24 @@ server-side filter before serialisation, which applies the deny-list (by tool,
 resource type, field path, or health system) held in the `mcp_policy` table. Filtering
 happens on the server, never in the client or the prompt, and applies equally to
 normalised output and to raw FHIR passthrough. Tests assert that denied data does
-not appear in a response. A denied health system's visit can also reach an
+not appear in a response. A field rule can reach any depth — keys inside arrays of
+objects, arrays inside arrays, every FHIR `value[x]` variant — and a named path
+segment that meets an array is applied to every element, so a path written
+without `[]` cannot silently match nothing. Redaction removes the key; it never
+leaves a placeholder a model could read as data or a `jq` program could select. A
+rule written in one vocabulary is translated into the other (renames, and
+normalised text rendered from a raw coding or reference), so one rule strips both
+shapes; a rule that could match nothing is refused at write time. A field rule's
+warning names its path, never its tool or health system scope.
+
+**Previewing a rule reads real data, for the owner only.** The rule builder's
+`POST /api/mcp/policy/structure` (key names of a tool's real answer) and
+`POST /api/mcp/policy/preview` (a draft rule's before and after on one real item)
+run the real tool through the in-memory MCP server, behind Access, the password
+session and the CSRF guard. They write no audit row (they are not an assistant's
+reads) and log nothing; the structure endpoint returns names only, never values;
+and `get_document_text` is previewed on a synthetic item so a preview can never
+spend a health system's metered document quota. A denied health system's visit can also reach an
 allowed one's patient portal through a shared record, stored under the allowed
 system; `get_appointments` and `get_health_summary` therefore match every
 appointment against the denied systems' own Encounters and portal visits (read
