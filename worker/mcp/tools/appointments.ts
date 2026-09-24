@@ -60,7 +60,7 @@ export function registerAppointmentTools(server: McpServer, deps: ToolDeps): voi
         "Each item says whether it came from the health record (`source: fhir`) or " +
         "the patient portal (`source: portal`). Pass `includePast: true` or a " +
         "`from` date to see past visits as well (then newest first). To keep only " +
-        'what you need, pass `jq`, e.g. `[.[] | select(.start < "2026-12-01") | {start, source}]`.',
+        'what you need, pass `jq`, e.g. `.[] | select(.start < "2026-12-01") | {start, source}`.',
       schema: APPOINTMENT_ARGS,
     },
     async (args, run) => {

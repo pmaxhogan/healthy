@@ -49,7 +49,7 @@ export function registerDocumentTools(server: McpServer, deps: ToolDeps): void {
       "Clinical document metadata: type, date, author, description and what " +
       "attachments exist. The text of one document is fetched with " +
       "get_document_text, which costs the organisation a metered request. To keep " +
-      'only what you need, pass `jq`, e.g. `[.[] | select(.date >= "2026-01-01") | {id, type, date}]`.',
+      'only what you need, pass `jq`, e.g. `.[] | select(.date >= "2026-01-01") | {id, type, date}`.',
     schema: toolArgs(WINDOW_ARGS),
     specs: () => [spec("DocumentReference", { dateOf: (item) => item.date })],
   });

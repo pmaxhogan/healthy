@@ -12,8 +12,11 @@ export const MCP_INSTRUCTIONS =
   "{ items, total, matched, warnings, truncated, generatedAt } and accepts an " +
   "optional `jq` argument: a real jq program run server-side on `items` (after " +
   "the owner's exposure policy, before `limit`), so you can filter and project a " +
-  "large result instead of reading all of it -- e.g. " +
-  '`[.[] | select(.effective >= "2026-01-01") | {code, value}]`. ISO dates ' +
-  "compare correctly as strings. A jq error comes back as a tool error carrying " +
-  "jq's message; a `jq_result_empty` warning means your filter matched nothing " +
-  "in a non-empty input, so check it before concluding there is no data.";
+  "large result instead of reading all of it. The filter runs on the items " +
+  "array; every value it emits becomes one element of items -- so write " +
+  '`.[] | select(.effective >= "2026-01-01") | {code, value}`, not that ' +
+  "wrapped in `[...]` (which would emit one output, itself an array, giving " +
+  "you a one-element items). ISO dates compare correctly as strings. A jq " +
+  "error comes back as a tool error carrying jq's message; a `jq_result_empty` " +
+  "warning means your filter matched nothing in a non-empty input, so check it " +
+  "before concluding there is no data.";

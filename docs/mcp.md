@@ -24,8 +24,9 @@ one). The admin UI's MCP page (`/connectors`) lists the live catalogue.
 Every answer is the same envelope:
 `{ items, total, matched, warnings, truncated, generatedAt }` (plus `raw` when
 asked for). `total` is how many items the exposure policy let through;
-`matched` is how many there are after `jq` (below) — equal to `total` without
-it; `truncated` is true only when a caller-supplied `limit` cut something.
+`matched` is the output count — how many values `jq` emitted (below), before
+`limit`; equal to `total` without it. `truncated` is true only when a
+caller-supplied `limit` cut something.
 
 ### Filtering server-side with `jq`
 
@@ -35,7 +36,7 @@ so a model can ask for exactly the slice it needs instead of reading a whole
 history. For example, on `get_lab_results`:
 
 ```json
-{ "jq": "[.[] | select(.effective >= \"2026-01-01\") | {code, value, effective}]" }
+{ "jq": ".[] | select(.effective >= \"2026-01-01\") | {code, value, effective}" }
 ```
 
 - **Order.** Exposure policy, then `jq`, then `limit`. jq only ever sees what
@@ -45,15 +46,19 @@ history. For example, on `get_lab_results`:
   policy-filtered FHIR resource under `raw` (`.raw.resource`), and the
   separate `raw` array is not returned, since a program that filters or
   reshapes `items` would leave it misaligned.
-- **Output.** One output becomes `items` as-is (an array, an object, a number…);
-  several outputs (a stream such as `.[] | .id`) are collected into an array.
-  `limit` applies to an array output; on any other output it cannot, and the
-  warning `jq_output_not_an_array_limit_not_applied` says so.
+- **Output.** The filter runs on the items array; every value it emits becomes
+  one element of `items`, even a single one. A stream such as
+  `.[] | select(...) | {...}` therefore puts one match per `items` element —
+  the usual thing to want. Wrapping it in `[...]` instead (`[.[] | select(...)]`)
+  produces one output, itself an array, so `items` ends up with that one array
+  as its single element (`[[...]]`), not the flat list; use the unwrapped form.
+  `limit` always applies to the `items` array, however many outputs `jq`
+  produced.
 - **Dates.** Every date the tools return is an ISO-8601 string, so plain
   string comparison (`>=`, `<`) orders them correctly.
 - **Honesty.** A compile or runtime error is a tool error, `jq_error`, whose
   `detail` is jq's own message — never an empty result. When a non-empty input
-  filters down to `[]`, `null` or all-nulls, the answer carries the warning
+  produces no outputs, or only `null` ones, the answer carries the warning
   `jq_result_empty`, so the model re-checks its filter before concluding the
   data is not there.
 - **Cost bounds** (on the program, never on the data): the program may be at

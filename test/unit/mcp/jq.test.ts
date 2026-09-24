@@ -137,14 +137,14 @@ describe("the jq argument", () => {
 
     for (const name of ["get_lab_results", "get_vitals", "get_documents", "get_appointments"]) {
       const tool = tools.find((candidate) => candidate.name === name);
-      expect(tool?.description, name).toMatch(/pass `jq`, e\.g\. `\[\.\[\] \| select\(/u);
+      expect(tool?.description, name).toMatch(/pass `jq`, e\.g\. `\.\[\] \| select\(/u);
     }
   });
 
   it("filters ISO date strings by plain comparison", async () => {
     const { envelope } = await jqCall(
       "get_conditions",
-      '[.[] | select(.recorded >= "2026-01-01") | .id] | sort',
+      '[.[] | select(.recorded >= "2026-01-01") | .id] | sort | .[]',
     );
 
     expect(envelope.items).toStrictEqual(["cond-1", "cond-b"]);
@@ -156,7 +156,7 @@ describe("the jq argument", () => {
   it("selects and projects with select and map", async () => {
     const { envelope } = await jqCall(
       "get_lab_results",
-      '[.[] | select(.effective >= "2026-05-01")] | map({id, effective})',
+      '.[] | select(.effective >= "2026-05-01") | {id, effective}',
     );
 
     expect(envelope.items).toStrictEqual([{ id: "obs-lab", effective: "2026-05-10T00:00:00Z" }]);
@@ -165,9 +165,9 @@ describe("the jq argument", () => {
   it("groups and deduplicates with group_by and unique", async () => {
     const grouped = await jqCall(
       "get_conditions",
-      "group_by(.healthSystemId) | map({healthSystemId: .[0].healthSystemId, n: length})",
+      "group_by(.healthSystemId) | map({healthSystemId: .[0].healthSystemId, n: length}) | .[]",
     );
-    const unique = await jqCall("get_conditions", "[.[].healthSystemId] | unique");
+    const unique = await jqCall("get_conditions", "[.[].healthSystemId] | unique | .[]");
 
     expect(grouped.envelope.items).toStrictEqual([
       { healthSystemId: "prov_a", n: 2 },
@@ -184,16 +184,23 @@ describe("the jq argument", () => {
     expect(envelope.matched).toBe(3);
   });
 
-  it("passes a single non-array output through as items, with matched 1", async () => {
+  it("wraps even a single, non-array output as items' one element", async () => {
     const { envelope } = await jqCall("get_conditions", "length");
 
-    expect(envelope.items).toBe(3);
+    expect(envelope.items).toStrictEqual([3]);
     expect(envelope.matched).toBe(1);
     expect(envelope.total).toBe(3);
   });
 
-  it("applies limit to jq's output, not to its input", async () => {
-    const { envelope } = await jqCall("get_conditions", "[.[] | .id] | sort", { limit: 2 });
+  it("wraps a program that builds its own array as one items element, not the flat list", async () => {
+    const { envelope } = await jqCall("get_conditions", "[.[] | .id] | sort");
+
+    expect(envelope.items).toStrictEqual([["cond-1", "cond-2", "cond-b"]]);
+    expect(envelope.matched).toBe(1);
+  });
+
+  it("applies limit to jq's output array, not to its input", async () => {
+    const { envelope } = await jqCall("get_conditions", "[.[] | .id] | sort | .[]", { limit: 2 });
 
     expect(envelope.items).toStrictEqual(["cond-1", "cond-2"]);
     expect(envelope.total).toBe(3);
@@ -201,17 +208,10 @@ describe("the jq argument", () => {
     expect(envelope.truncated).toBe(true);
   });
 
-  it("says so when a limit could not apply to a non-array output", async () => {
-    const { envelope } = await jqCall("get_conditions", "length", { limit: 1 });
-
-    expect(envelope.items).toBe(3);
-    expect(envelope.warnings).toContain("jq_output_not_an_array_limit_not_applied");
-  });
-
   it("gives each item its raw resource under `raw` when raw is requested", async () => {
     const { envelope } = await jqCall(
       "get_conditions",
-      "[.[] | {id, rawId: .raw.resource.id, rawType: .raw.resource.resourceType}] | sort_by(.id)",
+      "[.[] | {id, rawId: .raw.resource.id, rawType: .raw.resource.resourceType}] | sort_by(.id) | .[]",
       { raw: true },
     );
 
@@ -229,7 +229,7 @@ describe("the jq argument", () => {
       id: "doc-1",
     });
 
-    expect(envelope.items).toBe("Patient reports seasonal symptoms.".length);
+    expect(envelope.items).toStrictEqual(["Patient reports seasonal symptoms.".length]);
   });
 
   it("rejects a program longer than 4096 characters at the schema", async () => {
@@ -244,8 +244,8 @@ describe("jq sees only what the policy released", () => {
   it("cannot reach a denied field: it reads as null, with the empty-result warning", async () => {
     world.state.rules = rules({ rule_type: "field", target: "Condition.recorded" });
 
-    const { envelope, text } = await jqCall("get_conditions", "[.[].recorded]");
-    const viaRaw = await jqCall("get_conditions", "[.[].raw.resource.recordedDate]", {
+    const { envelope, text } = await jqCall("get_conditions", ".[].recorded");
+    const viaRaw = await jqCall("get_conditions", ".[].raw.resource.recordedDate", {
       raw: true,
     });
 
@@ -259,7 +259,10 @@ describe("jq sees only what the policy released", () => {
   it("cannot see a denied health system's items at all", async () => {
     world.state.rules = rules({ rule_type: "health_system", target: "prov_b" });
 
-    const { envelope, text } = await jqCall("get_conditions", "[.[].healthSystemId] | unique");
+    const { envelope, text } = await jqCall(
+      "get_conditions",
+      "[.[].healthSystemId] | unique | .[]",
+    );
 
     expect(envelope.items).toStrictEqual(["prov_a"]);
     expect(text).not.toContain("Migraine");
@@ -301,7 +304,7 @@ describe("jq failures are surfaced, never empty data", () => {
   });
 
   it("warns jq_result_empty when a non-empty input filters to nothing", async () => {
-    const empty = await jqCall("get_conditions", '[.[] | select(.recorded >= "2099-01-01")]');
+    const empty = await jqCall("get_conditions", '.[] | select(.recorded >= "2099-01-01")');
     const none = await jqCall("get_conditions", ".[] | select(false)");
     const nothing = await jqCall("get_conditions", ".nope");
 
@@ -313,8 +316,8 @@ describe("jq failures are surfaced, never empty data", () => {
   });
 
   it("does not warn when the input was already empty", async () => {
-    const { envelope } = await jqCall("get_conditions", ".", { healthSystems: ["prov_b"] });
-    const emptyInput = await jqCall("get_devices", ".");
+    const { envelope } = await jqCall("get_conditions", ".[]", { healthSystems: ["prov_b"] });
+    const emptyInput = await jqCall("get_devices", ".[]");
 
     expect(envelope.warnings).not.toContain("jq_result_empty");
     expect(emptyInput.envelope.items).toStrictEqual([]);

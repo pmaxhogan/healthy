@@ -15,9 +15,9 @@
  * then the caller's `limit`.
  *
  *  - `total` is how many items the policy let through: the input to `jq`.
- *  - `matched` is how many there are after `jq` -- the length of its output when
- *    that is an array, 1 when it is a single other value. Without `jq` it equals
- *    `total`, so the envelope has one shape whether or not a program ran.
+ *  - `matched` is the output count: how many values `jq` emitted, before
+ *    `limit`. Without `jq` it equals `total`, so the envelope has one shape
+ *    whether or not a program ran.
  *  - `truncated` is decided AFTER filtering and `jq`, deliberately. Slicing to
  *    `limit` first would let a deny rule turn a full page into a short one and
  *    the caller would have no way to tell a filtered page from the end of the
@@ -30,12 +30,15 @@
  *
  * `jq` sees only what the policy released: it runs on the filtered items, so a
  * denied field is not there to be selected, and a denied resource type or health
- * system is not in the array at all. Its output shape is the caller's to choose:
- * a single output becomes `items` as it is, several outputs (a stream) are
- * collected into an array. With `raw: true` each input item also carries its
- * policy-filtered raw resource under `raw`, and the separate `raw` array is not
- * returned -- a program that filters or reshapes items would otherwise leave it
- * pointing at the wrong things.
+ * system is not in the array at all. `items` after `jq` is always the array of
+ * every value the program emits, in order, even a single one -- so
+ * `[.[] | select(...)]` (one output, itself an array) yields a one-element
+ * `items` wrapping that array, not the filtered list; `.[] | select(...)` (a
+ * stream, one output per match) is what gives one `items` element per match.
+ * `limit` always applies to this array. With `raw: true` each input item also
+ * carries its policy-filtered raw resource under `raw`, and the separate `raw`
+ * array is not returned -- a program that filters or reshapes items would
+ * otherwise leave it pointing at the wrong things.
  *
  * Errors are `isError` content carrying a stable code and a fixed sentence. Never
  * a stack, never an upstream body, never a resource: an upstream error message
@@ -93,7 +96,7 @@ const ERROR_MESSAGES = new Map<ToolErrorCode, string>([
 export interface JqAudit {
   /** Items handed to the program. */
   inputCount: number;
-  /** `matched`: the output's length when it is an array, else 1. Null when it failed. */
+  /** `matched`: how many values the program emitted. Null when it failed. */
   outputCount: number | null;
 }
 
@@ -158,13 +161,13 @@ export interface RespondInput {
   now: number;
 }
 
-/** Warnings `jq` can add. Stable strings, like every other warning. */
+/** The warning `jq` can add. A stable string, like every other warning. */
 const JQ_RESULT_EMPTY = "jq_result_empty";
-const JQ_LIMIT_NOT_APPLIED = "jq_output_not_an_array_limit_not_applied";
 
-/** A program that turned something into nothing: worth a second look. */
-function looksEmpty(value: unknown): boolean {
-  return value === null || (Array.isArray(value) && value.every((element) => element === null));
+/** A program that turned a non-empty input into nothing: worth a second look. No outputs at all
+ *  (`outputs` is empty) counts too -- `every` on an empty array is vacuously true. */
+function looksEmpty(outputs: readonly unknown[]): boolean {
+  return outputs.every((element) => element === null);
 }
 
 /** Item plus its raw resource, for a `jq` run with `raw: true`. */
@@ -177,32 +180,21 @@ function withRaw(items: readonly unknown[], rawItems: readonly RawEntry[]): unkn
 }
 
 interface Shaped {
-  items: unknown;
+  items: readonly unknown[];
   matched: number;
   truncated: boolean;
   /** Items returned after `limit`, for the audit row. */
   returned: number;
-  warnings: string[];
 }
 
-/** Apply `limit` to whatever is about to become `items`. */
-function applyLimit(value: unknown, limit: number | undefined): Shaped {
-  if (!Array.isArray(value)) {
-    return {
-      items: value,
-      matched: 1,
-      truncated: false,
-      returned: 1,
-      warnings: limit === undefined ? [] : [JQ_LIMIT_NOT_APPLIED],
-    };
-  }
+/** Apply `limit` to the array that is about to become `items`. */
+function applyLimit(value: readonly unknown[], limit: number | undefined): Shaped {
   const kept = limit === undefined ? value : value.slice(0, limit);
   return {
     items: kept,
     matched: value.length,
     truncated: kept.length < value.length,
     returned: kept.length,
-    warnings: [],
   };
 }
 
@@ -261,19 +253,16 @@ export async function respond(input: RespondInput): Promise<ToolOutcome> {
     });
   }
 
-  // One output is the answer as the program shaped it; a stream is collected.
-  const value = run.outputs.length === 1 ? run.outputs[0] : run.outputs;
-  const shaped = applyLimit(value, limit);
-  const empty = total > 0 && looksEmpty(value);
+  // Every value the program emits becomes one element of `items`, even a
+  // single one -- the caller chooses whether that is one match (a stream,
+  // `.[] | select(...)`) or one shaped answer (a single non-array output).
+  const shaped = applyLimit(run.outputs, limit);
+  const empty = total > 0 && looksEmpty(run.outputs);
   const payload: Record<string, unknown> = {
     items: shaped.items,
     total,
     matched: shaped.matched,
-    warnings: sortedWarnings([
-      ...baseWarnings,
-      ...shaped.warnings,
-      ...(empty ? [JQ_RESULT_EMPTY] : []),
-    ]),
+    warnings: sortedWarnings([...baseWarnings, ...(empty ? [JQ_RESULT_EMPTY] : [])]),
     truncated: shaped.truncated,
     generatedAt: toIso(input.now),
   };

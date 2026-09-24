@@ -37,11 +37,13 @@ export const JQ_ARGS = {
     .optional()
     .describe(
       "Optional jq program (real jq 1.8), run server-side on the result before it is " +
-        "returned. Its input is the `items` array; with `raw: true` each item also " +
-        "carries its FHIR resource under `raw`. A single output becomes `items`; " +
-        "several outputs are collected into an array. `limit` applies to the output. " +
-        "ISO dates compare correctly as strings. Example: " +
-        '`[.[] | select(.date >= "2026-01-01")]`.',
+        "returned. It runs on the `items` array; with `raw: true` each item also " +
+        "carries its FHIR resource under `raw`. Every value the program emits becomes " +
+        "one element of `items`, even a single one -- so `[.[] | select(...)]` (one " +
+        "output, an array) wraps that array as `items`' one element, while " +
+        "`.[] | select(...)` (a stream) puts one match per `items` element, which is " +
+        "almost always what you want. `limit` always applies to `items`. ISO dates " +
+        'compare correctly as strings. Example: `.[] | select(.date >= "2026-01-01")`.',
     ),
 } as const;
 

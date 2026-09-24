@@ -593,7 +593,7 @@ describe("the jq argument, in workerd", () => {
   // columns from migration 0011 are really written to D1.
   it("filters with real jq after the policy, and audits a fingerprint", async () => {
     await repos().mcpPolicy.add("field", "Condition.code.text");
-    const program = '[.[] | select(.recorded >= "2026-03-01") | {id, text: .code.text}]';
+    const program = '.[] | select(.recorded >= "2026-03-01") | {id, text: .code.text}';
 
     const answer = await call(world.client, "get_conditions", { jq: program });
     const parsed = JSON.parse(answer.text) as { total: number; matched: number };
@@ -614,7 +614,7 @@ describe("the jq argument, in workerd", () => {
     const after = await call(world.client, "get_conditions", { jq: "length" });
 
     expect(runaway.error).toBe("jq_budget_exceeded");
-    expect(JSON.parse(after.text)).toMatchObject({ items: 2 });
+    expect(JSON.parse(after.text)).toMatchObject({ items: [2] });
   });
 
   it("surfaces a jq error with jq's message", async () => {
