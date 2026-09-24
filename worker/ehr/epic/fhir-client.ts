@@ -330,6 +330,14 @@ export function createFhirClient(deps: FhirClientDeps): FhirClient {
    * as a thrown error, not folded into a warning: `refreshResourceType` catches
    * it, records the failure in `fhir_sync_state`, and does not cache a partial
    * result under a resource type that looked like it succeeded.
+   *
+   * A server that serves a *fresh* `next` link forever is not caught here, and
+   * that is a decision, not an oversight: security review L2 (2026-09) proposed a
+   * fail-loud bound on pages or bytes, and the owner's standing rule (CLAUDE.md,
+   * "Never cap what is fetched or stored") forbids one. The backstop is the
+   * Worker's CPU limit (`limits.cpu_ms` in `wrangler.jsonc`), which ends such a
+   * walk and fails the run rather than letting it spin. Do not add a page or byte
+   * ceiling here without the owner changing that rule.
    */
   async function paginate(resourceType: string, firstUrl: string): Promise<SearchResult<Resource>> {
     const sink = {

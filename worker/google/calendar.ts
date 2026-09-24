@@ -401,6 +401,10 @@ export function createCalendarClient(options: CalendarClientOptions): CalendarCl
    * owner's calendar is whatever size it is. The one thing that stops this early
    * is Google handing back a token it already gave us -- a genuine upstream bug,
    * not a large calendar -- which is reported loudly rather than looped on.
+   *
+   * There is deliberately no page or byte bound for a fresh token served forever
+   * either: see the matching note on `paginate` in `worker/ehr/epic/fhir-client.ts`
+   * (security review L2, the no-cap rule in CLAUDE.md, the CPU limit as backstop).
    */
   const listAll = async (
     build: (pageToken: string | null) => string,
