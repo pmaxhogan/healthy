@@ -28,6 +28,9 @@ import {
 
 import JsonEditor from "../components/JsonEditor.vue";
 import JsonViewer from "../components/JsonViewer.vue";
+import { placeholderFor } from "../lib/mcp-schema.ts";
+
+import type { JsonSchema } from "../lib/json-schema-completion.ts";
 
 // Not lazy-loaded here, unlike the main app's use of these components: this
 // whole page exists only to host CodeMirror (JsonEditor above already pulls in
@@ -54,10 +57,75 @@ const busy = ref(false);
 const attempt = ref<{ name: string; arguments: Record<string, unknown>; outcome: Outcome } | null>(
   null,
 );
+const showSchema = ref(false);
+const insertChoice = ref("");
 
 const valid = computed(
   () => tool.value !== null && parseError.value === null && schemaIssues.value.length === 0,
 );
+
+function schemaProperties(schema: Record<string, unknown>): Record<string, JsonSchema> {
+  const properties = schema.properties;
+  return typeof properties === "object" && properties !== null
+    ? (properties as Record<string, JsonSchema>)
+    : {};
+}
+
+function schemaRequired(schema: Record<string, unknown>): Set<string> {
+  const required = schema.required;
+  return new Set(
+    Array.isArray(required) ? required.filter((entry) => typeof entry === "string") : [],
+  );
+}
+
+/** Whatever the current arguments text parses to, or `{}` if it does not parse -- never thrown. */
+function parsedArgsOrEmpty(): Record<string, unknown> {
+  try {
+    const candidate: unknown = JSON.parse(argsText.value);
+    return typeof candidate === "object" && candidate !== null && !Array.isArray(candidate)
+      ? (candidate as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The tool's properties not already present in the arguments, required ones
+ * first, for the "insert a field" dropdown below the editor.
+ */
+const insertableProperties = computed<{ key: string; required: boolean }[]>(() => {
+  if (tool.value === null) return [];
+  const properties = schemaProperties(tool.value.inputSchema);
+  const required = schemaRequired(tool.value.inputSchema);
+  const existing = new Set(Object.keys(parsedArgsOrEmpty()));
+  return Object.keys(properties)
+    .filter((key) => !existing.has(key))
+    .toSorted((a, b) => Number(required.has(b)) - Number(required.has(a)) || a.localeCompare(b))
+    .map((key) => ({ key, required: required.has(key) }));
+});
+
+/**
+ * Inserts one property, pre-filled with a placeholder value for its type, and
+ * re-renders the whole document from the parsed result. That loses the
+ * cursor position and the undo step a targeted insert into the view would
+ * have kept -- acceptable here, since this is a one-off "give me a starting
+ * point" action, not something done mid-edit.
+ */
+function insertField(key: string): void {
+  if (tool.value === null) return;
+  const properties = schemaProperties(tool.value.inputSchema);
+  const propertySchema = Object.hasOwn(properties, key) ? properties[key] : undefined;
+  const parsed = parsedArgsOrEmpty();
+  parsed[key] = propertySchema === undefined ? null : placeholderFor(propertySchema);
+  onArgsChanged(JSON.stringify(parsed, null, 2));
+}
+
+function onInsertChoice(): void {
+  const key = insertChoice.value;
+  insertChoice.value = "";
+  if (key !== "") insertField(key);
+}
 
 function validate(): void {
   parseError.value = null;
@@ -173,8 +241,36 @@ notifyParent({ type: "ready" });
     <template v-else>
       <p class="muted">{{ tool.description }}</p>
 
-      <div class="field-label">Arguments (JSON)</div>
-      <JsonEditor :model-value="argsText" @update:model-value="onArgsChanged" @run="run" />
+      <div class="row">
+        <div class="field-label">Arguments (JSON)</div>
+        <span class="spacer"></span>
+        <select
+          v-model="insertChoice"
+          :disabled="insertableProperties.length === 0"
+          @change="onInsertChoice"
+        >
+          <option value="">Insert field…</option>
+          <option
+            v-for="property in insertableProperties"
+            :key="property.key"
+            :value="property.key"
+          >
+            {{ property.key }}{{ property.required ? " (required)" : "" }}
+          </option>
+        </select>
+        <button type="button" class="small" @click="showSchema = !showSchema">
+          {{ showSchema ? "Hide schema" : "Show schema" }}
+        </button>
+      </div>
+      <div v-if="showSchema" class="viewer-block">
+        <JsonViewer :value="tool.inputSchema" />
+      </div>
+      <JsonEditor
+        :model-value="argsText"
+        :schema="tool.inputSchema"
+        @update:model-value="onArgsChanged"
+        @run="run"
+      />
       <p v-if="parseError" class="warn-text">{{ parseError }}</p>
       <ul v-else-if="schemaIssues.length > 0" class="warn-text issues">
         <li v-for="issue in schemaIssues" :key="issue">{{ issue }}</li>

@@ -16,7 +16,7 @@ export interface JsonSchemaLike {
 }
 
 /** One representative value for a property's declared type. */
-function placeholderFor(propertySchema: JsonSchemaLike): unknown {
+export function placeholderFor(propertySchema: JsonSchemaLike): unknown {
   const type = Array.isArray(propertySchema.type) ? propertySchema.type[0] : propertySchema.type;
   switch (type) {
     case "string": {
