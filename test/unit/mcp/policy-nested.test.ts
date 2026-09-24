@@ -54,7 +54,8 @@ describe("a nested rule and jq", () => {
     expect(answer.isError).toBe(false);
     expect(answer.text).not.toContain("118");
     expect(answer.text).not.toContain("74");
-    expect(JSON.parse(answer.text)).toMatchObject({ items: [null, null] });
+    // jq output is always the array of every output: one output, one array.
+    expect(JSON.parse(answer.text)).toMatchObject({ items: [[null, null]] });
   });
 
   it("jq cannot reach it through the raw resource either", async () => {
