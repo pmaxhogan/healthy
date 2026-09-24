@@ -135,7 +135,11 @@ one row or column and replayed in another: decryption with the wrong AAD fails,
 and there is a test that asserts it does. Where a row's id is itself blinded
 (`fhir_cache`, `portal_visits`), the AAD uses the stored, blinded id; a calendar
 row's detail is bound to its Google event id, which is the one id that row keeps
-for life.
+for life. The envelope version is authenticated as well (the AAD handed to
+AES-GCM is `<version>\0<table>.<column>.<rowId>`), so a `v2:` value relabelled
+`v1:` fails to open rather than being parsed under the wrong rule. Values sealed
+before the version was bound still open under the bare AAD and stay relabel-able
+until their column is next written, which re-seals them.
 
 ## Controls
 

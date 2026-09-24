@@ -21,6 +21,19 @@
  * moved between patients -- fails to open rather than quietly decrypting. Every
  * caller must therefore pass the same `aadFor(...)` on open as it did on seal.
  *
+ * The envelope version is authenticated too. What AES-GCM is actually given is
+ * `<version>\0<aad>` (the NUL is a byte no `aadFor` result contains), so a `v2:`
+ * value relabelled `v1:` -- or the reverse -- fails to open instead of being
+ * parsed under the other version's rule. Values sealed before that (security
+ * review L1, 2026-09) were sealed under the bare AAD, and `open` still accepts
+ * them: it tries the version-bound AAD first and falls back to the bare one. So
+ * no stored row has to be rewritten, every new seal is protected, and a legacy
+ * value stops being relabel-able the next time its cell is written. Most are, in
+ * the ordinary course (a token refresh, a calendar upsert, a portal fetch); one
+ * that is only written when the owner re-enters it (a client secret, portal
+ * credentials) stays legacy until then. The fallback costs one failed decrypt
+ * per legacy value opened.
+ *
  * Why app-layer at all, when D1 is encrypted at rest: at-rest encryption protects
  * the disks, not a database dump, a mis-scoped read from another Worker, or an
  * accidental log of a row. Tokens, patient identifiers and cached clinical
@@ -117,6 +130,11 @@ function keyFor(source: KeySource): Promise<CryptoKey> {
   return pending;
 }
 
+/** What AES-GCM authenticates for a new seal: the version, a NUL, the cell's AAD. */
+function boundAad(version: string, aad: string): Uint8Array {
+  return encoder.encode(`${version}\u{0}${aad}`);
+}
+
 /**
  * The AAD for one cell. `rowId` is whatever uniquely names the row in its table:
  * a primary key, or a composite like `<healthSystemId>:<type>:<id>` for the cache.
@@ -167,10 +185,11 @@ export async function seal(
   const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
   const encoded = encoder.encode(plaintext);
   const padded = options.pad === true;
+  const version = padded ? VERSION_PADDED : VERSION;
   let ciphertext: ArrayBuffer;
   try {
     ciphertext = await crypto.subtle.encrypt(
-      { name: "AES-GCM", iv, additionalData: encoder.encode(aad) },
+      { name: "AES-GCM", iv, additionalData: boundAad(version, aad) },
       key,
       padded ? padPlaintext(encoded) : encoded,
     );
@@ -180,7 +199,7 @@ export async function seal(
   const envelope = new Uint8Array(IV_BYTES + ciphertext.byteLength);
   envelope.set(iv, 0);
   envelope.set(new Uint8Array(ciphertext), IV_BYTES);
-  return `${padded ? VERSION_PADDED : VERSION}:${toBase64Url(envelope)}`;
+  return `${version}:${toBase64Url(envelope)}`;
 }
 
 /**
@@ -200,17 +219,21 @@ export async function open(source: KeySource, sealed: string, aad: string): Prom
   }
   const bytes = fromBase64(sealed.slice(separator + 1), "sealed envelope");
   if (bytes.length <= IV_BYTES) throw cryptoError("sealed envelope is too short");
-  let plaintext: ArrayBuffer;
-  try {
-    plaintext = await crypto.subtle.decrypt(
-      {
-        name: "AES-GCM",
-        iv: bytes.subarray(0, IV_BYTES),
-        additionalData: encoder.encode(aad),
-      },
+  const decrypt = (additionalData: Uint8Array): Promise<ArrayBuffer> =>
+    crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: bytes.subarray(0, IV_BYTES), additionalData },
       key,
       bytes.subarray(IV_BYTES),
     );
+  let plaintext: ArrayBuffer;
+  try {
+    // Version-bound first (every seal since L1), then the bare AAD every value
+    // sealed before it used. See the module comment.
+    try {
+      plaintext = await decrypt(boundAad(version, aad));
+    } catch {
+      plaintext = await decrypt(encoder.encode(aad));
+    }
   } catch (error) {
     throw cryptoError("open failed: wrong key, wrong AAD, or tampered ciphertext", error);
   }

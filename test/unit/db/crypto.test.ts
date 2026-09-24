@@ -123,6 +123,72 @@ describe("open", () => {
   });
 });
 
+/** Relabel an envelope's version without touching its bytes. */
+const relabel = (sealed: string, version: string): string =>
+  `${version}:${sealed.slice(sealed.indexOf(":") + 1)}`;
+
+/**
+ * A value sealed the way every seal before L1 was: under the bare AAD, with no
+ * version bound in. Built by hand so the test does not depend on `seal` still
+ * knowing how.
+ */
+async function legacySeal(plaintext: string, aad: string, padded: boolean): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    Buffer.from(KEY, "base64"),
+    { name: "AES-GCM" },
+    false,
+    ["encrypt"],
+  );
+  let body: Uint8Array<ArrayBuffer> = new TextEncoder().encode(plaintext);
+  if (padded) {
+    const out = new Uint8Array(64);
+    new DataView(out.buffer).setUint32(0, body.length, false);
+    out.set(body, 4);
+    body = out;
+  }
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(aad) },
+    key,
+    body,
+  );
+  const envelope = Buffer.concat([iv, new Uint8Array(ciphertext)]).toString("base64url");
+  return `${padded ? "v2" : "v1"}:${envelope}`;
+}
+
+describe("the envelope version is authenticated (security review L1)", () => {
+  it("refuses a padded v2 value relabelled v1", async () => {
+    // Old code opened it and returned the length prefix and zero fill as text.
+    const sealed = await seal(KEY, "short", AAD, { pad: true });
+    expect(sealed.startsWith("v2:")).toBe(true);
+
+    await expect(open(KEY, relabel(sealed, "v1"), AAD)).rejects.toMatchObject({ code: "crypto" });
+  });
+
+  it("refuses an unpadded v1 value relabelled v2", async () => {
+    // Three NULs and a 1 up front: old code read that as a one-byte padded value.
+    const sealed = await seal(KEY, "\u{0}\u{0}\u{0}\u{1}xyz", AAD);
+
+    await expect(open(KEY, relabel(sealed, "v2"), AAD)).rejects.toMatchObject({ code: "crypto" });
+  });
+
+  it("still opens v1 and v2 values sealed before the version was bound", async () => {
+    expect(await open(KEY, await legacySeal("legacy-plain", AAD, false), AAD)).toBe("legacy-plain");
+    expect(await open(KEY, await legacySeal("legacy-padded", AAD, true), AAD)).toBe(
+      "legacy-padded",
+    );
+  });
+
+  it("keeps the cell binding for legacy values: the wrong AAD still fails", async () => {
+    const legacy = await legacySeal("legacy", AAD, true);
+
+    await expect(
+      open(KEY, legacy, aadFor("connections", "access_token_enc", "c2")),
+    ).rejects.toMatchObject({ code: "crypto" });
+  });
+});
+
 describe("openOrNull", () => {
   it("passes a NULL column through", async () => {
     expect(await openOrNull(KEY, null, AAD)).toBeNull();
