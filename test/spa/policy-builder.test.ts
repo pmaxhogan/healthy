@@ -11,9 +11,9 @@ import { fakeResponse, healthSystem, installFakeApi } from "./helpers.ts";
 import { policyRule, testSchema } from "./policy-fixtures.ts";
 
 import type { FakeFetch } from "./helpers.ts";
-import type { PolicyPreviewDto } from "@shared/types.ts";
+import type { PolicyPreviewDto, PolicyToolPreviewDto } from "@shared/types.ts";
 
-const preview: PolicyPreviewDto = {
+const careTeamPreview: PolicyToolPreviewDto = {
   tool: "get_care_team",
   total: 3,
   affected: 2,
@@ -30,11 +30,26 @@ const preview: PolicyPreviewDto = {
   synthetic: false,
 };
 
-const world: { api: FakeFetch } = { api: undefined as unknown as FakeFetch };
+/** A tool preview; `affected: 0` is a tool the draft reaches but changes nothing in. */
+function toolPreview(tool: string, affected: number, total = 10): PolicyToolPreviewDto {
+  return {
+    tool,
+    total,
+    affected,
+    sample: { before: { tool, name: "x" }, after: affected > 0 ? { tool } : { tool, name: "x" } },
+    warnings: [],
+    synthetic: false,
+  };
+}
+
+const world: { api: FakeFetch; preview: PolicyPreviewDto } = {
+  api: undefined as unknown as FakeFetch,
+  preview: { tools: [careTeamPreview] },
+};
 
 function routes(overrides: Record<string, () => Response> = {}): Record<string, () => Response> {
   return {
-    "/api/mcp/policy/preview": () => fakeResponse({ body: preview }),
+    "/api/mcp/policy/preview": () => fakeResponse({ body: world.preview }),
     "/api/mcp/policy/structure": () =>
       fakeResponse({
         body: {
@@ -75,8 +90,15 @@ function checkbox(wrapper: ReturnType<typeof mount>, path: string) {
 
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
+  world.preview = { tools: [careTeamPreview] };
   world.api = installFakeApi(routes());
 });
+
+/** Let the debounced preview run and its answer render. */
+async function settle(): Promise<void> {
+  await vi.advanceTimersByTimeAsync(600);
+  await flushPromises();
+}
 
 afterEach(() => {
   vi.useRealTimers();
@@ -128,9 +150,10 @@ describe("PolicyRuleBuilder", () => {
     await vi.advanceTimersByTimeAsync(600);
     await flushPromises();
 
-    const previewCall = world.api.calls.find((call) => call.url === "/api/mcp/policy/preview");
-    expect(JSON.parse(previewCall?.body ?? "{}")).toStrictEqual({
-      tool: "get_care_team",
+    // One request for every tool in scope: no per-tool round trips.
+    const previewCalls = world.api.calls.filter((call) => call.url === "/api/mcp/policy/preview");
+    expect(previewCalls).toHaveLength(1);
+    expect(JSON.parse(previewCalls[0]?.body ?? "{}")).toStrictEqual({
       field: {
         effect: "hide",
         tool: "get_care_team",
@@ -260,5 +283,112 @@ describe("PolicyRuleBuilder", () => {
       ruleType: "tool",
       target: "get_patient_profile",
     });
+  });
+});
+
+/** Mount with every-tool scope and one field picked, and let the preview land. */
+async function drafted(): Promise<ReturnType<typeof mount>> {
+  const wrapper = mountBuilder();
+  await wrapper.find('[data-test="raw-path"]').setValue("name");
+  await wrapper.find('[data-test="raw-path"]').trigger("keydown", { key: "Enter" });
+  await settle();
+  return wrapper;
+}
+
+function options(wrapper: ReturnType<typeof mount>): string[] {
+  return wrapper.findAll('[data-test="preview-tool"] option').map((option) => option.text());
+}
+
+function selected(wrapper: ReturnType<typeof mount>): string {
+  return (wrapper.find('[data-test="preview-tool"]').element as HTMLSelectElement).value;
+}
+
+/** Change the draft, so the preview is recomputed with `next` as its answer. */
+async function redraft(
+  wrapper: ReturnType<typeof mount>,
+  next: PolicyPreviewDto,
+  path: string,
+): Promise<void> {
+  world.preview = next;
+  await wrapper.find('[data-test="raw-path"]').setValue(path);
+  await wrapper.find('[data-test="raw-path"]').trigger("keydown", { key: "Enter" });
+  await settle();
+}
+
+describe("the preview's tool choice", () => {
+  it("lists only the tools the draft changes, each with its count", async () => {
+    world.preview = {
+      tools: [
+        toolPreview("get_health_summary", 0, 40),
+        toolPreview("get_appointments", 7, 106),
+        toolPreview("get_encounters", 1, 1),
+      ],
+    };
+    const wrapper = await drafted();
+
+    expect(options(wrapper)).toStrictEqual([
+      "get_appointments — 7 of 106 items change",
+      "get_encounters — 1 of 1 item changes",
+    ]);
+    expect(selected(wrapper)).toBe("get_appointments");
+    expect(wrapper.find('[data-test="policy-preview"]').text()).toContain(
+      "Changes 7 of the 106 items get_appointments returns",
+    );
+  });
+
+  it("shows an empty state, with the reason, when nothing changes", async () => {
+    world.preview = {
+      tools: [toolPreview("get_care_team", 0, 3), toolPreview("get_patient_profile", 0, 2)],
+    };
+    const wrapper = await drafted();
+
+    expect(wrapper.find('[data-test="preview-tool"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="policy-preview"]').exists()).toBe(false);
+    const empty = wrapper.find('[data-test="preview-empty"]').text();
+    expect(empty).toContain("This rule doesn't change anything in your current data.");
+    expect(empty).toContain("None of the 5 items from the 2 tools it reaches has name");
+    expect(empty).toContain("isn't in your cached data");
+  });
+
+  it("moves the selection when the selected tool drops out, and never shows its diff", async () => {
+    world.preview = {
+      tools: [toolPreview("get_appointments", 7, 106), toolPreview("get_encounters", 3, 104)],
+    };
+    const wrapper = await drafted();
+    await wrapper.find('[data-test="preview-tool"]').setValue("get_encounters");
+    expect(selected(wrapper)).toBe("get_encounters");
+
+    await redraft(
+      wrapper,
+      { tools: [toolPreview("get_appointments", 2, 106), toolPreview("get_encounters", 0, 104)] },
+      "status",
+    );
+
+    expect(options(wrapper)).toStrictEqual(["get_appointments — 2 of 106 items change"]);
+    expect(selected(wrapper)).toBe("get_appointments");
+    expect(wrapper.find('[data-test="policy-preview"]').text()).not.toContain("get_encounters");
+
+    await redraft(wrapper, { tools: [toolPreview("get_appointments", 0, 106)] }, "end");
+
+    expect(wrapper.find('[data-test="preview-tool"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="policy-preview"]').exists()).toBe(false);
+    expect(wrapper.find('[data-test="preview-empty"]').exists()).toBe(true);
+  });
+
+  it("keeps the selection while the selected tool still qualifies", async () => {
+    world.preview = {
+      tools: [toolPreview("get_appointments", 7, 106), toolPreview("get_encounters", 3, 104)],
+    };
+    const wrapper = await drafted();
+    await wrapper.find('[data-test="preview-tool"]').setValue("get_encounters");
+
+    await redraft(
+      wrapper,
+      { tools: [toolPreview("get_appointments", 9, 106), toolPreview("get_encounters", 5, 104)] },
+      "status",
+    );
+
+    expect(selected(wrapper)).toBe("get_encounters");
+    expect(options(wrapper)).toContain("get_encounters — 5 of 104 items change");
   });
 });

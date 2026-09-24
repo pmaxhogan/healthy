@@ -62,6 +62,26 @@ describe("McpView policy rules", () => {
     expect(wrapper.find(".warn-text").exists()).toBe(false);
   });
 
+  it("says so, and why, when a rule affects no tool's output", async () => {
+    const { wrapper } = await mountMcp([
+      policyRule({
+        field: {
+          effect: "hide",
+          tool: null,
+          resourceType: "Practitioner",
+          healthSystemId: null,
+          paths: ["name"],
+        },
+      }),
+    ]);
+
+    const tools = wrapper.find('[data-test="reaches-nothing"]').text();
+    expect(tools).toBe(
+      "Affects no tool's output right now: Practitioner items are only used to look up references, and no tool returns them.",
+    );
+    expect(wrapper.find('[data-test="rule"]').text()).not.toMatch(/Changes\s*·/u);
+  });
+
   it("switches a rule off with PATCH, and shows it as off", async () => {
     const { wrapper, api } = await mountMcp([policyRule({ enabled: false })]);
 

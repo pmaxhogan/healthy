@@ -25,6 +25,7 @@ import type {
   PolicyRuleDto,
   PolicySchemaDto,
   PolicyStructureDto,
+  PolicyToolPreviewDto,
 } from "@shared/types.ts";
 
 const owner = freshOwner();
@@ -282,14 +283,51 @@ describe("POST /api/mcp/policy/structure", () => {
   });
 });
 
+/** One tool's entry in a preview answer. */
+function entry(preview: PolicyPreviewDto, tool: string): PolicyToolPreviewDto | undefined {
+  return preview.tools.find((candidate) => candidate.tool === tool);
+}
+
 describe("POST /api/mcp/policy/preview", () => {
-  it("requires the CSRF header", async () => {
-    const response = await call("/api/mcp/policy/preview", {
+  it("requires a session and the CSRF header", async () => {
+    const body = JSON.stringify({ field: field(["name"], { resourceType: "CareTeam" }) });
+    const anonymous = await call("/api/mcp/policy/preview", {
+      method: "POST",
+      headers: { origin: ORIGIN, ...CSRF, "content-type": "application/json" },
+      body,
+    });
+    const forged = await call("/api/mcp/policy/preview", {
       method: "POST",
       headers: { cookie: owner().cookie, origin: ORIGIN, "content-type": "application/json" },
-      body: JSON.stringify({ tool: "get_care_team", field: field(["name"]) }),
+      body,
     });
-    expect(response.status).toBe(403);
+
+    expect(anonymous.status).toBe(401);
+    expect(forged.status).toBe(403);
+  });
+
+  it("previews every tool the scope reaches in one request, with per-tool counts", async () => {
+    await seedRecord();
+
+    const response = await owner().send("POST", "/api/mcp/policy/preview", {
+      field: field(["component[].referenceRange[].low"], { resourceType: "Observation" }),
+    });
+    const preview = await json<PolicyPreviewDto>(response);
+    const tools = preview.tools.map((candidate) => candidate.tool);
+
+    expect(response.status).toBe(200);
+    // Every tool that can carry an Observation, and none that cannot.
+    expect(tools).toContain("get_lab_results");
+    expect(tools).toContain("get_vitals");
+    expect(tools).toContain("get_health_summary");
+    expect(tools).not.toContain("get_care_team");
+    // Never the metered document tool unless it is named.
+    expect(tools).not.toContain("get_document_text");
+    // The path is raw-only: it changes the lab result's raw resource, and not
+    // the summary, which carries normalized items and no raw at all.
+    expect(entry(preview, "get_lab_results")).toMatchObject({ total: 1, affected: 1 });
+    expect(entry(preview, "get_health_summary")?.affected).toBe(0);
+    expect(entry(preview, "get_vitals")).toMatchObject({ total: 0, affected: 0 });
   });
 
   it("shows the first real item the draft changes, before and after, raw included", async () => {
@@ -300,20 +338,36 @@ describe("POST /api/mcp/policy/preview", () => {
       field: field(["component[].referenceRange[].low"], { resourceType: "Observation" }),
     });
     const preview = await json<PolicyPreviewDto>(response);
+    const lab = entry(preview, "get_lab_results");
 
-    expect(response.status).toBe(200);
-    expect(preview).toMatchObject({
-      tool: "get_lab_results",
-      total: 1,
-      affected: 1,
-      synthetic: false,
-    });
-    expect(JSON.stringify(preview.sample?.rawBefore)).toContain('"low":{"value":4.1}');
-    expect(JSON.stringify(preview.sample?.rawAfter)).not.toContain('"low"');
-    expect(JSON.stringify(preview.sample?.rawAfter)).toContain('"high":{"value":5.6}');
-    expect(preview.warnings).toStrictEqual([
+    expect(preview.tools).toHaveLength(1);
+    expect(lab).toMatchObject({ total: 1, affected: 1, synthetic: false });
+    expect(JSON.stringify(lab?.sample?.rawBefore)).toContain('"low":{"value":4.1}');
+    expect(JSON.stringify(lab?.sample?.rawAfter)).not.toContain('"low"');
+    expect(JSON.stringify(lab?.sample?.rawAfter)).toContain('"high":{"value":5.6}');
+    expect(lab?.warnings).toStrictEqual([
       "policy_field_removed:Observation.component[].referenceRange[].low",
     ]);
+  });
+
+  it("reports zero changes, not an error, for a field no cached item has", async () => {
+    await seedRecord();
+
+    const preview = await json<PolicyPreviewDto>(
+      await owner().send("POST", "/api/mcp/policy/preview", {
+        field: field(["participants[].name"], { tool: "get_care_team" }),
+      }),
+    );
+
+    expect(preview.tools).toHaveLength(1);
+    expect(entry(preview, "get_care_team")?.affected).toBe(1);
+
+    const none = await json<PolicyPreviewDto>(
+      await owner().send("POST", "/api/mcp/policy/preview", {
+        field: field(["identifiers.csn"], { resourceType: "Encounter" }),
+      }),
+    );
+    expect(none.tools.every((candidate) => candidate.affected === 0)).toBe(true);
   });
 
   it("does not write an audit row, and is not affected by a stored field rule", async () => {
@@ -326,30 +380,30 @@ describe("POST /api/mcp/policy/preview", () => {
         field: field(["participants[].name"], { resourceType: "CareTeam" }),
       }),
     );
+    const team = entry(preview, "get_care_team");
 
     // The stored role rule is not in the baseline: the diff is the draft's alone.
-    expect(JSON.stringify(preview.sample?.before)).toContain("Primary care");
-    expect(JSON.stringify(preview.sample?.before)).toContain("Alpha Example");
-    expect(JSON.stringify(preview.sample?.after)).not.toContain("Alpha Example");
+    expect(JSON.stringify(team?.sample?.before)).toContain("Primary care");
+    expect(JSON.stringify(team?.sample?.before)).toContain("Alpha Example");
+    expect(JSON.stringify(team?.sample?.after)).not.toContain("Alpha Example");
     expect(await testRepos().mcpAudit.listRecent(10)).toStrictEqual([]);
   });
 
   it("uses a made-up sample for get_document_text rather than spend a metered request", async () => {
     const preview = await json<PolicyPreviewDto>(
       await owner().send("POST", "/api/mcp/policy/preview", {
-        tool: "get_document_text",
         field: field(["text"], { tool: "get_document_text" }),
       }),
     );
+    const text = entry(preview, "get_document_text");
 
-    expect(preview.synthetic).toBe(true);
-    expect(preview.affected).toBe(1);
-    expect(JSON.stringify(preview.sample?.after)).not.toContain("Example note text");
+    expect(text?.synthetic).toBe(true);
+    expect(text?.affected).toBe(1);
+    expect(JSON.stringify(text?.sample?.after)).not.toContain("Example note text");
   });
 
   it("refuses a draft that would be refused on save, with the same sentence", async () => {
     const response = await owner().send("POST", "/api/mcp/policy/preview", {
-      tool: "get_care_team",
       field: field(["participants[].nmae"], { tool: "get_care_team" }),
     });
 

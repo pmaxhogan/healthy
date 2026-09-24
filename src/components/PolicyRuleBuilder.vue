@@ -22,8 +22,12 @@ import { debounce } from "../lib/debounce.ts";
 import {
   allPaths,
   buildTree,
+  changedTools,
   fieldSentence,
+  keptSelection,
+  noChangeReason,
   overlayStructure,
+  previewLabel,
   readablePath,
   shapesFor,
 } from "../lib/policy.ts";
@@ -41,6 +45,7 @@ import type {
   PolicyRuleType,
   PolicySchemaDto,
   PolicyStructureDto,
+  PolicyToolPreviewDto,
 } from "@shared/types.ts";
 
 const props = withDefaults(
@@ -132,43 +137,35 @@ const spec = computed<FieldRuleSpec>(() => ({
 
 const structures = ref(new Map<string, PolicyStructureDto>());
 
-/** The tool whose real answer the structure overlay and the preview are read from. */
-const previewTool = ref("");
-
-const previewTools = computed(() => {
-  if (scope.value.tool !== null) return [scope.value.tool];
-  if (scope.value.resourceType === null) return toolNames.value;
+/**
+ * The tool whose real answer the tree's "in your data" overlay is read from:
+ * the scope's own tool, or the first tool that carries the scope's type.
+ */
+const structureTool = computed(() => {
+  if (scope.value.tool !== null) return scope.value.tool;
+  if (scope.value.resourceType === null) return "";
   const typed = new Set(
     props.schema.shapes
       .filter((shape) => shape.resourceType === scope.value.resourceType)
       .map((shape) => shape.id),
   );
-  return props.schema.tools
-    .filter((entry) => entry.shapes.some((shape) => typed.has(shape)))
-    .map((entry) => entry.name);
+  const tool = props.schema.tools.find((entry) => entry.shapes.some((shape) => typed.has(shape)));
+  return tool?.name ?? "";
 });
 
-watch(
-  previewTools,
-  (list) => {
-    if (!list.includes(previewTool.value)) previewTool.value = list[0] ?? "";
-  },
-  { immediate: true },
-);
-
 function structureKey(): string {
-  return `${previewTool.value}|${scope.value.resourceType ?? ""}`;
+  return `${structureTool.value}|${scope.value.resourceType ?? ""}`;
 }
 
 const structureState = ref<"idle" | "loading" | "failed">("idle");
 
 async function loadStructure(): Promise<void> {
   const key = structureKey();
-  if (previewTool.value === "" || structures.value.has(key)) return;
+  if (structureTool.value === "" || structures.value.has(key)) return;
   structureState.value = "loading";
   try {
     const structure = await endpoints.policyStructure({
-      tool: previewTool.value,
+      tool: structureTool.value,
       ...(scope.value.resourceType !== null && { resourceType: scope.value.resourceType }),
     });
     const next = new Map(structures.value);
@@ -206,11 +203,34 @@ function addRawPath(): void {
 }
 
 // --- preview ---------------------------------------------------------------
+//
+// One request runs the draft over every tool its scope reaches. The dropdown
+// lists only the tools it changes, each with its count; when it changes
+// nothing, an empty state says so and why, instead of a dropdown to click
+// through.
 
 const preview = ref<PolicyPreviewDto | null>(null);
 const previewState = ref<"idle" | "loading" | "failed">("idle");
 /** Bumped on every run, so an answer that arrives after a newer request is dropped. */
 const previewRun = ref(0);
+/** The tool whose before/after is shown; always one of `previewOptions`, or "". */
+const previewTool = ref("");
+
+const previewOptions = computed(() => changedTools(preview.value));
+
+// The selection follows the options: kept while its tool still changes, else
+// the first tool that does, else nothing (the empty state).
+watch(previewOptions, (options) => {
+  previewTool.value = keptSelection(previewTool.value, options);
+});
+
+const selectedPreview = computed<PolicyToolPreviewDto | null>(
+  () => previewOptions.value.find((entry) => entry.tool === previewTool.value) ?? null,
+);
+
+const emptyReason = computed(() =>
+  preview.value === null ? "" : noChangeReason(preview.value, spec.value),
+);
 
 function problemsOf(error: unknown): string[] {
   if (error instanceof ApiRequestError) {
@@ -223,7 +243,7 @@ function problemsOf(error: unknown): string[] {
 
 async function runPreview(): Promise<void> {
   previewRun.value += 1;
-  if (!isField.value || paths.value.length === 0 || previewTool.value === "") {
+  if (!isField.value || paths.value.length === 0) {
     preview.value = null;
     problems.value = [];
     return;
@@ -232,7 +252,6 @@ async function runPreview(): Promise<void> {
   previewState.value = "loading";
   try {
     const result = await endpoints.policyPreview({
-      tool: previewTool.value,
       ...(scope.value.resourceType !== null && { resourceType: scope.value.resourceType }),
       field: spec.value,
     });
@@ -252,11 +271,11 @@ const schedulePreview = debounce(() => {
   void runPreview();
 }, 450);
 
-watch([spec, previewTool], () => {
+watch(spec, () => {
   schedulePreview();
 });
 
-watch([previewTool, () => scope.value.resourceType], () => {
+watch([structureTool, () => scope.value.resourceType], () => {
   if (isField.value && scopeKind.value !== "all") void loadStructure();
 });
 
@@ -544,10 +563,15 @@ function setKind(next: Kind): void {
       <div class="preview-box">
         <div class="row">
           <h3>Preview</h3>
-          <label v-if="previewTools.length > 1" class="field inline spacer">
-            on
+          <label
+            v-if="previewState !== 'loading' && previewOptions.length > 0"
+            class="field inline spacer"
+          >
+            in
             <select v-model="previewTool" data-test="preview-tool">
-              <option v-for="name in previewTools" :key="name" :value="name">{{ name }}</option>
+              <option v-for="entry in previewOptions" :key="entry.tool" :value="entry.tool">
+                {{ previewLabel(entry) }}
+              </option>
             </select>
           </label>
         </div>
@@ -555,7 +579,23 @@ function setKind(next: Kind): void {
           Pick a field to see it removed from a real item of your data.
         </p>
         <p v-else-if="previewState === 'loading'" class="muted">Running the rule on your data…</p>
-        <PolicyPreview v-else-if="preview" :preview="preview" :allow="kind === 'allow'" />
+        <div
+          v-else-if="preview !== null && previewOptions.length === 0"
+          class="empty"
+          data-test="preview-empty"
+        >
+          <strong>{{
+            kind === "allow"
+              ? "This rule doesn't put anything back in your current data."
+              : "This rule doesn't change anything in your current data."
+          }}</strong>
+          <p class="muted">{{ emptyReason }}</p>
+        </div>
+        <PolicyPreview
+          v-else-if="selectedPreview !== null"
+          :preview="selectedPreview"
+          :allow="kind === 'allow'"
+        />
       </div>
     </template>
 
@@ -681,6 +721,15 @@ legend {
   display: grid;
   gap: 8px;
   min-width: 0;
+}
+
+.empty {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  font-size: 0.92rem;
 }
 
 .preview-box h3 {

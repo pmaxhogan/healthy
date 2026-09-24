@@ -226,7 +226,7 @@ export const policySampleSchema = z.strictObject({
 
 /** `POST /api/mcp/policy/preview`. */
 export const policyPreviewSchema = z.strictObject({
-  tool: z.string().min(1).max(100),
+  tool: z.string().min(1).max(100).optional(),
   resourceType: z.string().min(1).max(100).optional(),
   field: fieldRuleSpecSchema,
 });

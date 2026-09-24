@@ -178,14 +178,15 @@ mcpPolicyRouter.post("/structure", async (c) => {
 });
 
 /**
- * A draft `field` rule run over one tool's real answer. Doubles as live
- * validation: a draft that would be refused on save is refused here with the
- * same sentence.
+ * A draft `field` rule run over the real answer of every tool its scope can
+ * reach (or of `tool`, when given), in one request: per-tool counts and the
+ * first changed item. Doubles as live validation: a draft that would be
+ * refused on save is refused here with the same sentence.
  */
 mcpPolicyRouter.post("/preview", async (c) => {
   const api = apiContext(c);
   const body = await readJson(c, policyPreviewSchema);
-  knownTool(body.tool);
+  if (body.tool !== undefined) knownTool(body.tool);
   const columns = await checkedColumns(api, body.field);
   const deps = makeToolDeps({ env: c.env, caller: adminCaller() });
   const preview = await previewDraft(deps, await api.repos.mcpPolicy.list(), {
@@ -193,6 +194,5 @@ mcpPolicyRouter.post("/preview", async (c) => {
     resourceType: body.resourceType,
     field: { ...columns, paths: [...columns.paths] },
   });
-  if (preview === null) throw new AppError("bad_request", "that tool could not be sampled");
   return c.json<PolicyPreviewDto>(preview, 200, NO_STORE);
 });

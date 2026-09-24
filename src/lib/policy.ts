@@ -16,9 +16,11 @@ import type {
   FieldRuleSpec,
   PolicyFieldNode,
   PolicyKeyNode,
+  PolicyPreviewDto,
   PolicyRuleDto,
   PolicySchemaDto,
   PolicyShapeDto,
+  PolicyToolPreviewDto,
 } from "@shared/types.ts";
 
 // --- the tree ---------------------------------------------------------------
@@ -455,4 +457,66 @@ export function diffLines(value: unknown, other: unknown): DiffLine[] {
   const lines: DiffLine[] = [];
   emit(lines, value, other, { indent: 0, prefix: "", comma: "", removed: false });
   return lines;
+}
+
+// --- the preview's tool choice ------------------------------------------------
+
+/** The tools the draft changes something in: the preview dropdown's options. */
+export function changedTools(preview: PolicyPreviewDto | null): PolicyToolPreviewDto[] {
+  return preview?.tools.filter((entry) => entry.affected > 0) ?? [];
+}
+
+/**
+ * The selection after the options change: kept while its tool is still an
+ * option, else the first option, else "" (the empty state). Never a tool that
+ * is no longer listed.
+ */
+export function keptSelection(current: string, options: readonly PolicyToolPreviewDto[]): string {
+  return options.some((entry) => entry.tool === current) ? current : (options[0]?.tool ?? "");
+}
+
+/** A dropdown option: `get_appointments — 7 of 106 items change`. */
+export function previewLabel(entry: PolicyToolPreviewDto): string {
+  const noun = entry.total === 1 ? "item" : "items";
+  const verb = entry.affected === 1 ? "changes" : "change";
+  return `${entry.tool} — ${String(entry.affected)} of ${String(entry.total)} ${noun} ${verb}`;
+}
+
+/** Why a draft changes nothing, in a sentence, so the owner need not click through. */
+export function noChangeReason(preview: PolicyPreviewDto, spec: FieldRuleSpec): string {
+  const tools = preview.tools.map((entry) => entry.tool);
+  if (tools.length === 0) return "No tool's answers are within this rule's scope.";
+  const where =
+    tools.length === 1 ? (tools[0] ?? "") : `the ${String(tools.length)} tools it reaches`;
+  const total = preview.tools.reduce((sum, entry) => sum + entry.total, 0);
+  if (total === 0) {
+    const verb = tools.length === 1 ? "returns" : "return";
+    return `${where} ${verb} nothing from your cached data yet, so there is nothing for the rule to change.`;
+  }
+  const fields = list(spec.paths.map((path) => readablePath(path)));
+  const items = `${String(total)} ${total === 1 ? "item" : "items"}`;
+  return `None of the ${items} from ${where} has ${fields}. Either the field isn't in your cached data (the tree marks the fields your data has with a dot), or this scope doesn't reach it.`;
+}
+
+// --- rules that reach nothing ---------------------------------------------------
+
+/** Resource types the tools read only to resolve references, never return. */
+const REFERENCE_ONLY: ReadonlySet<string> = new Set([
+  "Practitioner",
+  "PractitionerRole",
+  "Location",
+  "Organization",
+  "Medication",
+]);
+
+/** Why a rule affects no tool's output, for the rule list; "" when it affects some. */
+export function reachesNothing(rule: PolicyRuleDto, schema: PolicySchemaDto | null): string {
+  if (schema === null || toolsAffected(rule, schema).length > 0) return "";
+  const type = rule.ruleType === "resource" ? rule.target : (rule.field?.resourceType ?? null);
+  if (type !== null && REFERENCE_ONLY.has(type)) {
+    return `Affects no tool's output right now: ${type} items are only used to look up references, and no tool returns them.`;
+  }
+  return type === null
+    ? "Affects no tool's output right now."
+    : `Affects no tool's output right now: no tool returns ${type} items.`;
 }

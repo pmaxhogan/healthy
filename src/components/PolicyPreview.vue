@@ -10,9 +10,9 @@ import { computed, ref } from "vue";
 import { diffLines } from "../lib/policy.ts";
 
 import type { DiffLine } from "../lib/policy.ts";
-import type { PolicyPreviewDto } from "@shared/types.ts";
+import type { PolicyToolPreviewDto } from "@shared/types.ts";
 
-const props = defineProps<{ preview: PolicyPreviewDto; allow: boolean }>();
+const props = defineProps<{ preview: PolicyToolPreviewDto; allow: boolean }>();
 
 type View = "item" | "raw";
 const view = ref<View>("item");

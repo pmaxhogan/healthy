@@ -29,9 +29,10 @@
 
 import { applyPolicy } from "../policy/filter.ts";
 import { EMPTY_RULES, buildRules } from "../policy/rules.ts";
-import { toolShapes } from "../policy/tree.ts";
+import { shapesForScope, toolShapes } from "../policy/tree.ts";
 
 import { callMcpTool } from "./admin-call.ts";
+import { TOOL_NAMES } from "./tool-names.ts";
 
 import type { ToolDeps } from "./deps.ts";
 import type { McpPolicyRow } from "../db/rows.ts";
@@ -41,6 +42,7 @@ import type {
   FieldRuleSpec,
   PolicyKeyNode,
   PolicyPreviewDto,
+  PolicyToolPreviewDto,
   PolicyStructureDto,
 } from "@shared/types.ts";
 
@@ -254,39 +256,70 @@ function addedWarnings(before: readonly string[], after: readonly string[]): str
 }
 
 /**
+ * The draft applied to an answer the baseline already filtered. For a `hide`
+ * rule this is exactly the answer a run with the draft in place would give:
+ * field rules only ever remove, and the answer's items still carry the
+ * `resourceType`, `healthSystemId` and raw entries the rule's scope is judged by.
+ */
+function applyDraft(tool: string, answer: Answer, draft: PolicyRules): Answer {
+  const filtered = applyPolicy({ tool, items: answer.items, rawItems: answer.raw, rules: draft });
+  return {
+    items: filtered.items,
+    raw: filtered.rawItems,
+    warnings: [...answer.warnings, ...filtered.warnings],
+  };
+}
+
+/** The draft's field rules on their own, with no whole-item denials. */
+function draftOnly(rules: PolicyRules): PolicyRules {
+  return { ...EMPTY_RULES, fields: rules.fields, allows: rules.allows };
+}
+
+/** One tool's answer before and after the draft. Null when the tool answered an error. */
+async function beforeAndAfter(
+  deps: ToolDeps,
+  tool: string,
+  field: FieldRuleSpec,
+  stored: readonly McpPolicyRow[],
+): Promise<{ before: Answer; after: Answer } | null> {
+  const before = baselineRules(stored);
+  const after = withDraft(stored, field);
+  if (tool === METERED_TOOL) {
+    const sample = syntheticDocumentText();
+    const run = (rules: PolicyRules): Answer => {
+      const filtered = applyPolicy({ tool, items: sample.items, rules });
+      return { items: filtered.items, raw: [], warnings: filtered.warnings };
+    };
+    return { before: run(before), after: run(after) };
+  }
+  const beforeAnswer = await runTool(deps, tool, before);
+  if (beforeAnswer === null) return null;
+  // An `allow` rule puts back a field the baseline run already stripped, which
+  // only a run with the rule in place can show; a `hide` rule is applied to
+  // the baseline answer, so each tool runs once.
+  const afterAnswer =
+    field.effect === "allow"
+      ? await runTool(deps, tool, after)
+      : applyDraft(tool, beforeAnswer, draftOnly(after));
+  return afterAnswer === null ? null : { before: beforeAnswer, after: afterAnswer };
+}
+
+/**
  * Run a draft rule over one tool's real answer and report what it changes.
  *
- * The tool runs twice -- under the baseline, and under the baseline plus the
- * draft -- rather than once with the draft applied to the result afterwards: an
- * `allow` rule puts back a field the baseline already stripped, which only a
- * run with the rule in place can show. The two answers line up item for item
- * (a field rule never drops an item), so the first item that differs is the
- * sample, and the count of those that differ is `affected`.
+ * The two answers line up item for item (a field rule never drops an item), so
+ * the first item that differs is the sample, and the count of those that differ
+ * is `affected`.
  */
-export async function previewDraft(
+async function previewOne(
   deps: ToolDeps,
   stored: readonly McpPolicyRow[],
   input: { tool: string; resourceType?: string | undefined; field: FieldRuleSpec },
-): Promise<PolicyPreviewDto | null> {
-  const before = baselineRules(stored);
-  const after = withDraft(stored, input.field);
+): Promise<PolicyToolPreviewDto | null> {
   const synthetic = input.tool === METERED_TOOL;
-
-  let beforeAnswer: Answer | null;
-  let afterAnswer: Answer | null;
-  if (synthetic) {
-    const sample = syntheticDocumentText();
-    const run = (rules: PolicyRules): Answer => {
-      const filtered = applyPolicy({ tool: input.tool, items: sample.items, rules });
-      return { items: filtered.items, raw: [], warnings: filtered.warnings };
-    };
-    beforeAnswer = run(before);
-    afterAnswer = run(after);
-  } else {
-    beforeAnswer = await runTool(deps, input.tool, before);
-    afterAnswer = await runTool(deps, input.tool, after);
-  }
-  if (beforeAnswer === null || afterAnswer === null) return null;
+  const answers = await beforeAndAfter(deps, input.tool, input.field, stored);
+  if (answers === null) return null;
+  const { before: beforeAnswer, after: afterAnswer } = answers;
   const left = onlyType(beforeAnswer, input.resourceType);
   const right = onlyType(afterAnswer, input.resourceType);
 
@@ -320,4 +353,41 @@ export async function previewDraft(
     warnings: addedWarnings(beforeAnswer.warnings, afterAnswer.warnings),
     synthetic,
   };
+}
+
+/**
+ * The tools a draft is previewed on: the one it names, else every tool whose
+ * answers its scope can reach. `get_document_text` only when it is named: its
+ * sample is made up, so it says nothing about what the draft does to the
+ * owner's data.
+ */
+function candidateTools(field: FieldRuleSpec, tool: string | undefined): string[] {
+  const named = tool ?? field.tool;
+  const reached = (name: string): boolean =>
+    name !== METERED_TOOL &&
+    shapesForScope({ tool: name, resourceType: field.resourceType }).length > 0;
+  return named === null ? TOOL_NAMES.filter((name) => reached(name)) : [named];
+}
+
+/**
+ * A draft rule run over every tool its scope can reach, in one request: per
+ * tool, how many items it changes out of how many, and the first one it
+ * changes. The tools run one after another, not concurrently -- they share one
+ * per-call cache in `deps`, which a parallel run would tear.
+ */
+export async function previewDraft(
+  deps: ToolDeps,
+  stored: readonly McpPolicyRow[],
+  input: { tool?: string | undefined; resourceType?: string | undefined; field: FieldRuleSpec },
+): Promise<PolicyPreviewDto> {
+  const tools: PolicyToolPreviewDto[] = [];
+  for (const tool of candidateTools(input.field, input.tool)) {
+    const preview = await previewOne(deps, stored, {
+      tool,
+      resourceType: input.resourceType,
+      field: input.field,
+    });
+    if (preview !== null) tools.push(preview);
+  }
+  return { tools };
 }

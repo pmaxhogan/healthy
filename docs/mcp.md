@@ -222,14 +222,18 @@ A field rule is built, not typed:
    values). Tick as many fields as you like: they become one rule. A path the
    tree does not show can be typed under **Type a path instead**, with
    autocomplete from the tree.
-3. **Preview.** Before saving, the draft runs over one tool's real answer and
-   shows the first item it changes before and after — removed keys struck
-   through — for the item and the raw FHIR, and how many items it changes.
-   The preview is the live check too: a draft that would be refused on save is
-   refused here, with the reason. It is for your eyes only: the sample is
-   fetched by the admin API behind Access and the password, is not audited or
-   logged, and `get_document_text` is previewed on a made-up item rather than
-   spending a metered document request.
+3. **Preview.** Before saving, the draft runs — in one request — over the
+   real answer of every tool its scope reaches. The preview lists only the
+   tools it changes, each with its count ("get_appointments — 7 of 106 items
+   change"), and shows the first item it changes in the chosen tool before
+   and after — removed keys struck through — for the item and the raw FHIR.
+   When it changes nothing anywhere, it says so and why (the field is not in
+   your cached data, or the scope does not reach it) instead. The preview is
+   the live check too: a draft that would be refused on save is refused here,
+   with the reason. It is for your eyes only: the samples are read by the
+   admin API behind Access and the password, are not audited or logged, and
+   `get_document_text` is only previewed when a rule names it, on a made-up
+   item, rather than spend a metered document request.
 
 The rule list reads each rule as a sentence — "Hide participants → name in
 get_appointments at all health systems" — grouped by what it applies to,

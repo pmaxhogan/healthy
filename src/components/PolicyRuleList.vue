@@ -8,7 +8,7 @@
 import { computed } from "vue";
 
 import { relativeTime } from "../lib/format.ts";
-import { ruleGroup, ruleSentence, toolsAffected } from "../lib/policy.ts";
+import { reachesNothing, ruleGroup, ruleSentence, toolsAffected } from "../lib/policy.ts";
 
 import type { HealthSystemDto, PolicyRuleDto, PolicySchemaDto } from "@shared/types.ts";
 
@@ -95,7 +95,12 @@ function affected(rule: PolicyRuleDto): { shown: string[]; more: number; all: bo
               </span>
             </p>
             <p class="tools muted">
-              <template v-if="affected(rule).all">Changes every tool's answers</template>
+              <template v-if="reachesNothing(rule, schema) !== ''">
+                <span class="nothing" data-test="reaches-nothing">{{
+                  reachesNothing(rule, schema)
+                }}</span>
+              </template>
+              <template v-else-if="affected(rule).all">Changes every tool's answers</template>
               <template v-else>
                 Changes
                 <code v-for="name in affected(rule).shown" :key="name" class="tool">{{
@@ -267,6 +272,10 @@ ul {
 .switch input:focus-visible + .track {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+.nothing {
+  color: var(--warn);
 }
 
 .warn-text {

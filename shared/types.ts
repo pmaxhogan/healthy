@@ -331,9 +331,16 @@ export interface PolicyStructureDto {
   raw: PolicyKeyNode[];
 }
 
-/** `POST /api/mcp/policy/preview`: a draft rule and the sample to run it on. */
-export interface PolicyPreviewRequest extends PolicySampleRequest {
+/**
+ * `POST /api/mcp/policy/preview`: a draft rule, run over every tool its scope
+ * can reach (or only `tool`, when given) in one request.
+ */
+export interface PolicyPreviewRequest {
   field: FieldRuleSpec;
+  /** Only this tool. Omitted: every tool the draft's scope can reach. */
+  tool?: string | undefined;
+  /** Keep only items of this resource type. */
+  resourceType?: string | undefined;
 }
 
 /** One item before and after the draft rule, and its raw resource when there is one. */
@@ -344,7 +351,13 @@ interface PolicyPreviewSample {
   rawAfter?: unknown;
 }
 
+/** The preview for every candidate tool, in `TOOL_NAMES` order. */
 export interface PolicyPreviewDto {
+  tools: PolicyToolPreviewDto[];
+}
+
+/** One tool's answer, before and after a draft rule. */
+export interface PolicyToolPreviewDto {
   tool: string;
   /** Items in the sample answer. */
   total: number;
