@@ -24,8 +24,8 @@
  *
  *  - Fuel. The vendored wasm decrements a counter at every function entry and
  *    every loop iteration and traps at zero. The budget is {@link fuelFor}:
- *    100 million units plus 100 per byte of input, at most 2^31 - 1 (about four
- *    seconds of CPU). Parsing the input costs ~7-15 units per byte and a
+ *    100 million units plus 100 per byte of input, at most 2^31 - 1 (a few
+ *    seconds of CPU: ~4 s in Node, ~6-7 s in workerd). Parsing the input costs ~7-15 units per byte and a
  *    `group_by` over it ~16, so an honest filter uses a small fraction of it.
  *  - Memory. The wasm's linear memory stops at 64 MiB. jq's parsed form of a
  *    document is ~6x its JSON text, so that holds ~10 MB of input -- more than

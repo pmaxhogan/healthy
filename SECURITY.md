@@ -86,7 +86,8 @@ listed rather than left to be inferred:
   plaintext `from_addr` / `subject` columns were blanked by migration 0007 and
   dropped by 0009.
 - **`mcp_audit`, `run_log`**: that a tool ran, by which client, how many rows
-  came back, and each sync run's counts and error codes. The owner's activity
+  came back (and, for a `jq` call, the program's SHA-256, length and item
+  counts — never its text), and each sync run's counts and error codes. The owner's activity
   times and clinical counts (for example a tool's `result_count`) are visible
   here; that is accepted.
 - **The other settings** (`default_title_template`, `default_color_id`,
