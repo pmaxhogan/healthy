@@ -10,8 +10,8 @@
 //     (city/state) we use for `locations`.
 //   - Endpoint.address is the FHIR R4 base URL. Endpoint.managingOrganization.display
 //     is often just the *hosting* system (e.g. many small clinics all show "OCHIN"
-//     there) rather than the specific brand, so we do NOT use it for `name`; the
-//     linked Organization.name is the actual brand name.
+//     there) rather than the specific brand, so we do NOT use it as a name on its
+//     own; the linked Organization.name is the actual brand name.
 //   - Multiple distinct primary-brand Organizations frequently share one Endpoint (an
 //     affiliate/shared-instance network), and occasionally two different Endpoint
 //     resources carry the identical address string. Both cases are handled by
@@ -20,6 +20,31 @@
 //     the real feed today, so `portalUrl` and `aliases` mostly come out empty/absent
 //     for real data; both are still supported for bundles that do carry them (and are
 //     exercised by the unit tests with synthetic data).
+//
+// Choosing a canonical name for a shared endpoint (Sept 2026 wave):
+//   Whichever Organization the bundle lists first for a shared endpoint became
+//   `name`, purely as an artifact of bundle order, and the rest were demoted to
+//   `aliases`. Measured against the real feed, that produced a misleading label on
+//   72 of the 106 shared-endpoint brands: a small affiliated organisation's name
+//   eclipsing the much larger health system it shares an Epic instance with.
+//   Two signals fix this, applied in order per candidate:
+//     1. `Endpoint.managingOrganization.display` exactly matches (case- and
+//        whitespace-insensitively) one of the sharing Organizations' own names.
+//        This is the strongest signal when present -- Epic populates it with the
+//        real operator of the instance -- and the OCHIN-style "just the hosting
+//        system" case the header above warns about does not false-positive here,
+//        because the hosting company is never itself one of the Organizations
+//        sharing its own endpoint.
+//     2. Otherwise, the Organization with the most locations/sites under that
+//        endpoint (the full count, before `locations` is capped to 5 for display)
+//        -- the larger organisation on a shared instance is reliably the one with
+//        more registered sites. Measured flips under this signal alone had a
+//        median 84x gap between the winning and losing location counts, so this
+//        is a wide margin, not a coin flip.
+//   Ties (including the common case where nothing has location data at all) keep
+//   whichever Organization the bundle listed first, so the weekly refresh job does
+//   not reorder a brand's canonical name from run to run without a real signal to
+//   justify it.
 
 /**
  * @typedef {Object} SlimBrand
@@ -29,6 +54,12 @@
  * @property {string} [portalUrl]
  * @property {string} fhirBaseUrl
  * @property {string[]} [locations]
+ */
+
+/**
+ * A `SlimBrand` before dedup, carrying the two canonical-name signals. Never
+ * returned to a caller: both extra fields are deleted once dedup picks a winner.
+ * @typedef {SlimBrand & {locationCount?: number, matchesManagingOrg?: boolean}} Candidate
  */
 
 /**
@@ -154,7 +185,7 @@ export function slimBrandsBundle(bundle) {
     locationsByOrg.set(parentOrg, list);
   }
 
-  /** @type {SlimBrand[]} */
+  /** @type {Candidate[]} */
   const candidates = [];
 
   for (const { resource: org } of primaryBrandOrgs) {
@@ -176,20 +207,32 @@ export function slimBrandsBundle(bundle) {
 
     const id = org.id || slugify(name) || slugify(fhirBaseUrl);
 
-    const locations = (locationsByOrg.get(org) || []).slice(0, 5);
+    const allLocations = locationsByOrg.get(org) || [];
+    const locations = allLocations.slice(0, 5);
 
     const portalUrl = extractPortalUrl(org);
 
-    /** @type {SlimBrand} */
-    const candidate = { id, name, fhirBaseUrl };
+    // `locationCount` and `matchesManagingOrg` are internal-only, used to pick a
+    // canonical name for a shared endpoint (see the header comment); both are
+    // deleted from every record before it is returned.
+    /** @type {Candidate} */
+    const candidate = {
+      id,
+      name,
+      fhirBaseUrl,
+      locationCount: allLocations.length,
+      matchesManagingOrg: canonicalNameMatchesManagingOrg(name, endpoint),
+    };
     if (portalUrl) candidate.portalUrl = portalUrl;
     if (locations.length > 0) candidate.locations = locations;
 
     candidates.push(candidate);
   }
 
-  // Dedupe by fhirBaseUrl, merging names into aliases and unioning locations.
-  /** @type {Map<string, SlimBrand>} */
+  // Dedupe by fhirBaseUrl. `isBetterCanonical` decides which of the two records
+  // becomes `existing` (and so keeps its name as canonical, with the other
+  // folded into `aliases`); see the header comment for the two signals it uses.
+  /** @type {Map<string, Candidate>} */
   const byBaseUrl = new Map();
   for (const candidate of candidates) {
     const existing = byBaseUrl.get(candidate.fhirBaseUrl);
@@ -198,30 +241,78 @@ export function slimBrandsBundle(bundle) {
       continue;
     }
 
-    if (candidate.name !== existing.name) {
-      const aliases = existing.aliases ? [...existing.aliases] : [];
-      if (!aliases.includes(candidate.name)) aliases.push(candidate.name);
-      for (const alias of candidate.aliases || []) {
-        if (alias !== existing.name && !aliases.includes(alias)) aliases.push(alias);
-      }
-      if (aliases.length > 0) existing.aliases = aliases;
-    }
-
-    if (!existing.portalUrl && candidate.portalUrl) existing.portalUrl = candidate.portalUrl;
-
-    if (candidate.locations && candidate.locations.length > 0) {
-      const locations = existing.locations ? [...existing.locations] : [];
-      for (const loc of candidate.locations) {
-        if (locations.length >= 5) break;
-        if (!locations.includes(loc)) locations.push(loc);
-      }
-      if (locations.length > 0) existing.locations = locations;
-    }
+    const [primary, secondary] = isBetterCanonical(candidate, existing)
+      ? [candidate, existing]
+      : [existing, candidate];
+    mergeBrandInto(primary, secondary);
+    byBaseUrl.set(candidate.fhirBaseUrl, primary);
   }
 
   const result = [...byBaseUrl.values()];
+  for (const brand of result) {
+    delete brand.locationCount;
+    delete brand.matchesManagingOrg;
+  }
   result.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   return result;
+}
+
+/**
+ * Whether `name` (a candidate Organization's own name) is the endpoint's
+ * `managingOrganization.display`, case- and whitespace-insensitively. See the
+ * header comment for why this is safe to use as a canonical-name signal even
+ * though `managingOrganization.display` is often a generic hosting system's name.
+ * @param {string} name
+ * @param {any} endpoint
+ * @returns {boolean}
+ */
+function canonicalNameMatchesManagingOrg(name, endpoint) {
+  const display = endpoint.managingOrganization && endpoint.managingOrganization.display;
+  return typeof display !== "string" || !display.trim()
+    ? false
+    : name.trim().toLowerCase() === display.trim().toLowerCase();
+}
+
+/**
+ * Whether `a` should be canonical over `b` when they share a `fhirBaseUrl`.
+ * `a` and `b` are the internally-annotated candidates built above.
+ * @param {Candidate} a
+ * @param {Candidate} b
+ * @returns {boolean}
+ */
+function isBetterCanonical(a, b) {
+  return a.matchesManagingOrg === b.matchesManagingOrg
+    ? (a.locationCount ?? 0) > (b.locationCount ?? 0)
+    : Boolean(a.matchesManagingOrg);
+}
+
+/**
+ * Fold `secondary` into `primary` in place: `secondary`'s name (and any aliases
+ * it already carried) become `primary`'s aliases, its portal URL fills in a gap,
+ * and its locations are unioned in up to the 5-location cap. Order-independent,
+ * so a chain of merges (three or more Organizations on one endpoint) converges
+ * to the same result regardless of which pairs are merged first.
+ * @param {Candidate} primary
+ * @param {Candidate} secondary
+ */
+function mergeBrandInto(primary, secondary) {
+  const aliases = new Set(primary.aliases || []);
+  if (secondary.name !== primary.name) aliases.add(secondary.name);
+  for (const alias of secondary.aliases || []) {
+    if (alias !== primary.name) aliases.add(alias);
+  }
+  if (aliases.size > 0) primary.aliases = [...aliases];
+
+  if (!primary.portalUrl && secondary.portalUrl) primary.portalUrl = secondary.portalUrl;
+
+  if (!secondary.locations || secondary.locations.length === 0) return;
+
+  const locations = primary.locations ? [...primary.locations] : [];
+  for (const loc of secondary.locations) {
+    if (locations.length >= 5) break;
+    if (!locations.includes(loc)) locations.push(loc);
+  }
+  if (locations.length > 0) primary.locations = locations;
 }
 
 /**

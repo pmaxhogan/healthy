@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2026-09-22T01:42:24.099Z",
+  "generatedAt": "2026-09-24T23:56:17.598Z",
   "source": "https://open.epic.com/Endpoints/Brands",
-  "count": 770,
+  "count": 771,
   "brands": [
     {
       "id": "c5f287a7-e01d-4745-a773-ce0d41710e55",
@@ -9,22 +9,6 @@
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MyChartAACI/api/FHIR/R4",
       "locations": [
         "San Jose, CA"
-      ]
-    },
-    {
-      "id": "72922155-495e-4258-9acb-fbd2a4ccc9ac",
-      "name": "Access Community Health Centers",
-      "fhirBaseUrl": "https://epicproxy.hosp.wisc.edu/FhirProxy/api/FHIR/R4",
-      "aliases": [
-        "SwedishAmerican",
-        "UW Health"
-      ],
-      "locations": [
-        "Fort Atkinson, WI",
-        "Roscoe, IL",
-        "Madison, WI",
-        "Rockford, IL",
-        "BEAVER DAM, WI"
       ]
     },
     {
@@ -40,44 +24,6 @@
       ]
     },
     {
-      "id": "9f7973a3-0159-4112-b683-27650a31e98c",
-      "name": "Access Health",
-      "fhirBaseUrl": "https://epicproxy.et1439.epichosted.com/FHIRProxyPRD/api/FHIR/R4",
-      "aliases": [
-        "Avera Health",
-        "Avera Health Plans",
-        "Bowdle Healthcare Center",
-        "Brookings Health System",
-        "Community Memorial Hospital and Redfield Clinic",
-        "Eureka Community Health Services Avera and Clinics",
-        "Floyd Valley Healthcare",
-        "Freeman Regional Health Services",
-        "Hegg Health Center",
-        "Hendricks Community Hospital Association",
-        "Lakes Regional Healthcare",
-        "Landmann Jungman Memorial Hospital Avera and Scotland Medical Clinic Avera",
-        "Marshall County Healthcare Center Avera",
-        "Northwest Iowa Surgeons, PC",
-        "NWIA Bone, Joint & Sports Surgeons",
-        "Osceola Regional Health Center",
-        "Pipestone County Medical Center and Family Clinic Avera",
-        "Platte Health Center Avera",
-        "Regional Health Services of Howard County",
-        "Sioux Center Health",
-        "Spencer Hospital",
-        "St. Michael's Hospital Avera and Bon Homme Family Practice",
-        "Surgical Institute of South Dakota, PC",
-        "Wagner Community Memorial Hospital Avera"
-      ],
-      "locations": [
-        "DE SMET, SD",
-        "GETTYSBURG, SD",
-        "PIERRE, SD",
-        "Gettysburg, SD",
-        "Marshall, MN"
-      ]
-    },
-    {
       "id": "50b23ec8-bac7-4a64-8211-aa147c2b1a58",
       "name": "Acumen Physician Solutions",
       "fhirBaseUrl": "https://epicproxy.et1041.epichosted.com/FHIRProxy/api/FHIR/R4",
@@ -87,35 +33,6 @@
         "LENOIR, NC",
         "MIDLAND, TX",
         "TAMPA, FL"
-      ]
-    },
-    {
-      "id": "73b7b132-dd7f-4229-ac12-5500cc41c01a",
-      "name": "Adams Memorial Hospital",
-      "fhirBaseUrl": "https://epicprod-mobile.parkview.com/FHIR/api/FHIR/R4",
-      "locations": [
-        "Fort Wayne, IN",
-        "DECATUR, IN",
-        "Decatur, IN",
-        "WARREN, IN",
-        "Geneva, IN"
-      ],
-      "aliases": [
-        "AIHS Guide",
-        "Alliance Health Centers",
-        "Cameron Health",
-        "Eaton Rapids Medical Center / Michigan Joint Replacement",
-        "Elyussif Orthopedic & Knee Pain Center",
-        "Healthier Moms and Babies",
-        "Hillsdale Hospital",
-        "Iridescent Health",
-        "Linke Urology and Robotics",
-        "Monarch Medicine",
-        "Parkview Bryan and Montpelier Hospitals",
-        "Parkview Health",
-        "Paulding County Hospital",
-        "Riverview Health",
-        "Woodlawn Health"
       ]
     },
     {
@@ -137,93 +54,6 @@
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MYCHARTADVANCECH/api/FHIR/R4",
       "locations": [
         "Raleigh, NC"
-      ]
-    },
-    {
-      "id": "120baa5b-46f0-4d4d-9f3d-51b250585fbf",
-      "name": "Advanced Radiology",
-      "fhirBaseUrl": "https://EpicProxy.hhchealth.org/FHIR/api/FHIR/R4",
-      "locations": [
-        "Shelton, CT",
-        "Fairfield, CT",
-        "WALLINGFORD, CT",
-        "Wethersfield, CT",
-        "Hartford, CT"
-      ],
-      "aliases": [
-        "Comprehensive Orthopaedics",
-        "Connecticut Ear, Nose & Throat Associates",
-        "Connecticut GI",
-        "Connecticut Orthopaedics",
-        "Endoscopy Center of Connecticut",
-        "Hartford Healthcare",
-        "Orthopedic Associates of Hartford",
-        "Physicians Alliance of Connecticut",
-        "SCA Health",
-        "Starling"
-      ]
-    },
-    {
-      "id": "0a7278d6-7bdb-49e4-83bf-940abe4cbf42",
-      "name": "Advanced Spine and Pain Specialists",
-      "fhirBaseUrl": "https://epicproxy.et1326.epichosted.com/FHIRProxy/MHCC/api/FHIR/R4",
-      "aliases": [
-        "Bellaire Allergy & Asthma",
-        "Concierge Health Partners",
-        "Digestive Specialists PA",
-        "Family and Aging Center",
-        "Gentle Pediatrics",
-        "Healthy Living Heart and Vein",
-        "Hope Digestive and Liver Disease Clinic",
-        "Houston Foot and Ankle Professional Group",
-        "JW Family Medicine",
-        "Kids First Pediatrics",
-        "Macie Medical",
-        "Maeville Pediatrics",
-        "Magnolia Lane Pediatrics",
-        "Moonat Med Associates",
-        "Nurture Women's Care",
-        "Optimcurea Renal and Vascular Access Care",
-        "Over the Moon Pediatrics",
-        "Pearland Family Wellness Clinic",
-        "Pediatric Digestive Care",
-        "Pinnacle Primary Care",
-        "Pozitiv Wellness",
-        "Prestige Medical Sai",
-        "Rukmini D. Kumar MD",
-        "Sugar Land Pain and Spine Specialists",
-        "Texas Family Clinic",
-        "Whole Care Pediatrics",
-        "Wishing Well Pediatrics",
-        "XO Wellness"
-      ],
-      "locations": [
-        "Bellaire, TX",
-        "Shenandoah, TX",
-        "Sugar Land, TX",
-        "Cypress, TX",
-        "Spring, TX"
-      ]
-    },
-    {
-      "id": "52695b8f-3fc3-493b-b275-01e6b4a74f65",
-      "name": "Advanced Vascular Surgery",
-      "fhirBaseUrl": "https://hygieia.bronsonhg.org/FHIRProxy/api/FHIR/R4",
-      "locations": [
-        "Kalamazoo, MI",
-        "South Haven, MI",
-        "BATTLE CREEK, MI",
-        "Paw Paw, MI",
-        "Battle Creek, MI"
-      ],
-      "aliases": [
-        "Bronson",
-        "Cereal City Pediatrics",
-        "Family Health Center",
-        "Kalamazoo College",
-        "Kalamazoo Foot Surgery",
-        "West Michigan Cancer Center",
-        "Western Michigan University"
       ]
     },
     {
@@ -259,22 +89,6 @@
       "id": "57ae07d2-bb17-444c-b1e2-0bca66b7f443",
       "name": "Adventist Health",
       "fhirBaseUrl": "https://epicproxy.et1438.epichosted.com/apiproxyprd/api/FHIR/R4"
-    },
-    {
-      "id": "5685cf80-ba30-4640-a22b-f3108102d893",
-      "name": "Adventist Health Columbia Gorge",
-      "fhirBaseUrl": "https://epicmobile.ohsu.edu/FHIRPRD/api/FHIR/R4",
-      "locations": [
-        "The Dalles, OR",
-        "Hood River, OR",
-        "Damascus, OR",
-        "McMinnville, OR",
-        "Clackamas, OR"
-      ],
-      "aliases": [
-        "Oregon Health and Science University",
-        "Tuality Healthcare"
-      ]
     },
     {
       "id": "c961c1dd-8270-4f45-baf3-071552f2ebae",
@@ -329,41 +143,6 @@
       ]
     },
     {
-      "id": "a3cdc437-f049-4068-b9c3-471e76d2da9d",
-      "name": "Alaska Neurology Center",
-      "fhirBaseUrl": "https://haikuak.providence.org/fhirproxy/api/FHIR/R4",
-      "locations": [
-        "Anchorage, AK",
-        "SOLDOTNA, AK",
-        "Renton, WA",
-        "KODIAK, AK",
-        "ANCHORAGE, AK"
-      ],
-      "aliases": [
-        "Anchorage Neighborhood Health Center",
-        "Anchorage Neurosurgical Associates",
-        "Central Peninsula Hospital",
-        "Providence, Alaska",
-        "Seward Community Health Center",
-        "South Peninsula Hospital"
-      ]
-    },
-    {
-      "id": "b9630772-30f2-4a70-be63-3c4a75c5cdcb",
-      "name": "Alaska Regional Hospital",
-      "fhirBaseUrl": "https://mountainstarhealthfhirprd.app.medcity.net/fhir-proxy/api/FHIR/R4",
-      "aliases": [
-        "HCA"
-      ],
-      "locations": [
-        "Salt Lake City, UT",
-        "Draper, UT",
-        "West Jordan, UT",
-        "Ogden, UT",
-        "LAYTON, UT"
-      ]
-    },
-    {
       "id": "683e2102-bd4d-4608-a8a7-3510e517c1dd",
       "name": "Albany County Department of Health",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MYCHARTACH/api/FHIR/R4",
@@ -405,25 +184,6 @@
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/ALLCAREHEALTHCENTER/api/FHIR/R4"
     },
     {
-      "id": "75b27a4e-1b46-4ad3-baa8-869302153c2c",
-      "name": "Alleghany Health",
-      "fhirBaseUrl": "https://epicproxy.et0905.epichosted.com/FHIRProxy/api/FHIR/R4",
-      "locations": [
-        "Sparta, NC",
-        "ALBEMARLE, NC",
-        "CHARLOTTE, NC",
-        "SHELBY, NC",
-        "MOORESVILLE, NC"
-      ],
-      "aliases": [
-        "Atrium Health",
-        "Camino Health Center",
-        "Morehouse Medicine",
-        "Scotland Health Care System",
-        "St. Luke's Hospital"
-      ]
-    },
-    {
       "id": "099bd9e5-7053-498e-885a-17d94f06227f",
       "name": "Allegheny Health Network",
       "fhirBaseUrl": "https://epicprisfd.ahn.org/PRD-FHIR/MYCHART/api/FHIR/R4",
@@ -463,31 +223,6 @@
         "St. Croix Health",
         "Welia Health",
         "Western Wisconsin Health"
-      ]
-    },
-    {
-      "id": "e1f13dfe-c8dc-42e0-a75b-454f35b48aac",
-      "name": "Alomere Health",
-      "fhirBaseUrl": "https://epicproxy.et0515.epichosted.com/APIProxyPRD/api/FHIR/R4",
-      "aliases": [
-        "Appleton Health",
-        "Astera Health",
-        "CCM Health",
-        "CentraCare",
-        "Johnson Memorial Health Services",
-        "Mille Lacs Band of Ojibwe",
-        "RC Hospitals & Clinics",
-        "Rice Memorial Hospital",
-        "St. Gabriel's Health",
-        "Stellis Health",
-        "Stevens Community Medical Center"
-      ],
-      "locations": [
-        "ST. CLOUD, MN",
-        "WILLMAR, MN",
-        "MARSHALL, MN",
-        "Cold Spring, MN",
-        "ALEXANDRIA, MN"
       ]
     },
     {
@@ -574,21 +309,6 @@
       ]
     },
     {
-      "id": "63be6b44-01e2-4128-90ae-ff9932c51f28",
-      "name": "Arlington Maternal Fetal Specialists",
-      "fhirBaseUrl": "https://stdavidsfhirprd.app.medcity.net/fhir-proxy/api/FHIR/R4",
-      "aliases": [
-        "St. David's"
-      ],
-      "locations": [
-        "AUSTIN, TX",
-        "MARBLE FALLS, TX",
-        "ROUND ROCK, TX",
-        "FREDERICKSBURG, TX",
-        "Austin, TX"
-      ]
-    },
-    {
       "id": "fcdcf701-ae3e-45a2-9f65-26e41995ebe7",
       "name": "Array",
       "fhirBaseUrl": "https://epicproxy.et1284.epichosted.com/FHIRProxy/KEYCARE/api/FHIR/R4",
@@ -606,24 +326,6 @@
         "FONTANA, CA",
         "Barstow, CA",
         "Yucca Valley, CA"
-      ]
-    },
-    {
-      "id": "4ef25aad-f45a-4d68-87fd-f31f44a91b62",
-      "name": "Articularis",
-      "fhirBaseUrl": "https://epicproxy.et4006.epichosted.com/FHIRProxyPRD/api/FHIR/R4",
-      "locations": [
-        "Columbia, SC",
-        "GREENWOOD, SC",
-        "Simpsonville, SC",
-        "SUMMERVILLE, SC",
-        "Mt Pleasant, SC"
-      ],
-      "aliases": [
-        "Northwest Orthopaedic Specialists",
-        "Rebound Orthopedic and Neurosurgery",
-        "Reno Orthopedic Center",
-        "The Center"
       ]
     },
     {
@@ -703,24 +405,6 @@
       ]
     },
     {
-      "id": "7256cbdd-200d-4d05-8732-c89b0055fd19",
-      "name": "Aspire",
-      "fhirBaseUrl": "https://epichaiku.chs-mi.com/FHIRPROXY/api/FHIR/R4",
-      "locations": [
-        "DECKERVILLE, MI",
-        "CASS CITY, MI",
-        "SANDUSKY, MI",
-        "MARLETTE, MI",
-        "BAD AXE, MI"
-      ],
-      "aliases": [
-        "Central Michigan University",
-        "Covenant HealthCare",
-        "Mary Free Bed",
-        "Scheurer"
-      ]
-    },
-    {
       "id": "c8f49f10-0a43-4165-a9dd-ebf886354d73",
       "name": "Aspirus",
       "fhirBaseUrl": "https://erx.aspirus.org/FHIR/api/FHIR/R4",
@@ -745,6 +429,25 @@
       ]
     },
     {
+      "id": "02c51a84-2664-479a-9dc7-41ad45dcbd21",
+      "name": "Atrium Health",
+      "fhirBaseUrl": "https://epicproxy.et0905.epichosted.com/FHIRProxy/api/FHIR/R4",
+      "locations": [
+        "ALBEMARLE, NC",
+        "CHARLOTTE, NC",
+        "SHELBY, NC",
+        "MOORESVILLE, NC",
+        "Winston Salem, NC"
+      ],
+      "aliases": [
+        "Alleghany Health",
+        "Camino Health Center",
+        "Morehouse Medicine",
+        "Scotland Health Care System",
+        "St. Luke's Hospital"
+      ]
+    },
+    {
       "id": "2fcbc7e8-d67b-488f-bd83-2d0bcfbf4da2",
       "name": "Atrius Health",
       "fhirBaseUrl": "https://iatrius.atriushealth.org/FHIR/api/FHIR/R4",
@@ -754,29 +457,6 @@
         "Boston, MA",
         "Quincy, MA",
         "Chestnut Hill, MA"
-      ]
-    },
-    {
-      "id": "6e5dd2ea-bd8d-49c5-9afd-5073e6e5e75e",
-      "name": "Audubon County Memorial Hospital & Clinics",
-      "fhirBaseUrl": "https://myepicapps.uihealthcare.org/FHIRProxy/api/FHIR/R4",
-      "locations": [
-        "AUDUBON, IA",
-        "Atlantic, IA",
-        "Clarion, IA",
-        "Fairfield, IA",
-        "Harlan, IA"
-      ],
-      "aliases": [
-        "Cass County Health System",
-        "Iowa Specialty Hospitals and Clinics",
-        "Jefferson County Health Center",
-        "Myrtue Medical Center",
-        "UIHC",
-        "Van Buren County Hospital",
-        "Veterans Memorial Hospital",
-        "Washington County Hospital and Clinics",
-        "Winneshiek Medical Center"
       ]
     },
     {
@@ -812,26 +492,41 @@
       ]
     },
     {
-      "id": "d7d3cb9e-6274-4ec0-ab3b-a404457cca87",
-      "name": "Avita Health System",
-      "fhirBaseUrl": "https://ihismufhir.osumc.edu/fhir-prd/api/FHIR/R4",
+      "id": "64d8cb33-886f-45ce-aff0-780fc8315d3a",
+      "name": "Avera Health",
+      "fhirBaseUrl": "https://epicproxy.et1439.epichosted.com/FHIRProxyPRD/api/FHIR/R4",
       "locations": [
-        "Mansfield, OH",
-        "Ontario, OH",
-        "Galion, OH",
-        "Marion, OH",
-        "Shelby, OH"
+        "DE SMET, SD",
+        "GETTYSBURG, SD",
+        "PIERRE, SD",
+        "Gettysburg, SD",
+        "Marshall, MN"
       ],
       "aliases": [
-        "Columbus Public Health",
-        "Heart of Ohio Family Health",
-        "Hocking Valley",
-        "LifeCare Alliance",
-        "Madison Health",
-        "Memorial Health",
-        "Mercer Health",
-        "The Ohio State University Wexner Medical Center",
-        "Wilson Health System"
+        "Access Health",
+        "Avera Health Plans",
+        "Bowdle Healthcare Center",
+        "Brookings Health System",
+        "Community Memorial Hospital and Redfield Clinic",
+        "Eureka Community Health Services Avera and Clinics",
+        "Floyd Valley Healthcare",
+        "Freeman Regional Health Services",
+        "Hegg Health Center",
+        "Hendricks Community Hospital Association",
+        "Lakes Regional Healthcare",
+        "Landmann Jungman Memorial Hospital Avera and Scotland Medical Clinic Avera",
+        "Marshall County Healthcare Center Avera",
+        "Northwest Iowa Surgeons, PC",
+        "NWIA Bone, Joint & Sports Surgeons",
+        "Osceola Regional Health Center",
+        "Pipestone County Medical Center and Family Clinic Avera",
+        "Platte Health Center Avera",
+        "Regional Health Services of Howard County",
+        "Sioux Center Health",
+        "Spencer Hospital",
+        "St. Michael's Hospital Avera and Bon Homme Family Practice",
+        "Surgical Institute of South Dakota, PC",
+        "Wagner Community Memorial Hospital Avera"
       ]
     },
     {
@@ -873,21 +568,6 @@
         "Heber Springs, AR",
         "Van Buren, AR",
         "Fort Smith, AR"
-      ]
-    },
-    {
-      "id": "d5d25085-0a9f-44d2-9887-ac4de0248b62",
-      "name": "Baptist Health",
-      "fhirBaseUrl": "https://epicproxy.et1131.epichosted.com/FHIRProxy/api/FHIR/R4",
-      "locations": [
-        "Birmingham, AL",
-        "CLERMONT, FL",
-        "Orlando, FL",
-        "ORLANDO, FL",
-        "TAMPA, FL"
-      ],
-      "aliases": [
-        "Orlando Health"
       ]
     },
     {
@@ -939,61 +619,6 @@
       ]
     },
     {
-      "id": "b60a0a0f-8c59-4157-b509-6ee38d8140c6",
-      "name": "Barrett Hospital and Healthcare",
-      "fhirBaseUrl": "https://haikuwa.providence.org/fhirproxy/api/FHIR/R4",
-      "locations": [
-        "Dillon, MT",
-        "Butte, MT",
-        "Spokane, WA",
-        "Spokane Valley, WA",
-        "Chehalis, WA"
-      ],
-      "aliases": [
-        "Butte Native Wellness",
-        "Cancer Care NorthWest",
-        "Cascade Community Health",
-        "Clark Fork Valley Hospital",
-        "Columbia Basin Hospital",
-        "Community Hospital for Anaconda",
-        "Credena Health - Alaska",
-        "Credena Health - Washington/Montana",
-        "Everett Bone and Joint",
-        "Excelsior Family Medicine",
-        "Grande Ronde",
-        "Infinity Cancer Care",
-        "International Health Community Services",
-        "Jamestown Family Health Clinic",
-        "Jefferson Healthcare",
-        "Kadlec Health System",
-        "Kinwell",
-        "Lincoln Hospital & Clinics",
-        "Missoula Surgical Associates",
-        "Newport Hospital & Health Services",
-        "North Olympic Healthcare Network",
-        "Olympic Medical Center",
-        "Pacific Medical Center",
-        "Proliance Hand, Wrist & Elbow Physicians",
-        "ProOrtho Orthopedics and Sports Medicine",
-        "Prosser Memorial Health",
-        "Providence Swedish",
-        "Providence, Washington, Idaho, Montana",
-        "Pullman Regional Hospital",
-        "Rocky Mountain ENT",
-        "Samaritan Healthcare",
-        "Seattle Medical Associates",
-        "Seattle Premier Health",
-        "Shodair Children's Hospital",
-        "Stillaguamish Tribe of Indians",
-        "Summit Pacific Medical Center",
-        "Tulalip Health System",
-        "Wallowa Memorial Hospital and Medical Center",
-        "Western Montana Clinics",
-        "Whitman Hospital Medical Clinics",
-        "Yelm Family Medicine"
-      ]
-    },
-    {
       "id": "1a5d9b05-357c-40e6-a60a-844c702879bb",
       "name": "Barton Health",
       "fhirBaseUrl": "https://fhir.renown.org/FHIRProxy/BMH/api/FHIR/R4",
@@ -1038,64 +663,11 @@
       ]
     },
     {
-      "id": "af955962-0e17-4d6d-b177-f9d95042c301",
-      "name": "Baton Rouge Orthopaedic Clinic",
-      "fhirBaseUrl": "https://epicproxy.et0830.epichosted.com/FHIRProxy/api/FHIR/R4",
-      "aliases": [
-        "Complete Cardiovascular Care",
-        "Ear, Nose, & Throat Surgical",
-        "FMOL Health | Our Lady of Lourdes",
-        "FMOL Health | Our Lady of the Angels",
-        "FMOL Health | Our Lady of the Lake",
-        "FMOL Health | Our Lady of the Lake Children's",
-        "FMOL Health | St. Dominic",
-        "FMOL Health | St. Francis",
-        "Jackson Pulmonary Associates",
-        "Lake Charles Memorial Health System",
-        "Lane Regional Medical Center",
-        "Louisiana Orthopaedic Specialists",
-        "Madison Ridgeland Medical Clinic",
-        "MEA Medical Clinic",
-        "Neighborhood Health Clinic",
-        "Our Lady of the Lake LSU",
-        "Southwest Mississippi Regional Medical Center",
-        "The Baton Rouge Clinic",
-        "The Woman's Clinic",
-        "Urgent Care - Lake/Lourdes/St. Francis",
-        "West Ascension Parish Hospital"
-      ],
-      "locations": [
-        "LAFAYETTE, LA",
-        "McComb, MS",
-        "Ridgeland, MS",
-        "MONROE, LA",
-        "Baton Rouge, LA"
-      ]
-    },
-    {
       "id": "625e0939-9580-4626-9c6d-a5a8a6fa572a",
       "name": "Bay Area Community Health",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MYCHARTBACH/api/FHIR/R4",
       "locations": [
         "Fremont, CA"
-      ]
-    },
-    {
-      "id": "c38866fd-f811-4d0a-b8ab-49cec14d1b19",
-      "name": "Bay Area Hospital",
-      "fhirBaseUrl": "https://epicproxy.et1030.epichosted.com/FHIRProxy/api/FHIR/R4",
-      "aliases": [
-        "Harney District Hospital",
-        "Santiam Hospital",
-        "St. Charles Health System",
-        "Volunteers in Medicine Cascades"
-      ],
-      "locations": [
-        "Redmond, OR",
-        "Stayton, OR",
-        "Burns, OR",
-        "COQUILLE, OR",
-        "Bend, OR"
       ]
     },
     {
@@ -1179,69 +751,45 @@
       ]
     },
     {
-      "id": "3f4cfaad-2073-4fe4-8aba-9c046017e3e7",
-      "name": "Bellin",
-      "fhirBaseUrl": "https://arr.thedacare.org/FHIR/api/FHIR/R4",
-      "aliases": [
-        "Neuroscience Group",
-        "Partnership Community Health",
-        "Thedacare"
-      ],
+      "id": "155810ef-6b98-41a9-950a-c8c5720efbca",
+      "name": "Bellaire Allergy & Asthma",
+      "fhirBaseUrl": "https://epicproxy.et1326.epichosted.com/FHIRProxy/MHCC/api/FHIR/R4",
       "locations": [
-        "APPLETON, WI",
-        "GREEN BAY, WI",
-        "DE PERE, WI",
-        "TIGERTON, WI",
-        "OSHKOSH, WI"
-      ]
-    },
-    {
-      "id": "96b79587-4290-461f-a5ff-3bbecfcded7e",
-      "name": "Beloved Community Family Wellness Center",
-      "fhirBaseUrl": "https://epicproxy.et1256.epichosted.com/FHIRProxy/api/FHIR/R4",
-      "locations": [
-        "CHICAGO, IL",
-        "HATCH, NM",
-        "Hollywood, FL",
-        "West Park, FL",
-        "Pompano Beach, FL"
+        "Bellaire, TX",
+        "Shenandoah, TX",
+        "Sugar Land, TX",
+        "Cypress, TX",
+        "Spring, TX"
       ],
       "aliases": [
-        "Ben Archer Health Center",
-        "Broward Community and Family Health Centers",
-        "Camillus Health Concern",
-        "CareArc",
-        "Chicago Family Health Center",
-        "Christian Community Health Center",
-        "Community Health Center of Lubbock",
-        "Community Health of South Florida",
-        "CommWell Health",
-        "District Health Care Services",
-        "Empower U",
-        "Evara Health",
-        "Family Care Health Centers of St. Louis",
-        "Family Christian Health Center",
-        "Florida Community Health Centers",
-        "FoundCare",
-        "Genesis Community Health",
-        "Hawaii Island Community Health Center",
-        "Health Care District of Palm Beach County",
-        "Homestead Community Health Center",
-        "Jessie Trice Community Health System",
-        "La Casa Family Health Centers",
-        "Legacy Community Health",
-        "Malama I Ke Ola Health Center",
-        "Med Centro",
-        "Miami Beach Community Health Center",
-        "NeoMed Center",
-        "Orange Blossom Family Health",
-        "Partnership Health Center",
-        "Premier Community HealthCare",
-        "Providence Community Health Centers",
-        "Tampa Family Health Centers",
-        "TCA Health",
-        "Treasure Coast Community Health",
-        "True Health"
+        "Advanced Spine and Pain Specialists",
+        "Concierge Health Partners",
+        "Digestive Specialists PA",
+        "Family and Aging Center",
+        "Gentle Pediatrics",
+        "Healthy Living Heart and Vein",
+        "Hope Digestive and Liver Disease Clinic",
+        "Houston Foot and Ankle Professional Group",
+        "JW Family Medicine",
+        "Kids First Pediatrics",
+        "Macie Medical",
+        "Maeville Pediatrics",
+        "Magnolia Lane Pediatrics",
+        "Moonat Med Associates",
+        "Nurture Women's Care",
+        "Optimcurea Renal and Vascular Access Care",
+        "Over the Moon Pediatrics",
+        "Pearland Family Wellness Clinic",
+        "Pediatric Digestive Care",
+        "Pinnacle Primary Care",
+        "Pozitiv Wellness",
+        "Prestige Medical Sai",
+        "Rukmini D. Kumar MD",
+        "Sugar Land Pain and Spine Specialists",
+        "Texas Family Clinic",
+        "Whole Care Pediatrics",
+        "Wishing Well Pediatrics",
+        "XO Wellness"
       ]
     },
     {
@@ -1276,95 +824,6 @@
         "WINCHESTER, MA",
         "Peabody, MA",
         "NEW BEDFORD, MA"
-      ]
-    },
-    {
-      "id": "a3acd086-ec1e-4014-9099-3d17293e10c7",
-      "name": "Bethlehem Health Bureau",
-      "fhirBaseUrl": "https://proxy.lvh.com/FHIR/api/FHIR/R4",
-      "locations": [
-        "BETHLEHEM, PA",
-        "ALLENTOWN, PA",
-        "Bethlehem, PA",
-        "BERWICK, PA",
-        "CENTER VALLEY, PA"
-      ],
-      "aliases": [
-        "City of Allentown Pennsylvania",
-        "Lehigh Valley Health Network",
-        "MyConnect Health Portal",
-        "Pocano Ambulatory Surgery Center",
-        "Valley Health Partners"
-      ]
-    },
-    {
-      "id": "f38b5465-f2f5-444c-af8e-dc3d46169d4c",
-      "name": "Bigfork Valley",
-      "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/api/FHIR/R4",
-      "aliases": [
-        "Center for Comprehensive Care & Diagnosis of Inherited Blood Disorders",
-        "CITTHS",
-        "Community Health Centers Burlington",
-        "Jackson County Regional Health Center",
-        "JAMHI",
-        "LALGBT Center",
-        "Muckleshoot Tribal Health & Wellness Center",
-        "One Health Center",
-        "PacificSource PACE",
-        "Piedmont Health",
-        "Pueblo Community Health Center",
-        "Puyallup Tribal Health Authority",
-        "Rocky Boy Health Center",
-        "Siskiyou Community Health Center",
-        "Squaxin Island Tribal Health Center",
-        "The Healthcare Connection",
-        "Waianae Coast Comprehensive Care",
-        "Yakima Neighborhood Health"
-      ],
-      "locations": [
-        "UPLAND, CA",
-        "SPRINGFIELD, OR",
-        "PUEBLO, CO",
-        "TACOMA, WA",
-        "CAVE JUNCTION, OR"
-      ]
-    },
-    {
-      "id": "ea4714de-b446-4c74-9c93-04ce1a79cdee",
-      "name": "Billings OBGYN",
-      "fhirBaseUrl": "https://epicproxy.et0645.epichosted.com/FHIRProxyPRD/api/FHIR/R4",
-      "locations": [
-        "Billings, MT",
-        "Cody, WY",
-        "Brighton, CO",
-        "Sidney, MT",
-        "BOUNTIFUL, UT"
-      ],
-      "aliases": [
-        "Cody Regional Health",
-        "Family Health West",
-        "Intermountain Health",
-        "Memorial Regional Health",
-        "National Jewish Health",
-        "Uptown Community Health Center"
-      ]
-    },
-    {
-      "id": "e23bd425-16ba-458f-bd5a-216eeb9a1002",
-      "name": "BioSpine Institute",
-      "fhirBaseUrl": "https://epicproxy.et1233.epichosted.com/FHIRProxy/AFFILIATE/api/FHIR/R4",
-      "aliases": [
-        "Infectious Disease Associates of Naples",
-        "Integris Physician Group",
-        "Upwell Primary Care",
-        "Winmind Behavioral Health & Addiction Medicine"
-      ],
-      "locations": [
-        "Orlando, FL",
-        "Tampa, FL",
-        "Naples, FL",
-        "Lakeland, FL",
-        "Fort Myers, FL"
       ]
     },
     {
@@ -1429,16 +888,6 @@
       ]
     },
     {
-      "id": "70baa7c5-26da-4edd-9967-81a84a0ec4a7",
-      "name": "Boys Town",
-      "fhirBaseUrl": "https://epic-fhir.mercy.net/prdfhirstl/api/FHIR/R4",
-      "aliases": [
-        "Mercy",
-        "Metro Imaging",
-        "MTS"
-      ]
-    },
-    {
       "id": "149385f2-009a-4c34-9c2d-fcfe14a05238",
       "name": "Bozeman Health",
       "fhirBaseUrl": "https://revproxy.bh.bozemanhealth.org/Interconnect-OAuth2-PRD/api/FHIR/R4",
@@ -1454,48 +903,24 @@
       ]
     },
     {
-      "id": "0e8f65ba-97c3-4929-84ea-6ff6d293dbd9",
-      "name": "Broadway",
-      "fhirBaseUrl": "https://minerva.northmemorial.com/fhir/api/FHIR/R4",
+      "id": "7adaa03c-ec22-49a5-9c81-35753b1889b1",
+      "name": "Bronson",
+      "fhirBaseUrl": "https://hygieia.bronsonhg.org/FHIRProxy/api/FHIR/R4",
       "locations": [
-        "Minneapolis, MN",
-        "Golden Valley, MN",
-        "MAPLE GROVE, MN",
-        "ROSEVILLE, MN",
-        "ROBBINSDALE, MN"
+        "South Haven, MI",
+        "BATTLE CREEK, MI",
+        "Kalamazoo, MI",
+        "Paw Paw, MI",
+        "Battle Creek, MI"
       ],
       "aliases": [
-        "Minneapolis Clinic of Neurology MyChart",
-        "North Memorial",
-        "Respiratory Consultants",
-        "Stellis Health"
-      ]
-    },
-    {
-      "id": "1307c9a3-8d07-4dbf-9c5d-02c08ce3014a",
-      "name": "Brockton Neighborhood Health Center",
-      "fhirBaseUrl": "https://epicproxy.et1290.epichosted.com/FHIRProxy/api/FHIR/R4",
-      "aliases": [
-        "Charles River Community Health",
-        "Community Health Center of Franklin County",
-        "Duffy Health Center",
-        "Family Health Center of Worcester",
-        "Fenway Health",
-        "Health First Family Care Center",
-        "High Country Community Health",
-        "Hilltown Community Health Center",
-        "Holyoke Health",
-        "Island Health Care",
-        "Lowell Community Health Center",
-        "New Bedford Community Health",
-        "North Shore Community Health"
-      ],
-      "locations": [
-        "Elkin, NC",
-        "HUNTINGTON, MA",
-        "WORCESTER, MA",
-        "Boone, NC",
-        "CAMBRIDGE, MA"
+        "Advanced Vascular Surgery",
+        "Cereal City Pediatrics",
+        "Family Health Center",
+        "Kalamazoo College",
+        "Kalamazoo Foot Surgery",
+        "West Michigan Cancer Center",
+        "Western Michigan University"
       ]
     },
     {
@@ -1614,28 +1039,6 @@
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/CAMCARE/api/FHIR/R4"
     },
     {
-      "id": "3e218d97-c576-4f9c-a233-5a80fcbe9e04",
-      "name": "CancerCare Specialists",
-      "fhirBaseUrl": "https://ssproxy.osfhealthcare.org/fhir-proxy/api/FHIR/R4",
-      "locations": [
-        "Decatur, IL",
-        "WILSON, MI",
-        "SPRINGFIELD, IL",
-        "DECATUR, IL",
-        "KIRKSVILLE, MO"
-      ],
-      "aliases": [
-        "Hannahville Indian Community Health and Human Services",
-        "Hannibal Regional Healthcare System",
-        "Heartland Health Services",
-        "OSF HealthCare",
-        "Rochelle Community Hospital",
-        "Salem Township Hospital",
-        "Sinai Chicago",
-        "Wabash General Hospital"
-      ]
-    },
-    {
       "id": "ffb5fa5c-403d-4a57-a7da-1d016e413d19",
       "name": "Cape Cod Healthcare",
       "fhirBaseUrl": "https://epicproxy.et1149.epichosted.com/FHIRProxy/api/FHIR/R4",
@@ -1731,28 +1134,6 @@
       ]
     },
     {
-      "id": "b5f3a05f-3703-4966-9971-33cb9991a6c7",
-      "name": "Carol Milgard Breast Center",
-      "fhirBaseUrl": "https://soapprod.multicare.org/FHIRProxy/api/FHIR/R4",
-      "locations": [
-        "Tacoma, WA",
-        "COEUR D ALENE, ID",
-        "Ritzville, WA",
-        "Forks, WA",
-        "Coeur d'Alene, ID"
-      ],
-      "aliases": [
-        "Coeur OBGYN",
-        "East Adams Rural Hospital",
-        "Forks Community Hospital",
-        "Kootenai Health",
-        "MultiCare",
-        "Sea Mar",
-        "Western Washington Medical Group",
-        "Willapa Harbor Hospital"
-      ]
-    },
-    {
       "id": "298c5e9d-9e2e-4ae4-b33f-f91d99acb1f7",
       "name": "Carolina Family Health Centers",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MYCHARTCFHC/api/FHIR/R4",
@@ -1790,21 +1171,6 @@
         "Cherryville, NC",
         "Belmont, NC",
         "BELMONT, NC"
-      ]
-    },
-    {
-      "id": "00533048-4552-4526-8bd3-c28b30654366",
-      "name": "Carson Tahoe",
-      "fhirBaseUrl": "https://webproxyprd.med.utah.edu/FHIRMyChart/api/FHIR/R4",
-      "locations": [
-        "Carson City, NV",
-        "Fallon, NV",
-        "Stateline, NV",
-        "Mammoth Lakes, CA",
-        "Dayton, NV"
-      ],
-      "aliases": [
-        "University of Utah"
       ]
     },
     {
@@ -1895,6 +1261,31 @@
       ]
     },
     {
+      "id": "201fb3bf-7f2a-4921-a260-869dca8ae832",
+      "name": "CentraCare",
+      "fhirBaseUrl": "https://epicproxy.et0515.epichosted.com/APIProxyPRD/api/FHIR/R4",
+      "locations": [
+        "ST. CLOUD, MN",
+        "WILLMAR, MN",
+        "MARSHALL, MN",
+        "Cold Spring, MN",
+        "ALEXANDRIA, MN"
+      ],
+      "aliases": [
+        "Alomere Health",
+        "Appleton Health",
+        "Astera Health",
+        "CCM Health",
+        "Johnson Memorial Health Services",
+        "Mille Lacs Band of Ojibwe",
+        "RC Hospitals & Clinics",
+        "Rice Memorial Hospital",
+        "St. Gabriel's Health",
+        "Stellis Health",
+        "Stevens Community Medical Center"
+      ]
+    },
+    {
       "id": "d9d98ffc-0cdb-4824-8896-75cccb950ef7",
       "name": "Central City Concern",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/CENTRALCITYCONCERN/api/FHIR/R4"
@@ -1971,6 +1362,33 @@
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/CBWCHC/api/FHIR/R4"
     },
     {
+      "id": "03164a77-0d3a-4812-b61e-30ef2c75a998",
+      "name": "Charles River Community Health",
+      "fhirBaseUrl": "https://epicproxy.et1290.epichosted.com/FHIRProxy/api/FHIR/R4",
+      "locations": [
+        "Elkin, NC",
+        "HUNTINGTON, MA",
+        "WORCESTER, MA",
+        "Boone, NC",
+        "CAMBRIDGE, MA"
+      ],
+      "aliases": [
+        "Brockton Neighborhood Health Center",
+        "Community Health Center of Franklin County",
+        "Duffy Health Center",
+        "Family Health Center of Worcester",
+        "Fenway Health",
+        "Health First Family Care Center",
+        "High Country Community Health",
+        "Hilltown Community Health Center",
+        "Holyoke Health",
+        "Island Health Care",
+        "Lowell Community Health Center",
+        "New Bedford Community Health",
+        "North Shore Community Health"
+      ]
+    },
+    {
       "id": "46304abd-04fc-4e40-8a84-cb938c9aa8d1",
       "name": "Chehalis Tribal Wellness Center",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/CHEHALISTRIBEMYCHART/api/FHIR/R4"
@@ -2032,22 +1450,6 @@
       ]
     },
     {
-      "id": "e2c58ac0-d656-497b-97e3-2d2ae598491d",
-      "name": "CHI Memorial",
-      "fhirBaseUrl": "https://rpsouth.catholichealth.net/fhir/api/FHIR/R4",
-      "locations": [
-        "Hixson, TN",
-        "CHATTANOOGA, TN",
-        "Ringgold, GA",
-        "Fort Oglethorpe, GA",
-        "LONDON, KY"
-      ],
-      "aliases": [
-        "CHI St. Joseph's Health",
-        "CommonSpirit - AR/GA/KY/TN/TX"
-      ]
-    },
-    {
       "id": "901ca3d2-dc8a-4ede-8396-2c0f48b944a5",
       "name": "CHI St. Vincent",
       "fhirBaseUrl": "https://epic-fhir.mercy.net/PRDFHIRSGF/CHI/api/FHIR/R4"
@@ -2086,27 +1488,6 @@
         "Duluth, GA",
         "Atlanta, GA",
         "Athens, GA"
-      ]
-    },
-    {
-      "id": "90b74166-e535-4ff3-b912-02e586b9c660",
-      "name": "Children's Heart Clinic of LA",
-      "fhirBaseUrl": "https://interconnect.lcmchealth.org/FHIR/LCMC/api/FHIR/R4",
-      "aliases": [
-        "Culicchia Neurological",
-        "Lallie Kemp Regional Medical Center",
-        "LCMC Health",
-        "LSU Health Network",
-        "MRI of Louisiana",
-        "Pennington Biomedical",
-        "St Thomas Community Health Center"
-      ],
-      "locations": [
-        "NEW ORLEANS, LA",
-        "New Orleans, LA",
-        "PRAIRIEVILLE, LA",
-        "ALEXANDRIA, LA",
-        "Destrehan, LA"
       ]
     },
     {
@@ -2259,7 +1640,7 @@
       ]
     },
     {
-      "id": "99e99a72-39f7-4f45-8d78-18dfff4fb4fa",
+      "id": "438ab062-0fc2-4b82-89e7-e9e38ba4633b",
       "name": "Cleveland Clinic",
       "fhirBaseUrl": "https://api.ccf.org/mu/api/FHIR/R4",
       "locations": [
@@ -2321,42 +1702,6 @@
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/CCMH1/api/FHIR/R4"
     },
     {
-      "id": "f0faf1d5-4774-48b8-a3ee-730a861f9a31",
-      "name": "Columbia Gorge Family Medicine",
-      "fhirBaseUrl": "https://haikuor.providence.org/fhirproxy/api/FHIR/R4",
-      "locations": [
-        "Hood River, OR",
-        "VENTURA, CA",
-        "OXNARD, CA",
-        "SANTA PAULA, CA",
-        "FILLMORE, CA"
-      ],
-      "aliases": [
-        "Community Memorial Healthcare",
-        "Covenant Health",
-        "Credena Health",
-        "Curry Health Network",
-        "Fairchild Medical Center",
-        "Family Medical Group",
-        "Greater Orange County Ear, Nose, Throat, Head & Neck Surgeons",
-        "Head and Neck Associates of Orange County",
-        "Nor-Lea Hospital District",
-        "Ocean Beach Hospital & Medical Center",
-        "Orange County Neurosurgical Associates",
-        "Orange County Thoracic and Cardiovascular Surgeons",
-        "Oregon Heart Center",
-        "Providence Cedars Sinai Tarzana",
-        "Providence, Greater Portland Area",
-        "Providence, Oregon, California",
-        "Sonoma Valley Hospital",
-        "South Tabor Family Physicians & Services",
-        "Southern California Multi Specialty Center",
-        "Southern Coos Hospital & Health Center",
-        "Southern Oregon Orthopedics",
-        "The Oregon Clinic"
-      ]
-    },
-    {
       "id": "e7d82bbb-848e-474d-8cdf-77a90d5d1534",
       "name": "Columbia River Health",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MYCHARTCRH/api/FHIR/R4",
@@ -2390,6 +1735,22 @@
         "Seymour, IN",
         "North Vernon, IN",
         "Greensburg, IN"
+      ]
+    },
+    {
+      "id": "9f4aabdf-3c61-44d0-a726-5801dbdca924",
+      "name": "CommonSpirit - AR/GA/KY/TN/TX",
+      "fhirBaseUrl": "https://rpsouth.catholichealth.net/fhir/api/FHIR/R4",
+      "locations": [
+        "COLLEGE STATION, TX",
+        "THE WOODLANDS, TX",
+        "Cleveland, TN",
+        "Houston, TX",
+        "CHATTANOOGA, TN"
+      ],
+      "aliases": [
+        "CHI St. Joseph's Health",
+        "CHI Memorial"
       ]
     },
     {
@@ -2458,6 +1819,55 @@
       ]
     },
     {
+      "id": "eba1811c-e5c8-4bb8-a50e-aed17e7e6494",
+      "name": "Community Health of South Florida",
+      "fhirBaseUrl": "https://epicproxy.et1256.epichosted.com/FHIRProxy/api/FHIR/R4",
+      "locations": [
+        "CLEARWATER, FL",
+        "TAMPA, FL",
+        "Missoula, MT",
+        "Houston, TX",
+        "Miami, FL"
+      ],
+      "aliases": [
+        "Broward Community and Family Health Centers",
+        "Beloved Community Family Wellness Center",
+        "Ben Archer Health Center",
+        "Camillus Health Concern",
+        "CareArc",
+        "Chicago Family Health Center",
+        "Christian Community Health Center",
+        "Community Health Center of Lubbock",
+        "CommWell Health",
+        "District Health Care Services",
+        "Empower U",
+        "Evara Health",
+        "Family Care Health Centers of St. Louis",
+        "Family Christian Health Center",
+        "Florida Community Health Centers",
+        "FoundCare",
+        "Genesis Community Health",
+        "Hawaii Island Community Health Center",
+        "Health Care District of Palm Beach County",
+        "Homestead Community Health Center",
+        "Jessie Trice Community Health System",
+        "La Casa Family Health Centers",
+        "Legacy Community Health",
+        "Malama I Ke Ola Health Center",
+        "Med Centro",
+        "Miami Beach Community Health Center",
+        "NeoMed Center",
+        "Orange Blossom Family Health",
+        "Partnership Health Center",
+        "Premier Community HealthCare",
+        "Providence Community Health Centers",
+        "Tampa Family Health Centers",
+        "TCA Health",
+        "Treasure Coast Community Health",
+        "True Health"
+      ]
+    },
+    {
       "id": "4ab83698-4740-47be-b333-ea7b55f4105f",
       "name": "Community Health Services, Inc",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/CHSIMYCHART/api/FHIR/R4"
@@ -2496,44 +1906,6 @@
       ]
     },
     {
-      "id": "1d03341c-88d4-4221-8898-98a6e15e09fe",
-      "name": "Community Memorial Hospital",
-      "fhirBaseUrl": "https://eprescribe.sanfordhealth.org/FHIR/api/FHIR/R4",
-      "locations": [
-        "BURKE, SD",
-        "Browns Valley, MN",
-        "Rosholt, SD",
-        "Herman, MN",
-        "SISSETON, SD"
-      ],
-      "aliases": [
-        "Coteau des Prairie Medical Center",
-        "Douglas County Memorial Hospital",
-        "Family Healthcare",
-        "Jacobson Memorial Hospital",
-        "Jamestown Regional Medical Center",
-        "Kittson Healthcare",
-        "Lake Region Healthcare",
-        "Lifescape",
-        "Mahnomen Health Center",
-        "McKenzie County Healthcare",
-        "Murray County Medical Center",
-        "Orange City Area Health System",
-        "Ortonville Area Health Services",
-        "Perham Health",
-        "Pioneer Memorial Hospital",
-        "Rainy Lake Medical Center",
-        "Riverview Health",
-        "Sanford",
-        "Sanford Health Plan",
-        "Sidney Health Center",
-        "UND Center for Family Medicine",
-        "United Hospital District",
-        "Windom Area Health",
-        "Winner Regional Healthcare"
-      ]
-    },
-    {
       "id": "d2c36513-f070-4322-b35f-296db4f51ea8",
       "name": "Community Mental Health Affiliates",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/CMHACC/api/FHIR/R4"
@@ -2551,39 +1923,6 @@
       ]
     },
     {
-      "id": "a5d092aa-b60e-4d27-8d73-6a66123af555",
-      "name": "CommunityCare",
-      "fhirBaseUrl": "https://geisapi.geisinger.edu/FHIR_PROD/api/FHIR/R4",
-      "aliases": [
-        "Evangelical Community Hospital",
-        "Geisinger",
-        "Susquehanna Valley Medical Specialties"
-      ],
-      "locations": [
-        "PA",
-        "Sunbury, PA",
-        "Scranton, PA",
-        "Williamsport, PA",
-        "Danville, PA"
-      ]
-    },
-    {
-      "id": "74e91f44-f7b3-4e17-bc2e-506033a97d5a",
-      "name": "Communitycare PLAN",
-      "fhirBaseUrl": "https://mhssp.mhs.net/fhir/api/FHIR/R4",
-      "aliases": [
-        "Connect PBC",
-        "Memorial Healthcare System"
-      ],
-      "locations": [
-        "WESTON, FL",
-        "DAVIE, FL",
-        "LAKE WORTH, FL",
-        "MIRAMAR, FL",
-        "FORT MYERS, FL"
-      ]
-    },
-    {
       "id": "3732b28f-89ce-4ef9-85e7-429766df13ce",
       "name": "Compassionate Care Medical Center",
       "fhirBaseUrl": "https://epicproxy.et0502.epichosted.com/FhirProxy/CCMC/api/FHIR/R4",
@@ -2592,18 +1931,38 @@
       ]
     },
     {
-      "id": "d8bef9ac-5dc1-4867-a49d-7f49878e5a9f",
-      "name": "Concentra",
-      "fhirBaseUrl": "https://epicproxy.et0948.epichosted.com/FhirProxy/api/FHIR/R4",
-      "aliases": [
-        "Select Medical"
-      ],
+      "id": "fb10c72a-022b-473e-888b-00dcb8b43cc2",
+      "name": "Complete Cardiovascular Care",
+      "fhirBaseUrl": "https://epicproxy.et0830.epichosted.com/FHIRProxy/api/FHIR/R4",
       "locations": [
-        "LACOMBE, LA",
-        "BEACHWOOD, OH",
-        "Newport News, VA",
-        "Tallahassee, FL",
-        "Canton, OH"
+        "LAFAYETTE, LA",
+        "McComb, MS",
+        "Ridgeland, MS",
+        "MONROE, LA",
+        "Baton Rouge, LA"
+      ],
+      "aliases": [
+        "Baton Rouge Orthopaedic Clinic",
+        "Ear, Nose, & Throat Surgical",
+        "FMOL Health | Our Lady of Lourdes",
+        "FMOL Health | Our Lady of the Angels",
+        "FMOL Health | Our Lady of the Lake",
+        "FMOL Health | Our Lady of the Lake Children's",
+        "FMOL Health | St. Dominic",
+        "FMOL Health | St. Francis",
+        "Jackson Pulmonary Associates",
+        "Lake Charles Memorial Health System",
+        "Lane Regional Medical Center",
+        "Louisiana Orthopaedic Specialists",
+        "Madison Ridgeland Medical Clinic",
+        "MEA Medical Clinic",
+        "Neighborhood Health Clinic",
+        "Our Lady of the Lake LSU",
+        "Southwest Mississippi Regional Medical Center",
+        "The Baton Rouge Clinic",
+        "The Woman's Clinic",
+        "Urgent Care - Lake/Lourdes/St. Francis",
+        "West Ascension Parish Hospital"
       ]
     },
     {
@@ -2735,6 +2094,24 @@
       ]
     },
     {
+      "id": "44c69c6c-7dba-4d8c-b412-dfbeae673aa6",
+      "name": "Covenant HealthCare",
+      "fhirBaseUrl": "https://epichaiku.chs-mi.com/FHIRPROXY/api/FHIR/R4",
+      "locations": [
+        "Saginaw, MI",
+        "Flint, MI",
+        "Midland, MI",
+        "FLINT, MI",
+        "Caro, MI"
+      ],
+      "aliases": [
+        "Aspire",
+        "Central Michigan University",
+        "Mary Free Bed",
+        "Scheurer"
+      ]
+    },
+    {
       "id": "6d7e73e5-2e30-49dd-a206-0959a5818f48",
       "name": "Covington County Hospital",
       "fhirBaseUrl": "https://epicproxy.et1453.epichosted.com/FHIRProxyPRD/COVINGTON/api/FHIR/R4",
@@ -2761,23 +2138,6 @@
       "id": "d1fecbb7-9698-4522-9266-4fc2c0b2c3d9",
       "name": "Crescent Community Health Center",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/CRESCENTCHC/api/FHIR/R4"
-    },
-    {
-      "id": "8d5d7edb-b542-42d2-9bc1-5e4cfd30d754",
-      "name": "Crossing Rivers Health",
-      "fhirBaseUrl": "https://scproxy.gundersenhealth.org/FHIRARR/GHS/api/FHIR/R4",
-      "locations": [
-        "FENNIMORE, WI",
-        "Prairie du Chien, WI",
-        "PRAIRIE DU CHIEN, WI",
-        "MONONA, IA",
-        "GREEN BAY, WI"
-      ],
-      "aliases": [
-        "Emplify Health",
-        "Tomah Health",
-        "Vernon Memorial Healthcare"
-      ]
     },
     {
       "id": "ae98ab3e-a3e6-472a-a326-90b5ffb32e29",
@@ -2878,44 +2238,6 @@
       ]
     },
     {
-      "id": "1b70be43-7cb5-4fe4-b0b9-b1daf6c6d278",
-      "name": "Doctors on Duty",
-      "fhirBaseUrl": "https://epicproxy.et1146.epichosted.com/FHIRProxy/api/FHIR/R4",
-      "locations": [
-        "Salinas, CA",
-        "SALINAS, CA",
-        "SEASIDE, CA",
-        "APTOS, CA",
-        "Monterey, CA"
-      ],
-      "aliases": [
-        "Johnny Blanchard, MD",
-        "Salinas Valley Health",
-        "Salinas Valley Health Affiliates",
-        "Santa Lucia Medical Group"
-      ]
-    },
-    {
-      "id": "34814bc2-8277-4c5f-a274-137f886793f0",
-      "name": "Drexel",
-      "fhirBaseUrl": "https://epicproxy.et4001.epichosted.com/APIProxyPRD/api/FHIR/R4",
-      "locations": [
-        "PHILADELPHIA, PA",
-        "Verona, WI",
-        "Philadelphia, PA",
-        "PHILA, PA",
-        "EAU CLAIRE, WI"
-      ],
-      "aliases": [
-        "Eau Claire GI Associates – OakLeaf Medical Network",
-        "eleHealth",
-        "Evergreen Surgical – OakLeaf Medical Network",
-        "Salem Clinic",
-        "Texas A&M Health",
-        "The Portland Clinic"
-      ]
-    },
-    {
       "id": "04299987-3519-49b4-97c3-15389ab4b749",
       "name": "Driscoll Children's Hospital",
       "fhirBaseUrl": "https://hubble.dchstx.org/fhir/HOME/api/FHIR/R4",
@@ -2969,6 +2291,26 @@
       ]
     },
     {
+      "id": "32f9b45b-acbd-4883-ae20-41b2abc5e0a2",
+      "name": "Eau Claire GI Associates – OakLeaf Medical Network",
+      "fhirBaseUrl": "https://epicproxy.et4001.epichosted.com/APIProxyPRD/api/FHIR/R4",
+      "locations": [
+        "EAU CLAIRE, WI",
+        "RICE LAKE, WI",
+        "DURAND, WI",
+        "CHIPPEWA FALLS, WI",
+        "STANLEY, WI"
+      ],
+      "aliases": [
+        "Drexel",
+        "eleHealth",
+        "Evergreen Surgical – OakLeaf Medical Network",
+        "Salem Clinic",
+        "Texas A&M Health",
+        "The Portland Clinic"
+      ]
+    },
+    {
       "id": "0b62dc37-3674-425a-858e-2bbe2fb8eb2d",
       "name": "ECU Health",
       "fhirBaseUrl": "https://prd-proxy.vidanthealth.com/FHIR/api/FHIR/R4",
@@ -2993,18 +2335,18 @@
       ]
     },
     {
-      "id": "9a1b8a4c-4331-4665-a17a-bd08db8711b2",
-      "name": "El Camino",
+      "id": "f678abc2-fe6d-45f2-b1cb-ddc08ccb8b1b",
+      "name": "El Camino Health",
       "fhirBaseUrl": "https://rwebproxy.elcaminohospital.org/FHIR/HOME/api/FHIR/R4",
-      "aliases": [
-        "El Camino Health"
-      ],
       "locations": [
         "SUNNYVALE, CA",
         "Los Gatos, CA",
         "San Jose, CA",
         "Menlo Park, CA",
         "Mountain View, CA"
+      ],
+      "aliases": [
+        "El Camino"
       ]
     },
     {
@@ -3047,6 +2389,23 @@
         "Dawsonville, GA",
         "LAGRANGE, GA",
         "PEACHTREE CITY, GA"
+      ]
+    },
+    {
+      "id": "512d8e6c-87bd-40e8-8b49-568f0d9f6438",
+      "name": "Emplify Health",
+      "fhirBaseUrl": "https://scproxy.gundersenhealth.org/FHIRARR/GHS/api/FHIR/R4",
+      "locations": [
+        "GREEN BAY, WI",
+        "LA CROSSE, WI",
+        "INDEPENDENCE, WI",
+        "LA CRESCENT, MN",
+        "WHITEHALL, WI"
+      ],
+      "aliases": [
+        "Crossing Rivers Health",
+        "Tomah Health",
+        "Vernon Memorial Healthcare"
       ]
     },
     {
@@ -3162,35 +2521,19 @@
       ]
     },
     {
-      "id": "f15df3e5-c3ab-4f25-9d8e-3309ac09d436",
-      "name": "Evernorth Care Group",
+      "id": "33169e88-0c8e-4709-94f1-0771915dd9e6",
+      "name": "Evernorth Workplace Care",
       "fhirBaseUrl": "https://epicarr.healthcare.cigna.com/FHIR-PRD/api/FHIR/R4",
       "locations": [
-        "GOODYEAR, AZ",
-        "PEORIA, AZ",
-        "PHOENIX, AZ",
-        "DALLAS, TX",
-        "SAN DIEGO, CA"
+        "HARTFORD, CT",
+        "Washington, D.C., WA",
+        "ARLINGTON, TX",
+        "CHESHIRE, CT",
+        "MEMPHIS, TN"
       ],
       "aliases": [
-        "Evernorth Home-Based Care",
-        "Evernorth Workplace Care"
-      ]
-    },
-    {
-      "id": "8a3c8711-d4ea-4468-bfad-61d47da96a4b",
-      "name": "EverWell Precision Health",
-      "fhirBaseUrl": "https://epicproxy.et1233.epichosted.com/FHIRProxy/api/FHIR/R4",
-      "aliases": [
-        "Naples Concierge Cardiology and Internal Medicine",
-        "NCH Healthcare System"
-      ],
-      "locations": [
-        "Marco Island, FL",
-        "Naples, FL",
-        "Bonita Springs, FL",
-        "NAPLES, FL",
-        "Lutz, FL"
+        "Evernorth Care Group",
+        "Evernorth Home-Based Care"
       ]
     },
     {
@@ -3394,6 +2737,23 @@
       ]
     },
     {
+      "id": "b646deaf-2c69-4401-a4ef-97971a396a88",
+      "name": "Geisinger",
+      "fhirBaseUrl": "https://geisapi.geisinger.edu/FHIR_PROD/api/FHIR/R4",
+      "locations": [
+        "PA",
+        "Sunbury, PA",
+        "Scranton, PA",
+        "Williamsport, PA",
+        "Danville, PA"
+      ],
+      "aliases": [
+        "CommunityCare",
+        "Evangelical Community Hospital",
+        "Susquehanna Valley Medical Specialties"
+      ]
+    },
+    {
       "id": "01ccc0c0-50e4-4835-af49-7ec7d1bfc9db",
       "name": "Genesis",
       "fhirBaseUrl": "https://fhir.genesishcs.org/api/FHIR/R4",
@@ -3418,21 +2778,6 @@
         "MADISON, WI",
         "Madison, WI",
         "FITCHBURG, WI"
-      ]
-    },
-    {
-      "id": "f8a92420-7499-4995-9dc2-39e205f0c92f",
-      "name": "Go East Medical Services",
-      "fhirBaseUrl": "https://epicproxy.et1332.epichosted.com/FHIRProxy/api/FHIR/R4",
-      "locations": [
-        "LAS VEGAS, NV",
-        "DALY CITY, CA",
-        "SAN FRANCISCO, CA",
-        "SAN JOSE, CA",
-        "S SAN FRAN, CA"
-      ],
-      "aliases": [
-        "North East Medical Services"
       ]
     },
     {
@@ -3490,25 +2835,6 @@
         "Sandy Springs, GA",
         "SANDY SPRINGS, GA",
         "atlanta, GA"
-      ]
-    },
-    {
-      "id": "9e3e85c8-cade-4612-a5f0-637965dfb8ba",
-      "name": "Great Lakes Surgical Associates",
-      "fhirBaseUrl": "https://arrprod.midmichigan.net/ProdFHIR/api/FHIR/R4",
-      "aliases": [
-        "Helen Newberry Joy",
-        "Karu Medical Associates",
-        "Mackinac Straits Health System",
-        "MyMichigan Health",
-        "Nimkee"
-      ],
-      "locations": [
-        "Newberry, MI",
-        "SAINT IGNACE, MI",
-        "WEST BRANCH, MI",
-        "ROSCOMMON, MI",
-        "Midland, MI"
       ]
     },
     {
@@ -3609,20 +2935,44 @@
       ]
     },
     {
-      "id": "d13eb66c-af9a-4f36-939a-f4156cbe1bfc",
-      "name": "Harris County Public Health",
+      "id": "c4adeec9-92e1-45a3-9611-0ef574af3188",
+      "name": "Harris Health",
       "fhirBaseUrl": "https://fhir.harrishealth.org/fhir/api/FHIR/R4",
       "locations": [
-        "Houston",
         "Houston, TX",
         "Crosby",
         "Pasadena",
-        "Baytown"
+        "Baytown",
+        "Pasadena, TX"
       ],
       "aliases": [
-        "Harris Health",
+        "Harris County Public Health",
         "Healthcare for the Homeless Houston",
         "Vecino Health Centers"
+      ]
+    },
+    {
+      "id": "5c1766d0-2d39-42ed-911b-22429d6f9d75",
+      "name": "Hartford Healthcare",
+      "fhirBaseUrl": "https://EpicProxy.hhchealth.org/FHIR/api/FHIR/R4",
+      "locations": [
+        "New Britain, CT",
+        "Norwich, CT",
+        "West Hartford, CT",
+        "HARTFORD, CT",
+        "West Haven, CT"
+      ],
+      "aliases": [
+        "Connecticut GI",
+        "Advanced Radiology",
+        "Comprehensive Orthopaedics",
+        "Connecticut Ear, Nose & Throat Associates",
+        "Connecticut Orthopaedics",
+        "Endoscopy Center of Connecticut",
+        "Orthopedic Associates of Hartford",
+        "Physicians Alliance of Connecticut",
+        "SCA Health",
+        "Starling"
       ]
     },
     {
@@ -3662,20 +3012,18 @@
       ]
     },
     {
-      "id": "7ce44dfa-d8f6-4e1e-91bb-02ac9f2226ad",
-      "name": "Health Center, powered by Mount Sinai",
-      "fhirBaseUrl": "https://epicproxy.et0513.epichosted.com/APIProxyPRD/api/FHIR/R4",
-      "aliases": [
-        "Mount Sinai New York - Concierge Care",
-        "MountSinai",
-        "The Health Center at Hudson Yards"
-      ],
+      "id": "93de1581-fca3-4a70-a234-abd29d613a09",
+      "name": "HCA",
+      "fhirBaseUrl": "https://mountainstarhealthfhirprd.app.medcity.net/fhir-proxy/api/FHIR/R4",
       "locations": [
-        "New York, NY",
-        "Paramus, NJ",
-        "NEW YORK, NY",
-        "YONKERS, NY",
-        "STATEN ISLAND, NY"
+        "Salt Lake City, UT",
+        "Draper, UT",
+        "West Jordan, UT",
+        "Ogden, UT",
+        "LAYTON, UT"
+      ],
+      "aliases": [
+        "Alaska Regional Hospital"
       ]
     },
     {
@@ -3735,55 +3083,6 @@
       ]
     },
     {
-      "id": "4db0ba0d-f244-44b0-9e46-27b43bb4c4de",
-      "name": "Heart of Texas",
-      "fhirBaseUrl": "https://epicrpx.shannonhealth.org/FHIR_ARR/api/FHIR/R4",
-      "aliases": [
-        "La Esperanza Clinic",
-        "Shannon"
-      ],
-      "locations": [
-        "San Angelo, TX",
-        "Ballinger, TX",
-        "Brady, TX",
-        "Laredo, TX",
-        "Sonora, TX"
-      ]
-    },
-    {
-      "id": "d2f457f3-8f71-4b90-8a9c-c54cc575a61d",
-      "name": "Hemophilia Outreach Center",
-      "fhirBaseUrl": "https://scripts.prevea.com/FHIR-ARR-PRD/api/FHIR/R4",
-      "aliases": [
-        "Hospital Sisters Health System",
-        "HSHS Medical Group",
-        "Prairie Cardiovascular",
-        "Prevea Health"
-      ],
-      "locations": [
-        "ANNA, IL",
-        "Mattoon, IL",
-        "MARINETTE, WI",
-        "Troy, IL",
-        "Kewaunee, WI"
-      ]
-    },
-    {
-      "id": "7f5cbd5b-70f4-43fc-8845-ca1c574cfa3a",
-      "name": "Hendricks Regional Health",
-      "fhirBaseUrl": "https://sehproxy.stelizabeth.com/arr-fhir/api/FHIR/R4",
-      "locations": [
-        "Danville, IN",
-        "UNION, KY",
-        "BROWNSBURG, IN",
-        "Edgewood, KY",
-        "West Chester, OH"
-      ],
-      "aliases": [
-        "St. Elizabeth Healthcare"
-      ]
-    },
-    {
       "id": "f961ab70-8ca3-4a84-961a-a0a06ab0493b",
       "name": "Hennepin",
       "fhirBaseUrl": "https://hie.hcmed.org/FHIR/api/FHIR/R4",
@@ -3813,22 +3112,6 @@
       "fhirBaseUrl": "https://arr01.service.vumc.org/FHIR-PRD/api/FHIR/R4",
       "locations": [
         "NASHVILLE, TN"
-      ]
-    },
-    {
-      "id": "ff2b1905-8ecd-4fd3-8d7e-9b58aa945316",
-      "name": "Highland District Hospital",
-      "fhirBaseUrl": "https://epicscripts.trihealth.com/fhirproxy/HOME/api/FHIR/R4",
-      "locations": [
-        "Hillsboro, OH",
-        "Washington Court House, OH",
-        "Lynchburg, OH",
-        "Greenfield, OH",
-        "Cincinnati, OH"
-      ],
-      "aliases": [
-        "Highland Health Providers",
-        "TriHealth"
       ]
     },
     {
@@ -3892,6 +3175,24 @@
       ]
     },
     {
+      "id": "258522f7-575d-47bf-a666-a54c97624d35",
+      "name": "Hospital Sisters Health System",
+      "fhirBaseUrl": "https://scripts.prevea.com/FHIR-ARR-PRD/api/FHIR/R4",
+      "locations": [
+        "ANNA, IL",
+        "Mattoon, IL",
+        "MARINETTE, WI",
+        "Troy, IL",
+        "Kewaunee, WI"
+      ],
+      "aliases": [
+        "Hemophilia Outreach Center",
+        "HSHS Medical Group",
+        "Prairie Cardiovascular",
+        "Prevea Health"
+      ]
+    },
+    {
       "id": "f7db2ad3-88ee-4784-b8ba-6d7c6ce74b0d",
       "name": "Hot Springs Health Program",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MYCHARTHSH/api/FHIR/R4",
@@ -3926,21 +3227,6 @@
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MYCHARTHBH/api/FHIR/R4",
       "locations": [
         "Chicago, IL"
-      ]
-    },
-    {
-      "id": "d81dd5f1-666b-44f5-bb0e-d75f7e12a3eb",
-      "name": "HPI",
-      "fhirBaseUrl": "https://FHIR.Integrisok.com/Interconnect-FHIR/api/FHIR/R4",
-      "aliases": [
-        "INTEGRIS Health"
-      ],
-      "locations": [
-        "OKLAHOMA CITY, OK",
-        "EDMOND, OK",
-        "Oklahoma City, OK",
-        "Enid, OK",
-        "Moore, OK"
       ]
     },
     {
@@ -4055,11 +3341,46 @@
       "fhirBaseUrl": "https://epicproxy.et1473.epichosted.com/APIProxyPRD/api/FHIR/R4"
     },
     {
+      "id": "9daddc9c-1ff2-4c20-897b-a953f51545e0",
+      "name": "INTEGRIS Health",
+      "fhirBaseUrl": "https://FHIR.Integrisok.com/Interconnect-FHIR/api/FHIR/R4",
+      "locations": [
+        "OKLAHOMA CITY, OK",
+        "EDMOND, OK",
+        "Oklahoma City, OK",
+        "Enid, OK",
+        "Moore, OK"
+      ],
+      "aliases": [
+        "HPI"
+      ]
+    },
+    {
       "id": "8caa0bb2-9c75-416f-b30f-df72cebfc3c6",
       "name": "InterCommunity Health Care",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MYCHARTINTERCOMMUNITY/api/FHIR/R4",
       "locations": [
         "East Hartford, CT"
+      ]
+    },
+    {
+      "id": "b6be7b09-0802-433b-8097-a24d106f6436",
+      "name": "Intermountain Health",
+      "fhirBaseUrl": "https://epicproxy.et0645.epichosted.com/FHIRProxyPRD/api/FHIR/R4",
+      "locations": [
+        "Brighton, CO",
+        "Sidney, MT",
+        "BOUNTIFUL, UT",
+        "SALT LAKE CITY, UT",
+        "Billings, MT"
+      ],
+      "aliases": [
+        "Billings OBGYN",
+        "Cody Regional Health",
+        "Family Health West",
+        "Memorial Regional Health",
+        "National Jewish Health",
+        "Uptown Community Health Center"
       ]
     },
     {
@@ -4315,22 +3636,6 @@
       ]
     },
     {
-      "id": "49faae97-7bbc-48ad-a39f-778fb5d77160",
-      "name": "Keystone Health",
-      "fhirBaseUrl": "https://interconnect.wellspan.org/interconnect-prd-oauth2/api/FHIR/R4",
-      "aliases": [
-        "Quest Behavioral Health",
-        "WellSpan"
-      ],
-      "locations": [
-        "LEBANON, PA",
-        "NEW HOLLAND, PA",
-        "BERWICK, PA",
-        "CHRISTIANA, PA",
-        "MANCHESTER, PA"
-      ]
-    },
-    {
       "id": "d74a2541-e649-465c-b82b-8a3056a93220",
       "name": "King County Public Health",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MYCHARTKINGCOUNTY/api/FHIR/R4",
@@ -4446,6 +3751,27 @@
       ]
     },
     {
+      "id": "a3792191-e404-47be-acb3-de7fc01c8e68",
+      "name": "LCMC Health",
+      "fhirBaseUrl": "https://interconnect.lcmchealth.org/FHIR/LCMC/api/FHIR/R4",
+      "locations": [
+        "GRETNA, LA",
+        "RICHARDSON, TX",
+        "Slidell, LA",
+        "NEW ORLEANS, LA",
+        "Marrero, LA"
+      ],
+      "aliases": [
+        "Lallie Kemp Regional Medical Center",
+        "Children's Heart Clinic of LA",
+        "Culicchia Neurological",
+        "LSU Health Network",
+        "MRI of Louisiana",
+        "Pennington Biomedical",
+        "St Thomas Community Health Center"
+      ]
+    },
+    {
       "id": "211dc6b1-6c65-4f12-acff-80fda461a688",
       "name": "Lee Health Systems, Inc",
       "fhirBaseUrl": "https://epicedi.leememorial.org/FHIR-prd/api/FHIR/R4",
@@ -4467,6 +3793,25 @@
         "Cornelius, OR",
         "Vancouver, WA",
         "Portland, OR"
+      ]
+    },
+    {
+      "id": "4a7d17c6-de0e-414b-8a62-52ae3bf98ec1",
+      "name": "Lehigh Valley Health Network",
+      "fhirBaseUrl": "https://proxy.lvh.com/FHIR/api/FHIR/R4",
+      "locations": [
+        "Bethlehem, PA",
+        "BERWICK, PA",
+        "CENTER VALLEY, PA",
+        "POTTSVILLE, PA",
+        "Macungie, PA"
+      ],
+      "aliases": [
+        "Bethlehem Health Bureau",
+        "City of Allentown Pennsylvania",
+        "MyConnect Health Portal",
+        "Pocano Ambulatory Surgery Center",
+        "Valley Health Partners"
       ]
     },
     {
@@ -4534,21 +3879,6 @@
       ]
     },
     {
-      "id": "0d9e6db1-8774-4c73-9fc0-186a38ee6310",
-      "name": "Lindner Center of Hope",
-      "fhirBaseUrl": "https://epic-soap.uchealth.com/FHIRProxy/api/FHIR/R4",
-      "locations": [
-        "CINCINNATI, OH",
-        "MASON, OH",
-        "Williamstown, KY",
-        "Oxford, OH",
-        "West Chester, OH"
-      ],
-      "aliases": [
-        "UC Health"
-      ]
-    },
-    {
       "id": "87c30649-74c2-4750-b3a3-4158d2adb566",
       "name": "Little Traverse Bay Bands",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/LTBBHEALTH/api/FHIR/R4"
@@ -4571,21 +3901,6 @@
       ]
     },
     {
-      "id": "b4f8bd7d-2c26-41b2-92f4-dd6223bbce54",
-      "name": "Longstreet Clinic",
-      "fhirBaseUrl": "https://wpprod.nghs.com/fhir/NGHS/api/FHIR/R4",
-      "aliases": [
-        "Northeast Georgia Health System"
-      ],
-      "locations": [
-        "Braselton, GA",
-        "OAKWOOD, GA",
-        "BUFORD, GA",
-        "Gainesville, GA",
-        "GAINESVILLE, GA"
-      ]
-    },
-    {
       "id": "86cd7df3-006d-4c3c-b5bf-7df70c6c0af8",
       "name": "Lovelace Health",
       "fhirBaseUrl": "https://epicproxy.ardenthealth.com/fhir/LHS/api/FHIR/R4",
@@ -4601,24 +3916,6 @@
       "id": "4108b89f-60ef-449a-92fe-6d5549da53a9",
       "name": "Lower Lights Christian Health Center",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/LOWERLIGHTSHEALTH/api/FHIR/R4"
-    },
-    {
-      "id": "7e5c2b73-6bcb-4862-af3b-63bbb0af45dd",
-      "name": "Lumina",
-      "fhirBaseUrl": "https://fhir.metrohealth.org/fhir_prd/api/FHIR/R4",
-      "locations": [
-        "Mentor, OH",
-        "CLEVELAND, OH",
-        "Cleveland, OH",
-        "Broadview Heights, OH",
-        "Westlake, OH"
-      ],
-      "aliases": [
-        "MetroHealth OH",
-        "Ovatient",
-        "Spry Health",
-        "SprySenior"
-      ]
     },
     {
       "id": "aaff4668-808f-424b-bf12-c27849441406",
@@ -4724,21 +4021,6 @@
       ]
     },
     {
-      "id": "64980e2c-f480-43dd-839b-d8d37cbcf79d",
-      "name": "Marshall Medical Center",
-      "fhirBaseUrl": "https://emrrp.ucdmc.ucdavis.edu/FHIR/api/FHIR/R4",
-      "locations": [
-        "Placerville, CA",
-        "Sacramento, CA",
-        "Davis, CA",
-        "El Dorado Hills, CA",
-        "Rocklin, CA"
-      ],
-      "aliases": [
-        "UC Davis"
-      ]
-    },
-    {
       "id": "5fdfdc13-bdad-4b01-bbfd-e50e6741d762",
       "name": "Mary Washington",
       "fhirBaseUrl": "https://epicproxy.et1055.epichosted.com/FHIRProxy/MWHC/api/FHIR/R4",
@@ -4748,21 +4030,6 @@
         "STAFFORD, VA",
         "KING GEORGE, VA",
         "RUTHER GLEN, VA"
-      ]
-    },
-    {
-      "id": "2e233e72-2079-49c5-9820-7fe276b324fe",
-      "name": "Maryland Primary Care Physicians",
-      "fhirBaseUrl": "https://fhir.umm.edu/fhir/api/FHIR/R4",
-      "locations": [
-        "Glen Burnie, MD",
-        "Queenstown, MD",
-        "Bowie, MD",
-        "Pasadena, MD",
-        "Hanover, MD"
-      ],
-      "aliases": [
-        "University of Maryland Medical System"
       ]
     },
     {
@@ -4822,21 +4089,6 @@
       ]
     },
     {
-      "id": "f73a6b7e-5228-4dd0-865d-a6283cbb4113",
-      "name": "MedNorth",
-      "fhirBaseUrl": "https://epicfe.unch.unc.edu/FHIR/api/FHIR/R4",
-      "aliases": [
-        "UNC Health Care"
-      ],
-      "locations": [
-        "Chapel Hill, NC",
-        "Rutherford College, NC",
-        "CHAPEL HILL, NC",
-        "Kinston, NC",
-        "GOLDSBORO, NC"
-      ]
-    },
-    {
       "id": "33152440-8a2f-4057-ba5d-0b7c03122e95",
       "name": "Memorial Health",
       "fhirBaseUrl": "https://memorialhealthfhirprd.app.medcity.net/fhir-proxy/api/FHIR/R4",
@@ -4846,6 +4098,22 @@
         "Richmond Hill, GA",
         "Charleston, SC",
         "Rincon, GA"
+      ]
+    },
+    {
+      "id": "0f2135fb-c2a6-4b31-87d4-b64a08eb6077",
+      "name": "Memorial Healthcare System",
+      "fhirBaseUrl": "https://mhssp.mhs.net/fhir/api/FHIR/R4",
+      "locations": [
+        "WESTON, FL",
+        "DAVIE, FL",
+        "LAKE WORTH, FL",
+        "MIRAMAR, FL",
+        "FORT MYERS, FL"
+      ],
+      "aliases": [
+        "Communitycare PLAN",
+        "Connect PBC"
       ]
     },
     {
@@ -4894,6 +4162,16 @@
         "Wilmington, CA",
         "Laguna Woods, CA",
         "Long Beach, CA"
+      ]
+    },
+    {
+      "id": "9fcce44d-11d3-4ded-a8e2-cc3df115ff80",
+      "name": "Mercy",
+      "fhirBaseUrl": "https://epic-fhir.mercy.net/prdfhirstl/api/FHIR/R4",
+      "aliases": [
+        "Boys Town",
+        "Metro Imaging",
+        "MTS"
       ]
     },
     {
@@ -4982,6 +4260,24 @@
         "Olive Branch, MS",
         "Bartlett, TN",
         "Holly Springs, MS"
+      ]
+    },
+    {
+      "id": "0e928c54-ac5f-4490-b298-10e37ba4ff61",
+      "name": "MetroHealth OH",
+      "fhirBaseUrl": "https://fhir.metrohealth.org/fhir_prd/api/FHIR/R4",
+      "locations": [
+        "CLEVELAND, OH",
+        "Cleveland, OH",
+        "Broadview Heights, OH",
+        "Westlake, OH",
+        "Middleburg Heights, OH"
+      ],
+      "aliases": [
+        "Lumina",
+        "Ovatient",
+        "Spry Health",
+        "SprySenior"
       ]
     },
     {
@@ -5182,19 +4478,6 @@
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MOUNTAINVALLEYSHEALTHCENTERS/api/FHIR/R4"
     },
     {
-      "id": "12800561-aaaf-4556-bd93-a2fef1776e0d",
-      "name": "Mountain West Surgical Specialists",
-      "fhirBaseUrl": "https://soap.crmcwy.org/fhirproxy/api/FHIR/R4",
-      "locations": [
-        "Cheyenne, WY",
-        "Douglas, WY",
-        "Gillette, WY"
-      ],
-      "aliases": [
-        "Thunder Basin"
-      ]
-    },
-    {
       "id": "ea9f8c0b-9503-46b2-97ae-bf3f15cee242",
       "name": "Mountainside Medical Center",
       "fhirBaseUrl": "https://epicproxy.ardenthealth.com/fhir/MMC/api/FHIR/R4",
@@ -5207,18 +4490,42 @@
       ]
     },
     {
-      "id": "4e4877e6-69e3-4f3f-9118-06cd53e5e1f3",
-      "name": "MTOSC",
-      "fhirBaseUrl": "https://epicproxy.et1015.epichosted.com/FHIRProxy/api/FHIR/R4",
+      "id": "d40eb518-8293-461e-9263-0a472d769771",
+      "name": "MountSinai",
+      "fhirBaseUrl": "https://epicproxy.et0513.epichosted.com/APIProxyPRD/api/FHIR/R4",
       "locations": [
-        "MCLEAN, VA",
-        "MIDLOTHIAN, VA",
-        "FAIRFAX, VA",
-        "CHRISTIANSBURG, VA",
-        "RESTON, VA"
+        "New York, NY",
+        "Paramus, NJ",
+        "NEW YORK, NY",
+        "YONKERS, NY",
+        "STATEN ISLAND, NY"
       ],
       "aliases": [
-        "OrthoVirginia"
+        "Health Center, powered by Mount Sinai",
+        "Mount Sinai New York - Concierge Care",
+        "The Health Center at Hudson Yards"
+      ]
+    },
+    {
+      "id": "3c8868fb-6e4b-4482-893e-776918ba5c47",
+      "name": "MultiCare",
+      "fhirBaseUrl": "https://soapprod.multicare.org/FHIRProxy/api/FHIR/R4",
+      "locations": [
+        "Puyallup, WA",
+        "Spokane Valley, WA",
+        "Gig Harbor, WA",
+        "Auburn, WA",
+        "Tacoma, WA"
+      ],
+      "aliases": [
+        "Kootenai Health",
+        "Carol Milgard Breast Center",
+        "Coeur OBGYN",
+        "East Adams Rural Hospital",
+        "Forks Community Hospital",
+        "Sea Mar",
+        "Western Washington Medical Group",
+        "Willapa Harbor Hospital"
       ]
     },
     {
@@ -5274,6 +4581,25 @@
       ]
     },
     {
+      "id": "f08bfbd8-b8eb-4a09-bddf-a0580643340d",
+      "name": "MyMichigan Health",
+      "fhirBaseUrl": "https://arrprod.midmichigan.net/ProdFHIR/api/FHIR/R4",
+      "locations": [
+        "WEST BRANCH, MI",
+        "ROSCOMMON, MI",
+        "Midland, MI",
+        "Mount Pleasant, MI",
+        "Mt Pleasant, MI"
+      ],
+      "aliases": [
+        "Helen Newberry Joy",
+        "Great Lakes Surgical Associates",
+        "Karu Medical Associates",
+        "Mackinac Straits Health System",
+        "Nimkee"
+      ]
+    },
+    {
       "id": "f8b76dd4-1cef-4898-9a9e-7569023d6e80",
       "name": "Nationwide Children's Hospital",
       "fhirBaseUrl": "https://hkc.nationwidechildrens.org/FHIR/MYCHART/api/FHIR/R4",
@@ -5299,6 +4625,22 @@
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MYCHARTNAHC/api/FHIR/R4",
       "locations": [
         "Oakland, CA"
+      ]
+    },
+    {
+      "id": "4b531211-015c-4473-9a63-57e29751b4c2",
+      "name": "NCH Healthcare System",
+      "fhirBaseUrl": "https://epicproxy.et1233.epichosted.com/FHIRProxy/api/FHIR/R4",
+      "locations": [
+        "Marco Island, FL",
+        "Naples, FL",
+        "Bonita Springs, FL",
+        "NAPLES, FL",
+        "Lutz, FL"
+      ],
+      "aliases": [
+        "EverWell Precision Health",
+        "Naples Concierge Cardiology and Internal Medicine"
       ]
     },
     {
@@ -5411,11 +4753,44 @@
       ]
     },
     {
+      "id": "5854c5e1-ecb5-437b-8c16-a3ca53de29c4",
+      "name": "North East Medical Services",
+      "fhirBaseUrl": "https://epicproxy.et1332.epichosted.com/FHIRProxy/api/FHIR/R4",
+      "locations": [
+        "DALY CITY, CA",
+        "SAN FRANCISCO, CA",
+        "SAN JOSE, CA",
+        "S SAN FRAN, CA",
+        "LAS VEGAS, NV"
+      ],
+      "aliases": [
+        "Go East Medical Services"
+      ]
+    },
+    {
       "id": "8ed17fdc-e0b4-4798-ab38-ffcdf119b9dc",
       "name": "North Lakes",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MYCHARTNORTHLAKES/api/FHIR/R4",
       "locations": [
         "Iron River, WI"
+      ]
+    },
+    {
+      "id": "0a005e83-f89f-4ff2-8142-9544dc1c6e26",
+      "name": "North Memorial",
+      "fhirBaseUrl": "https://minerva.northmemorial.com/fhir/api/FHIR/R4",
+      "locations": [
+        "MAPLE GROVE, MN",
+        "ROSEVILLE, MN",
+        "ROBBINSDALE, MN",
+        "FRIDLEY, MN",
+        "Robbinsdale, MN"
+      ],
+      "aliases": [
+        "Broadway",
+        "Minneapolis Clinic of Neurology MyChart",
+        "Respiratory Consultants",
+        "Stellis Health"
       ]
     },
     {
@@ -5443,18 +4818,18 @@
       ]
     },
     {
-      "id": "cdfdbd71-d1ff-4d4e-92fa-17950c956549",
-      "name": "NorthEast Wisconsin Community Clinic",
-      "fhirBaseUrl": "https://scproxy.gundersenhealth.org/FHIRARR/api/FHIR/R4",
+      "id": "c85d35f2-6c64-4474-80f4-0f1f89db53f0",
+      "name": "Northeast Georgia Health System",
+      "fhirBaseUrl": "https://wpprod.nghs.com/fhir/NGHS/api/FHIR/R4",
       "locations": [
-        "Green Bay, WI",
-        "GREEN BAY, WI",
-        "DE PERE, WI",
-        "MARINETTE, WI"
+        "Braselton, GA",
+        "OAKWOOD, GA",
+        "BUFORD, GA",
+        "Gainesville, GA",
+        "GAINESVILLE, GA"
       ],
       "aliases": [
-        "Unity",
-        "Urology Associates of Green Bay"
+        "Longstreet Clinic"
       ]
     },
     {
@@ -5623,22 +4998,6 @@
       ]
     },
     {
-      "id": "874e9c64-fdfe-4bbc-907c-db793bd4274e",
-      "name": "Oklahoma State University",
-      "fhirBaseUrl": "https://eprdsoap000.saintfrancis.Com/FHIRProxy/api/FHIR/R4",
-      "aliases": [
-        "Saint Francis Health System",
-        "Tulsa Bone and Joint Associates"
-      ],
-      "locations": [
-        "SAND SPRINGS, OK",
-        "VINITA, OK",
-        "CLEVELAND, OK",
-        "BARTLESVILLE, OK",
-        "MUSKOGEE, OK"
-      ]
-    },
-    {
       "id": "04f2b444-fe2f-4402-a0b8-7656fe88e38c",
       "name": "Olmsted Medical Center",
       "fhirBaseUrl": "https://epicproxy.et1077.epichosted.com/APIPROXYPRD/HOME/api/FHIR/R4",
@@ -5685,18 +5044,35 @@
       ]
     },
     {
-      "id": "f9b599b6-eee9-4915-bf2c-9a183b4f6568",
-      "name": "OneChart",
-      "fhirBaseUrl": "https://ocsoapprd.nebraskamed.com/FHIR-PRD/HOME/api/FHIR/R4",
-      "aliases": [
-        "The Nebraska Medical Center"
-      ],
+      "id": "37af7f45-5a8a-46c1-be9b-6f25c5064847",
+      "name": "One Health Center",
+      "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/api/FHIR/R4",
       "locations": [
-        "O' NEILL, NE",
-        "KEARNEY, NE",
-        "Columbus, NE",
-        "North Platte, NE",
-        "Hebron, NE"
+        "UPLAND, CA",
+        "SPRINGFIELD, OR",
+        "PUEBLO, CO",
+        "TACOMA, WA",
+        "CAVE JUNCTION, OR"
+      ],
+      "aliases": [
+        "Bigfork Valley",
+        "Center for Comprehensive Care & Diagnosis of Inherited Blood Disorders",
+        "CITTHS",
+        "Community Health Centers Burlington",
+        "Jackson County Regional Health Center",
+        "JAMHI",
+        "LALGBT Center",
+        "Muckleshoot Tribal Health & Wellness Center",
+        "PacificSource PACE",
+        "Piedmont Health",
+        "Pueblo Community Health Center",
+        "Puyallup Tribal Health Authority",
+        "Rocky Boy Health Center",
+        "Siskiyou Community Health Center",
+        "Squaxin Island Tribal Health Center",
+        "The Healthcare Connection",
+        "Waianae Coast Comprehensive Care",
+        "Yakima Neighborhood Health"
       ]
     },
     {
@@ -5750,6 +5126,37 @@
       ]
     },
     {
+      "id": "add387e4-dc8d-496d-b30b-a8e0d5b52332",
+      "name": "Oregon Health and Science University",
+      "fhirBaseUrl": "https://epicmobile.ohsu.edu/FHIRPRD/api/FHIR/R4",
+      "locations": [
+        "Damascus, OR",
+        "McMinnville, OR",
+        "Clackamas, OR",
+        "Sandy, OR",
+        "Portland, OR"
+      ],
+      "aliases": [
+        "Adventist Health Columbia Gorge",
+        "Tuality Healthcare"
+      ]
+    },
+    {
+      "id": "9a6b4520-a671-429f-af53-7c2d355ba375",
+      "name": "Orlando Health",
+      "fhirBaseUrl": "https://epicproxy.et1131.epichosted.com/FHIRProxy/api/FHIR/R4",
+      "locations": [
+        "CLERMONT, FL",
+        "Orlando, FL",
+        "ORLANDO, FL",
+        "TAMPA, FL",
+        "TITUSVILLE, FL"
+      ],
+      "aliases": [
+        "Baptist Health"
+      ]
+    },
+    {
       "id": "9b559de0-4a70-457b-bf05-991f441b8628",
       "name": "OrthoCarolina",
       "fhirBaseUrl": "https://epwebapps.orthocarolina.com/fhir-prd/api/FHIR/R4",
@@ -5762,20 +5169,18 @@
       ]
     },
     {
-      "id": "d3150bba-ca64-4eeb-ac86-3c10290f30f0",
-      "name": "Orthopaedic & Spine Center of the Rockies",
-      "fhirBaseUrl": "https://ss.uch.edu/FHIRProxy/api/FHIR/R4",
+      "id": "f9f25a70-29c5-42b1-8301-a1e3246154b2",
+      "name": "OrthoVirginia",
+      "fhirBaseUrl": "https://epicproxy.et1015.epichosted.com/FHIRProxy/api/FHIR/R4",
       "locations": [
-        "FORT COLLINS, CO",
-        "DENVER, CO",
-        "GUNNISON, CO",
-        "LITTLETON, CO",
-        "GILLETTE, WY"
+        "MIDLOTHIAN, VA",
+        "FAIRFAX, VA",
+        "CHRISTIANSBURG, VA",
+        "RESTON, VA",
+        "PRINCE GEORGE, VA"
       ],
       "aliases": [
-        "UCHealth Affiliated Clinics and Hospitals MyChart",
-        "Vail Health",
-        "Valley View Hospital"
+        "MTOSC"
       ]
     },
     {
@@ -5792,6 +5197,28 @@
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/OMC/api/FHIR/R4",
       "locations": [
         "Osceola, WI"
+      ]
+    },
+    {
+      "id": "8f43bbde-0a71-4c3e-be33-99c8d2d7c438",
+      "name": "OSF HealthCare",
+      "fhirBaseUrl": "https://ssproxy.osfhealthcare.org/fhir-proxy/api/FHIR/R4",
+      "locations": [
+        "CHAMPAIGN, IL",
+        "OAK LAWN, IL",
+        "DIXON, IL",
+        "NORMAL, IL",
+        "EVERGREEN PARK, IL"
+      ],
+      "aliases": [
+        "Hannibal Regional Healthcare System",
+        "CancerCare Specialists",
+        "Hannahville Indian Community Health and Human Services",
+        "Heartland Health Services",
+        "Rochelle Community Hospital",
+        "Salem Township Hospital",
+        "Sinai Chicago",
+        "Wabash General Hospital"
       ]
     },
     {
@@ -5850,21 +5277,6 @@
       ]
     },
     {
-      "id": "c5dd248d-069e-44ee-9207-91b14b971ef8",
-      "name": "Packard Health",
-      "fhirBaseUrl": "https://arrprd.metrohealth.net/fhir/api/FHIR/R4",
-      "locations": [
-        "ANN ARBOR, MI",
-        "Wayland, MI",
-        "Wyoming, MI",
-        "ALLENDALE, MI",
-        "WYOMING, MI"
-      ],
-      "aliases": [
-        "University of Michigan Health-West"
-      ]
-    },
-    {
       "id": "e1448f48-884c-4bf3-8a7e-391f5fd792d4",
       "name": "Palouse Specialty Physicians",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/PSP/api/FHIR/R4"
@@ -5879,6 +5291,35 @@
         "Richardson, TX",
         "Garland, TX",
         "DALLAS, TX"
+      ]
+    },
+    {
+      "id": "f66275a8-2e2b-47d8-956b-6e5763077d7f",
+      "name": "Parkview Health",
+      "fhirBaseUrl": "https://epicprod-mobile.parkview.com/FHIR/api/FHIR/R4",
+      "locations": [
+        "Shipshewana, IN",
+        "Kendallville, IN",
+        "Fort Wayne, IN",
+        "MARION, IN",
+        "Columbia City, IN"
+      ],
+      "aliases": [
+        "Adams Memorial Hospital",
+        "AIHS Guide",
+        "Alliance Health Centers",
+        "Cameron Health",
+        "Eaton Rapids Medical Center / Michigan Joint Replacement",
+        "Elyussif Orthopedic & Knee Pain Center",
+        "Healthier Moms and Babies",
+        "Hillsdale Hospital",
+        "Iridescent Health",
+        "Linke Urology and Robotics",
+        "Monarch Medicine",
+        "Parkview Bryan and Montpelier Hospitals",
+        "Paulding County Hospital",
+        "Riverview Health",
+        "Woodlawn Health"
       ]
     },
     {
@@ -6178,21 +5619,6 @@
       ]
     },
     {
-      "id": "144e4611-cdcf-408f-aeb7-677538b26cc5",
-      "name": "ProHealth Physicians",
-      "fhirBaseUrl": "https://fhirprd.reliantmedicalgroup.org/FHIRPRD/api/FHIR/R4",
-      "locations": [
-        "Farmington, CT",
-        "Rocky Hill, CT",
-        "Danbury, CT",
-        "Glastonbury, CT",
-        "South Windsor, CT"
-      ],
-      "aliases": [
-        "Reliant Medical Group"
-      ]
-    },
-    {
       "id": "3e96366e-e212-45b3-b827-d5c97bd540af",
       "name": "ProMedica",
       "fhirBaseUrl": "https://fhir.promedica.org/FHIR/MYCHART/api/FHIR/R4",
@@ -6202,6 +5628,117 @@
         "Coldwater, MI",
         "Port Clinton, OH",
         "Lambertville, MI"
+      ]
+    },
+    {
+      "id": "9a1f151d-7e8d-4ec4-9d21-e8ebff36924d",
+      "name": "Providence, Alaska",
+      "fhirBaseUrl": "https://haikuak.providence.org/fhirproxy/api/FHIR/R4",
+      "locations": [
+        "Renton, WA",
+        "KODIAK, AK",
+        "SOLDOTNA, AK",
+        "ANCHORAGE, AK",
+        "SEWARD, AK"
+      ],
+      "aliases": [
+        "Alaska Neurology Center",
+        "Anchorage Neighborhood Health Center",
+        "Anchorage Neurosurgical Associates",
+        "Central Peninsula Hospital",
+        "Seward Community Health Center",
+        "South Peninsula Hospital"
+      ]
+    },
+    {
+      "id": "6f164dd4-0ad3-4171-8475-7046ea218ac2",
+      "name": "Providence, Greater Portland Area",
+      "fhirBaseUrl": "https://haikuor.providence.org/fhirproxy/api/FHIR/R4",
+      "locations": [
+        "PORTLAND, OR",
+        "Ashland, OR",
+        "WARRENTON, OR",
+        "Snyder, TX",
+        "Fullerton, CA"
+      ],
+      "aliases": [
+        "Covenant Health",
+        "Community Memorial Healthcare",
+        "Columbia Gorge Family Medicine",
+        "Credena Health",
+        "Curry Health Network",
+        "Fairchild Medical Center",
+        "Family Medical Group",
+        "Greater Orange County Ear, Nose, Throat, Head & Neck Surgeons",
+        "Head and Neck Associates of Orange County",
+        "Nor-Lea Hospital District",
+        "Ocean Beach Hospital & Medical Center",
+        "Orange County Neurosurgical Associates",
+        "Orange County Thoracic and Cardiovascular Surgeons",
+        "Oregon Heart Center",
+        "Providence Cedars Sinai Tarzana",
+        "Providence, Oregon, California",
+        "Sonoma Valley Hospital",
+        "South Tabor Family Physicians & Services",
+        "Southern California Multi Specialty Center",
+        "Southern Coos Hospital & Health Center",
+        "Southern Oregon Orthopedics",
+        "The Oregon Clinic"
+      ]
+    },
+    {
+      "id": "744a32f6-6372-4933-b530-a6fe9408110f",
+      "name": "Providence, Washington, Idaho, Montana",
+      "fhirBaseUrl": "https://haikuwa.providence.org/fhirproxy/api/FHIR/R4",
+      "locations": [
+        "Spokane, WA",
+        "Issaquah, WA",
+        "Everett, WA",
+        "Bellingham, WA",
+        "Stanwood, WA"
+      ],
+      "aliases": [
+        "Kinwell",
+        "Kadlec Health System",
+        "International Health Community Services",
+        "Cascade Community Health",
+        "Cancer Care NorthWest",
+        "Barrett Hospital and Healthcare",
+        "Butte Native Wellness",
+        "Clark Fork Valley Hospital",
+        "Columbia Basin Hospital",
+        "Community Hospital for Anaconda",
+        "Credena Health - Alaska",
+        "Credena Health - Washington/Montana",
+        "Everett Bone and Joint",
+        "Excelsior Family Medicine",
+        "Grande Ronde",
+        "Infinity Cancer Care",
+        "Jamestown Family Health Clinic",
+        "Jefferson Healthcare",
+        "Lincoln Hospital & Clinics",
+        "Missoula Surgical Associates",
+        "Newport Hospital & Health Services",
+        "North Olympic Healthcare Network",
+        "Olympic Medical Center",
+        "Pacific Medical Center",
+        "Proliance Hand, Wrist & Elbow Physicians",
+        "ProOrtho Orthopedics and Sports Medicine",
+        "Prosser Memorial Health",
+        "Providence Swedish",
+        "Pullman Regional Hospital",
+        "Rocky Mountain ENT",
+        "Samaritan Healthcare",
+        "Seattle Medical Associates",
+        "Seattle Premier Health",
+        "Shodair Children's Hospital",
+        "Stillaguamish Tribe of Indians",
+        "Summit Pacific Medical Center",
+        "Tulalip Health System",
+        "Wallowa Memorial Hospital and Medical Center",
+        "Western Montana Clinics",
+        "Whitman Hospital Medical Clinics",
+        "Yelm Family Medicine"
       ]
     },
     {
@@ -6236,21 +5773,6 @@
       "id": "c987c213-bb5e-40c0-ac49-3c7689aa485c",
       "name": "Quartz",
       "fhirBaseUrl": "https://epicproxy.hosp.wisc.edu/FhirProxy/QUARTZ/api/FHIR/R4"
-    },
-    {
-      "id": "8d287ca5-2807-4418-a5fc-16757ed6afb9",
-      "name": "Queen's Connect",
-      "fhirBaseUrl": "https://mobileapps.queens.org/FHIR/MYCHART/api/FHIR/R4",
-      "locations": [
-        "Kealakekua, HI",
-        "Kapaau, HI",
-        "KAILUA KONA, HI",
-        "Honolulu, HI",
-        "HILO, HI"
-      ],
-      "aliases": [
-        "The Queen's Health System"
-      ]
     },
     {
       "id": "5380c522-936b-4724-90fe-4cb622723083",
@@ -6303,6 +5825,21 @@
         "Brookville, IN",
         "CAMBRIDGE CITY, IN",
         "RICHMOND, IN"
+      ]
+    },
+    {
+      "id": "9052b2d6-fdef-437e-af82-d54d0316c6f0",
+      "name": "Reliant Medical Group",
+      "fhirBaseUrl": "https://fhirprd.reliantmedicalgroup.org/FHIRPRD/api/FHIR/R4",
+      "locations": [
+        "Worcester, MA",
+        "Webster, MA",
+        "WESTBOROUGH, MA",
+        "WORCESTER, MA",
+        "LEOMINSTER, MA"
+      ],
+      "aliases": [
+        "ProHealth Physicians"
       ]
     },
     {
@@ -6483,18 +6020,18 @@
       ]
     },
     {
-      "id": "26e32dab-f019-42af-93e1-f4e4ccf5f87a",
-      "name": "Rutgers Health University Behavioral Health Care",
+      "id": "b34cf50a-d018-4372-bfef-61e08bb3ce97",
+      "name": "RWJBarnabas Health",
       "fhirBaseUrl": "https://epicproxy.et1157.epichosted.com/FHIRProxy/api/FHIR/R4",
       "locations": [
-        "Green Brook, NJ",
-        "NEWARK, NJ",
-        "North Brunswick, NJ",
-        "North Plainfield, NJ",
-        "Robbinsville Township, NJ"
+        "BRIDGEWATER, NJ",
+        "EAST BRUNSWICK, NJ",
+        "Westfield, NJ",
+        "Howell, NJ",
+        "New Brunswick, NJ"
       ],
       "aliases": [
-        "RWJBarnabas Health",
+        "Rutgers Health University Behavioral Health Care",
         "Saint James Health"
       ]
     },
@@ -6512,6 +6049,22 @@
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/SCPH/api/FHIR/R4",
       "locations": [
         "Sacramento, CA"
+      ]
+    },
+    {
+      "id": "2ab38054-502c-4ff2-a311-1566c25d29cf",
+      "name": "Saint Francis Health System",
+      "fhirBaseUrl": "https://eprdsoap000.saintfrancis.Com/FHIRProxy/api/FHIR/R4",
+      "locations": [
+        "SAND SPRINGS, OK",
+        "VINITA, OK",
+        "CLEVELAND, OK",
+        "BARTLESVILLE, OK",
+        "MUSKOGEE, OK"
+      ],
+      "aliases": [
+        "Oklahoma State University",
+        "Tulsa Bone and Joint Associates"
       ]
     },
     {
@@ -6548,6 +6101,24 @@
         "KEIZER, OR",
         "MONMOUTH, OR",
         "Salem, OR"
+      ]
+    },
+    {
+      "id": "baa981d3-a8f6-4395-9b19-0849f1d3d807",
+      "name": "Salinas Valley Health",
+      "fhirBaseUrl": "https://epicproxy.et1146.epichosted.com/FHIRProxy/api/FHIR/R4",
+      "locations": [
+        "SALINAS, CA",
+        "GONZALES, CA",
+        "Salinas, CA",
+        "MONTEREY, CA",
+        "SEASIDE, CA"
+      ],
+      "aliases": [
+        "Doctors on Duty",
+        "Johnny Blanchard, MD",
+        "Salinas Valley Health Affiliates",
+        "Santa Lucia Medical Group"
       ]
     },
     {
@@ -6605,6 +6176,44 @@
         "National City, CA",
         "San Ysidro, CA",
         "Campo, CA"
+      ]
+    },
+    {
+      "id": "a6465e88-2e85-45ce-96f2-e9ba921dd7c4",
+      "name": "Sanford",
+      "fhirBaseUrl": "https://eprescribe.sanfordhealth.org/FHIR/api/FHIR/R4",
+      "locations": [
+        "Fargo, ND",
+        "Walker, MN",
+        "Bemidji, MN",
+        "Edgerton, MN",
+        "Bismarck, ND"
+      ],
+      "aliases": [
+        "Lake Region Healthcare",
+        "Coteau des Prairie Medical Center",
+        "Community Memorial Hospital",
+        "Douglas County Memorial Hospital",
+        "Family Healthcare",
+        "Jacobson Memorial Hospital",
+        "Jamestown Regional Medical Center",
+        "Kittson Healthcare",
+        "Lifescape",
+        "Mahnomen Health Center",
+        "McKenzie County Healthcare",
+        "Murray County Medical Center",
+        "Orange City Area Health System",
+        "Ortonville Area Health Services",
+        "Perham Health",
+        "Pioneer Memorial Hospital",
+        "Rainy Lake Medical Center",
+        "Riverview Health",
+        "Sanford Health Plan",
+        "Sidney Health Center",
+        "UND Center for Family Medicine",
+        "United Hospital District",
+        "Windom Area Health",
+        "Winner Regional Healthcare"
       ]
     },
     {
@@ -6684,18 +6293,18 @@
       ]
     },
     {
-      "id": "bfe3bf8e-0d38-4879-a4b0-e20e7b5f0b6a",
-      "name": "Seattle Childrens Community Connect",
+      "id": "22be3c03-b034-469e-be80-5b4a9fa7f6ca",
+      "name": "Seattle Children's MyChart",
       "fhirBaseUrl": "https://fhir.seattlechildrens.org/fhir/api/FHIR/R4",
       "locations": [
-        "Woodinville, WA",
-        "Olympia, WA",
         "SEATTLE, WA",
         "SEQUIM, WA",
-        "SITKA, AK"
+        "SITKA, AK",
+        "Bothell, WA",
+        "Great Falls, MT"
       ],
       "aliases": [
-        "Seattle Children's MyChart"
+        "Seattle Childrens Community Connect"
       ]
     },
     {
@@ -6712,6 +6321,21 @@
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MYCHARTSEATTLEROOTS/api/FHIR/R4",
       "locations": [
         "Seattle, WA"
+      ]
+    },
+    {
+      "id": "23a71824-4bf6-4033-9dff-917c242dd25d",
+      "name": "Select Medical",
+      "fhirBaseUrl": "https://epicproxy.et0948.epichosted.com/FhirProxy/api/FHIR/R4",
+      "locations": [
+        "LACOMBE, LA",
+        "BEACHWOOD, OH",
+        "Newport News, VA",
+        "Tallahassee, FL",
+        "Canton, OH"
+      ],
+      "aliases": [
+        "Concentra"
       ]
     },
     {
@@ -6753,16 +6377,29 @@
     {
       "id": "628c78f7-4491-4326-9b86-41dbc3850db6",
       "name": "SGMC",
-      "fhirBaseUrl": "https://epicproxy.et1024.epichosted.com/FHIRProxy/api/FHIR/R4",
+      "fhirBaseUrl": "https://epicproxy.et1024.epichosted.com/FHIRProxy/PARENT/api/FHIR/R4",
       "locations": [
         "Valdosta, GA",
         "Hahira, GA",
         "VALDOSTA, GA",
         "Nashville, GA",
         "Lake Park, GA"
+      ]
+    },
+    {
+      "id": "83e3e6b3-55ba-48c2-979b-ef631f52c53d",
+      "name": "Shannon",
+      "fhirBaseUrl": "https://epicrpx.shannonhealth.org/FHIR_ARR/api/FHIR/R4",
+      "locations": [
+        "San Angelo, TX",
+        "Ballinger, TX",
+        "Brady, TX",
+        "Laredo, TX",
+        "Sonora, TX"
       ],
       "aliases": [
-        "Wiregrass Student Health Clinic"
+        "Heart of Texas",
+        "La Esperanza Clinic"
       ]
     },
     {
@@ -6803,21 +6440,6 @@
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MYCHARTSH/api/FHIR/R4",
       "locations": [
         "MENTOR, OH"
-      ]
-    },
-    {
-      "id": "3bd0171c-f488-42f6-95d9-474e53df54c3",
-      "name": "SIH Affiliates",
-      "fhirBaseUrl": "https://epicproxy.et0986.epichosted.com/FHIRProxy/api/FHIR/R4",
-      "locations": [
-        "CARBONDALE, IL",
-        "Rosiclare, IL",
-        "MARION, IL",
-        "HERRIN, IL",
-        "MACEDONIA, IL"
-      ],
-      "aliases": [
-        "Southern Illinois Healthcare"
       ]
     },
     {
@@ -7003,6 +6625,21 @@
       ]
     },
     {
+      "id": "1f52a460-8d7c-42a3-9877-4d764a710bbf",
+      "name": "Southern Illinois Healthcare",
+      "fhirBaseUrl": "https://epicproxy.et0986.epichosted.com/FHIRProxy/api/FHIR/R4",
+      "locations": [
+        "HERRIN, IL",
+        "MACEDONIA, IL",
+        "CARBONDALE, IL",
+        "MURPHYSBORO, IL",
+        "MARION, IL"
+      ],
+      "aliases": [
+        "SIH Affiliates"
+      ]
+    },
+    {
       "id": "01a2460f-035a-4fe5-81cb-fe64f23e33dc",
       "name": "Southern Jersey Family Medical Centers",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MYCHARTSJFMC/api/FHIR/R4",
@@ -7088,6 +6725,54 @@
         "New York, NY",
         "Brooklyn, NY",
         "Bronc, NY"
+      ]
+    },
+    {
+      "id": "78dda85b-b0d0-4bb6-ba27-0a627d5b25c5",
+      "name": "St. Charles Health System",
+      "fhirBaseUrl": "https://epicproxy.et1030.epichosted.com/FHIRProxy/api/FHIR/R4",
+      "locations": [
+        "Redmond, OR",
+        "Stayton, OR",
+        "Burns, OR",
+        "COQUILLE, OR",
+        "Bend, OR"
+      ],
+      "aliases": [
+        "Bay Area Hospital",
+        "Harney District Hospital",
+        "Santiam Hospital",
+        "Volunteers in Medicine Cascades"
+      ]
+    },
+    {
+      "id": "00b7da77-14de-4dbe-829c-e19f02ba767f",
+      "name": "St. David's",
+      "fhirBaseUrl": "https://stdavidsfhirprd.app.medcity.net/fhir-proxy/api/FHIR/R4",
+      "locations": [
+        "AUSTIN, TX",
+        "MARBLE FALLS, TX",
+        "ROUND ROCK, TX",
+        "FREDERICKSBURG, TX",
+        "Austin, TX"
+      ],
+      "aliases": [
+        "Arlington Maternal Fetal Specialists"
+      ]
+    },
+    {
+      "id": "2db84bd1-356a-4306-b79e-6377a6acbc92",
+      "name": "St. Elizabeth Healthcare",
+      "fhirBaseUrl": "https://sehproxy.stelizabeth.com/arr-fhir/api/FHIR/R4",
+      "locations": [
+        "UNION, KY",
+        "BROWNSBURG, IN",
+        "Edgewood, KY",
+        "West Chester, OH",
+        "FORT THOMAS, KY"
+      ],
+      "aliases": [
+        "Hendricks Regional Health"
       ]
     },
     {
@@ -7237,21 +6922,6 @@
       ]
     },
     {
-      "id": "403fa423-0772-471e-a84f-605a9ec0b47e",
-      "name": "Summit Surgical Center",
-      "fhirBaseUrl": "https://epicproxy.et1017.epichosted.com/FHIRProxy/api/FHIR/R4",
-      "locations": [
-        "VOORHEES, NJ",
-        "Voorhees, NJ",
-        "Stratford, NJ",
-        "Marlton, NJ",
-        "Haddon Heights, NJ"
-      ],
-      "aliases": [
-        "Virtua Health"
-      ]
-    },
-    {
       "id": "589ab299-0ce1-4b36-b73e-a796f35c828b",
       "name": "SUNY",
       "fhirBaseUrl": "https://epicedge.upstate.edu/fhir/api/FHIR/R4",
@@ -7389,6 +7059,24 @@
       ]
     },
     {
+      "id": "9ba7a5fd-7ed8-4bbe-af9b-fe62fb28ff68",
+      "name": "The Center",
+      "fhirBaseUrl": "https://epicproxy.et4006.epichosted.com/FHIRProxyPRD/api/FHIR/R4",
+      "locations": [
+        "John Day, OR",
+        "BEND, OR",
+        "Bend, OR",
+        "La Pine, OR",
+        "POST FALLS, ID"
+      ],
+      "aliases": [
+        "Articularis",
+        "Northwest Orthopaedic Specialists",
+        "Rebound Orthopedic and Neurosurgery",
+        "Reno Orthopedic Center"
+      ]
+    },
+    {
       "id": "55109b1a-3932-4e65-aec2-87d69e68ddec",
       "name": "The Centers",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MYCHARTCHS/api/FHIR/R4",
@@ -7429,6 +7117,59 @@
       ]
     },
     {
+      "id": "8a6b49d9-7c36-456e-8941-74a514db6903",
+      "name": "The Nebraska Medical Center",
+      "fhirBaseUrl": "https://ocsoapprd.nebraskamed.com/FHIR-PRD/HOME/api/FHIR/R4",
+      "locations": [
+        "O' NEILL, NE",
+        "KEARNEY, NE",
+        "Columbus, NE",
+        "North Platte, NE",
+        "Hebron, NE"
+      ],
+      "aliases": [
+        "OneChart"
+      ]
+    },
+    {
+      "id": "89417d26-25ac-4fae-bffa-7ca622b4055d",
+      "name": "The Ohio State University Wexner Medical Center",
+      "fhirBaseUrl": "https://ihismufhir.osumc.edu/fhir-prd/api/FHIR/R4",
+      "locations": [
+        "Columbus, OH",
+        "Bellefontaine, OH",
+        "Grandview Heights, OH",
+        "Granville, OH",
+        "Pataskala, OH"
+      ],
+      "aliases": [
+        "Avita Health System",
+        "Columbus Public Health",
+        "Heart of Ohio Family Health",
+        "Hocking Valley",
+        "LifeCare Alliance",
+        "Madison Health",
+        "Memorial Health",
+        "Mercer Health",
+        "Wilson Health System"
+      ]
+    },
+    {
+      "id": "fe6f96a5-63c9-4823-a879-6083f720a33d",
+      "name": "The Queen's Health System",
+      "fhirBaseUrl": "https://mobileapps.queens.org/FHIR/MYCHART/api/FHIR/R4",
+      "locations": [
+        "Honolulu, HI",
+        "HILO, HI",
+        "PEARL CITY, HI",
+        "HONOLULU, HI",
+        "AIEA, HI"
+      ],
+      "aliases": [
+        "Queen's Connect"
+      ]
+    },
+    {
       "id": "2d045017-084b-40cb-ac3c-dc82e0897299",
       "name": "The University of Kansas Health System",
       "fhirBaseUrl": "https://fhir.kansashealthsystem.com/interconnect-PRD_FHIR/api/FHIR/R4",
@@ -7441,6 +7182,23 @@
       ]
     },
     {
+      "id": "f29bc248-42c5-4047-af1e-392e5d2578cc",
+      "name": "Thedacare",
+      "fhirBaseUrl": "https://arr.thedacare.org/FHIR/api/FHIR/R4",
+      "locations": [
+        "APPLETON, WI",
+        "GREEN BAY, WI",
+        "DE PERE, WI",
+        "TIGERTON, WI",
+        "OSHKOSH, WI"
+      ],
+      "aliases": [
+        "Bellin",
+        "Neuroscience Group",
+        "Partnership Community Health"
+      ]
+    },
+    {
       "id": "1066bc01-3ed5-424c-8d90-f3d7f53fdf5c",
       "name": "Thomas Jefferson University Health System",
       "fhirBaseUrl": "https://fhir.jefferson.edu/FHIRProxy/HOME/api/FHIR/R4",
@@ -7450,6 +7208,19 @@
         "Feasterville, PA",
         "Horsham, PA",
         "BENSALEM, PA"
+      ]
+    },
+    {
+      "id": "e89490ad-37bc-4766-8fb5-eff42a31d615",
+      "name": "Thunder Basin",
+      "fhirBaseUrl": "https://soap.crmcwy.org/fhirproxy/api/FHIR/R4",
+      "locations": [
+        "Douglas, WY",
+        "Gillette, WY",
+        "Cheyenne, WY"
+      ],
+      "aliases": [
+        "Mountain West Surgical Specialists"
       ]
     },
     {
@@ -7503,6 +7274,22 @@
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/TAPMEDICINE/api/FHIR/R4",
       "locations": [
         "Greensboro, NC"
+      ]
+    },
+    {
+      "id": "76af7b73-e13f-4370-aeb6-608d740faf46",
+      "name": "TriHealth",
+      "fhirBaseUrl": "https://epicscripts.trihealth.com/fhirproxy/HOME/api/FHIR/R4",
+      "locations": [
+        "Cincinnati, OH",
+        "Loveland, OH",
+        "CINCINNATI, OH",
+        "Hamilton, OH",
+        "Mason, OH"
+      ],
+      "aliases": [
+        "Highland Health Providers",
+        "Highland District Hospital"
       ]
     },
     {
@@ -7573,6 +7360,36 @@
       "fhirBaseUrl": "https://epicproxy.et1460.epichosted.com/APIPROXYPRD/api/FHIR/R4"
     },
     {
+      "id": "50361b98-37a2-4ab7-a024-5e07c23e150b",
+      "name": "UC Davis",
+      "fhirBaseUrl": "https://emrrp.ucdmc.ucdavis.edu/FHIR/api/FHIR/R4",
+      "locations": [
+        "Sacramento, CA",
+        "Davis, CA",
+        "El Dorado Hills, CA",
+        "Rocklin, CA",
+        "Placerville, CA"
+      ],
+      "aliases": [
+        "Marshall Medical Center"
+      ]
+    },
+    {
+      "id": "e3fa8baf-f551-4fc6-87b1-c17882d18a4c",
+      "name": "UC Health",
+      "fhirBaseUrl": "https://epic-soap.uchealth.com/FHIRProxy/api/FHIR/R4",
+      "locations": [
+        "Williamstown, KY",
+        "Oxford, OH",
+        "West Chester, OH",
+        "CINCINNATI, OH",
+        "Crestview, KY"
+      ],
+      "aliases": [
+        "Lindner Center of Hope"
+      ]
+    },
+    {
       "id": "eab01036-015f-4d37-a9ac-baf47925174c",
       "name": "UC Irvine",
       "fhirBaseUrl": "https://epicproxy.et1448.epichosted.com/APIProxyPRD/api/FHIR/R4",
@@ -7606,6 +7423,23 @@
         "FORT COLLINS, CO",
         "WALSENBURG, CO",
         "HIGHLANDS RANCH, CO"
+      ]
+    },
+    {
+      "id": "e1a9a64b-e623-4ab3-8208-84cb19c3d745",
+      "name": "UCHealth Affiliated Clinics and Hospitals MyChart",
+      "fhirBaseUrl": "https://ss.uch.edu/FHIRProxy/api/FHIR/R4",
+      "locations": [
+        "DENVER, CO",
+        "GUNNISON, CO",
+        "FORT COLLINS, CO",
+        "LITTLETON, CO",
+        "GILLETTE, WY"
+      ],
+      "aliases": [
+        "Orthopaedic & Spine Center of the Rockies",
+        "Vail Health",
+        "Valley View Hospital"
       ]
     },
     {
@@ -7677,6 +7511,29 @@
       ]
     },
     {
+      "id": "74adbfcb-c282-410d-8dcb-75e7ca5c612c",
+      "name": "UIHC",
+      "fhirBaseUrl": "https://myepicapps.uihealthcare.org/FHIRProxy/api/FHIR/R4",
+      "locations": [
+        "CORALVILLE, IA",
+        "CLEAR LAKE, IA",
+        "Iowa City, IA",
+        "Des Moines, IA",
+        "Rockwell, IA"
+      ],
+      "aliases": [
+        "Audubon County Memorial Hospital & Clinics",
+        "Cass County Health System",
+        "Iowa Specialty Hospitals and Clinics",
+        "Jefferson County Health Center",
+        "Myrtue Medical Center",
+        "Van Buren County Hospital",
+        "Veterans Memorial Hospital",
+        "Washington County Hospital and Clinics",
+        "Winneshiek Medical Center"
+      ]
+    },
+    {
       "id": "f3c8d6ec-b9a7-45ef-b228-26b162e14e9b",
       "name": "UK Healthcare",
       "fhirBaseUrl": "https://ukepicproxy.mc.uky.edu/Interconnect-PRD-OAuth2/api/FHIR/R4",
@@ -7724,6 +7581,21 @@
       ],
       "aliases": [
         "UNLV Health"
+      ]
+    },
+    {
+      "id": "e4be772e-1081-4b0f-a729-2004fea90f22",
+      "name": "UNC Health Care",
+      "fhirBaseUrl": "https://epicfe.unch.unc.edu/FHIR/api/FHIR/R4",
+      "locations": [
+        "Chapel Hill, NC",
+        "Rutherford College, NC",
+        "CHAPEL HILL, NC",
+        "Kinston, NC",
+        "GOLDSBORO, NC"
+      ],
+      "aliases": [
+        "MedNorth"
       ]
     },
     {
@@ -7901,6 +7773,21 @@
       ]
     },
     {
+      "id": "28df6439-1c90-4270-9861-4b76dcf45798",
+      "name": "University of Maryland Medical System",
+      "fhirBaseUrl": "https://fhir.umm.edu/fhir/api/FHIR/R4",
+      "locations": [
+        "Chestertown, MD",
+        "Cambridge, MD",
+        "Towson, MD",
+        "Brentwood, MD",
+        "Perryville, MD"
+      ],
+      "aliases": [
+        "Maryland Primary Care Physicians"
+      ]
+    },
+    {
       "id": "8b596142-5f5e-4b71-827b-c8976b46c4f4",
       "name": "University of Miami",
       "fhirBaseUrl": "https://epicproxy.et0747.epichosted.com/APIProxyPRD/api/FHIR/R4",
@@ -7934,6 +7821,21 @@
         "Ionia, MI",
         "CHARLOTTE, MI",
         "DEWITT, MI"
+      ]
+    },
+    {
+      "id": "9bcdb44b-b591-4565-846e-931bb09835c5",
+      "name": "University of Michigan Health-West",
+      "fhirBaseUrl": "https://arrprd.metrohealth.net/fhir/api/FHIR/R4",
+      "locations": [
+        "Wayland, MI",
+        "Wyoming, MI",
+        "ALLENDALE, MI",
+        "WYOMING, MI",
+        "Allegan, MI"
+      ],
+      "aliases": [
+        "Packard Health"
       ]
     },
     {
@@ -8000,6 +7902,21 @@
       ]
     },
     {
+      "id": "76861b1f-6762-4972-a283-b08ed1f93f8f",
+      "name": "University of Utah",
+      "fhirBaseUrl": "https://webproxyprd.med.utah.edu/FHIRMyChart/api/FHIR/R4",
+      "locations": [
+        "Sandy, UT",
+        "Meridian, ID",
+        "Park City, UT",
+        "Midvale, UT",
+        "Salt Lake City, UT"
+      ],
+      "aliases": [
+        "Carson Tahoe"
+      ]
+    },
+    {
       "id": "27fa8b63-e9b8-4930-aea0-660d878c39f5",
       "name": "University of Vermont Health Network",
       "fhirBaseUrl": "https://epicproxy.uvmhealth.org/FHIR-ARR/UVMMYCHART/api/FHIR/R4",
@@ -8045,6 +7962,21 @@
         "Harrisburg, PA",
         "Bedford, PA",
         "PITTSBURGH, PA"
+      ]
+    },
+    {
+      "id": "de4e4391-5cd3-4a3d-83a1-8ef7700d4045",
+      "name": "Urology Associates of Green Bay",
+      "fhirBaseUrl": "https://scproxy.gundersenhealth.org/FHIRARR/api/FHIR/R4",
+      "locations": [
+        "DE PERE, WI",
+        "GREEN BAY, WI",
+        "MARINETTE, WI",
+        "Green Bay, WI"
+      ],
+      "aliases": [
+        "NorthEast Wisconsin Community Clinic",
+        "Unity"
       ]
     },
     {
@@ -8127,6 +8059,22 @@
         "Irving, TX",
         "Coppell, TX",
         "Fort Worth, TX"
+      ]
+    },
+    {
+      "id": "f31af86b-16cf-4035-9e20-e85ad2650656",
+      "name": "UW Health",
+      "fhirBaseUrl": "https://epicproxy.hosp.wisc.edu/FhirProxy/api/FHIR/R4",
+      "locations": [
+        "Fort Atkinson, WI",
+        "Roscoe, IL",
+        "Madison, WI",
+        "Rockford, IL",
+        "BEAVER DAM, WI"
+      ],
+      "aliases": [
+        "Access Community Health Centers",
+        "SwedishAmerican"
       ]
     },
     {
@@ -8274,6 +8222,21 @@
       ]
     },
     {
+      "id": "34e91fae-eca4-470d-9ca3-a3ddd8d5b643",
+      "name": "Virtua Health",
+      "fhirBaseUrl": "https://epicproxy.et1017.epichosted.com/FHIRProxy/api/FHIR/R4",
+      "locations": [
+        "Voorhees, NJ",
+        "Stratford, NJ",
+        "Marlton, NJ",
+        "Haddon Heights, NJ",
+        "DELRAN, NJ"
+      ],
+      "aliases": [
+        "Summit Surgical Center"
+      ]
+    },
+    {
       "id": "b4c521b3-a903-404d-bae7-c00a01e30301",
       "name": "Vitruvian Health",
       "fhirBaseUrl": "https://epicproxy.et1336.epichosted.com/FHIRProxy/HOME/api/FHIR/R4",
@@ -8407,6 +8370,22 @@
       ]
     },
     {
+      "id": "4d1a5d40-7baa-459e-9a51-573595850665",
+      "name": "WellSpan",
+      "fhirBaseUrl": "https://interconnect.wellspan.org/interconnect-prd-oauth2/api/FHIR/R4",
+      "locations": [
+        "LEBANON, PA",
+        "NEW HOLLAND, PA",
+        "BERWICK, PA",
+        "CHRISTIANA, PA",
+        "MANCHESTER, PA"
+      ],
+      "aliases": [
+        "Keystone Health",
+        "Quest Behavioral Health"
+      ]
+    },
+    {
       "id": "13984187-b1df-4f5b-9be3-20327c8911fb",
       "name": "WellStar",
       "fhirBaseUrl": "https://epicsoap.wellstar.org/fhirproxy/HOME/api/FHIR/R4",
@@ -8492,12 +8471,35 @@
       ]
     },
     {
+      "id": "8eeb6e48-e70a-4efb-9591-169aeae7e078",
+      "name": "Winmind Behavioral Health & Addiction Medicine",
+      "fhirBaseUrl": "https://epicproxy.et1233.epichosted.com/FHIRProxy/AFFILIATE/api/FHIR/R4",
+      "locations": [
+        "Orlando, FL",
+        "Tampa, FL",
+        "Naples, FL",
+        "Lakeland, FL",
+        "Fort Myers, FL"
+      ],
+      "aliases": [
+        "BioSpine Institute",
+        "Infectious Disease Associates of Naples",
+        "Integris Physician Group",
+        "Upwell Primary Care"
+      ]
+    },
+    {
       "id": "adc7cf1c-2eb9-428a-a39d-375eee33029e",
       "name": "Winters Healthcare",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/WINTERSHEALTH/api/FHIR/R4",
       "locations": [
         "Winters, CA"
       ]
+    },
+    {
+      "id": "cdf7dc62-e4b8-482a-ac72-ff69975f736f",
+      "name": "Wiregrass Student Health Clinic",
+      "fhirBaseUrl": "https://epicproxy.et1024.epichosted.com/FHIRProxy/api/FHIR/R4"
     },
     {
       "id": "46930ef8-ab6d-4dec-90bf-2fad96030aea",
