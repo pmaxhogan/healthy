@@ -501,6 +501,16 @@ const DATATYPES: Readonly<Record<string, FieldSpecs>> = {
     system: ["string", "The code system"],
     code: ["string", "The code"],
   },
+  "N.ConditionCode": {
+    text: ["string", "Plain-text label"],
+    system: ["string", "The first code's system"],
+    code: ["string", "The first code"],
+    codings: ["N.Coding[]", "Every code it carries"],
+  },
+  "N.Coding": {
+    system: ["string", "The code system"],
+    code: ["string", "The code"],
+  },
   "N.Value": {
     value: ["string|number", "The number or text"],
     unit: ["string", "Unit of measure"],
@@ -1157,8 +1167,9 @@ const N_APPOINTMENT = {
 
 const N_CONDITION = {
   ...N_BASE,
-  code: ["N.CodeableConcept", "The condition"],
+  code: ["N.ConditionCode", "The condition"],
   category: "string[]",
+  encounterId: ["string", "The visit it was recorded at"],
   clinicalStatus: "string",
   verificationStatus: "string",
   onset: "string",
@@ -1366,7 +1377,32 @@ const SUMMARY_COUNT = {
 const SUMMARY_RECENT = {
   kind: ["string", "Always recent"],
   section: ["string", "appointments, conditions, medications or labs"],
+  source: ["string", "For a condition: problem_list, encounter_diagnosis or other"],
 } as const;
+
+/**
+ * One condition, collapsed from every row that names it (`get_conditions` with
+ * `collapse: true`, the summary's conditions). Built from rows the policy has
+ * already filtered, so a rule on a Condition field reaches it through those.
+ */
+const CONDITION_GROUP = {
+  resourceType: ["string", "Always Condition"],
+  kind: ["string", "Always condition_group"],
+  ...TAGS,
+  code: ["N.ConditionCode", "The condition"],
+  categories: ["string[]", "Every category its rows carry"],
+  onProblemList: ["boolean", "True when one of its rows is a problem-list entry"],
+  clinicalStatus: "string",
+  verificationStatus: "string",
+  abatement: "string",
+  firstSeen: ["string", "The earliest onset or recorded date"],
+  lastSeen: ["string", "The latest onset or recorded date"],
+  occurrences: ["integer", "How many rows it was collapsed from"],
+  ids: ["string[]", "The rows' Condition ids"],
+  encounterIds: ["string[]", "The visits it was recorded at"],
+} as const;
+
+const CONDITION_GROUP_SHAPE = "view:ConditionGroup";
 
 const DOCUMENT_TEXT = {
   resourceType: ["string", "Always DocumentReference"],
@@ -1480,6 +1516,13 @@ const SHAPES: readonly ShapeDef[] = [
     fields: N_APPOINTMENT,
   },
   {
+    id: CONDITION_GROUP_SHAPE,
+    label: "Collapsed condition item",
+    resourceType: "Condition",
+    vocabulary: "normalized",
+    fields: CONDITION_GROUP,
+  },
+  {
     id: "summary:count",
     label: "Summary count row",
     resourceType: null,
@@ -1537,7 +1580,7 @@ const TOOL_SHAPES = {
     "summary:count",
     "summary:recent",
     APPOINTMENT_SHAPE,
-    "normalized:Condition",
+    CONDITION_GROUP_SHAPE,
     "normalized:MedicationRequest",
     "normalized:Observation",
   ],
@@ -1546,7 +1589,7 @@ const TOOL_SHAPES = {
   get_patient_profile: collectionShapes("Patient"),
   get_appointments: [APPOINTMENT_SHAPE, "raw:Encounter"],
   get_encounters: collectionShapes("Encounter"),
-  get_conditions: collectionShapes("Condition"),
+  get_conditions: [...collectionShapes("Condition"), CONDITION_GROUP_SHAPE],
   get_medications: collectionShapes("MedicationRequest"),
   get_medication_fills: collectionShapes("MedicationDispense"),
   get_allergies: collectionShapes("AllergyIntolerance"),

@@ -25,7 +25,8 @@ Every answer is the same envelope:
 `{ items, total, matched, warnings, truncated, generatedAt }` (plus `raw` when
 asked for). `total` is how many items the exposure policy let through;
 `matched` is the output count — how many values `jq` emitted (below), before
-`limit`; equal to `total` without it. `truncated` is true only when a
+`limit`; without `jq`, the number of items `limit` applies to (`total`, or
+`groups` after `get_conditions`' `collapse`). `truncated` is true only when a
 caller-supplied `limit` cut something.
 
 ### Filtering server-side with `jq`
@@ -39,7 +40,9 @@ history. For example, on `get_lab_results`:
 { "jq": ".[] | select(.effective >= \"2026-01-01\") | {code, value, effective}" }
 ```
 
-- **Order.** Exposure policy, then `jq`, then `limit`. jq only ever sees what
+- **Order.** Exposure policy, then the tool's own post-policy step (only
+  `get_conditions`' `status` filter and `collapse`), then `jq`, then `limit`.
+  jq only ever sees what
   the policy released: a denied field is simply absent (`.[].deniedField` is
   `null`), and a denied resource type or health system is not in the input.
 - **Input.** The `items` array. With `raw: true` each item also carries its
@@ -142,6 +145,54 @@ Encounters:
 `get_health_summary`'s appointments section uses the same merge: the five
 appointments nearest to now, upcoming ones first (soonest first), then the
 latest past ones.
+
+### Conditions: the problem list and encounter diagnoses
+
+An Epic record re-mints a diagnosis as a new Condition at every visit it is
+coded at ("encounter diagnosis", tagged with both the FHIR
+`encounter-diagnosis` category and Epic's own `visit-diagnosis`), next to the
+handful of problem-list entries — so the raw list is mostly the same few
+conditions again and again, and most of those rows carry no clinical status.
+`get_conditions` keeps every row (no arguments still returns all of them) and
+makes the useful view one argument away:
+
+- **`category`** — a list; a row is kept when it is in any of them:
+  `problem-list-item`, `encounter-diagnosis`, `health-concern`. The display
+  strings (`"Problem List Item"`, `"Encounter Diagnosis"`, `"Health Concern"`)
+  and Epic's `"Visit Diagnosis"` are accepted and mapped; anything else is
+  refused. Matched against the category codes, displays and text of the raw
+  resource and the normalized `category`, compared as slugs.
+- **`status`** — the clinical status (`active`, `resolved`, …, compared as a
+  slug), or `unknown` for exactly the rows that have none. A status filter
+  that leaves out rows with no status says how many:
+  `status_filter_excluded_unknown:<n>`. It runs after the exposure policy, so
+  a hidden `clinicalStatus` reads as unknown rather than being filtered on.
+- **`collapse: true`** — one item per condition (`kind: "condition_group"`).
+  Identity is the health system plus the row's first ICD-10 code, else its
+  first SNOMED code, else its text (lower-cased, whitespace collapsed); a row
+  with none of those is a group of its own. ICD-10 comes first because a
+  problem-list entry and its visits' copies reliably share it, while which
+  coding a health system sends _first_ differs between them — so every row's
+  normalized `code` carries all its codings as `code.codings`. A group has the
+  representative row's `code`, `clinicalStatus`, `verificationStatus` and
+  `abatement` (the problem-list row when there is one, else the latest row
+  with a status), `categories` (the union, as codes), `onProblemList`,
+  `firstSeen` / `lastSeen` (the earliest and latest onset or recorded date —
+  every cached encounter diagnosis carries a recorded date, so the visit's own
+  date is not read separately), `occurrences`, `ids` (the Condition ids) and
+  `encounterIds` (each visit named, once). Groups are newest `lastSeen` first.
+- **Counts.** `total` is the rows after the policy and the filters, before
+  grouping; `groups` (only with `collapse`) is how many groups, and it is the
+  groups that `jq` and `limit` see, so `matched` and `truncated` are about
+  groups. With `raw: true`, `raw[i]` is the list of group `i`'s rows' resources.
+- **Policy first.** Grouping runs on what the exposure policy released: a
+  hidden `onset` does not feed `firstSeen`, a hidden `encounterId` (or a denied
+  Encounter type) leaves `encounterIds` empty, and a hidden `code` leaves every
+  row its own group.
+
+`get_health_summary`'s conditions section is the same collapse: problem-list
+entries first, then the most recently seen encounter diagnoses, then anything
+else, each labelled `source: "problem_list" | "encounter_diagnosis" | "other"`.
 
 A single settings toggle, **MCP enabled**, is a kill switch: when it is off,
 every tool call answers `mcp_disabled` immediately, without reading

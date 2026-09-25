@@ -307,6 +307,28 @@ describe("reading the real cache", () => {
     ]);
   });
 
+  it("filters by category, collapses, and is honest about status-less rows", async () => {
+    const all = await call(world.client, "get_conditions");
+    const problemList = await call(world.client, "get_conditions", {
+      category: ["Problem List Item"],
+    });
+    const collapsed = await call(world.client, "get_conditions", { collapse: true });
+    const active = await call(world.client, "get_conditions", { status: "active" });
+    const parsed = JSON.parse(collapsed.text) as { total: number; groups: number };
+
+    expect(all.items).toHaveLength(2);
+    expect(problemList.items.length).toBeLessThanOrEqual(all.items.length);
+    expect(parsed.total).toBe(all.items.length);
+    expect(parsed.groups).toBe(collapsed.items.length);
+    expect(collapsed.items.every((item) => item.kind === "condition_group")).toBe(true);
+    const unknown = all.items.filter((item) => item.clinicalStatus === undefined).length;
+    const { warnings } = JSON.parse(active.text) as { warnings: string[] };
+    const expected = unknown === 0 ? [] : [`status_filter_excluded_unknown:${String(unknown)}`];
+    expect(warnings.filter((warning) => warning.startsWith("status_filter"))).toStrictEqual(
+      expected,
+    );
+  });
+
   it("resolves references out of the cache, not out of the bundle", async () => {
     const answer = await call(world.client, "get_appointments");
 

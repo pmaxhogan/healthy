@@ -66,3 +66,45 @@ describe("normalizeCondition", () => {
     expect(result.category).toEqual([]);
   });
 });
+
+describe("normalizeCondition codings and visit", () => {
+  it("keeps every coding once, in order, under code, and reads the visit id", () => {
+    const resource: fhir4.Condition = {
+      resourceType: "Condition",
+      id: "cond-3",
+      subject: { reference: "Patient/pat-1" },
+      code: {
+        text: "Example finding",
+        coding: [
+          { system: "https://snomed.info/sct", code: "1000001" },
+          { system: "https://hl7.org/fhir/sid/icd-10-cm", code: "X01.1" },
+          { system: "https://snomed.info/sct", code: "1000001", display: "Again" },
+        ],
+      },
+      encounter: { reference: "https://fhir.example.test/api/FHIR/R4/Encounter/enc-9" },
+    };
+
+    const result = normalizeCondition(resource, testCtx());
+
+    expect(result.code?.codings).toStrictEqual([
+      { system: "https://snomed.info/sct", code: "1000001" },
+      { system: "https://hl7.org/fhir/sid/icd-10-cm", code: "X01.1" },
+    ]);
+    expect(result.encounterId).toBe("enc-9");
+  });
+
+  it("reads no visit id from a reference to anything but an Encounter", () => {
+    const resource: fhir4.Condition = {
+      resourceType: "Condition",
+      id: "cond-4",
+      subject: { reference: "Patient/pat-1" },
+      code: { text: "Example finding" },
+      encounter: { reference: "Observation/obs-1" },
+    };
+
+    const result = normalizeCondition(resource, testCtx());
+
+    expect(Object.hasOwn(result, "encounterId")).toBe(false);
+    expect(Object.hasOwn(result.code ?? {}, "codings")).toBe(false);
+  });
+});

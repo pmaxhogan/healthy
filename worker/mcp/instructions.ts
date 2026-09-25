@@ -8,7 +8,9 @@
  */
 export const MCP_INSTRUCTIONS =
   "A read-only copy of one person's health record, cached from their health " +
-  "systems. Start with get_health_summary. Every tool that reads a resource " +
+  "systems. Start with get_health_summary. For 'what conditions do I have', " +
+  'use get_conditions with category ["problem-list-item"] or collapse: true. ' +
+  "Every tool that reads a resource " +
   "type returns { items, total, matched, coverage, warnings, truncated, " +
   "generatedAt } and accepts an optional `jq` argument: a real jq program run " +
   "server-side on `items` (after the owner's exposure policy, before `limit`), " +

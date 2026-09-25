@@ -137,6 +137,11 @@ export const REFERENCE_FIELDS: ReadonlyMap<string, readonly ReferenceField[]> = 
     ],
   ],
   [
+    "Condition",
+    // Not a display but the referenced visit's id: it goes when Encounter is denied.
+    [{ normalized: ["encounterId"], raw: ["encounter"], targets: ["Encounter"] }],
+  ],
+  [
     "MedicationRequest",
     [
       { normalized: ["requester"], raw: ["requester"], targets: ACTOR_TARGETS, name: true },

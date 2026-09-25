@@ -505,9 +505,11 @@ describe("get_health_summary", () => {
     expect(new Set(recent.map((item) => item.section))).toStrictEqual(
       new Set(["appointments", "conditions", "medications", "labs"]),
     );
-    // The section label must not shadow the resource's own FHIR category array.
+    // The section label must not shadow the condition's own categories, and the
+    // problem-list entry comes first, saying so.
     const condition = recent.find((item) => item.resourceType === "Condition");
-    expect(condition?.category).toStrictEqual(["problem-list-item"]);
+    expect(condition?.categories).toStrictEqual(["problem-list-item"]);
+    expect(condition?.source).toBe("problem_list");
   });
 
   it("does not report its own decoded-document cache as a resource type", async () => {

@@ -3,8 +3,9 @@
  *
  * It answers "what is in here, and what has happened lately" in a single round
  * trip -- a count of every cached resource type per health system, plus the five
- * appointments nearest to now (the patient portal's upcoming visits included) and
- * the five most recent conditions, medications and lab results. A model that
+ * appointments nearest to now (the patient portal's upcoming visits included),
+ * five conditions (problem list first, see {@link recentConditions}) and the
+ * five most recent medications and lab results. A model that
  * starts here knows which of the other twenty-three tools are worth calling.
  *
  * The counts are emitted as items carrying `resourceType`, not as a separate
@@ -13,6 +14,7 @@
  * the summary would still say how many there are.
  */
 
+import { applyPolicy } from "../../policy/filter.ts";
 import { collectAppointments } from "../appointment-items.ts";
 import { WINDOW_ARGS, toolArgs } from "../args.ts";
 import {
@@ -22,6 +24,7 @@ import {
   selectHealthSystems,
   spec,
 } from "../collect.ts";
+import { collapseConditions } from "../conditions.ts";
 import { buildCoverage, mergeCoverage } from "../coverage.ts";
 import { BINARY_TEXT_TYPE } from "../deps.ts";
 import { LABORATORY, hasCategory } from "../match.ts";
@@ -36,22 +39,21 @@ import type { CoverageEntry } from "../coverage.ts";
 import type { HealthSystemInfo, SyncStatusEntry, ToolDeps } from "../deps.ts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
+const SUMMARY_TOOL = "get_health_summary";
+
 /** How many recent items of each section the summary carries. */
 const RECENT_PER_SECTION = 5;
 
 /**
- * Three of the four things a summary is asked about, and how to read each one.
- * The fourth, appointments, is {@link nearestAppointments}.
+ * Two of the four things a summary is asked about, and how to read each one.
+ * Appointments are {@link nearestAppointments}; conditions are
+ * {@link recentConditions}.
  *
  * The label goes out as `section`, not `category`: several normalized shapes
  * already carry a FHIR `category` array, and reusing the name would have the
  * summary's own label silently overwrite the resource's.
  */
 const SECTIONS: { section: string; specs: () => CollectSpec[] }[] = [
-  {
-    section: "conditions",
-    specs: () => [spec("Condition", { dateOf: (item) => item.recorded ?? item.onset })],
-  },
   {
     section: "medications",
     specs: () => [spec("MedicationRequest", { dateOf: (item) => item.authoredOn })],
@@ -126,8 +128,72 @@ function perSectionLimit(limit: number | undefined): number {
   return limit ?? RECENT_PER_SECTION;
 }
 
+/** Which part of the record a summary condition came from. */
+type ConditionSource = "problem_list" | "encounter_diagnosis" | "other";
+
+function conditionSource(group: TaggedItem): ConditionSource {
+  if (group.onProblemList === true) return "problem_list";
+  const categories = Array.isArray(group.categories) ? group.categories : [];
+  return categories.includes("encounter-diagnosis") ? "encounter_diagnosis" : "other";
+}
+
+const SOURCE_RANK: Record<ConditionSource, number> = {
+  problem_list: 0,
+  encounter_diagnosis: 1,
+  other: 2,
+};
+
+/**
+ * The conditions section: problem-list entries first, then the most recently
+ * seen encounter diagnoses, then anything else -- each one condition, collapsed
+ * exactly as `get_conditions` with `collapse: true` would (so a problem-list
+ * entry and its visits' copies are one item), and labelled with `source`.
+ *
+ * Collapsing is done on rows the exposure policy has ALREADY filtered, under
+ * this tool's name: a group's dates, visits and codes can only come from what
+ * the policy let through. The policy runs over the groups once more in
+ * `respond`, which changes nothing a first pass already removed; the first
+ * pass's warnings are passed on so none is lost.
+ */
+async function recentConditions(
+  deps: ToolDeps,
+  healthSystems: readonly HealthSystemInfo[],
+  rules: PolicyRules,
+  perSection: number,
+): Promise<{ entries: Sourced[]; coverage: CoverageEntry[]; warnings: string[] }> {
+  const collected = await collect(deps, healthSystems, {
+    specs: [spec("Condition", { dateOf: (item) => item.recorded ?? item.onset })],
+  });
+  const filtered = applyPolicy({
+    tool: SUMMARY_TOOL,
+    items: collected.items,
+    sources: collected.sources,
+    rules,
+  });
+  const groups = collapseConditions(filtered.items.map((item) => ({ item, raw: undefined })));
+  const ranked = groups.map((group, index) => ({
+    item: group.item,
+    source: conditionSource(group.item),
+    index,
+  }));
+  // `ranked` is a fresh array from `.map()`; `toSorted` is ES2023 and the Worker
+  // compiles against ES2022. Within a source, the collapse's own newest-first
+  // order is kept.
+  ranked.sort((a, b) => SOURCE_RANK[a.source] - SOURCE_RANK[b.source] || a.index - b.index);
+  return {
+    entries: ranked.slice(0, perSection).map(({ item, source }) => ({
+      item: { ...item, kind: "recent", section: "conditions", source },
+      source: undefined,
+    })),
+    coverage: collected.coverage,
+    warnings: filtered.warnings,
+  };
+}
+
 interface RecentResult {
   entries: Sourced[];
+  /** Warnings from sections that ran the policy before `respond` did. */
+  warnings: string[];
   /** Coverage for the appointments section (Encounter) plus every section in {@link SECTIONS}. */
   coverage: CoverageEntry[];
 }
@@ -149,6 +215,9 @@ async function recentItems(
   const coverageGroups: CoverageEntry[][] = [
     buildCoverage({ healthSystems, resourceTypes: ["Encounter"], syncStatus, rules, now }),
   ];
+  const conditions = await recentConditions(deps, healthSystems, rules, perSection);
+  out.push(...conditions.entries);
+  coverageGroups.push(conditions.coverage);
   for (const entry of SECTIONS) {
     const collected = await collect(deps, healthSystems, { specs: entry.specs() });
     coverageGroups.push(collected.coverage);
@@ -159,7 +228,11 @@ async function recentItems(
       });
     }
   }
-  return { entries: out, coverage: mergeCoverage(...coverageGroups) };
+  return {
+    entries: out,
+    warnings: conditions.warnings,
+    coverage: mergeCoverage(...coverageGroups),
+  };
 }
 
 export function registerSummaryTool(server: McpServer, deps: ToolDeps): void {
@@ -167,13 +240,17 @@ export function registerSummaryTool(server: McpServer, deps: ToolDeps): void {
     server,
     deps,
     {
-      name: "get_health_summary",
+      name: SUMMARY_TOOL,
       description:
         "Start here. How many of each resource type each connected health system " +
         "has cached (items with kind `count`), plus the five appointments nearest " +
-        "to now (upcoming first, patient-portal visits included) and the five most " +
-        "recent conditions, medications and lab results across all of them " +
-        "(kind `recent`, labelled by `section`). Five is a default for a fast " +
+        "to now (upcoming first, patient-portal visits included), five conditions " +
+        "and the five most recent medications and lab results across all of them " +
+        "(kind `recent`, labelled by `section`). Conditions are collapsed to one " +
+        "item per condition, as get_conditions does with `collapse: true`: " +
+        "problem-list entries first, then the most recently seen encounter " +
+        "diagnoses, each saying which in `source` (`problem_list`, " +
+        "`encounter_diagnosis`, or `other`). Five is a default for a fast " +
         "overview, not a ceiling: pass `limit` to get that many per section " +
         "instead, or call the section's own tool (`get_appointments`, " +
         "`get_conditions`, ...) for the complete list. `coverage` reports " +
@@ -224,8 +301,9 @@ export function registerSummaryTool(server: McpServer, deps: ToolDeps): void {
       }
 
       return respond({
-        tool: "get_health_summary",
+        tool: SUMMARY_TOOL,
         rules: run.rules,
+        warnings: recent.warnings,
         items,
         sources,
         limit: effectiveLimit(args.limit),

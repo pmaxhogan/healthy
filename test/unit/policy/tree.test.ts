@@ -215,7 +215,7 @@ describe("fieldSignature", () => {
 describe("shapesForScope", () => {
   it("keeps a typed scope's own shapes and the summary rows that name a type", () => {
     expect(shapesForScope({ tool: "get_health_summary", resourceType: "Condition" })).toStrictEqual(
-      ["summary:count", "summary:recent", "normalized:Condition"],
+      ["summary:count", "summary:recent", "view:ConditionGroup"],
     );
   });
 });

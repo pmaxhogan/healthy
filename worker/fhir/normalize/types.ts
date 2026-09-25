@@ -108,16 +108,35 @@ export interface NormalizedAppointmentView {
   csn?: string;
 }
 
-export interface NormalizedCodeableConcept {
+interface NormalizedCodeableConcept {
   text?: string;
   system?: string;
   code?: string;
 }
 
+/** One coding of a concept, as the health system sent it. */
+export interface NormalizedCoding {
+  system?: string;
+  code?: string;
+}
+
+/**
+ * A condition's code: the first coding, as every concept is normalized, plus
+ * every coding it carries. A health system often sends SNOMED first on one row
+ * and ICD-10 first on another copy of the same diagnosis, so telling that two
+ * rows are one condition needs all of them (`worker/mcp/conditions.ts`). Nested
+ * under `code` so a rule hiding `code` hides the codings too.
+ */
+export interface NormalizedConditionCode extends NormalizedCodeableConcept {
+  codings?: NormalizedCoding[];
+}
+
 export interface NormalizedCondition extends NormalizedBase {
   resourceType: "Condition";
-  code?: NormalizedCodeableConcept;
+  code?: NormalizedConditionCode;
   category: string[];
+  /** The id of the Encounter the condition was recorded at, when it names one. */
+  encounterId?: string;
   clinicalStatus?: string;
   verificationStatus?: string;
   onset?: string;

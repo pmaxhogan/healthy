@@ -16,6 +16,12 @@ import { z } from "zod";
 import { WINDOW_ARGS, sharedOnlyArgs, toolArgs } from "../args.ts";
 import { spec } from "../collect.ts";
 import {
+  CATEGORY_ARG,
+  CATEGORY_SPELLINGS,
+  canonicalCategory,
+  conditionsReshape,
+} from "../conditions.ts";
+import {
   LABORATORY,
   SOCIAL_HISTORY,
   VITAL_SIGNS,
@@ -57,25 +63,64 @@ export function registerClinicalTools(server: McpServer, deps: ToolDeps): void {
   collectionTool(server, deps, {
     name: "get_conditions",
     description:
-      "Diagnoses, problems and health concerns. Filter with `status` to see only " +
-      "active or only resolved ones.",
+      "Diagnoses, problems and health concerns, newest first. With no arguments " +
+      "it returns every row, and most rows are usually encounter diagnoses: the " +
+      "same condition recorded again at each visit it was coded at. For 'what " +
+      'conditions do I have\', pass `category: ["problem-list-item"]` (the ' +
+      "problem list only) or `collapse: true` (one item per condition). " +
+      "`category` keeps rows in any of the given categories " +
+      "(problem-list-item, encounter-diagnosis, health-concern; the display " +
+      "strings and Epic's 'Visit Diagnosis' are accepted too). `collapse` groups " +
+      "rows by condition -- the health system plus the first ICD-10 code, else " +
+      "the first SNOMED code, else the text -- into one item carrying the shared " +
+      "code, `categories`, `onProblemList`, `firstSeen`/`lastSeen` (earliest and " +
+      "latest onset or recorded date), `occurrences`, the Condition `ids`, the " +
+      "`encounterIds` it was coded at, and the status of the problem-list entry " +
+      "(else of the latest row that has one). With `collapse`, `total` counts " +
+      "rows before grouping, `groups` counts the groups, and `jq` and `limit` " +
+      "run on the groups; with `raw: true` each group's `raw` is the list of its " +
+      "rows' resources. Many rows carry no clinical status: `status` matches it " +
+      '(e.g. active, resolved), `status: "unknown"` keeps exactly the rows ' +
+      "without one, and a `status_filter_excluded_unknown:<n>` warning says how " +
+      "many status-less rows another value left out.",
     schema: toolArgs({
       ...WINDOW_ARGS,
+      category: CATEGORY_ARG.optional().describe(
+        "Only rows in any of these categories: problem-list-item, " +
+          'encounter-diagnosis, health-concern (or "Problem List Item", ' +
+          '"Encounter Diagnosis", "Visit Diagnosis", "Health Concern").',
+      ),
       status: z
         .string()
         .min(1)
         .optional()
-        .describe("Clinical status, e.g. active, inactive, resolved, remission."),
+        .describe(
+          "Clinical status, e.g. active, inactive, resolved, remission; or " +
+            "`unknown` for rows that carry none.",
+        ),
+      collapse: z
+        .boolean()
+        .optional()
+        .describe(
+          "One item per condition instead of one per row (see the tool " +
+            "description). Off by default.",
+        ),
     }),
-    specs: ({ status }) => [
-      spec("Condition", {
-        dateOf: (item) => firstOf(item.recorded, item.onset),
-        ...(status !== undefined && {
-          keep: (item) =>
-            item.clinicalStatus !== undefined && slug(item.clinicalStatus) === slug(status),
+    specs: ({ category }) => {
+      const wanted = (category ?? []).flatMap((value) => {
+        const code = canonicalCategory(value);
+        return code === undefined ? [] : (CATEGORY_SPELLINGS.get(code) ?? []);
+      });
+      return [
+        spec("Condition", {
+          dateOf: (item) => firstOf(item.recorded, item.onset),
+          ...(category !== undefined && {
+            keep: (item, resource) => hasCategory(resource, item.category, wanted),
+          }),
         }),
-      }),
-    ],
+      ];
+    },
+    reshape: ({ status, collapse }) => conditionsReshape({ status, collapse }),
   });
 
   collectionTool(server, deps, {

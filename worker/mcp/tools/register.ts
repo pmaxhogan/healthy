@@ -23,6 +23,7 @@ import type { SharedArgs, WindowArgs } from "../args.ts";
 import type { ToolBody } from "../audit.ts";
 import type { CollectSpec } from "../collect.ts";
 import type { ToolDeps } from "../deps.ts";
+import type { RespondInput } from "../respond.ts";
 import type { McpServer, ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { z } from "zod";
 
@@ -79,6 +80,11 @@ export interface CollectionToolOptions<
    * upcoming only". Stable strings, never anything from the record.
    */
   notes?: (args: z.output<S>) => string[];
+  /**
+   * A step of the tool's own between the exposure policy and `jq` (see
+   * `RespondInput.reshape`): filtering on a normalized field, grouping.
+   */
+  reshape?: (args: z.output<S>) => RespondInput["reshape"];
 }
 
 /**
@@ -122,6 +128,7 @@ export function collectionTool<S extends z.ZodType<SharedArgs & WindowArgs>>(
       healthSystemIds: collected.healthSystemIds,
       warnings: options.notes?.(args),
       coverage: collected.coverage,
+      reshape: options.reshape?.(args),
       now: run.now,
     });
   });

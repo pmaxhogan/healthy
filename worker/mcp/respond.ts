@@ -13,12 +13,16 @@
  *   (+ coverage, on a call that named the resource types it covers; + raw, when
  *   asked for)
  *
- * The order of operations is fixed too: policy, then the caller's `jq` program,
- * then the caller's `limit`.
+ * The order of operations is fixed too: policy, then the tool's own `reshape`
+ * (if it has one), then the caller's `jq` program, then the caller's `limit`.
  *
- *  - `total` is how many items the policy let through: the input to `jq`.
+ *  - `total` is how many items the policy let through: the input to `jq`. A
+ *    tool with a `reshape` defines it itself -- `get_conditions` reports the
+ *    rows its filters kept, before `collapse` groups them, and adds `groups`
+ *    (the number of groups, which is then the input to `jq`).
  *  - `matched` is the output count: how many values `jq` emitted, before
- *    `limit`. Without `jq` it equals `total`, so the envelope has one shape
+ *    `limit`. Without `jq` it is the number of items `limit` applies to --
+ *    `total`, or `groups` after a collapse -- so the envelope has one shape
  *    whether or not a program ran.
  *  - `truncated` is decided AFTER filtering and `jq`, deliberately. Slicing to
  *    `limit` first would let a deny rule turn a full page into a short one and
@@ -176,8 +180,38 @@ export interface RespondInput {
    * mistaken for "nothing exists".
    */
   coverage?: readonly CoverageEntry[] | undefined;
+  /**
+   * A tool's own step between the policy and `jq`: filter or group the
+   * policy-filtered items. It sees only what the policy released, so nothing it
+   * derives (a count, a date range, a group) can carry a withheld value.
+   */
+  reshape?: ((rows: readonly ReshapeRow[]) => Reshaped) | undefined;
   /** Unix seconds. */
   now: number;
+}
+
+/** One policy-filtered item, and its policy-filtered raw resource when `raw` was asked for. */
+export interface ReshapeRow {
+  item: unknown;
+  raw: RawEntry | undefined;
+}
+
+/** What a `reshape` hands back. */
+export interface Reshaped {
+  /** The items `jq` and `limit` now run on. */
+  items: unknown[];
+  /**
+   * Index-aligned with `items`: what `raw` carries for each one (a raw entry,
+   * or an array of them for an item made from several rows). Ignored unless
+   * `raw` was asked for.
+   */
+  raw: unknown[];
+  /** The envelope's `total`: the reshape documents what it counts. */
+  total: number;
+  /** Extra warnings: stable strings and counts, never a value from the record. */
+  warnings: string[];
+  /** Extra numeric envelope fields (`groups`). */
+  envelope?: Record<string, number> | undefined;
 }
 
 /** The warning `jq` can add. A stable string, like every other warning. */
@@ -190,7 +224,7 @@ function looksEmpty(outputs: readonly unknown[]): boolean {
 }
 
 /** Item plus its raw resource, for a `jq` run with `raw: true`. */
-function withRaw(items: readonly unknown[], rawItems: readonly RawEntry[]): unknown[] {
+function withRaw(items: readonly unknown[], rawItems: readonly unknown[]): unknown[] {
   return items.map((item, index) =>
     item !== null && typeof item === "object" && !Array.isArray(item)
       ? { ...item, raw: rawItems[index] ?? null }
@@ -217,6 +251,28 @@ function applyLimit(value: readonly unknown[], limit: number | undefined): Shape
   };
 }
 
+/** The tool's `reshape` over the policy's output, or that output unchanged. */
+function reshapeFiltered(
+  reshape: RespondInput["reshape"],
+  filtered: { items: unknown[]; rawItems: RawEntry[] },
+  wantsRaw: boolean,
+): Reshaped {
+  if (reshape === undefined) {
+    return {
+      items: filtered.items,
+      raw: filtered.rawItems,
+      total: filtered.items.length,
+      warnings: [],
+    };
+  }
+  return reshape(
+    filtered.items.map((item, index) => ({
+      item,
+      raw: wantsRaw ? filtered.rawItems[index] : undefined,
+    })),
+  );
+}
+
 /**
  * Filter, run the caller's jq, page, serialise.
  *
@@ -238,7 +294,10 @@ export async function respond(input: RespondInput): Promise<ToolOutcome> {
   }
 
   const limit = input.limit === undefined ? undefined : Math.max(0, Math.trunc(input.limit));
-  const total = filtered.items.length;
+  const wantsRaw = input.rawItems !== undefined;
+  const reshaped = reshapeFiltered(input.reshape, filtered, wantsRaw);
+  const { items, raw: rawItems, total } = reshaped;
+  const envelope = reshaped.envelope ?? {};
   // Checked on `total` -- post-policy, pre-`jq` -- so a denied pair (already
   // excluded from `coverage` itself) can never trigger this, and a `jq` program
   // narrowing a genuinely complete answer to nothing does not either.
@@ -247,19 +306,21 @@ export async function respond(input: RespondInput): Promise<ToolOutcome> {
   const baseWarnings = [
     ...(input.warnings ?? []),
     ...filtered.warnings,
+    ...reshaped.warnings,
     ...(input.coverage === undefined ? [] : coverageWarnings(input.coverage)),
     ...(incomplete ? [INCOMPLETE_WARNING] : []),
   ];
 
   if (input.jq === undefined) {
-    const shaped = applyLimit(filtered.items, limit);
+    const shaped = applyLimit(items, limit);
     const payload: Record<string, unknown> = {
       items: shaped.items,
       total,
-      matched: total,
+      ...envelope,
+      matched: items.length,
       ...(input.coverage !== undefined && { coverage: input.coverage }),
-      ...(input.rawItems !== undefined && {
-        raw: limit === undefined ? filtered.rawItems : filtered.rawItems.slice(0, limit),
+      ...(wantsRaw && {
+        raw: limit === undefined ? rawItems : rawItems.slice(0, limit),
       }),
       warnings: sortedWarnings(baseWarnings),
       truncated: shaped.truncated,
@@ -273,14 +334,13 @@ export async function respond(input: RespondInput): Promise<ToolOutcome> {
     };
   }
 
-  const jqInput =
-    input.rawItems === undefined ? filtered.items : withRaw(filtered.items, filtered.rawItems);
+  const jqInput = wantsRaw ? withRaw(items, rawItems) : items;
   const run = await runJq(input.jq, JSON.stringify(jqInput));
   if (!run.ok) {
     return toolError(run.code, {
       healthSystemIds: input.healthSystemIds,
       detail: run.message,
-      jq: { inputCount: total, outputCount: null },
+      jq: { inputCount: items.length, outputCount: null },
     });
   }
 
@@ -288,10 +348,11 @@ export async function respond(input: RespondInput): Promise<ToolOutcome> {
   // single one -- the caller chooses whether that is one match (a stream,
   // `.[] | select(...)`) or one shaped answer (a single non-array output).
   const shaped = applyLimit(run.outputs, limit);
-  const empty = total > 0 && looksEmpty(run.outputs);
+  const empty = items.length > 0 && looksEmpty(run.outputs);
   const payload: Record<string, unknown> = {
     items: shaped.items,
     total,
+    ...envelope,
     matched: shaped.matched,
     ...(input.coverage !== undefined && { coverage: input.coverage }),
     warnings: sortedWarnings([...baseWarnings, ...(empty ? [JQ_RESULT_EMPTY] : [])]),
@@ -303,6 +364,6 @@ export async function respond(input: RespondInput): Promise<ToolOutcome> {
     resultCount: shaped.returned,
     healthSystemIds: input.healthSystemIds,
     errorCode: null,
-    jq: { inputCount: total, outputCount: shaped.matched },
+    jq: { inputCount: items.length, outputCount: shaped.matched },
   };
 }
