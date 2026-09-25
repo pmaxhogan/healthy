@@ -3,15 +3,16 @@
 // this deployment needs: where the password comes from, and the public pages.
 //
 // Most of SettingsDto is edited on /calendar, next to the thing it affects. This
-// page shows the rest read-only, so the whole configuration is visible in one
-// place.
+// page shows the rest of it -- mostly read-only, plus the MCP toggle and the
+// patient-portal sign-in limit, which have no better home -- so the whole
+// configuration is visible in one place.
 //
 // The backoff clock is deliberately read-only, not a "clear it" button: the
 // Worker accepts `syncBackoffUntil` in a settings patch only so the SPA can
 // round-trip the DTO it was handed, and then ignores it. A button that reported
 // success while changing nothing would be worse than no button.
 
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 
 import { endpoints } from "../api/endpoints.ts";
 import StateBlock from "../components/StateBlock.vue";
@@ -21,6 +22,7 @@ import { useAction, useLoad } from "../lib/use-load.ts";
 
 const settings = useLoad((signal) => endpoints.settings(signal));
 const toggleMcp = useAction();
+const savePortalLimit = useAction();
 
 const current = computed(() => settings.data.value);
 
@@ -29,6 +31,41 @@ async function onToggleMcp(next: boolean): Promise<void> {
     const saved = await endpoints.saveSettings({ mcpEnabled: next });
     settings.set(saved);
     toastSuccess(next ? "MCP enabled." : "MCP disabled.");
+  });
+  if (!ok) await settings.reload();
+}
+
+// A draft, re-seeded whenever the loaded value changes underneath it (but not
+// while a save of our own is in flight, which would otherwise clobber what the
+// owner just typed with the value the load that started before it returned).
+const portalLimitDraft = ref(1);
+watch(
+  current,
+  (value) => {
+    if (value && !savePortalLimit.busy.value)
+      portalLimitDraft.value = value.portalLoginAttemptLimit;
+  },
+  { immediate: true },
+);
+
+/**
+ * Mirrors `worker/api/schemas.ts`'s `portalLoginAttemptLimit` bound, so a bad
+ * value is refused here before it is ever sent -- see `errorMessage` for the
+ * zod issue text shown when a save is 400ed anyway.
+ */
+const portalLimitValid = computed(
+  () =>
+    Number.isSafeInteger(portalLimitDraft.value) &&
+    portalLimitDraft.value >= 1 &&
+    portalLimitDraft.value <= 20,
+);
+
+async function onSavePortalLimit(): Promise<void> {
+  if (!portalLimitValid.value) return;
+  const ok = await savePortalLimit.run(async () => {
+    const saved = await endpoints.saveSettings({ portalLoginAttemptLimit: portalLimitDraft.value });
+    settings.set(saved);
+    toastSuccess("Portal sign-in limit saved.");
   });
   if (!ok) await settings.reload();
 }
@@ -73,6 +110,37 @@ async function onToggleMcp(next: boolean): Promise<void> {
             Clients, policy rules and the audit log live on the
             <RouterLink to="/connectors">MCP</RouterLink> page.
           </p>
+        </section>
+
+        <section class="card">
+          <h2>Patient portal sign-ins</h2>
+          <label class="field">
+            Portal sign-ins per day
+            <input
+              v-model.number="portalLimitDraft"
+              type="number"
+              min="1"
+              max="20"
+              :disabled="savePortalLimit.busy.value"
+            />
+          </label>
+          <p class="muted">
+            Each sign-in may email a verification code; the scheduled sync always leaves the last 2
+            attempts of the day for the "Sign in now" button, and sends at most 2 emailed codes per
+            day unattended. The counter resets at 00:00 UTC.
+          </p>
+          <p v-if="!portalLimitValid" class="muted danger-text">
+            Must be a whole number from 1 to 20.
+          </p>
+          <div class="row">
+            <button
+              class="primary"
+              :disabled="!portalLimitValid || savePortalLimit.busy.value"
+              @click="onSavePortalLimit"
+            >
+              {{ savePortalLimit.busy.value ? "Saving…" : "Save" }}
+            </button>
+          </div>
         </section>
 
         <section class="card">
