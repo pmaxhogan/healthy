@@ -149,6 +149,11 @@ export interface RespondInput {
   items: readonly unknown[];
   /** The raw FHIR behind `items`, in the same order. Omitted unless requested. */
   rawItems?: readonly RawEntry[] | undefined;
+  /**
+   * The raw FHIR behind `items`, in the same order, whether or not it was
+   * requested: the policy judges rendered reference names by it. Never returned.
+   */
+  sources?: readonly (RawEntry | undefined)[] | undefined;
   /** Omitted (or undefined) means no limit: every matching item is returned. */
   limit?: number | undefined;
   /** The caller's jq program, run after the policy and before `limit`. */
@@ -210,6 +215,7 @@ export async function respond(input: RespondInput): Promise<ToolOutcome> {
     tool: input.tool,
     items: input.items,
     rawItems: input.rawItems,
+    sources: input.sources,
     rules: input.rules,
   });
 

@@ -288,6 +288,57 @@ is something a model can mistake for data, and something a `jq` filter could
 select. The answer's `warnings` say what went instead:
 `policy_field_removed:<Type or *>.<path>`.
 
+### Names inside references, and narratives
+
+A FHIR resource names other resources in passing: every `Reference` carries a
+`display`, the referenced resource's name, wherever it sits — `subject`,
+`performer[]`, `resultsInterpreter[]`, `participant[].individual`, inside an
+extension or a contained resource. No path rule could list them all, so the
+policy judges each reference by the type it points at, taken from its
+`reference` (`Practitioner/…`, an absolute URL, `#id` for a contained
+resource) or its `type`. A reference's `display` and `identifier` are removed,
+anywhere in the resource, when that type is:
+
+- denied by a `resource` rule;
+- `Patient` or `RelatedPerson`, when a hide rule reaches the patient's `name`
+  (or the sensitive default withholds it);
+- `Practitioner`, `PractitionerRole` or `Person`, when one of those is
+  denied, a hide rule reaches its `name`, or a hide rule reaches a field a
+  clinician's name is rendered into (`practitioners[].name`, the appointment
+  view's `practitioner`, a `requester`, an `author`, `performers[].name`,
+  `participants[].name` — in either vocabulary).
+
+A reference whose type cannot be read (a bare `{ "display": … }`, a
+`urn:uuid:`, a `#id` with no contained match) is removed whenever any person
+type is restricted — it fails closed — and so is an annotation's
+`authorString`. A coding's `display` (a code's text) is never touched. The
+normalised strings rendered from these references (`practitioners[].name`,
+`requester`, `author`, `payor`, …) go too, and so does what was read from a
+withheld resource itself (a clinician's `specialty`, a denied Location's
+address): judged by the raw reference they were read from, or — for a portal
+visit, or a summary item — by every type that field may point at. A
+restriction applies at the health systems the triggering rule is scoped to,
+in every resource type. A rule on a person's own `name` (`Patient.name`,
+`Practitioner.name`) applies in every tool whatever its tool scope, since the
+copy of that name in other tools' resources would otherwise be a way around
+it; a rule on a field a name is rendered into keeps its tool scope. The
+warning is
+`policy_reference_display_removed:<TargetType>` (`unknown` for the untyped
+kind), never the value.
+
+`contained[]` resources are filtered as resources of their own type: a denied
+type is dropped from the array, and every field rule for that type applies.
+
+**Narratives.** A raw resource's `text` (the health system's HTML rendering of
+the whole resource) cannot be filtered by path, so it is removed from any
+resource that a field rule reaches, that has a sensitive field withheld, that
+lost a reference display, or whenever any person type is restricted at all.
+The warning is `policy_field_removed:<Type>.text`.
+
+What no rule reaches is free prose: a report's `conclusion`, a note's text, a
+document's decoded text (`get_document_text`). A name written into prose stays
+there; hide the field or deny the tool if that matters.
+
 ### Show a withheld field
 
 Some fields are withheld by default because the resource marks them

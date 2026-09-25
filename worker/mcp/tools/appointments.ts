@@ -86,6 +86,7 @@ export function registerAppointmentTools(server: McpServer, deps: ToolDeps): voi
         rules: run.rules,
         items: collected.items,
         ...(args.raw === true && { rawItems: collected.rawItems }),
+        sources: collected.sources,
         limit: effectiveLimit(args.limit),
         jq: args.jq,
         healthSystemIds: collected.healthSystemIds,

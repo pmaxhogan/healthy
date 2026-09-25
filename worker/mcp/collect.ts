@@ -106,6 +106,12 @@ export interface Collected {
   items: TaggedItem[];
   /** Empty unless `raw` was asked for. Index-aligned with `items`. */
   rawItems: RawEntry[];
+  /**
+   * The raw resource behind every item, whether or not `raw` was asked for.
+   * Index-aligned with `items`. For the exposure policy to judge by (which type
+   * a rendered name points at) -- never returned unless `raw` is.
+   */
+  sources: RawEntry[];
   /** The health systems actually read from, by id. For the audit row. */
   healthSystemIds: string[];
 }
@@ -286,6 +292,7 @@ export async function collect(
   return {
     items: entries.map((entry) => entry.item),
     rawItems: options.raw === true ? entries.map((entry) => entry.raw) : [],
+    sources: entries.map((entry) => entry.raw),
     healthSystemIds: healthSystems.map((healthSystem) => healthSystem.id),
   };
 }

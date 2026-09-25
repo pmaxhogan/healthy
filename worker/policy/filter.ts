@@ -30,11 +30,26 @@
  * them back. The `sensitive` key is then replaced by `withheld`, so the model is
  * told a field exists and was held back rather than being left to assume the
  * record is empty.
+ *
+ * References: a name a resource copies from another (`Reference.display`) is
+ * judged by the referenced type, anywhere in the raw resource and in the
+ * normalized strings rendered from it -- see `worker/policy/references.ts`.
+ * Contained resources are filtered as resources of their own type, and a raw
+ * resource's narrative (`text`) is dropped whenever the policy withholds
+ * anything from it, since no path can reach inside rendered HTML.
  */
 
 import { ARRAY_SEGMENT, isChoiceSegment, matchesChoice } from "@shared/policy-path.ts";
 
 import { expandPath } from "./aliases.ts";
+import {
+  containedTypes,
+  isUnrestricted,
+  restrictionFor,
+  walkReferences,
+  withheldNormalizedPaths,
+  type Restriction,
+} from "./references.ts";
 import {
   fieldRulesFor,
   isHealthSystemDenied,
@@ -43,6 +58,7 @@ import {
   type ItemScope,
   type PolicyRules,
 } from "./rules.ts";
+import { SENSITIVE_FIELDS } from "./tree.ts";
 
 /** A raw FHIR resource as a tool hands it over, tagged with its health system. */
 export interface RawEntry {
@@ -60,6 +76,14 @@ export interface ApplyPolicyInput {
   items: readonly unknown[];
   /** Optional raw projection, filtered by exactly the same rules. */
   rawItems?: readonly RawEntry[] | undefined;
+  /**
+   * The raw resource each item was normalized from, index-aligned with `items`,
+   * for judging only: never returned. It tells the reference rule which type a
+   * rendered name (`requester`, `payor`) actually points at. Defaults to
+   * `rawItems`; an item with no source is judged by every type its field may
+   * point at, which fails closed.
+   */
+  sources?: readonly (RawEntry | undefined)[] | undefined;
   rules: PolicyRules;
 }
 
@@ -391,24 +415,81 @@ export function applyPolicy(input: ApplyPolicyInput): ApplyPolicyResult {
 
   const warnings = new Set<string>();
   const sensitive = collectSensitive(rules, tool, input.items);
+  const restrictions = new Restrictions(rules, tool);
 
   return {
     denied: false,
-    items: filterItems(rules, tool, input.items, warnings),
-    rawItems: filterRaw(rules, tool, input.rawItems ?? [], sensitive, warnings),
+    items: filterItems(
+      rules,
+      tool,
+      input.items,
+      input.sources ?? input.rawItems ?? [],
+      restrictions,
+      warnings,
+    ),
+    rawItems: filterRaw(rules, tool, input.rawItems ?? [], sensitive, restrictions, warnings),
     warnings: sortedWarnings(warnings),
   };
 }
 
-/** The normalized half: whole-item denials, then field rules, then `sensitive`. */
+/**
+ * The reference restriction per health system, computed once per call: it
+ * depends on the tool and health system a rule is scoped to, never on the
+ * item's own resource type (see `restrictionFor`).
+ */
+class Restrictions {
+  private readonly byHealthSystem = new Map<string, Restriction>();
+
+  constructor(
+    private readonly rules: PolicyRules,
+    private readonly tool: string,
+  ) {}
+
+  get(healthSystemId: string): Restriction {
+    const cached = this.byHealthSystem.get(healthSystemId);
+    if (cached !== undefined) return cached;
+    const restriction = restrictionFor(this.rules, {
+      tool: this.tool,
+      resourceType: "",
+      healthSystemId,
+    });
+    this.byHealthSystem.set(healthSystemId, restriction);
+    return restriction;
+  }
+}
+
+/**
+ * Remove every normalized field rendered from a withheld reference: a
+ * clinician's name in `practitioners[].name`, a requester, an author.
+ */
+function stripNormalizedReferences(
+  item: unknown,
+  resourceType: string,
+  source: unknown,
+  restriction: Restriction,
+  warnings: Set<string>,
+): unknown {
+  let current = item;
+  for (const { path, as } of withheldNormalizedPaths(resourceType, source, restriction)) {
+    const next = prune(current, path);
+    if (next.remove || !next.changed) continue;
+    warnings.add(`policy_reference_display_removed:${as}`);
+    current = next.value;
+  }
+  return current;
+}
+
+/** The normalized half: whole-item denials, then field rules, references, then `sensitive`. */
 function filterItems(
   rules: PolicyRules,
   tool: string,
   input: readonly unknown[],
+  sources: readonly (RawEntry | undefined)[],
+  restrictions: Restrictions,
   warnings: Set<string>,
 ): unknown[] {
   const items: unknown[] = [];
-  for (const item of input) {
+  for (const [index, item] of input.entries()) {
     // Anything that is not a record cannot be filtered: it carries no
     // `resourceType` to judge, no `healthSystemId` to check and no `sensitive` list to
     // honour. No tool produces one today, and the choke point's contract is that
@@ -419,7 +500,14 @@ function filterItems(
     }
     const scope = itemScope(tool, item);
     if (itemDenied(rules, scope, warnings)) continue;
-    const filtered = applyFieldRules(rules, scope, "normalized", item, warnings);
+    const fielded = applyFieldRules(rules, scope, "normalized", item, warnings);
+    const filtered = stripNormalizedReferences(
+      fielded,
+      scope.resourceType,
+      sources.at(index)?.resource,
+      restrictions.get(scope.healthSystemId),
+      warnings,
+    );
     items.push(isRecord(filtered) ? stripSensitive(rules, scope, filtered, warnings) : filtered);
   }
   return items;
@@ -431,6 +519,7 @@ function filterRaw(
   tool: string,
   input: readonly RawEntry[],
   sensitive: ReadonlyMap<string, ReadonlySet<string>>,
+  restrictions: Restrictions,
   warnings: Set<string>,
 ): RawEntry[] {
   const rawItems: RawEntry[] = [];
@@ -441,13 +530,12 @@ function filterRaw(
       healthSystemId: entry.healthSystemId,
     };
     if (itemDenied(rules, scope, warnings)) continue;
-    const filtered = applyFieldRules(rules, scope, "raw", entry.resource, warnings);
-    const resource = stripSensitiveRaw(
-      scope.resourceType,
-      sensitive.get(sensitiveKey(scope.resourceType, scope.healthSystemId)) ?? EMPTY_FIELDS,
-      filtered,
+    const resource = filterRawResource(rules, scope, entry.resource, {
+      sensitive: sensitive.get(sensitiveKey(scope.resourceType, scope.healthSystemId)),
+      restriction: restrictions.get(scope.healthSystemId),
+      contained: containedTypes(entry.resource),
       warnings,
-    );
+    });
     rawItems.push({
       healthSystem: entry.healthSystem,
       healthSystemId: entry.healthSystemId,
@@ -457,8 +545,111 @@ function filterRaw(
   return rawItems;
 }
 
-/** Shared empty set, so `filterRaw` allocates nothing per item in the common case. */
-const EMPTY_FIELDS: ReadonlySet<string> = new Set<string>();
+interface RawContext {
+  /** Sensitive fields carried over from the normalized items; the static default when absent. */
+  sensitive: ReadonlySet<string> | undefined;
+  restriction: Restriction;
+  /** Contained ids to types, from the outermost resource: what `#id` resolves to. */
+  contained: ReadonlyMap<string, string>;
+  warnings: Set<string>;
+}
+
+/**
+ * The sensitive fields a raw resource of this type loses when no normalized
+ * item declared them -- a contained resource has none -- read from the static
+ * default and the owner's `allow` rules.
+ */
+function staticSensitive(rules: PolicyRules, scope: ItemScope): ReadonlySet<string> {
+  const declared = SENSITIVE_FIELDS.get(scope.resourceType) ?? [];
+  return new Set(declared.filter((field) => !isSensitiveAllowed(rules, scope, field)));
+}
+
+/**
+ * One raw resource through the whole policy: field rules, sensitive fields,
+ * its contained resources (each judged as a resource of its own type), every
+ * withheld reference's display, and the narrative.
+ */
+function filterRawResource(
+  rules: PolicyRules,
+  scope: ItemScope,
+  resource: unknown,
+  context: RawContext,
+): unknown {
+  const { warnings } = context;
+  const fielded = applyFieldRules(rules, scope, "raw", resource, warnings);
+  const sensitiveFields = context.sensitive ?? staticSensitive(rules, scope);
+  let current = stripSensitiveRaw(scope.resourceType, sensitiveFields, fielded, warnings);
+  current = filterContained(rules, scope, current, context);
+
+  let referencesRemoved = false;
+  if (!isUnrestricted(context.restriction)) {
+    const walked = walkReferences(
+      current,
+      { restriction: context.restriction, contained: context.contained, warnings },
+      CONTAINED_KEY,
+    );
+    referencesRemoved = walked.changed;
+    current = walked.value;
+  }
+
+  const narrativeAtRisk =
+    referencesRemoved ||
+    context.restriction.person ||
+    sensitiveFields.size > 0 ||
+    fieldRulesFor(rules, scope).length > 0;
+  return narrativeAtRisk ? stripNarrative(scope.resourceType, current, warnings) : current;
+}
+
+const CONTAINED_KEY: ReadonlySet<string> = new Set(["contained"]);
+
+/**
+ * Filter a resource's `contained[]` as resources of their own types: a denied
+ * type is dropped, and every other one goes through {@link filterRawResource}
+ * in its own resource-type scope (same tool and health system). Anything in
+ * the array that is not a resource cannot be judged, so it is dropped.
+ */
+function filterContained(
+  rules: PolicyRules,
+  scope: ItemScope,
+  resource: unknown,
+  context: RawContext,
+): unknown {
+  if (!isRecord(resource) || !Object.hasOwn(resource, "contained")) return resource;
+  const contained: unknown = Reflect.get(resource, "contained");
+  if (!Array.isArray(contained)) return resource;
+  const kept: unknown[] = [];
+  for (const entry of contained as unknown[]) {
+    const type = stringField(entry, "resourceType");
+    if (type === "") {
+      context.warnings.add("policy_unfilterable_item_dropped");
+      continue;
+    }
+    const inner: ItemScope = { ...scope, resourceType: type };
+    if (itemDenied(rules, inner, context.warnings)) continue;
+    kept.push(filterRawResource(rules, inner, entry, { ...context, sensitive: undefined }));
+  }
+  return Object.fromEntries(
+    Object.entries(resource).map(([key, value]) => [key, key === "contained" ? kept : value]),
+  );
+}
+
+/**
+ * Drop a resource's narrative (`text`, a `{ status, div }` Narrative).
+ *
+ * The narrative is the health system's own rendering of the whole resource to
+ * HTML -- names, dates, results -- and no path rule can reach inside it. So
+ * whenever the policy removes anything from a resource, or withholds names at
+ * all, the narrative goes with it rather than restating what was removed.
+ */
+function stripNarrative(resourceType: string, resource: unknown, warnings: Set<string>): unknown {
+  if (!isRecord(resource) || !Object.hasOwn(resource, "text")) return resource;
+  const text: unknown = Reflect.get(resource, "text");
+  if (!isRecord(text) || !(Object.hasOwn(text, "div") || Object.hasOwn(text, "status"))) {
+    return resource;
+  }
+  warnings.add(`policy_field_removed:${resourceType}.text`);
+  return Object.fromEntries(Object.entries(resource).filter(([key]) => key !== "text"));
+}
 
 /**
  * Warnings as a sorted, de-duplicated list.

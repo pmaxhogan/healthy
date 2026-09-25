@@ -116,6 +116,7 @@ export function collectionTool<S extends z.ZodType<SharedArgs & WindowArgs>>(
       rules: run.rules,
       items: collected.items,
       ...(shared.raw === true && { rawItems: collected.rawItems }),
+      sources: collected.sources,
       limit: effectiveLimit(shared.limit),
       jq: shared.jq,
       healthSystemIds: collected.healthSystemIds,

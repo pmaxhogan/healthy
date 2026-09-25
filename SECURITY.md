@@ -177,6 +177,26 @@ normalised text rendered from a raw coding or reference), so one rule strips bot
 shapes; a rule that could match nothing is refused at write time. A field rule's
 warning names its path, never its tool or health system scope.
 
+`raw: true` is the FHIR resource minus the policy, and that includes every name
+a resource copies from another one. Every `Reference` anywhere in a raw resource
+— nested, in arrays, in extensions, in contained resources — is judged by the
+type it points at (from `reference`, relative, absolute or `#contained`, or
+from `type`): its `display` and `identifier` are removed when that type is
+denied, when it is the patient (or a related person) and a rule hides the
+patient's name, or when it is a clinician (`Practitioner`, `PractitionerRole`,
+`Person`) and those are denied or a rule hides a clinician's name or a field one
+is rendered into. A reference whose type cannot be read fails closed: removed
+whenever any person type is restricted. The normalised strings rendered from
+those references (`requester`, `author`, `practitioners[].name`, …), and what
+was read from a withheld resource itself (a clinician's specialty, a denied
+Location's address), go with them — judged by the raw reference behind the item, or, where there is none,
+by every type the field may point at. `contained[]` resources are filtered as
+resources of their own type. A resource's narrative (`text`, rendered HTML no
+path can reach into) is dropped whenever the policy withholds anything from
+that resource or restricts any person's name. Each removal is a warning
+(`policy_reference_display_removed:<Type>`, `policy_field_removed:<Type>.text`)
+that never carries the value. See [docs/mcp.md](docs/mcp.md#names-inside-references-and-narratives).
+
 **Previewing a rule reads real data, for the owner only.** The rule builder's
 `POST /api/mcp/policy/structure` (key names of a tool's real answer) and
 `POST /api/mcp/policy/preview` (a draft rule's before and after on one real item)
@@ -319,6 +339,11 @@ configuration. gitleaks runs on staged changes in a pre-commit hook and over ful
 history in CI.
 
 ## Known limits
+
+- The exposure policy removes structured fields, references and narratives; it
+  does not scrub free prose. A name a clinician typed into a report's
+  `conclusion`, a note, or a document's text (`get_document_text`) is returned
+  as written unless that field is hidden or the tool denied.
 
 - `DATA_KEY` has no key id in the envelope, so rotating it invalidates existing
   sealed columns and moves every blinded value. Rotation currently means

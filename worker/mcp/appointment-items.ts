@@ -99,6 +99,11 @@ export interface Appointments {
   items: TaggedItem[];
   /** Empty unless `raw` was asked for. Index-aligned with `items`. */
   rawItems: RawEntry[];
+  /**
+   * The FHIR Encounter behind each item, for the exposure policy to judge by;
+   * undefined for a portal visit, which has none. Never returned. Index-aligned.
+   */
+  sources: (RawEntry | undefined)[];
   healthSystemIds: string[];
   /** The tool's own notes, e.g. {@link PORTAL_RAW_WARNING}. */
   warnings: string[];
@@ -150,7 +155,6 @@ function sightingOf(item: TaggedItem, healthSystemId: string, rank: Sighting["ra
 async function fhirEntries(
   deps: ToolDeps,
   healthSystems: readonly HealthSystemInfo[],
-  raw: boolean,
 ): Promise<Entry[]> {
   const collected = await collect(deps, healthSystems, {
     specs: [
@@ -164,13 +168,12 @@ async function fhirEntries(
         }),
       }),
     ],
-    raw,
   });
   return collected.items.map((item, index) => {
     const healthSystemId = stringOf(item, "healthSystemId") ?? "";
     return {
       item,
-      raw: collected.rawItems[index] ?? { healthSystem: "", healthSystemId, resource: {} },
+      raw: collected.sources[index] ?? { healthSystem: "", healthSystemId, resource: {} },
       healthSystemId,
       start: startOf(item),
       portal: false,
@@ -303,7 +306,7 @@ async function deniedSightings(
   if (denied.length === 0) return [];
   // Unmerged on purpose: a portal copy the FHIR item would absorb still carries
   // its own CSN and labels, and every one of them is something to match on.
-  const encounters = await fhirEntries(deps, denied, false);
+  const encounters = await fhirEntries(deps, denied);
   const sightings = encounters.map((entry) => entry.sighting);
   for (const healthSystem of denied) {
     const records = await deps.portalVisits(healthSystem.id);
@@ -338,7 +341,7 @@ export async function collectAppointments(
 ): Promise<Appointments> {
   const raw = options.raw === true;
   const now = deps.now();
-  const entries = await fhirEntries(deps, healthSystems, raw);
+  const entries = await fhirEntries(deps, healthSystems);
   await mergePortal(deps, healthSystems, entries, now);
   const denied = await deniedSightings(deps, options.denied, now);
 
@@ -354,6 +357,7 @@ export async function collectAppointments(
   return {
     items: kept.map((entry) => entry.item),
     rawItems: raw ? kept.map((entry) => entry.raw) : [],
+    sources: kept.map((entry) => (entry.portal ? undefined : entry.raw)),
     healthSystemIds: healthSystems.map((healthSystem) => healthSystem.id),
     warnings: raw && kept.some((entry) => entry.portal) ? [PORTAL_RAW_WARNING] : [],
   };
