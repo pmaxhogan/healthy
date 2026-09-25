@@ -5,6 +5,7 @@
 // `events.list` response the API sends -- so "the second run must not duplicate
 // anything" is an assertion about the diff, not about a mock.
 
+import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { getSetting, setSetting } from "../../../worker/db/settings.ts";
@@ -228,8 +229,8 @@ describe("the second run", () => {
     await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
     const patchesAfterFirst = h.upstreams.calendar.patches;
 
-    // An hour later the footer's "last checked" time has moved, and that must not
-    // be enough to provoke a patch.
+    // An hour later the run's clock has moved, and that must not be enough to
+    // provoke a patch.
     h.time.advance(3600);
     const summary = await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
 
@@ -237,6 +238,35 @@ describe("the second run", () => {
     expect(summary.eventsPatched).toBe(0);
     expect(summary.eventsGhosted).toBe(0);
     expect(h.upstreams.calendar.patches).toBe(patchesAfterFirst);
+  });
+
+  it("writes a description with no clock in it", async () => {
+    const h = await setup();
+    await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
+
+    const event = h.upstreams.calendar.byKey().get(await sk(`${h.healthSystemId}:enc-1`));
+    const description = String(event?.description);
+    expect(description.endsWith("\n\nSynced by Healthy · do not edit")).toBe(true);
+    expect(description).not.toContain("last checked");
+  });
+
+  it("rewrites an event with a stale description exactly once", async () => {
+    // What a deploy that changes the description does to every event already on
+    // the calendar: the stored fingerprint no longer matches, so the next run
+    // patches each event once and the one after patches nothing.
+    const h = await setup();
+    await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
+    await env.DB.prepare("UPDATE calendar_events SET fingerprint = ?").bind("older").run();
+
+    h.time.advance(3600);
+    const first = await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
+    h.time.advance(3600);
+    const second = await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
+
+    expect(first.eventsPatched).toBe(2);
+    expect(first.eventsInserted).toBe(0);
+    expect(second.eventsPatched).toBe(0);
+    expect(second.eventsInserted).toBe(0);
   });
 
   it("settles a ghost after one pass", async () => {

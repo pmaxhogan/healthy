@@ -29,7 +29,6 @@ import type { MappingInput, MappingSettings } from "../../../worker/sync/mapping
 
 const HEALTH_SYSTEM_ID = "prov-1";
 const START = "2026-10-01T15:30:00Z";
-const NOW = "2026-09-30T12:00:00Z";
 const PORTAL = "https://portal.example.test/mychart";
 
 /** A fresh random key per run: the blinds only have to be consistent within one. */
@@ -66,7 +65,6 @@ function input(
       config: config(overrides.config),
     },
     settings: { ...SETTINGS, ...overrides.settings },
-    nowIso: NOW,
     blinder: BLINDER,
   };
 }
@@ -353,9 +351,13 @@ describe("description", () => {
     expect(model.description).toContain("Casey Example — Cardiology");
     expect(model.description).toContain("Office Visit · planned");
     expect(model.description).toContain(PORTAL);
-    expect(model.description).toContain(
-      `Synced by Healthy · last checked ${formatInZone(NOW, "UTC")} · do not edit`,
-    );
+    expect(model.description.endsWith("\n\nSynced by Healthy · do not edit")).toBe(true);
+  });
+
+  it("carries no clock: an unchanged event is never patched, so a time would go stale", async () => {
+    const { model } = await buildCalendarModel(view(), input());
+
+    expect(model.description).not.toContain("last checked");
   });
 
   it("falls back to the health system display name when the org is unknown", async () => {
@@ -391,15 +393,12 @@ describe("colorId", () => {
 });
 
 describe("fingerprint", () => {
-  it("ignores the footer's last-checked time", async () => {
+  it("is the same on every build of an unchanged appointment", async () => {
     // THE property that stops the hourly sync patching every event forever.
     const first = await buildCalendarModel(view(), input());
-    const later = await buildCalendarModel(view(), {
-      ...input(),
-      nowIso: "2026-09-30T23:59:00Z",
-    });
+    const later = await buildCalendarModel(view(), input());
 
-    expect(later.model.description).not.toBe(first.model.description);
+    expect(later.model.description).toBe(first.model.description);
     expect(later.model.fingerprint).toBe(first.model.fingerprint);
   });
 
@@ -476,7 +475,7 @@ describe("ghostModel", () => {
   it("settles: the same disappearance time gives the same fingerprint", async () => {
     // What stops every hourly run re-patching every ghost.
     const early = await buildCalendarModel(view(), input());
-    const late = await buildCalendarModel(view(), { ...input(), nowIso: "2026-10-05T04:00:00Z" });
+    const late = await buildCalendarModel(view(), input());
     const options = {
       ghostColorId: "8",
       blinder: BLINDER,

@@ -173,8 +173,8 @@ const DEFAULT_FORMAT: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeSt
 /**
  * Format an instant for a human, in an explicit zone.
  *
- * Defaults to a short date-and-time, which is what the calendar description
- * footer and the admin UI both want. The locale is fixed to en-US so the output
+ * Defaults to a short date-and-time, which is what a ghost event's "no longer on
+ * the schedule as of" line and the admin UI both want. The locale is fixed to en-US so the output
  * does not change with whatever locale the Worker isolate happens to report.
  */
 export function formatInZone(

@@ -15,12 +15,14 @@
  * offset is a 50-minute event -- which is what the owner's afternoon actually
  * costs.
  *
- * **The footer time is outside the fingerprint.** The description ends with
- * "last checked <local time>", which changes on every run. If that were
- * fingerprinted, every hourly sync would patch every event forever. So the
- * fingerprint covers the body and the footer rides along: nothing is patched
- * until something real changes, and when something does the footer is refreshed
- * with it.
+ * **The description carries no clock.** It ends with a fixed "Synced by Healthy ·
+ * do not edit" footer and nothing that changes from run to run. An unchanged
+ * event is never patched (that is what the fingerprint is for), so a "last
+ * checked <time>" stamp would have shown the time of the first write for ever --
+ * a claim of freshness that was not true. How recently a health system was synced
+ * is shown in the admin UI, which knows. The whole description, footer included,
+ * is fingerprinted: it is static, so nothing is patched until something real
+ * changes.
  *
  * **A ghost is derived, not rebuilt.** `ghostModel` takes the active model and
  * prefixes, greys and de-blocks it, and its fingerprint is a hash of the active
@@ -59,8 +61,7 @@ export const DEFAULT_DURATION_MIN = 30;
 const OFF_SCHEDULE_STATUSES: ReadonlySet<string> = new Set(["cancelled", "entered-in-error"]);
 
 /** The fixed tail of every description. Quoted in tests; do not reword lightly. */
-const FOOTER_PREFIX = "Synced by Healthy · last checked ";
-const FOOTER_SUFFIX = " · do not edit";
+const FOOTER = "Synced by Healthy · do not edit";
 const GHOST_TITLE_PREFIX = "Cancelled: ";
 const VANISHED_PREFIX = "No longer on the health system's schedule as of ";
 
@@ -123,8 +124,6 @@ interface MappingHealthSystem {
 export interface MappingInput {
   healthSystem: MappingHealthSystem;
   settings: MappingSettings;
-  /** ISO instant the run started, rendered into the footer. */
-  nowIso: string;
   /** Blinds the event key and keys the fingerprint. `blinderFor(env)` in the Worker. */
   blinder: Blinder;
 }
@@ -302,13 +301,9 @@ export function formatApptTime(iso: string, timezone: string): string {
   return formatInZone(iso, timezone, { hour: "numeric", minute: "2-digit" });
 }
 
-/** A date and time for a human: the description footer and the vanished note. */
+/** A date and time for a human: the vanished note. */
 function formatStamp(iso: string, timezone: string): string {
   return formatInZone(iso, timezone);
-}
-
-function footerLine(nowIso: string, timezone: string): string {
-  return `${FOOTER_PREFIX}${formatStamp(nowIso, timezone)}${FOOTER_SUFFIX}`;
 }
 
 /** Drop empty entries and join what is left, so a missing field leaves no gap. */
@@ -325,12 +320,7 @@ function joinInline(parts: readonly (string | undefined)[], separator: string): 
   return parts.filter((part): part is string => part !== undefined && part !== "").join(separator);
 }
 
-/**
- * The description, minus the footer.
- *
- * Kept separate because this -- and not the whole description -- is what the
- * fingerprint covers. See the module comment.
- */
+/** The description, minus the footer. */
 function descriptionBody(
   view: NormalizedAppointmentView,
   healthSystem: MappingHealthSystem,
@@ -348,8 +338,11 @@ function descriptionBody(
   return joinSections([where, who, healthSystem.portalUrl ?? ""]);
 }
 
-/** Everything the fingerprint covers, in a fixed order. */
-function fingerprintPayload(model: Omit<CalendarEventModel, "fingerprint">, body: string): string {
+/**
+ * Everything the fingerprint covers, in a fixed order: every field written to
+ * Google, the whole description included. Nothing in it moves between runs.
+ */
+function fingerprintPayload(model: Omit<CalendarEventModel, "fingerprint">): string {
   return JSON.stringify([
     model.key,
     model.title,
@@ -359,7 +352,7 @@ function fingerprintPayload(model: Omit<CalendarEventModel, "fingerprint">, body
     model.location ?? null,
     model.colorId ?? null,
     model.transparent,
-    body,
+    model.description,
   ]);
 }
 
@@ -413,14 +406,12 @@ export async function buildCalendarModel(
 
   const location = locationText(view, healthSystem.portalUrl);
   const colorId = healthSystem.config.color_id ?? settings.defaultColorId ?? undefined;
-  const body = descriptionBody(view, healthSystem);
-
   const draft: Omit<CalendarEventModel, "fingerprint"> = {
     key: await blindEventKey(input.blinder, eventKey(healthSystem.id, view.encounterId)),
     encounterId: view.encounterId,
     healthSystem: healthSystem.id,
     title,
-    description: joinSections([body, footerLine(input.nowIso, timezone)]),
+    description: joinSections([descriptionBody(view, healthSystem), FOOTER]),
     ...(location !== undefined && { location }),
     start,
     end,
@@ -432,7 +423,7 @@ export async function buildCalendarModel(
   return {
     model: {
       ...draft,
-      fingerprint: await input.blinder.digest(FINGERPRINT_DOMAIN, fingerprintPayload(draft, body)),
+      fingerprint: await input.blinder.digest(FINGERPRINT_DOMAIN, fingerprintPayload(draft)),
     },
     status: view.status,
     offSchedule: OFF_SCHEDULE_STATUSES.has(view.status),

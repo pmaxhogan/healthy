@@ -33,7 +33,6 @@ import type {
 } from "../../../worker/sync/mapping.ts";
 
 const HEALTH_SYSTEM_ID = "prov-1";
-const NOW = "2026-09-30T12:00:00Z";
 const PORTAL_URL = "https://portal.example.test/mychart";
 
 const SETTINGS: MappingSettings = {
@@ -59,7 +58,6 @@ function input(
       config: healthSystemConfigSchema.parse(overrides.config ?? {}),
     },
     settings: { ...SETTINGS, ...overrides.settings },
-    nowIso: NOW,
     blinder: BLINDER,
   };
 }
@@ -164,7 +162,7 @@ describe("what the owner sees", () => {
       input({ settings: { timezone: "Etc/GMT-2" } }),
     );
     expect(mapping.model.timeZone).toBe("Etc/GMT-2");
-    expect(mapping.model.description).toContain("last checked");
+    expect(mapping.model.description.endsWith("Synced by Healthy · do not edit")).toBe(true);
   });
 
   it("puts the location name and the address on the event", async () => {

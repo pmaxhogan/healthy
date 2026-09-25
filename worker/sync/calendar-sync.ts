@@ -190,7 +190,6 @@ interface RunContext {
   calendar: CalendarClient;
   calendarId: string;
   timezone: string;
-  nowIso: string;
   /** Unix second the FHIR window opens. Rows older than this are not diffed. */
   windowStartSeconds: number;
   /** `YYYY-MM-DD` in the owner's zone, for the FHIR `date=ge` parameter. */
@@ -264,7 +263,6 @@ async function syncAllHealthSystems(
     calendar,
     calendarId,
     timezone,
-    nowIso,
     windowStartSeconds: fromIso(windowStartIso),
     windowStartDate: dateInZone(windowStartIso, timezone),
     googleEvents,
@@ -320,7 +318,6 @@ function portalInput(run: RunContext, options: CalendarSyncOptions): PortalPassI
     calendar: run.calendar,
     calendarId: run.calendarId,
     timezone: run.timezone,
-    nowIso: run.nowIso,
     windowStartSeconds: run.windowStartSeconds,
     googleEvents: run.googleEvents,
     settings: run.settings,
@@ -525,7 +522,6 @@ function mappingInput(
       config: target.config,
     },
     settings: run.settings,
-    nowIso: run.nowIso,
     blinder: run.blinder,
   };
 }

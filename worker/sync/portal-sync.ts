@@ -154,8 +154,6 @@ export interface PortalPassInput {
   calendar: CalendarClient;
   calendarId: string;
   timezone: string;
-  /** ISO instant the run started, rendered into the description footer. */
-  nowIso: string;
   /** Unix second the sync window opens. Rows older than this are not diffed. */
   windowStartSeconds: number;
   /** Every `healthy=1` event on the target calendar, across every health system. */
@@ -497,7 +495,6 @@ async function buildPortalCandidates(
         config,
       },
       settings: input.settings,
-      nowIso: input.nowIso,
       blinder: input.blinder,
     });
     const start = fromIso(mapping.model.start);
