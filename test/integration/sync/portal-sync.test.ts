@@ -149,6 +149,33 @@ describe("portal visits on the calendar", () => {
     expect(row?.state).toBe("active");
   });
 
+  it("puts the address in the location and the phone in the description, as FHIR events have", async () => {
+    const fix = await fixture({
+      portal: {
+        visits: [
+          portalVisit({
+            csn: "csn-1",
+            locationName: "Example Tower",
+            address: "1 Example Way, Testville, TS 00001",
+            phone: "\u{202A}555-0100\u{202C}",
+          }),
+        ],
+      },
+    });
+    await seedSettings(fix.ctx, { default_arrival_offset_min: 15 });
+
+    await portalRun(fix);
+
+    const event = fix.upstreams.calendar.byKey().get(await portalKey(fix.healthSystem, "csn-1"));
+    expect(event?.location).toBe("Example Tower, 1 Example Way, Testville, TS 00001");
+    const description = String(event?.description);
+    expect(description).toContain("1 Example Way, Testville, TS 00001 · 555-0100");
+    expect(description).not.toMatch(/[\u{202A}\u{202C}]/u);
+    // The same arrive-early rule: the event starts early and the title says when
+    // the appointment really is.
+    expect(event?.summary).toBe("Follow-up · A. Example, MD (appt 2:30 PM)");
+  });
+
   it("does nothing on a second run when nothing changed, then patches when something does", async () => {
     const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1" })] } });
     await portalRun(fix);

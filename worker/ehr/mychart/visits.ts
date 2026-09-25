@@ -29,6 +29,7 @@
  */
 
 import { AppError } from "../../lib/errors.ts";
+import { cleanPhone } from "../../lib/text.ts";
 import { toIsoInZone } from "../../lib/time.ts";
 
 import { isExternalVisit } from "./external.ts";
@@ -213,7 +214,7 @@ function departmentOf(fields: ReadonlyMap<string, unknown>): {
   return {
     ...pick("department", text(department, DEPARTMENT_KEYS.name)),
     ...pick("address", formatAddress(firstPresent(department, DEPARTMENT_KEYS.address))),
-    ...pick("phone", text(department, DEPARTMENT_KEYS.phone)),
+    ...pick("phone", cleanPhone(text(department, DEPARTMENT_KEYS.phone))),
   };
 }
 
@@ -284,7 +285,7 @@ function toVisit(record: object, fallbackTimeZone: string): PortalVisit | null {
     ...pick("department", text(fields, VISIT_KEYS.department)),
     ...pick("locationName", text(fields, VISIT_KEYS.locationName)),
     ...pick("address", text(fields, VISIT_KEYS.address)),
-    ...pick("phone", text(fields, VISIT_KEYS.phone)),
+    ...pick("phone", cleanPhone(text(fields, VISIT_KEYS.phone))),
     ...place,
     // A nested department is also the best name for the location when the payload
     // has no flat one, which is the common case.

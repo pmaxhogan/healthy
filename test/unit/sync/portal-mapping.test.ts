@@ -189,6 +189,27 @@ describe("what the owner sees", () => {
     expect(mapping.model.transparent).toBe(false);
   });
 
+  it("gives a portal visit the address, phone and arrive-early text a FHIR one gets", async () => {
+    const mapping = await map(
+      { locationName: "Example Tower", address: "1 Example Way, Testville", phone: "555-0100" },
+      input({ config: { arrival_offset_min: 15 } }),
+    );
+    expect(mapping.model.location).toBe("Example Tower, 1 Example Way, Testville");
+    expect(mapping.model.description).toContain("1 Example Way, Testville · 555-0100");
+    expect(mapping.model.title).toMatch(/\(appt .+\)$/u);
+    expect(mapping.arrivalOffsetMin).toBe(15);
+  });
+
+  it("strips the bidi direction marks around a stored phone number", async () => {
+    // A payload stored before the parser cleaned it is still mapped from.
+    const view = portalVisitView(HEALTH_SYSTEM_ID, visit({ phone: "\u{202A}555-0100\u{202C}" }));
+    expect(view.location?.phone).toBe("555-0100");
+
+    const mapping = await map({ address: "1 Example Way", phone: "\u{202A}555-0100\u{202C}" });
+    expect(mapping.model.description).toContain("1 Example Way · 555-0100");
+    expect(mapping.model.description).not.toMatch(/[\u{202A}\u{202C}]/u);
+  });
+
   it("leaves the title readable when the payload names no practitioner", async () => {
     const mapping = await map({ practitioner: undefined });
     expect(mapping.model.title).toBe("Follow-up");

@@ -32,6 +32,8 @@
  * is the owner's own data, bound for their calendar and nowhere else.
  */
 
+import { cleanPhone } from "../lib/text.ts";
+
 import type { PortalVisit, PortalVisitStatus } from "../ehr/mychart/index.ts";
 import type { NormalizedAppointmentView, NormalizedLocationRef } from "../fhir/normalize/types.ts";
 
@@ -107,11 +109,14 @@ function pick(key: string, value: string | undefined): Record<string, string> {
 function locationOf(visit: PortalVisit): NormalizedLocationRef | undefined {
   const name = visit.locationName ?? visit.department;
   const address = visit.address === undefined || visit.address === "" ? undefined : visit.address;
-  if (name === undefined && address === undefined && visit.phone === undefined) return undefined;
+  // Cleaned here as well as in the parser: a payload stored before the parser
+  // cleaned it is still served to the MCP and still calendared from.
+  const phone = cleanPhone(visit.phone);
+  if (name === undefined && address === undefined && phone === undefined) return undefined;
   return {
     ...pick("name", name),
     ...(address !== undefined && { address: { lines: [address] } }),
-    ...pick("phone", visit.phone),
+    ...pick("phone", phone),
   };
 }
 

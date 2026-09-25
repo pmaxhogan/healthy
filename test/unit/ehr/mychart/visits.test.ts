@@ -184,6 +184,26 @@ describe("parseUpcoming", () => {
     expect(byCsn(visits, "csn-in-progress").isVideo).toBe(false);
   });
 
+  it("strips the bidi direction marks a portal wraps a phone number in", () => {
+    const instant = `/Date(${String(VISIT_INSTANT_MS)})/`;
+    const { visits } = parseUpcoming(
+      {
+        NextNDaysVisits: [
+          { CSN: "flat", Instant: instant, Phone: "\u{202A}555-0100\u{202C}" },
+          {
+            CSN: "nested",
+            Instant: instant,
+            PrimaryDepartment: { Name: "Example Clinic", PhoneNumber: "\u{202A}555-0142\u{202C}" },
+          },
+        ],
+      },
+      OWNER_ZONE,
+    );
+
+    expect(byCsn(visits, "flat").phone).toBe("555-0100");
+    expect(byCsn(visits, "nested").phone).toBe("555-0142");
+  });
+
   it("omits an optional field rather than setting it to undefined", () => {
     const { visits } = parseUpcoming(
       { NextNDaysVisits: [{ CSN: "c", Instant: `/Date(${String(VISIT_INSTANT_MS)})/` }] },

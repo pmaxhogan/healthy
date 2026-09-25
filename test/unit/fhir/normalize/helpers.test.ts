@@ -93,6 +93,12 @@ describe("phone", () => {
     expect(phone([{ system: "email", value: "ada@example.com" }])).toBeUndefined();
     expect(phone()).toBeUndefined();
   });
+
+  it("strips bidi direction marks around the number", () => {
+    expect(phone([{ system: "phone", value: "\u{202A}555-010-0111\u{202C}" }])).toBe(
+      "555-010-0111",
+    );
+  });
 });
 
 describe("period", () => {

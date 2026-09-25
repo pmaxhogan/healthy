@@ -138,11 +138,32 @@ describe("upcoming portal visits", () => {
       telehealth: true,
       csn: "csn-a",
     });
-    expect(item?.location).toMatchObject({ name: "Example Tower", phone: "555-0199" });
+    expect(item?.location).toMatchObject({
+      name: "Example Tower",
+      address: { lines: ["1 Example Way"] },
+      phone: "555-0199",
+    });
     // No Encounter behind it, so no Encounter id -- and no second copy of the CSN.
     expect(item).not.toHaveProperty("encounterId");
     // The FHIR items are marked too.
     expect(answer.items.find((entry) => entry.encounterId === "enc-future")?.source).toBe("fhir");
+  });
+
+  it("serves a stored phone number without the bidi marks the portal wrapped it in", async () => {
+    world.state.portalVisits.set(HEALTH_SYSTEM_A, [
+      stored(
+        visit({
+          csn: "csn-a",
+          start: "2026-06-10T15:00:00+00:00",
+          phone: "\u{202A}555-0199\u{202C}",
+        }),
+      ),
+    ]);
+
+    const answer = await callTool(world.client, "get_appointments");
+    const [item] = portalItems(answer.items);
+
+    expect(item?.location).toMatchObject({ phone: "555-0199" });
   });
 
   it("returns every visit across all three buckets and seven months, soonest first", async () => {

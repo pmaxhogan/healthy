@@ -1,6 +1,8 @@
 // Small, pure conversions from FHIR R4 datatypes to plain strings/numbers.
 // Every function here is total (never throws) and side-effect free: missing
 // input always yields `undefined`, never a placeholder string.
+import { cleanPhone } from "../../lib/text.ts";
+
 import type * as fhir4 from "fhir/r4";
 
 /** `CodeableConcept` -> the best available human text: `.text`, else the
@@ -88,7 +90,7 @@ export function phone(telecom?: fhir4.ContactPoint[]): string | undefined {
     return undefined;
   }
   const preferred = phones.find((entry) => entry.use === "work") ?? phones[0];
-  return preferred?.value;
+  return cleanPhone(preferred?.value);
 }
 
 /** A `Period` reduced to plain optional start/end strings. */
