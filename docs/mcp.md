@@ -188,7 +188,11 @@ makes the useful view one argument away:
 - **Policy first.** Grouping runs on what the exposure policy released: a
   hidden `onset` does not feed `firstSeen`, a hidden `encounterId` (or a denied
   Encounter type) leaves `encounterIds` empty, and a hidden `code` leaves every
-  row its own group.
+  row its own group. A rule on `code.code` or `code.system` (or the raw
+  `code.coding[].code` / `.system`) reaches every entry of `code.codings`, not
+  just the first coding. The policy then runs over the groups once more, so a
+  rule on a group's own field (`Condition.firstSeen`, `Condition.encounterIds`)
+  applies too.
 
 `get_health_summary`'s conditions section is the same collapse: problem-list
 entries first, then the most recently seen encounter diagnoses, then anything

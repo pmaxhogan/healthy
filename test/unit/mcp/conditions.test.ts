@@ -394,6 +394,37 @@ describe("get_conditions collapse", () => {
     expect(answer.text).not.toContain("X01.1");
   });
 
+  it("hides every coding when a rule reaches the first one's code or system", async () => {
+    // In both vocabularies: the ICD-10 code is never the first coding on a
+    // visit row, so it survives only if `code.codings` escapes the rule.
+    for (const target of [
+      "Condition.code.code",
+      "Condition.code.coding[].code",
+      "Condition.code.coding",
+    ]) {
+      world.state.rules = rules({ rule_type: "field", target });
+      for (const args of [{}, { collapse: true }, { raw: true }]) {
+        const answer = await callTool(world.client, "get_conditions", args);
+        expect(answer.text, `${target} ${JSON.stringify(args)}`).not.toContain("X01.1");
+      }
+    }
+    for (const target of ["Condition.code.system", "Condition.code.coding[].system"]) {
+      world.state.rules = rules({ rule_type: "field", target });
+      const answer = await callTool(world.client, "get_conditions", { collapse: true });
+      expect(answer.text, target).not.toContain("icd-10-cm");
+    }
+  });
+
+  it("applies a rule on a collapsed-only field to the groups", async () => {
+    world.state.rules = rules({ rule_type: "field", target: "Condition.firstSeen" });
+
+    const answer = await callTool(world.client, "get_conditions", { collapse: true });
+
+    expect(answer.items.some((item) => Object.hasOwn(item, "firstSeen"))).toBe(false);
+    expect(answer.items.every((item) => typeof item.lastSeen === "string")).toBe(true);
+    expect(answer.warnings).toContain("policy_field_removed:Condition.firstSeen");
+  });
+
   it("drops a visit id when the Encounter type is denied", async () => {
     world.state.rules = rules({ rule_type: "resource", target: "Encounter" });
 

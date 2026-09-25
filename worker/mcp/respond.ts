@@ -251,12 +251,22 @@ function applyLimit(value: readonly unknown[], limit: number | undefined): Shape
   };
 }
 
-/** The tool's `reshape` over the policy's output, or that output unchanged. */
+/**
+ * The tool's `reshape` over the policy's output, or that output unchanged.
+ *
+ * What a reshape builds (a collapsed condition's `firstSeen`, `occurrences`)
+ * is a shape of its own, and the owner can write a rule against it; so the
+ * policy runs over the reshaped items once more. Everything they carry came
+ * from rows the first pass already filtered, so the second pass can only
+ * remove more. It never drops an item -- tool, health-system and resource
+ * rules already dropped the rows -- which keeps `raw` aligned.
+ */
 function reshapeFiltered(
-  reshape: RespondInput["reshape"],
+  input: RespondInput,
   filtered: { items: unknown[]; rawItems: RawEntry[] },
   wantsRaw: boolean,
 ): Reshaped {
+  const { reshape } = input;
   if (reshape === undefined) {
     return {
       items: filtered.items,
@@ -265,12 +275,22 @@ function reshapeFiltered(
       warnings: [],
     };
   }
-  return reshape(
+  const reshaped = reshape(
     filtered.items.map((item, index) => ({
       item,
       raw: wantsRaw ? filtered.rawItems[index] : undefined,
     })),
   );
+  const again = applyPolicy({ tool: input.tool, items: reshaped.items, rules: input.rules });
+  if (again.items.length !== reshaped.items.length) {
+    // Unreachable (see above); failing closed rather than misaligning `raw`.
+    return { items: [], raw: [], total: 0, warnings: again.warnings };
+  }
+  return {
+    ...reshaped,
+    items: again.items,
+    warnings: [...reshaped.warnings, ...again.warnings],
+  };
 }
 
 /**
@@ -295,7 +315,7 @@ export async function respond(input: RespondInput): Promise<ToolOutcome> {
 
   const limit = input.limit === undefined ? undefined : Math.max(0, Math.trunc(input.limit));
   const wantsRaw = input.rawItems !== undefined;
-  const reshaped = reshapeFiltered(input.reshape, filtered, wantsRaw);
+  const reshaped = reshapeFiltered(input, filtered, wantsRaw);
   const { items, raw: rawItems, total } = reshaped;
   const envelope = reshaped.envelope ?? {};
   // Checked on `total` -- post-policy, pre-`jq` -- so a denied pair (already

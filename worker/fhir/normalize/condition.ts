@@ -16,8 +16,19 @@ export const FIELD_ALIASES: readonly FieldAlias[] = [
   { normalized: ["code", "text"], raw: codeTextSources("code"), rendered: true },
   { normalized: ["code", "code"], raw: [["code", "coding", "[]", "code"]], rendered: true },
   { normalized: ["code", "system"], raw: [["code", "coding", "[]", "system"]], rendered: true },
-  // Every coding's system and code, the same structure renamed.
+  // Every coding's system and code, the same structure renamed. The per-leaf
+  // entries tie with `code.code` / `code.system` above, so a rule on either
+  // (in either vocabulary) reaches every coding as well as the first one --
+  // the alias engine keeps only the longest match, and ties are what widen it.
   { normalized: ["code", "codings"], raw: [["code", "coding"]] },
+  {
+    normalized: ["code", "codings", "[]", "code"],
+    raw: [["code", "coding", "[]", "code"]],
+  },
+  {
+    normalized: ["code", "codings", "[]", "system"],
+    raw: [["code", "coding", "[]", "system"]],
+  },
   // The id part of `encounter.reference`.
   { normalized: ["encounterId"], raw: [["encounter", "reference"]], rendered: true },
   {

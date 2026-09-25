@@ -1387,7 +1387,7 @@ const SUMMARY_RECENT = {
  */
 const CONDITION_GROUP = {
   resourceType: ["string", "Always Condition"],
-  kind: ["string", "Always condition_group"],
+  kind: ["string", "condition_group (recent, in the summary)"],
   ...TAGS,
   code: ["N.ConditionCode", "The condition"],
   categories: ["string[]", "Every category its rows carry"],
