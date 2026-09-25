@@ -121,6 +121,7 @@ export function collectionTool<S extends z.ZodType<SharedArgs & WindowArgs>>(
       jq: shared.jq,
       healthSystemIds: collected.healthSystemIds,
       warnings: options.notes?.(args),
+      coverage: collected.coverage,
       now: run.now,
     });
   });

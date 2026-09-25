@@ -87,6 +87,16 @@ function observation(id: string): fhir4.Observation {
   };
 }
 
+function carePlan(id: string): fhir4.CarePlan {
+  return {
+    resourceType: "CarePlan",
+    id,
+    status: "active",
+    intent: "plan",
+    subject: { reference: "Patient/patient-a" },
+  };
+}
+
 function immunization(id: string): fhir4.Immunization {
   return {
     resourceType: "Immunization",
@@ -194,15 +204,24 @@ describe("runFullRefresh", () => {
     expect(byType.get("AllergyIntolerance")).toMatchObject({ lastOk: true });
   });
 
-  it("does not ask for a resource type the organisation does not expose", async () => {
+  it("records, but never asks for, a resource type the organisation does not expose", async () => {
     const h = await setup();
+    const callsBefore = h.server.searchCalls;
 
     await runFullRefresh(h.ctx, { deps: h.upstreams.deps });
 
+    // Recorded as `unsupported` rather than left with no row at all: a bare
+    // absence would read exactly like "the refresh has not reached it yet".
     const states = await syncRepos(h.ctx).fhirSyncState.listByHealthSystem(h.healthSystemId);
-    const types = new Set(states.map((state) => state.resourceType));
-    expect(types.has("Coverage")).toBe(false);
-    expect(types.has("MedicationRequest")).toBe(false);
+    const byType = new Map(states.map((state) => [state.resourceType, state]));
+    expect(byType.get("Coverage")).toMatchObject({ lastOk: false, lastErrorCode: "unsupported" });
+    expect(byType.get("MedicationRequest")).toMatchObject({
+      lastOk: false,
+      lastErrorCode: "unsupported",
+    });
+    // Never actually searched for: the eleven calls the next test counts do not
+    // include Coverage or MedicationRequest.
+    expect(h.server.searchCalls - callsBefore).toBe(11);
   });
 
   it("runs one search per category for a category-scoped type", async () => {
@@ -227,6 +246,62 @@ describe("runFullRefresh", () => {
 
     const counts = await syncRepos(h.ctx).fhirCache.countsByType();
     expect(counts.find((row) => row.resourceType === "Condition")?.count).toBe(1);
+  });
+
+  it("searches CarePlan per category, paginates one to the end, dedupes across categories, and tolerates one rejected category", async () => {
+    const h = await setup();
+    h.server.capability = {
+      ...h.server.capability,
+      rest: [
+        {
+          mode: "server",
+          resource: [
+            ...(h.server.capability.rest?.[0]?.resource ?? []),
+            {
+              type: "CarePlan",
+              interaction: [{ code: "search-type" }],
+              searchParam: [
+                { name: "patient", type: "reference" },
+                { name: "category", type: "token" },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const page2Url = `https://${HOST}/api/FHIR/R4/CarePlan?patient=patient-a&category=assess-plan&page=2`;
+    // assess-plan pages: cp-1 on page one (with a `next` link), cp-2 on page two.
+    h.server.categorySearches.set("CarePlan:assess-plan:1", {
+      resourceType: "Bundle",
+      type: "searchset",
+      entry: [{ resource: carePlan("cp-1"), search: { mode: "match" } }],
+      link: [{ relation: "next", url: page2Url }],
+    });
+    h.server.categorySearches.set("CarePlan:assess-plan:2", searchBundle([carePlan("cp-2")]));
+    // longitudinal lists cp-1 again -- the same plan under a different category.
+    h.server.categorySearches.set("CarePlan:longitudinal:1", searchBundle([carePlan("cp-1")]));
+    // encounter is rejected outright: a fatal issue with no benign Epic code.
+    h.server.categorySearches.set(
+      "CarePlan:encounter:1",
+      outcomeBundle({ severity: "error", code: "invalid", diagnostics: "category not supported" }),
+    );
+
+    const summary = await runFullRefresh(h.ctx, { deps: h.upstreams.deps });
+
+    // The rejected category did not fail the type or the run.
+    expect(summary.errors).toStrictEqual([]);
+    const counts = await syncRepos(h.ctx).fhirCache.countsByType();
+    // cp-1 (from both assess-plan page one and longitudinal) and cp-2 (assess-plan
+    // page two), deduped by id to two, not three or four.
+    expect(counts.find((row) => row.resourceType === "CarePlan")?.count).toBe(2);
+
+    const states = await syncRepos(h.ctx).fhirSyncState.listByHealthSystem(h.healthSystemId);
+    const carePlanState = states.find((state) => state.resourceType === "CarePlan");
+    expect(carePlanState?.lastOk).toBe(true);
+    expect(carePlanState?.warnings).toContainEqual({
+      code: "category_rejected:encounter",
+      count: 1,
+    });
   });
 
   it("isolates a failing resource type from the rest", async () => {

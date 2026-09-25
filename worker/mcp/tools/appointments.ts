@@ -32,12 +32,59 @@ import { z } from "zod";
 import { collectAppointments } from "../appointment-items.ts";
 import { WINDOW_ARGS, toolArgs } from "../args.ts";
 import { deniedHealthSystems, effectiveLimit, selectHealthSystems } from "../collect.ts";
+import { buildCoverage, mergeCoverage } from "../coverage.ts";
 import { respond } from "../respond.ts";
 
 import { readTool } from "./register.ts";
 
-import type { ToolDeps } from "../deps.ts";
+import type { CoverageEntry, CoverageStatus } from "../coverage.ts";
+import type { HealthSystemInfo, ToolDeps } from "../deps.ts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+
+/** How long since the hourly calendar sync last touched a health system before its
+ * portal-derived visits are called `stale` rather than `ok`. The sync runs hourly;
+ * six gives it several missed runs of slack before flagging anything. */
+const PORTAL_STALE_AFTER_SECONDS = 6 * 60 * 60;
+
+/**
+ * A synthetic coverage entry per health system for the portal half of
+ * `get_appointments`: upcoming visits come only from the patient portal (see
+ * `worker/mcp/appointment-items.ts`), and the portal pass shares the same
+ * hourly-cadence connection the FHIR calendar sync uses, so that connection's
+ * own status (`worker/mcp/deps.ts`'s `HealthSystemInfo`) is the best signal this
+ * layer has for whether upcoming visits are current. It is a coarser signal
+ * than `fhir_sync_state` -- there is no per-resource-type sync state for a
+ * portal visit -- so it is reported under a resource type of its own,
+ * `PortalVisit`, rather than folded into `Encounter`.
+ */
+function portalCoverage(healthSystems: readonly HealthSystemInfo[], now: number): CoverageEntry[] {
+  return healthSystems.map((healthSystem) => {
+    const base = {
+      healthSystemId: healthSystem.id,
+      healthSystem: healthSystem.displayName,
+      resourceType: "PortalVisit",
+    };
+    if (healthSystem.status !== "connected" || healthSystem.needsReauthSince !== null) {
+      const status: CoverageStatus = "failed";
+      return {
+        ...base,
+        status,
+        ...(healthSystem.lastErrorCode !== null && { errorCode: healthSystem.lastErrorCode }),
+      };
+    }
+    if (healthSystem.lastSyncAt === null) {
+      const status: CoverageStatus = "never";
+      return { ...base, status };
+    }
+    const ageSeconds = now - healthSystem.lastSyncAt;
+    if (ageSeconds > PORTAL_STALE_AFTER_SECONDS) {
+      const status: CoverageStatus = "stale";
+      return { ...base, status, ageHours: Math.floor(ageSeconds / 3600) };
+    }
+    const status: CoverageStatus = "ok";
+    return { ...base, status };
+  });
+}
 
 const APPOINTMENT_ARGS = toolArgs({
   ...WINDOW_ARGS,
@@ -59,8 +106,11 @@ export function registerAppointmentTools(server: McpServer, deps: ToolDeps): voi
         "which department, where, and whether it is a video visit. Soonest first. " +
         "Each item says whether it came from the health record (`source: fhir`) or " +
         "the patient portal (`source: portal`). Pass `includePast: true` or a " +
-        "`from` date to see past visits as well (then newest first). To keep only " +
-        'what you need, pass `jq`, e.g. `.[] | select(.start < "2026-12-01") | {start, source}`.',
+        "`from` date to see past visits as well (then newest first). `coverage` " +
+        "covers both sources -- the FHIR Encounter sync and the patient-portal " +
+        "connection -- so check it before concluding there are no visits. To " +
+        "keep only what you need, pass `jq`, e.g. " +
+        '`.[] | select(.start < "2026-12-01") | {start, source}`.',
       schema: APPOINTMENT_ARGS,
     },
     async (args, run) => {
@@ -80,6 +130,22 @@ export function registerAppointmentTools(server: McpServer, deps: ToolDeps): voi
         raw: args.raw,
         order: upcomingOnly ? "asc" : "desc",
       });
+      const syncStatus = await deps.syncStatus();
+      // Both a portal visit and a FHIR one are tagged `resourceType: "Encounter"`
+      // (see `worker/mcp/appointment-items.ts`), so an `Encounter` deny rule hides
+      // every appointment item; the synthetic `PortalVisit` coverage row must
+      // disappear with them, or it would say something about the hidden data.
+      const encounterDenied = run.rules.resources.has("Encounter");
+      const coverage = mergeCoverage(
+        buildCoverage({
+          healthSystems,
+          resourceTypes: ["Encounter"],
+          syncStatus,
+          rules: run.rules,
+          now: run.now,
+        }),
+        encounterDenied ? [] : portalCoverage(healthSystems, run.now),
+      );
 
       return respond({
         tool: "get_appointments",
@@ -94,6 +160,7 @@ export function registerAppointmentTools(server: McpServer, deps: ToolDeps): voi
           ...collected.warnings,
           ...(upcomingOnly ? ["window_defaults_to_upcoming_only"] : []),
         ],
+        coverage,
         now: run.now,
       });
     },

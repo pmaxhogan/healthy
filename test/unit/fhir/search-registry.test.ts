@@ -103,7 +103,11 @@ describe("SEARCH_REGISTRY", () => {
         .params(PATIENT)
         .map((set) => set.category),
     ).toStrictEqual(["laboratory", "vital-signs", "social-history", "survey"]);
-    expect(entryFor("CarePlan").params(PATIENT)).toHaveLength(2);
+    expect(
+      entryFor("CarePlan")
+        .params(PATIENT)
+        .map((set) => set.category),
+    ).toStrictEqual(["assess-plan", "longitudinal", "encounter"]);
     expect(entryFor("DocumentReference").params(PATIENT)[0]?.category).toBe("clinical-note");
   });
 

@@ -198,7 +198,12 @@ export function registerClinicalTools(server: McpServer, deps: ToolDeps): void {
 
   collectionTool(server, deps, {
     name: "get_care_plans",
-    description: "Care plans: title, status, period and the activities they call for.",
+    description:
+      "Care plans: title, status, period and the activities they call for. An " +
+      "empty result can mean the health system genuinely has none, or that the " +
+      "last sync of this type failed or has not run -- check `coverage` (and " +
+      "the `incomplete_no_data_is_not_absence` warning) before concluding there " +
+      "are no care plans.",
     schema: toolArgs(WINDOW_ARGS),
     specs: () => [spec("CarePlan", { dateOf: (item) => item.period?.start })],
   });

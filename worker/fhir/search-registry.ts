@@ -173,7 +173,16 @@ export const SEARCH_REGISTRY: readonly RegistryEntry[] = [
     mode: "search",
     epicApiName: "CarePlan.Search",
     uscdi: "v1",
-    params: byCategory("assess-plan", "longitudinal"),
+    // Epic's CarePlan.Search (R4) documents exactly four supported `category`
+    // values: assess-plan and careteam (Argonaut), longitudinal and encounter
+    // (Epic's own category system). `careteam` is deliberately left out here --
+    // CareTeam.Search already returns that data, and a CarePlan record of the
+    // same care team would only show up as a confusing near-duplicate. Any
+    // category an organisation still rejects (observed: 59109 on some) is not
+    // fatal to the whole type any more -- see `fetchEntry` in full-refresh.ts,
+    // which searches each category independently and records a per-category
+    // warning instead of failing CarePlan outright.
+    params: byCategory("assess-plan", "longitudinal", "encounter"),
     needsCapability: "category",
   },
   {

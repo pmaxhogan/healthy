@@ -469,6 +469,15 @@ export interface FhirServer {
   resources: Map<string, fhir4.FhirResource>;
   /** Extra search bundles for the full refresh, keyed by resource type. */
   searches: Map<string, fhir4.Bundle>;
+  /**
+   * Per-category, per-page overrides for a `byCategory` search (CarePlan,
+   * Condition, Observation, DocumentReference), keyed
+   * `<resourceType>:<category>:<page>` (`page` is `"1"` for the first request,
+   * then whatever `?page=` a `link.relation: "next"` this map produced carries).
+   * Falls back to `searches` when no entry matches, so every existing test that
+   * never sets this is unaffected.
+   */
+  categorySearches: Map<string, fhir4.Bundle>;
   capability: fhir4.CapabilityStatement;
   /** Echoed back by the token endpoint, as Epic's `patient` field. */
   patientId: string;
@@ -492,6 +501,7 @@ export function fhirServer(overrides: Partial<FhirServer> = {}): FhirServer {
     encounters: emptyBundle(),
     resources: new Map(),
     searches: new Map(),
+    categorySearches: new Map(),
     capability: capabilityStatement(),
     patientId: "patient-a",
     capabilityStatus: null,
@@ -644,6 +654,21 @@ function handleFhir(server: FhirServer, url: URL): Response {
     return fhirJson(server.encounters);
   }
   server.searchCalls += 1;
+  return genericSearch(server, resourceType, url);
+}
+
+/**
+ * Every search but Encounter's: a `categorySearches` override for one
+ * `?category=`/`?page=` combination when the test set one, else the plain
+ * per-resource-type bundle every other test already relies on.
+ */
+function genericSearch(server: FhirServer, resourceType: string, url: URL): Response {
+  const category = url.searchParams.get("category");
+  if (category !== null) {
+    const page = url.searchParams.get("page") ?? "1";
+    const override = server.categorySearches.get(`${resourceType}:${category}:${page}`);
+    if (override !== undefined) return fhirJson(override);
+  }
   return fhirJson(server.searches.get(resourceType) ?? emptyBundle());
 }
 

@@ -79,7 +79,9 @@ export function registerHealthSystemTools(server: McpServer, deps: ToolDeps): vo
       description:
         "How fresh the cached record is: when each resource type was last " +
         "refreshed per health system, whether it worked, and any warnings the " +
-        "organisation returned. Read this before trusting an empty result.",
+        "organisation returned. This is the detail behind every other tool's " +
+        "`coverage` field -- read it before trusting an empty result from any " +
+        "of them.",
       schema: sharedOnlyArgs(),
     },
     async (args, run) => {

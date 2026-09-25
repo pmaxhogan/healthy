@@ -63,6 +63,7 @@ import { errorFields } from "../lib/log.ts";
 import { backoffUntilSeconds, rateLimitOf } from "./backoff.ts";
 import { getCapabilityIndex } from "./discovery.ts";
 import { emptySummary, record } from "./run.ts";
+import { CATEGORY_REJECTED_PREFIX, UNSUPPORTED_ERROR_CODE } from "./sync-state-codes.ts";
 import { syncTargets } from "./targets.ts";
 import { getFhirClientFor } from "./tokens.ts";
 
@@ -72,7 +73,7 @@ import type { SyncTarget } from "./targets.ts";
 import type { Ctx } from "../db/client.ts";
 import type { Repos } from "../db/index.ts";
 import type { SyncWarning } from "../db/schemas.ts";
-import type { FhirClient } from "../ehr/epic/fhir-client.ts";
+import type { FhirClient, SearchResult } from "../ehr/epic/fhir-client.ts";
 import type { RegistryEntry } from "../fhir/search-registry.ts";
 import type { Resource, SearchWarning } from "../fhir/types.ts";
 import type { RunKind, RunSummary } from "@shared/types.ts";
@@ -82,6 +83,11 @@ const FULL_REFRESH_TTL_MS = 8 * 24 * 60 * 60 * 1000;
 
 /** Resource types whose retrieval is capped by Epic's daily document quota. */
 const DOCUMENT_TYPES: ReadonlySet<string> = new Set(["DocumentReference", "Binary"]);
+
+/** The category (or other single distinguishing parameter) an entry's parameter set names, for a warning. Never the patient id. */
+function categoryOf(params: Record<string, string>): string {
+  return params.category ?? "default";
+}
 
 /**
  * How much wall clock one chunk of a chunked refresh may spend.
@@ -309,6 +315,43 @@ async function completedTypes(
   );
 }
 
+/**
+ * One registry entry's outcome for one health system: an unsupported search
+ * type is just recorded, a document type past the daily cap is recorded and
+ * skipped, and everything else is actually fetched.
+ */
+async function processRegistryEntry(
+  ctx: Ctx,
+  repos: Repos,
+  session: { client: FhirClient; patientId: string },
+  target: SyncTarget,
+  registryEntry: RegistryEntry,
+  entry: RegistryEntry | undefined,
+  state: RunState,
+  documentCap: { reached: boolean },
+): Promise<void> {
+  const healthSystemId = target.healthSystem.id;
+  if (entry === undefined) {
+    // Not supported by this organisation's CapabilityStatement: nothing to
+    // fetch, just the record that tells `get_sync_status` and the MCP coverage
+    // layer this is not a gap.
+    await repos.fhirSyncState.record(healthSystemId, registryEntry.resourceType, {
+      ok: false,
+      errorCode: UNSUPPORTED_ERROR_CODE,
+    });
+    return;
+  }
+  if (documentCap.reached && DOCUMENT_TYPES.has(entry.resourceType)) {
+    ctx.log.info("refresh.documents.capped", { healthSystemId, resourceType: entry.resourceType });
+    await repos.fhirSyncState.record(healthSystemId, entry.resourceType, {
+      ok: false,
+      errorCode: `epic_${EPIC_DOCUMENT_CAP}`,
+    });
+    return;
+  }
+  await refreshResourceType(ctx, repos, session, target, entry, state, documentCap);
+}
+
 /** True when the budget ran out and this health system still has resource types left. */
 async function refreshHealthSystem(
   ctx: Ctx,
@@ -334,6 +377,7 @@ async function refreshHealthSystem(
   // is to fetch nothing, and an unsupported search costs one 4122 warning.
   const entries =
     capabilities === null ? [...SEARCH_REGISTRY] : filterSupported(SEARCH_REGISTRY, capabilities);
+  const byType = new Map(entries.map((entry) => [entry.resourceType, entry]));
 
   // Set once a 4135 is seen, and honoured for the rest of this health system's pass.
   // Deliberately *not* carried across a chunk boundary: the only entry that reads
@@ -341,22 +385,31 @@ async function refreshHealthSystem(
   // therefore never searched, so a fresh chunk starting with `reached: false`
   // cannot spend any of the daily document quota it would have saved.
   const documentCap = { reached: false };
-  for (const entry of entries) {
-    if (done.has(entry.resourceType)) continue;
+  // Walked in the registry's own order, not `entries`': a search type dropped by
+  // `filterSupported` still gets one budget-respecting step here -- recorded as
+  // `unsupported` rather than left with no row at all, so it is told apart from
+  // "the refresh has not reached it yet". Only when the CapabilityStatement was
+  // actually read: a null `capabilities` means "unknown", not "unsupported", and
+  // is left exactly as before -- silently skipped, costing nothing.
+  for (const registryEntry of SEARCH_REGISTRY) {
+    if (done.has(registryEntry.resourceType)) continue;
+    const entry = byType.get(registryEntry.resourceType);
+    const unsupported =
+      entry === undefined && registryEntry.mode === "search" && capabilities !== null;
+    if (entry === undefined && !unsupported) continue;
+
     if (budgetSpent(pass.budget)) return true;
     pass.budget.processed += 1;
-    if (documentCap.reached && DOCUMENT_TYPES.has(entry.resourceType)) {
-      ctx.log.info("refresh.documents.capped", {
-        healthSystemId,
-        resourceType: entry.resourceType,
-      });
-      await repos.fhirSyncState.record(healthSystemId, entry.resourceType, {
-        ok: false,
-        errorCode: `epic_${EPIC_DOCUMENT_CAP}`,
-      });
-      continue;
-    }
-    await refreshResourceType(ctx, repos, session, target, entry, state, documentCap);
+    await processRegistryEntry(
+      ctx,
+      repos,
+      session,
+      target,
+      registryEntry,
+      entry,
+      state,
+      documentCap,
+    );
   }
   return false;
 }
@@ -373,7 +426,7 @@ async function refreshResourceType(
 ): Promise<void> {
   const healthSystemId = target.healthSystem.id;
   try {
-    const { resources, warnings } = await fetchEntry(session, entry);
+    const { resources, warnings } = await fetchEntry(ctx, session, entry);
     if (warnings.some((warning) => warning.epicCode === EPIC_DOCUMENT_CAP)) {
       documentCap.reached = true;
     }
@@ -422,8 +475,51 @@ async function refreshResourceType(
   }
 }
 
-/** Run every parameter set an entry asks for, or read the Patient by id. */
+/** One parameter set's search, tried once: a result, or the error it threw. */
+type SetOutcome = { ok: true; result: SearchResult<Resource> } | { ok: false; error: unknown };
+
+async function runOneSet(
+  session: { client: FhirClient; patientId: string },
+  resourceType: string,
+  params: Record<string, string>,
+): Promise<SetOutcome> {
+  try {
+    return { ok: true, result: await session.client.search(resourceType, params) };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
+
+/** Add resources not already seen (by `resourceType/id`) to `resources`, in place. */
+function mergeUnique(resources: Resource[], seen: Set<string>, found: readonly Resource[]): void {
+  for (const resource of found) {
+    const key = `${resource.resourceType}/${resource.id ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    resources.push(resource);
+  }
+}
+
+/**
+ * Run every parameter set an entry asks for, or read the Patient by id.
+ *
+ * An entry with several parameter sets (`byCategory`) runs each independently:
+ * Epic rejecting one category outright (a 400 whose body is a single
+ * OperationOutcome issue, thrown by `assertIssuesUsable` as `upstream_error` --
+ * 59109 among the codes observed) must not discard every other category's
+ * results. Before this, one rejected category failed the whole type and cached
+ * nothing, even when the others paged fine -- exactly what happened to CarePlan.
+ * Only that one failure mode is tolerated per set -- an auth failure, a rate
+ * limit or an unavailable upstream is not category-specific, applies to every
+ * set alike, and is left to fail (and, for a rate limit, escape) the whole
+ * entry exactly as it always has.
+ *
+ * When every set fails this throws the last failure, so a single-set entry
+ * (everything but the `byCategory` ones) behaves exactly as before: one
+ * failure is the type's failure.
+ */
 async function fetchEntry(
+  ctx: Ctx,
   session: { client: FhirClient; patientId: string },
   entry: RegistryEntry,
 ): Promise<{ resources: Resource[]; warnings: SearchWarning[] }> {
@@ -435,19 +531,46 @@ async function fetchEntry(
   const resources: Resource[] = [];
   const warnings: SearchWarning[] = [];
   const seen = new Set<string>();
+  const rejectedCategories: string[] = [];
+  let succeeded = 0;
+  let lastFailure: unknown;
   // `sinceIso` is deliberately omitted: the cache is the owner's whole record.
   // The search itself pages to the end with no ceiling; the only thing that
   // stops it early is a repeated `next` link, which surfaces as a thrown
   // error and is recorded below as this resource type's failure for the day.
   for (const params of entry.params(session.patientId)) {
-    const result = await session.client.search(entry.resourceType, params);
-    warnings.push(...result.warnings);
-    for (const resource of result.resources) {
-      const key = `${resource.resourceType}/${resource.id ?? ""}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      resources.push(resource);
+    const outcome = await runOneSet(session, entry.resourceType, params);
+    if (!outcome.ok) {
+      if (!isAppError(outcome.error) || outcome.error.code !== "upstream_error")
+        throw outcome.error;
+      const category = categoryOf(params);
+      rejectedCategories.push(category);
+      lastFailure = outcome.error;
+      // Category and Epic code only -- never the params object, which carries
+      // the patient id.
+      ctx.log.warn("refresh.category_rejected", {
+        resourceType: entry.resourceType,
+        category,
+        ...errorFields(outcome.error),
+      });
+      continue;
     }
+    succeeded += 1;
+    warnings.push(...outcome.result.warnings);
+    mergeUnique(resources, seen, outcome.result.resources);
+  }
+  if (succeeded === 0 && rejectedCategories.length > 0) {
+    // Nothing to salvage: fails exactly as a single-set entry always has.
+    throw lastFailure;
+  }
+  for (const category of rejectedCategories) {
+    warnings.push({
+      resourceType: entry.resourceType,
+      severity: "warning",
+      code: `${CATEGORY_REJECTED_PREFIX}${category}`,
+      epicCode: `${CATEGORY_REJECTED_PREFIX}${category}`,
+      diagnostics: null,
+    });
   }
   return { resources, warnings };
 }

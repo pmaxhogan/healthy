@@ -22,6 +22,7 @@ import {
   selectHealthSystems,
   spec,
 } from "../collect.ts";
+import { buildCoverage, mergeCoverage } from "../coverage.ts";
 import { BINARY_TEXT_TYPE } from "../deps.ts";
 import { LABORATORY, hasCategory } from "../match.ts";
 import { respond } from "../respond.ts";
@@ -29,8 +30,10 @@ import { respond } from "../respond.ts";
 import { readTool } from "./register.ts";
 
 import type { RawEntry } from "../../policy/filter.ts";
+import type { PolicyRules } from "../../policy/rules.ts";
 import type { CollectSpec, TaggedItem } from "../collect.ts";
-import type { HealthSystemInfo, ToolDeps } from "../deps.ts";
+import type { CoverageEntry } from "../coverage.ts";
+import type { HealthSystemInfo, SyncStatusEntry, ToolDeps } from "../deps.ts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 /** How many recent items of each section the summary carries. */
@@ -123,20 +126,32 @@ function perSectionLimit(limit: number | undefined): number {
   return limit ?? RECENT_PER_SECTION;
 }
 
+interface RecentResult {
+  entries: Sourced[];
+  /** Coverage for the appointments section (Encounter) plus every section in {@link SECTIONS}. */
+  coverage: CoverageEntry[];
+}
+
 async function recentItems(
   deps: ToolDeps,
   healthSystems: readonly HealthSystemInfo[],
   denied: readonly HealthSystemInfo[],
+  rules: PolicyRules,
+  syncStatus: readonly SyncStatusEntry[],
   now: number,
   perSection: number,
-): Promise<Sourced[]> {
+): Promise<RecentResult> {
   const out: Sourced[] = [];
   const appointments = await nearestAppointments(deps, healthSystems, denied, now, perSection);
   for (const { item, source } of appointments) {
     out.push({ item: { ...item, kind: "recent", section: "appointments" }, source });
   }
+  const coverageGroups: CoverageEntry[][] = [
+    buildCoverage({ healthSystems, resourceTypes: ["Encounter"], syncStatus, rules, now }),
+  ];
   for (const entry of SECTIONS) {
     const collected = await collect(deps, healthSystems, { specs: entry.specs() });
+    coverageGroups.push(collected.coverage);
     for (const [index, item] of collected.items.slice(0, perSection).entries()) {
       out.push({
         item: { ...item, kind: "recent", section: entry.section },
@@ -144,7 +159,7 @@ async function recentItems(
       });
     }
   }
-  return out;
+  return { entries: out, coverage: mergeCoverage(...coverageGroups) };
 }
 
 export function registerSummaryTool(server: McpServer, deps: ToolDeps): void {
@@ -161,7 +176,10 @@ export function registerSummaryTool(server: McpServer, deps: ToolDeps): void {
         "(kind `recent`, labelled by `section`). Five is a default for a fast " +
         "overview, not a ceiling: pass `limit` to get that many per section " +
         "instead, or call the section's own tool (`get_appointments`, " +
-        "`get_conditions`, ...) for the complete list.",
+        "`get_conditions`, ...) for the complete list. `coverage` reports " +
+        "whether the appointments, conditions, medications and labs sections are " +
+        "each current, so a section with nothing in it can be told apart from " +
+        "one whose last sync failed or has not happened yet.",
       schema: toolArgs(WINDOW_ARGS),
     },
     async (args, run) => {
@@ -190,14 +208,17 @@ export function registerSummaryTool(server: McpServer, deps: ToolDeps): void {
         sources.push(undefined);
       }
       const denied = deniedHealthSystems(all, run.rules);
+      const syncStatus = await deps.syncStatus();
       const recent = await recentItems(
         deps,
         healthSystems,
         denied,
+        run.rules,
+        syncStatus,
         run.now,
         perSectionLimit(args.limit),
       );
-      for (const entry of recent) {
+      for (const entry of recent.entries) {
         items.push(entry.item);
         sources.push(entry.source);
       }
@@ -209,6 +230,7 @@ export function registerSummaryTool(server: McpServer, deps: ToolDeps): void {
         sources,
         limit: effectiveLimit(args.limit),
         jq: args.jq,
+        coverage: recent.coverage,
         healthSystemIds: healthSystems.map((healthSystem) => healthSystem.id),
         now: run.now,
       });

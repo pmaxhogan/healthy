@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { TOOL_NAMES } from "../../../worker/mcp/tools/index.ts";
 import { buildRules } from "../../../worker/policy/rules.ts";
+import { UNSUPPORTED_ERROR_CODE } from "../../../worker/sync/sync-state-codes.ts";
 
 import {
   NAME_A,
@@ -89,6 +90,7 @@ describe("the envelope", () => {
     const parsed = JSON.parse(answer.text) as Record<string, unknown>;
 
     expect(Object.keys(parsed).toSorted((a, b) => a.localeCompare(b))).toStrictEqual([
+      "coverage",
       "generatedAt",
       "items",
       "matched",
@@ -517,5 +519,179 @@ describe("get_health_summary", () => {
     const answer = await callTool(world.client, "get_health_summary");
 
     expect(answer.text).not.toContain("_binary_text");
+  });
+
+  it("carries coverage for the appointments, conditions, medications and labs sections", async () => {
+    const answer = await callTool(world.client, "get_health_summary");
+
+    const types = new Set(answer.coverage?.map((entry) => entry.resourceType));
+    expect(types).toStrictEqual(
+      new Set(["Encounter", "Condition", "MedicationRequest", "Observation"]),
+    );
+  });
+});
+
+describe("coverage", () => {
+  // Neither fixture health system has any CarePlan in its pool, so get_care_plans
+  // always comes back with `items: []` -- the exact case an empty array must not
+  // be read as "no care plans exist".
+  it("reports failed, with the error code, when the last sync threw", async () => {
+    world.state.syncStatus = [
+      {
+        healthSystemId: HEALTH_SYSTEM_A,
+        resourceType: "CarePlan",
+        lastFullAt: NOW - 3600,
+        lastOk: false,
+        lastErrorCode: "upstream_error:59109",
+        warnings: [],
+      },
+    ];
+
+    const answer = await callTool(world.client, "get_care_plans");
+
+    expect(answer.items).toStrictEqual([]);
+    const row = answer.coverage?.find(
+      (entry) => entry.healthSystemId === HEALTH_SYSTEM_A && entry.resourceType === "CarePlan",
+    );
+    expect(row).toMatchObject({ status: "failed", errorCode: "upstream_error:59109" });
+    expect(answer.warnings).toContain("incomplete_no_data_is_not_absence");
+  });
+
+  it("reports never for a health system CarePlan has not been synced for at all", async () => {
+    world.state.syncStatus = [];
+
+    const answer = await callTool(world.client, "get_care_plans");
+
+    const rows = answer.coverage?.filter((entry) => entry.resourceType === "CarePlan") ?? [];
+    expect(rows).toHaveLength(2);
+    expect(rows.every((entry) => entry.status === "never")).toBe(true);
+    expect(answer.warnings).toContain("incomplete_no_data_is_not_absence");
+  });
+
+  it("reports stale once the last success is older than the refresh's own cadence", async () => {
+    world.state.syncStatus = [
+      {
+        healthSystemId: HEALTH_SYSTEM_A,
+        resourceType: "CarePlan",
+        lastFullAt: NOW - 90_000, // 25 hours -- more than a day, still not stale
+        lastOk: true,
+        lastErrorCode: null,
+        warnings: [],
+      },
+      {
+        healthSystemId: HEALTH_SYSTEM_B,
+        resourceType: "CarePlan",
+        lastFullAt: NOW - 300_000, // over three days
+        lastOk: true,
+        lastErrorCode: null,
+        warnings: [],
+      },
+    ];
+
+    const answer = await callTool(world.client, "get_care_plans");
+
+    const byHealthSystem = new Map(
+      answer.coverage
+        ?.filter((entry) => entry.resourceType === "CarePlan")
+        .map((entry) => [entry.healthSystemId, entry]),
+    );
+    expect(byHealthSystem.get(HEALTH_SYSTEM_A)?.status).toBe("ok");
+    expect(byHealthSystem.get(HEALTH_SYSTEM_B)?.status).toBe("stale");
+  });
+
+  it("reports unsupported, not failed, and does not add the incomplete warning for it alone", async () => {
+    world.state.syncStatus = [
+      {
+        healthSystemId: HEALTH_SYSTEM_A,
+        resourceType: "CarePlan",
+        lastFullAt: NOW - 3600,
+        lastOk: false,
+        lastErrorCode: UNSUPPORTED_ERROR_CODE,
+        warnings: [],
+      },
+      {
+        healthSystemId: HEALTH_SYSTEM_B,
+        resourceType: "CarePlan",
+        lastFullAt: NOW - 3600,
+        lastOk: false,
+        lastErrorCode: UNSUPPORTED_ERROR_CODE,
+        warnings: [],
+      },
+    ];
+
+    const answer = await callTool(world.client, "get_care_plans");
+
+    const rows = answer.coverage?.filter((entry) => entry.resourceType === "CarePlan") ?? [];
+    expect(rows.every((entry) => entry.status === "unsupported")).toBe(true);
+    expect(rows.every((entry) => entry.errorCode === undefined)).toBe(true);
+    // Every covered pair is "unsupported", which is a complete answer, not a gap.
+    expect(answer.warnings).not.toContain("incomplete_no_data_is_not_absence");
+  });
+
+  it("does not add the incomplete warning when items are not empty, whatever coverage says", async () => {
+    world.state.syncStatus = [
+      {
+        healthSystemId: HEALTH_SYSTEM_B,
+        resourceType: "Condition",
+        lastFullAt: NOW - 3600,
+        lastOk: false,
+        lastErrorCode: "upstream_error",
+        warnings: [],
+      },
+    ];
+
+    const answer = await callTool(world.client, "get_conditions");
+
+    expect(answer.items.length).toBeGreaterThan(0);
+    expect(answer.warnings).not.toContain("incomplete_no_data_is_not_absence");
+    // The gap is still reported, just not escalated into the top-level warning
+    // -- both as a structured `coverage` entry and as a flat warning, so a
+    // caller that only reads `warnings` cannot miss it either. System A's data
+    // filling `items` must not hide system B's failing sync.
+    expect(
+      answer.coverage?.some(
+        (entry) => entry.healthSystemId === HEALTH_SYSTEM_B && entry.status === "failed",
+      ),
+    ).toBe(true);
+    expect(answer.warnings).toContain(`sync_failed:Condition:${HEALTH_SYSTEM_B}:upstream_error`);
+  });
+
+  it("never reveals a denied resource type through coverage", async () => {
+    world.state.rules = rules({ rule_type: "resource", target: "CarePlan" });
+    world.state.syncStatus = [
+      {
+        healthSystemId: HEALTH_SYSTEM_A,
+        resourceType: "CarePlan",
+        lastFullAt: NOW - 3600,
+        lastOk: false,
+        lastErrorCode: "upstream_error",
+        warnings: [],
+      },
+    ];
+
+    const answer = await callTool(world.client, "get_care_plans");
+
+    expect(answer.coverage).toStrictEqual([]);
+    expect(answer.text).not.toContain("CarePlan");
+  });
+
+  it("never reveals a denied health system through coverage", async () => {
+    world.state.rules = rules({ rule_type: "health_system", target: HEALTH_SYSTEM_B });
+    world.state.syncStatus = [
+      {
+        healthSystemId: HEALTH_SYSTEM_B,
+        resourceType: "CarePlan",
+        lastFullAt: NOW - 3600,
+        lastOk: false,
+        lastErrorCode: "upstream_error",
+        warnings: [],
+      },
+    ];
+
+    const answer = await callTool(world.client, "get_care_plans");
+
+    expect(answer.coverage?.some((entry) => entry.healthSystemId === HEALTH_SYSTEM_B)).toBe(false);
+    expect(answer.text).not.toContain(HEALTH_SYSTEM_B);
+    expect(answer.text).not.toContain(NAME_B);
   });
 });

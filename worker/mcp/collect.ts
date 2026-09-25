@@ -22,6 +22,9 @@
 import { mapResolver, normalizeResource } from "../fhir/normalize/index.ts";
 import { isHealthSystemDenied } from "../policy/rules.ts";
 
+import { buildCoverage } from "./coverage.ts";
+
+import type { CoverageEntry } from "./coverage.ts";
 import type { CachedRow, HealthSystemInfo, ToolDeps } from "./deps.ts";
 import type { NormalizeCtx, NormalizedResource } from "../fhir/normalize/index.ts";
 import type { RawEntry } from "../policy/filter.ts";
@@ -114,6 +117,12 @@ export interface Collected {
   sources: RawEntry[];
   /** The health systems actually read from, by id. For the audit row. */
   healthSystemIds: string[];
+  /**
+   * Per (health system, resource type) freshness for every type this call's
+   * specs covered -- see `worker/mcp/coverage.ts`. What lets a caller (or
+   * `respond`) tell an empty `items` apart from a sync gap.
+   */
+  coverage: CoverageEntry[];
 }
 
 /**
@@ -289,10 +298,21 @@ export async function collect(
 
   entries.sort((a, b) => b.order - a.order);
 
+  const [rules, syncStatus] = await Promise.all([deps.rules(), deps.syncStatus()]);
+  const resourceTypes = [...new Set(options.specs.map((current) => current.resourceType))];
+  const coverage = buildCoverage({
+    healthSystems,
+    resourceTypes,
+    syncStatus,
+    rules,
+    now: deps.now(),
+  });
+
   return {
     items: entries.map((entry) => entry.item),
     rawItems: options.raw === true ? entries.map((entry) => entry.raw) : [],
     sources: entries.map((entry) => entry.raw),
     healthSystemIds: healthSystems.map((healthSystem) => healthSystem.id),
+    coverage,
   };
 }

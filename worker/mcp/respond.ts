@@ -9,7 +9,9 @@
  *
  * The envelope is fixed:
  *
- *   { items, total, matched, warnings, truncated, generatedAt }   (+ raw, when asked for)
+ *   { items, total, matched, warnings, truncated, generatedAt }
+ *   (+ coverage, on a call that named the resource types it covers; + raw, when
+ *   asked for)
  *
  * The order of operations is fixed too: policy, then the caller's `jq` program,
  * then the caller's `limit`.
@@ -52,8 +54,10 @@
 import { toIso } from "../lib/time.ts";
 import { applyPolicy, sortedWarnings } from "../policy/filter.ts";
 
+import { INCOMPLETE_WARNING, coverageIncomplete, coverageWarnings } from "./coverage.ts";
 import { runJq } from "./jq/engine.ts";
 
+import type { CoverageEntry } from "./coverage.ts";
 import type { JqFailureCode } from "./jq/engine.ts";
 import type { RawEntry } from "../policy/filter.ts";
 import type { PolicyRules } from "../policy/rules.ts";
@@ -162,6 +166,16 @@ export interface RespondInput {
   healthSystemIds: string[];
   /** Notes the tool itself wants to pass on (cache staleness, sync warnings). */
   warnings?: readonly string[] | undefined;
+  /**
+   * Per (health system, resource type) freshness for every type this tool
+   * covers, from `collect()` or built directly with `worker/mcp/coverage.ts`.
+   * Omitted only by the tools that read no resource type at all
+   * (`get_document_text`, `list_health_systems`). When `items` comes back empty
+   * and any entry here is not `ok` (or `unsupported`, which is not a gap), the
+   * envelope gets {@link INCOMPLETE_WARNING} so an empty answer is never
+   * mistaken for "nothing exists".
+   */
+  coverage?: readonly CoverageEntry[] | undefined;
   /** Unix seconds. */
   now: number;
 }
@@ -225,7 +239,17 @@ export async function respond(input: RespondInput): Promise<ToolOutcome> {
 
   const limit = input.limit === undefined ? undefined : Math.max(0, Math.trunc(input.limit));
   const total = filtered.items.length;
-  const baseWarnings = [...(input.warnings ?? []), ...filtered.warnings];
+  // Checked on `total` -- post-policy, pre-`jq` -- so a denied pair (already
+  // excluded from `coverage` itself) can never trigger this, and a `jq` program
+  // narrowing a genuinely complete answer to nothing does not either.
+  const incomplete =
+    total === 0 && input.coverage !== undefined && coverageIncomplete(input.coverage);
+  const baseWarnings = [
+    ...(input.warnings ?? []),
+    ...filtered.warnings,
+    ...(input.coverage === undefined ? [] : coverageWarnings(input.coverage)),
+    ...(incomplete ? [INCOMPLETE_WARNING] : []),
+  ];
 
   if (input.jq === undefined) {
     const shaped = applyLimit(filtered.items, limit);
@@ -233,6 +257,7 @@ export async function respond(input: RespondInput): Promise<ToolOutcome> {
       items: shaped.items,
       total,
       matched: total,
+      ...(input.coverage !== undefined && { coverage: input.coverage }),
       ...(input.rawItems !== undefined && {
         raw: limit === undefined ? filtered.rawItems : filtered.rawItems.slice(0, limit),
       }),
@@ -268,6 +293,7 @@ export async function respond(input: RespondInput): Promise<ToolOutcome> {
     items: shaped.items,
     total,
     matched: shaped.matched,
+    ...(input.coverage !== undefined && { coverage: input.coverage }),
     warnings: sortedWarnings([...baseWarnings, ...(empty ? [JQ_RESULT_EMPTY] : [])]),
     truncated: shaped.truncated,
     generatedAt: toIso(input.now),

@@ -385,6 +385,8 @@ export interface ToolAnswer {
   raw?: { resource: Record<string, unknown> }[];
   /** Present on an error answer. */
   error?: string;
+  /** Present on any tool that named the resource types it covers. */
+  coverage?: Record<string, unknown>[];
 }
 
 /** The one text block a tool answers with, or an empty string. */
@@ -425,5 +427,8 @@ export async function callTool(
     total: typeof parsed.total === "number" ? parsed.total : 0,
     ...(parsed.raw !== undefined && { raw: parsed.raw as { resource: Record<string, unknown> }[] }),
     ...(typeof parsed.error === "string" && { error: parsed.error }),
+    ...(parsed.coverage !== undefined && {
+      coverage: parsed.coverage as Record<string, unknown>[],
+    }),
   };
 }

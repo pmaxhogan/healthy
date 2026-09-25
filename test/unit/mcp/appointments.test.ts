@@ -624,3 +624,44 @@ describe("a health_system deny rule reaches another organisation's copy (securit
     ]);
   });
 });
+
+describe("coverage", () => {
+  it("covers Encounter (the FHIR sync) and PortalVisit (the portal connection) per health system", async () => {
+    const answer = await callTool(world.client, "get_appointments");
+
+    const types = new Set(
+      answer.coverage
+        ?.filter((entry) => entry.healthSystemId === HEALTH_SYSTEM_A)
+        .map((entry) => entry.resourceType),
+    );
+    expect(types).toStrictEqual(new Set(["Encounter", "PortalVisit"]));
+  });
+
+  it("reports the portal connection as failed when the health system needs reauth", async () => {
+    world.state.healthSystems = world.state.healthSystems.map((healthSystem) =>
+      healthSystem.id === HEALTH_SYSTEM_A
+        ? {
+            ...healthSystem,
+            status: "needs_reauth",
+            needsReauthSince: NOW - 3600,
+            lastErrorCode: "needs_reauth",
+          }
+        : healthSystem,
+    );
+
+    const answer = await callTool(world.client, "get_appointments");
+
+    const portal = answer.coverage?.find(
+      (entry) => entry.healthSystemId === HEALTH_SYSTEM_A && entry.resourceType === "PortalVisit",
+    );
+    expect(portal).toMatchObject({ status: "failed", errorCode: "needs_reauth" });
+  });
+
+  it("drops the synthetic PortalVisit row along with Encounter when Encounter is denied", async () => {
+    world.state.rules = rules({ rule_type: "resource", target: "Encounter" });
+
+    const answer = await callTool(world.client, "get_appointments");
+
+    expect(answer.coverage).toStrictEqual([]);
+  });
+});
