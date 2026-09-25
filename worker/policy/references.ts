@@ -348,19 +348,33 @@ function withheldAs(targets: readonly string[], restriction: Restriction): strin
 /** Keys only a Coding has: a `display` beside one of them is a code's text, not a name. */
 const CODING_KEYS: readonly string[] = ["system", "code", "version", "userSelected"];
 
+/** Every key a FHIR Reference can have. */
+const REFERENCE_KEYS: ReadonlySet<string> = new Set([
+  "id",
+  "extension",
+  "reference",
+  "type",
+  "identifier",
+  "display",
+]);
+
 /**
  * True for an object that is (or has to be treated as) a FHIR Reference:
- * a literal `reference`, a typed logical reference, or a `display` that is not
- * a Coding's. A bare `{ display }` counts -- Epic sends performers that way.
+ * a literal `reference`, a logical reference (an `identifier` with nothing but
+ * Reference keys beside it -- an NPI with no type is still someone's), or a
+ * `display` that is not a Coding's. A bare `{ display }` counts -- Epic sends
+ * performers that way.
  */
 function isReference(value: Record<string, unknown>): boolean {
   if (typeof own(value, "resourceType") === "string") return false;
   if (typeof own(value, "reference") === "string") return true;
-  const typedLogical = typeof own(value, "type") === "string" && isRecord(own(value, "identifier"));
+  const logical =
+    isRecord(own(value, "identifier")) &&
+    Object.keys(value).every((key) => REFERENCE_KEYS.has(key));
   const namedOnly =
     typeof own(value, "display") === "string" &&
     CODING_KEYS.every((key) => !Object.hasOwn(value, key));
-  return typedLogical || namedOnly;
+  return logical || namedOnly;
 }
 
 /** One walk's context: what is withheld, and what `#id` points at. */

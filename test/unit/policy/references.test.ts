@@ -186,11 +186,16 @@ describe("raw reference displays", () => {
       id: "obs-2",
       status: "final",
       code: { text: "Synthetic measurement" },
-      performer: [{ display: UNTYPED }, { reference: "urn:uuid:0000", display: UNTYPED }],
+      performer: [
+        { display: UNTYPED },
+        { reference: "urn:uuid:0000", display: UNTYPED },
+        { identifier: { system: "urn:synthetic:npi", value: NPI } },
+      ],
       note: [{ authorString: UNTYPED, text: "Synthetic note" }],
     };
     const restricted = run("get_lab_results", [observation], rules(hide(["name"], "Patient")));
     expect(restricted.text).not.toContain(UNTYPED);
+    expect(restricted.text).not.toContain(NPI);
     expect(restricted.result.warnings).toContain("policy_reference_display_removed:unknown");
 
     // With no person type restricted, an untyped display is left alone.
