@@ -353,6 +353,45 @@ describe("normalized strings rendered from references", () => {
   });
 });
 
+describe("hiding only the patient's name leaves clinicians alone", () => {
+  const PATIENT_ONLY = rules(hide(["name"], "Patient"));
+  const request: fhir4.MedicationRequest = {
+    resourceType: "MedicationRequest",
+    id: "mr-7",
+    status: "active",
+    intent: "order",
+    authoredOn: "2026-05-01",
+    subject: { reference: "Patient/pat-1", display: PATIENT_NAME },
+    medicationCodeableConcept: { text: "Synthetic medication" },
+    requester: { reference: "Practitioner/p1", display: PERFORMER },
+  };
+
+  it("keeps a requester judged by its source, and a portal visit's clinician", () => {
+    const { text } = run("get_medications", [request], PATIENT_ONLY, { withSources: true });
+    expect(text).toContain(PERFORMER);
+    expect(text).not.toContain(PATIENT_NAME);
+    const portal = { resourceType: "Encounter", source: "portal", practitioner: PERFORMER, ...tag };
+    const result = applyPolicy({
+      tool: "get_appointments",
+      items: [portal],
+      sources: [undefined],
+      rules: PATIENT_ONLY,
+    });
+    expect(JSON.stringify(result.items)).toContain(PERFORMER);
+  });
+
+  it("get_health_summary judges its recent items by their sources", async () => {
+    const state = fakeState({
+      rules: PATIENT_ONLY,
+      pools: new Map([[HEALTH_SYSTEM_A, { MedicationRequest: [request] }]]),
+    });
+    const client = await connectTools(fakeDeps(state));
+    const answer = await callTool(client, "get_health_summary");
+    expect(answer.text).toContain(PERFORMER);
+    expect(answer.text).not.toContain(PATIENT_NAME);
+  });
+});
+
 describe("normalized values read from a denied referenced resource", () => {
   const pooled = {
     healthSystem: tag.healthSystem,
@@ -486,7 +525,7 @@ describe("end to end through the real tools", () => {
 });
 
 describe("REFERENCE_FIELDS", () => {
-  // Every normalizer that renders a reference to text (`refs.display`) must
+  // Every normalizer that reads through a reference (`refs.display`, `refs.get`) must
   // have its fields listed, or a hidden name would survive in the normalized item.
   const renderers = new Map([
     ["care-team.ts", "CareTeam"],
@@ -518,7 +557,7 @@ describe("REFERENCE_FIELDS", () => {
       ...renderers.keys(),
     ]) {
       const source = readFileSync(new URL(file, directory), "utf8");
-      const renders = source.includes("refs.display(");
+      const renders = source.includes("refs.display(") || source.includes("refs.get<");
       expect({ file, renders }).toEqual({ file, renders: renderers.has(file) });
     }
     for (const type of renderers.values()) expect(REFERENCE_FIELDS.has(type)).toBe(true);

@@ -315,8 +315,9 @@ type is restricted — it fails closed — and so is an annotation's
 normalised strings rendered from these references (`practitioners[].name`,
 `requester`, `author`, `payor`, …) go too, and so does what was read from a
 withheld resource itself (a clinician's `specialty`, a denied Location's
-address): judged by the raw reference they were read from, or — for a portal
-visit, or a summary item — by every type that field may point at. A
+address): judged by the raw reference they were read from, or — where no raw
+resource is behind the item, as for a portal visit — by every type that field
+may point at (for a portal visit's clinician, a practitioner). A
 restriction applies at the health systems the triggering rule is scoped to,
 in every resource type. A rule on a person's own `name` (`Patient.name`,
 `Practitioner.name`) applies in every tool whatever its tool scope, since the

@@ -28,6 +28,7 @@ import { respond } from "../respond.ts";
 
 import { readTool } from "./register.ts";
 
+import type { RawEntry } from "../../policy/filter.ts";
 import type { CollectSpec, TaggedItem } from "../collect.ts";
 import type { HealthSystemInfo, ToolDeps } from "../deps.ts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -80,19 +81,33 @@ async function nearestAppointments(
   denied: readonly HealthSystemInfo[],
   now: number,
   perSection: number,
-): Promise<TaggedItem[]> {
-  const { items } = await collectAppointments(deps, healthSystems, { denied, order: "asc" });
+): Promise<Sourced[]> {
+  const { items, sources } = await collectAppointments(deps, healthSystems, {
+    denied,
+    order: "asc",
+  });
   const nowMs = now * 1000;
   const isUpcoming = (item: TaggedItem): boolean =>
     typeof item.start === "string" && Date.parse(item.start) >= nowMs;
-  const upcoming: TaggedItem[] = [];
+  const upcoming: Sourced[] = [];
   // Latest first; `items` is soonest first, so each past one goes to the front.
-  const past: TaggedItem[] = [];
-  for (const item of items) {
-    if (isUpcoming(item)) upcoming.push(item);
-    else past.unshift(item);
+  const past: Sourced[] = [];
+  for (const [index, item] of items.entries()) {
+    const entry = { item, source: sources.at(index) };
+    if (isUpcoming(item)) upcoming.push(entry);
+    else past.unshift(entry);
   }
   return [...upcoming, ...past].slice(0, perSection);
+}
+
+/**
+ * One summary item and the raw resource it was read from, if any: the
+ * exposure policy judges a rendered name (a requester, a practitioner) by
+ * the reference behind it. Never returned.
+ */
+interface Sourced {
+  item: TaggedItem;
+  source: RawEntry | undefined;
 }
 
 /**
@@ -114,14 +129,19 @@ async function recentItems(
   denied: readonly HealthSystemInfo[],
   now: number,
   perSection: number,
-): Promise<TaggedItem[]> {
-  const out: TaggedItem[] = [];
+): Promise<Sourced[]> {
+  const out: Sourced[] = [];
   const appointments = await nearestAppointments(deps, healthSystems, denied, now, perSection);
-  out.push(...appointments.map((item) => ({ ...item, kind: "recent", section: "appointments" })));
+  for (const { item, source } of appointments) {
+    out.push({ item: { ...item, kind: "recent", section: "appointments" }, source });
+  }
   for (const entry of SECTIONS) {
     const collected = await collect(deps, healthSystems, { specs: entry.specs() });
-    for (const item of collected.items.slice(0, perSection)) {
-      out.push({ ...item, kind: "recent", section: entry.section });
+    for (const [index, item] of collected.items.slice(0, perSection).entries()) {
+      out.push({
+        item: { ...item, kind: "recent", section: entry.section },
+        source: collected.sources.at(index),
+      });
     }
   }
   return out;
@@ -152,6 +172,8 @@ export function registerSummaryTool(server: McpServer, deps: ToolDeps): void {
       );
 
       const items: TaggedItem[] = [];
+      // Index-aligned with `items`: what each was read from, for the policy only.
+      const sources: (RawEntry | undefined)[] = [];
       const counts = await deps.counts();
       for (const count of counts) {
         const name = names.get(count.healthSystemId);
@@ -165,6 +187,7 @@ export function registerSummaryTool(server: McpServer, deps: ToolDeps): void {
           resourceType: count.resourceType,
           count: count.count,
         });
+        sources.push(undefined);
       }
       const denied = deniedHealthSystems(all, run.rules);
       const recent = await recentItems(
@@ -174,12 +197,16 @@ export function registerSummaryTool(server: McpServer, deps: ToolDeps): void {
         run.now,
         perSectionLimit(args.limit),
       );
-      items.push(...recent);
+      for (const entry of recent) {
+        items.push(entry.item);
+        sources.push(entry.source);
+      }
 
       return respond({
         tool: "get_health_summary",
         rules: run.rules,
         items,
+        sources,
         limit: effectiveLimit(args.limit),
         jq: args.jq,
         healthSystemIds: healthSystems.map((healthSystem) => healthSystem.id),

@@ -79,6 +79,13 @@ const ACTOR_TARGETS = [
 const PARTICIPANT_TARGETS = ["Practitioner", "PractitionerRole", "RelatedPerson"] as const;
 
 /**
+ * The appointment view's clinician. With no Encounter behind it -- a patient
+ * portal's visit -- the value came from the portal's own listing, which only
+ * ever names the clinician the visit is with.
+ */
+const VIEW_CLINICIAN_TARGETS = ["Practitioner", "PractitionerRole"] as const;
+
+/**
  * Every normalized field rendered from a Reference, by resource type. A test
  * pins it against the normalizers, so a new `refs.display` call without an
  * entry here fails rather than leaking.
@@ -106,13 +113,13 @@ export const REFERENCE_FIELDS: ReadonlyMap<string, readonly ReferenceField[]> = 
       {
         normalized: ["practitioner"],
         raw: ["participant", ARRAY_SEGMENT, "individual"],
-        targets: PARTICIPANT_TARGETS,
+        targets: VIEW_CLINICIAN_TARGETS,
         name: true,
       },
       {
         normalized: ["specialty"],
         raw: ["participant", ARRAY_SEGMENT, "individual"],
-        targets: PARTICIPANT_TARGETS,
+        targets: VIEW_CLINICIAN_TARGETS,
       },
       // A Location's name, address and phone, and the department's name.
       {
