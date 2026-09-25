@@ -3,12 +3,18 @@
  *
  * Pure functions, no bindings, no I/O -- which is why they live here rather than
  * in `binary.ts`: this half is exercised by the plain-Node unit suite, and the
- * half that talks to a health system is not.
+ * half that talks to a health system is not. That includes classifying and
+ * matching a `get_document_text` id argument: deciding what an id string names,
+ * and which of a `DocumentReference`'s attachments a Binary reference points at,
+ * is ordinary string and structure matching over data the caller already has --
+ * only the two cache/repo lookups that use the result belong in `binary.ts`.
  *
  * Deliberately narrow. `text/plain` passes through, HTML and RTF are flattened,
  * and everything else is refused. Handing a model the base64 of a PDF does not
  * produce a summary of the PDF; it produces a confident summary of nothing.
  */
+
+import type * as fhir4 from "fhir/r4";
 
 /** Decode base64 (standard or url-safe, whitespace tolerated) as UTF-8 text. */
 export function decodeBase64Utf8(data: string): string {
@@ -16,6 +22,111 @@ export function decodeBase64Utf8(data: string): string {
   const binary = atob(normalised);
   const bytes = Uint8Array.from(binary, (character) => character.codePointAt(0) ?? 0);
   return new TextDecoder().decode(bytes);
+}
+
+const DOCUMENT_REFERENCE_PREFIX = "DocumentReference/";
+
+/**
+ * `Binary/<id>` out of a relative reference or an absolute URL.
+ *
+ * Used two ways: parsing the `id` argument `get_document_text` was called with,
+ * and parsing an `attachment.url` out of a cached `DocumentReference` to see
+ * which Binary it names -- the same extraction, because a model copies the
+ * latter straight out of `attachments[].url` in `get_documents`' answer and hands
+ * it back as the former.
+ */
+export function binaryIdFromUrl(url: string | undefined): string | undefined {
+  if (url === undefined) return undefined;
+  const match = /(?:^|\/)Binary\/([^/?#]+)/u.exec(url);
+  return match?.[1];
+}
+
+/** What a `get_document_text` `id` argument named. */
+export type ParsedDocumentId =
+  | { kind: "binary"; id: string }
+  | { kind: "documentReference"; id: string }
+  | { kind: "bare"; id: string };
+
+/**
+ * Classify a `get_document_text` id argument.
+ *
+ * A model naturally copies a document's `attachments[].url` (a Binary reference)
+ * rather than its `id` (the DocumentReference), so both are accepted:
+ *
+ *  - `Binary/<id>`, or an absolute URL ending in `/Binary/<id>` -> `"binary"`.
+ *  - `DocumentReference/<id>` -> `"documentReference"`, prefix stripped.
+ *  - anything else -> `"bare"`.
+ *
+ * A bare id is ambiguous on purpose: every existing caller passes a bare
+ * DocumentReference id, but the id of a `Binary` is just as plausibly bare. This
+ * function only classifies the string; `binary.ts` is what tries a `"bare"` id as
+ * a DocumentReference id first (preserving every existing caller) and falls back
+ * to treating it as a Binary id only when that lookup misses.
+ */
+export function parseDocumentTextId(rawId: string): ParsedDocumentId {
+  const binaryId = binaryIdFromUrl(rawId);
+  if (binaryId !== undefined) return { kind: "binary", id: binaryId };
+  return rawId.startsWith(DOCUMENT_REFERENCE_PREFIX)
+    ? { kind: "documentReference", id: rawId.slice(DOCUMENT_REFERENCE_PREFIX.length) }
+    : { kind: "bare", id: rawId };
+}
+
+/** The little a cache write or a fetch needs to know about one attachment. */
+export interface DocumentAttachment {
+  contentType: string;
+  /** Inline base64, when the organisation supplied it. */
+  data?: string | undefined;
+  /** The `Binary` id, when it did not. */
+  binaryId?: string | undefined;
+}
+
+export function isDocumentReference(value: unknown): value is fhir4.DocumentReference {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { resourceType?: unknown }).resourceType === "DocumentReference" &&
+    Array.isArray((value as { content?: unknown }).content)
+  );
+}
+
+/** The first attachment that could plausibly become text. */
+export function pickAttachment(document: fhir4.DocumentReference): DocumentAttachment | null {
+  for (const content of document.content) {
+    const { attachment } = content;
+    const contentType = attachment.contentType ?? "";
+    if (!isConvertible(contentType)) continue;
+    const binaryId = binaryIdFromUrl(attachment.url);
+    if (binaryId === undefined && attachment.data === undefined) continue;
+    return {
+      contentType,
+      ...(attachment.data !== undefined && { data: attachment.data }),
+      ...(binaryId !== undefined && { binaryId }),
+    };
+  }
+  return null;
+}
+
+/**
+ * The one attachment a Binary reference names, when it names a convertible one.
+ *
+ * Unlike `pickAttachment`'s "first one that will do", a caller who named a
+ * specific Binary gets that attachment or nothing -- never a different one that
+ * happens to convert. Checking `isConvertible` here, before any Binary is
+ * fetched, is what keeps a request for a document's PDF attachment from spending
+ * a metered fetch only to be told `unsupported_document` afterwards: the
+ * DocumentReference already says what the attachment's type is.
+ */
+export function attachmentForBinary(
+  document: fhir4.DocumentReference,
+  binaryId: string,
+): DocumentAttachment | null {
+  for (const content of document.content) {
+    const { attachment } = content;
+    if (binaryIdFromUrl(attachment.url) !== binaryId) continue;
+    const contentType = attachment.contentType ?? "";
+    return isConvertible(contentType) ? { contentType, binaryId } : null;
+  }
+  return null;
 }
 
 /** The handful of entities a clinical note actually contains. */

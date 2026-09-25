@@ -71,6 +71,16 @@ describe("the registered surface", () => {
       expect(tool.description ?? "", tool.name).not.toBe("");
     }
   });
+
+  it("tells a model that get_document_text also takes an attachment url", async () => {
+    const { tools } = await world.client.listTools();
+    const documents = tools.find((tool) => tool.name === "get_documents");
+    const documentText = tools.find((tool) => tool.name === "get_document_text");
+    const idProperty = documentText?.inputSchema.properties?.id as { description?: string };
+
+    expect(documents?.description).toContain("attachment");
+    expect(idProperty.description).toContain("attachments[].url");
+  });
 });
 
 describe("the envelope", () => {
@@ -432,6 +442,23 @@ describe("get_document_text", () => {
       id: "d",
     });
     expect(missing.error).toBe("not_found");
+  });
+
+  it("passes a not_found detail through to the answer, when documentText gives one", async () => {
+    world.state.document = {
+      ok: false,
+      reason: "not_found",
+      detail: "looked like a Binary reference (Binary/nope); use the `id` get_documents reported",
+    };
+
+    const answer = await callTool(world.client, "get_document_text", {
+      healthSystem: HEALTH_SYSTEM_A,
+      id: "Binary/nope",
+    });
+
+    expect(answer.error).toBe("not_found");
+    expect(answer.text).toContain("looked like a Binary reference");
+    expect(answer.text).toContain("get_documents");
   });
 
   it("refuses a health system name that matches nothing", async () => {

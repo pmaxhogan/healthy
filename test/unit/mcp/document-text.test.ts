@@ -3,14 +3,156 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  attachmentForBinary,
+  binaryIdFromUrl,
   convertDocument,
   decodeBase64Utf8,
   htmlToText,
   isConvertible,
+  isDocumentReference,
+  parseDocumentTextId,
+  pickAttachment,
   rtfToText,
 } from "../../../worker/mcp/document-text.ts";
 
+import type * as fhir4 from "fhir/r4";
+
 const b64 = (value: string): string => Buffer.from(value, "utf8").toString("base64");
+
+/** A minimal, synthetic DocumentReference with one or more content entries. */
+function documentReference(
+  content: { contentType: string; url?: string; data?: string }[],
+): fhir4.DocumentReference {
+  return {
+    resourceType: "DocumentReference",
+    id: "doc-fixture",
+    status: "current",
+    content: content.map(({ contentType, url, data }) => ({
+      attachment: {
+        contentType,
+        ...(url !== undefined && { url }),
+        ...(data !== undefined && { data }),
+      },
+    })),
+  };
+}
+
+describe("binaryIdFromUrl", () => {
+  it("reads a relative Binary reference", () => {
+    expect(binaryIdFromUrl("Binary/abc-123")).toBe("abc-123");
+  });
+
+  it("reads the id out of an absolute URL", () => {
+    expect(binaryIdFromUrl("https://fhir.example.test/R4/Binary/abc-123")).toBe("abc-123");
+  });
+
+  it("stops at a query string or fragment", () => {
+    expect(binaryIdFromUrl("Binary/abc-123?_id=1")).toBe("abc-123");
+    expect(binaryIdFromUrl("Binary/abc-123#frag")).toBe("abc-123");
+  });
+
+  it("is undefined for a url with no Binary segment, or none at all", () => {
+    expect(binaryIdFromUrl("DocumentReference/doc-1")).toBeUndefined();
+    expect(binaryIdFromUrl(undefined)).toBeUndefined();
+  });
+});
+
+describe("parseDocumentTextId", () => {
+  it("classifies a relative Binary reference", () => {
+    expect(parseDocumentTextId("Binary/bin-1")).toStrictEqual({ kind: "binary", id: "bin-1" });
+  });
+
+  it("classifies an absolute URL ending in a Binary reference", () => {
+    expect(parseDocumentTextId("https://fhir.example.test/R4/Binary/bin-1")).toStrictEqual({
+      kind: "binary",
+      id: "bin-1",
+    });
+  });
+
+  it("classifies a DocumentReference-prefixed id, stripping the prefix", () => {
+    expect(parseDocumentTextId("DocumentReference/doc-1")).toStrictEqual({
+      kind: "documentReference",
+      id: "doc-1",
+    });
+  });
+
+  it("classifies anything else as bare", () => {
+    expect(parseDocumentTextId("doc-1")).toStrictEqual({ kind: "bare", id: "doc-1" });
+  });
+});
+
+describe("isDocumentReference", () => {
+  it("accepts a DocumentReference with a content array", () => {
+    expect(isDocumentReference(documentReference([{ contentType: "text/plain" }]))).toBe(true);
+  });
+
+  it("rejects anything else", () => {
+    expect(isDocumentReference(null)).toBe(false);
+    expect(isDocumentReference({ resourceType: "Patient" })).toBe(false);
+    expect(isDocumentReference({ resourceType: "DocumentReference" })).toBe(false);
+  });
+});
+
+describe("pickAttachment", () => {
+  it("picks the first convertible attachment, inline data included", () => {
+    const document = documentReference([
+      { contentType: "application/pdf", url: "Binary/bin-pdf" },
+      { contentType: "text/html", data: b64("<p>hi</p>") },
+    ]);
+
+    expect(pickAttachment(document)).toStrictEqual({
+      contentType: "text/html",
+      data: b64("<p>hi</p>"),
+    });
+  });
+
+  it("carries the Binary id when the attachment is by reference", () => {
+    const document = documentReference([{ contentType: "text/html", url: "Binary/bin-html" }]);
+
+    expect(pickAttachment(document)).toStrictEqual({
+      contentType: "text/html",
+      binaryId: "bin-html",
+    });
+  });
+
+  it("is null when nothing is convertible", () => {
+    const document = documentReference([{ contentType: "application/pdf", url: "Binary/bin-pdf" }]);
+
+    expect(pickAttachment(document)).toBeNull();
+  });
+});
+
+describe("attachmentForBinary", () => {
+  it("picks the attachment the Binary id names, not the default choice", () => {
+    // RTF comes first, so `pickAttachment` would choose it; a Binary reference to
+    // the HTML attachment must still get the HTML one.
+    const document = documentReference([
+      { contentType: "application/rtf", url: "Binary/bin-rtf" },
+      { contentType: "text/html", url: "Binary/bin-html" },
+    ]);
+
+    expect(attachmentForBinary(document, "bin-html")).toStrictEqual({
+      contentType: "text/html",
+      binaryId: "bin-html",
+    });
+    expect(attachmentForBinary(document, "bin-rtf")).toStrictEqual({
+      contentType: "application/rtf",
+      binaryId: "bin-rtf",
+    });
+  });
+
+  it("is null when the named Binary's declared type is not convertible", () => {
+    const document = documentReference([{ contentType: "application/pdf", url: "Binary/bin-pdf" }]);
+
+    expect(attachmentForBinary(document, "bin-pdf")).toBeNull();
+  });
+
+  it("is null when no attachment names that Binary", () => {
+    const document = documentReference([{ contentType: "text/html", url: "Binary/bin-html" }]);
+
+    expect(attachmentForBinary(document, "bin-nope")).toBeNull();
+  });
+});
 
 describe("decodeBase64Utf8", () => {
   it("round-trips UTF-8, including characters outside ASCII", () => {

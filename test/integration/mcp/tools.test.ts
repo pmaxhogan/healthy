@@ -62,6 +62,52 @@ const INLINE_NOTE = {
   ],
 };
 
+/**
+ * A single-attachment DocumentReference whose body lives in a Binary, not
+ * inline. Its `_binary_text` cache entry is seeded directly (below) so the
+ * Binary-reference paths can be exercised without a fake organisation to fetch
+ * from -- exactly what `INLINE_NOTE` does for the plain DocumentReference-id path.
+ */
+const REMOTE_NOTE = {
+  resourceType: "DocumentReference",
+  id: "doc-remote",
+  status: "current",
+  date: "2026-04-03T00:00:00Z",
+  type: { text: "Discharge summary" },
+  content: [{ attachment: { contentType: "text/html", url: "Binary/bin-remote" } }],
+};
+
+/**
+ * A DocumentReference with two attachments, RTF first and HTML second.
+ * `pickAttachment`'s default choice is the first convertible one (RTF), so a
+ * Binary reference naming the HTML attachment must resolve to different text.
+ */
+const MULTI_ATTACHMENT_NOTE = {
+  resourceType: "DocumentReference",
+  id: "doc-multi",
+  status: "current",
+  date: "2026-04-02T00:00:00Z",
+  type: { text: "Consult note" },
+  content: [
+    { attachment: { contentType: "application/rtf", url: "Binary/bin-rtf" } },
+    { attachment: { contentType: "text/html", url: "Binary/bin-html" } },
+  ],
+};
+
+/**
+ * Health system B's own document, naming a Binary id ("bin-html") that
+ * collides with health system A's `MULTI_ATTACHMENT_NOTE` on purpose: the
+ * reverse Binary search must stay scoped to the health system asked about.
+ */
+const CROSS_HEALTH_SYSTEM_NOTE = {
+  resourceType: "DocumentReference",
+  id: "doc-b-html",
+  status: "current",
+  date: "2026-02-03T00:00:00Z",
+  type: { text: "Note" },
+  content: [{ attachment: { contentType: "text/html", url: "Binary/bin-html" } }],
+};
+
 interface Seeded {
   healthSystemA: string;
   healthSystemB: string;
@@ -115,6 +161,8 @@ async function seed(): Promise<Seeded> {
         participant: [{ individual: { reference: "Practitioner/prac-1" } }],
       },
       INLINE_NOTE,
+      REMOTE_NOTE,
+      MULTI_ATTACHMENT_NOTE,
     ],
     8 * day,
   );
@@ -127,6 +175,54 @@ async function seed(): Promise<Seeded> {
         clinicalStatus: { coding: [{ code: "active" }] },
         code: { text: "Migraine without aura" },
         recordedDate: "2026-02-02T00:00:00Z",
+      },
+      CROSS_HEALTH_SYSTEM_NOTE,
+    ],
+    8 * day,
+  );
+
+  // Pre-seeded thirty-day text cache, keyed by Binary id, for the documents whose
+  // attachment is by reference rather than inline: this is what lets the
+  // Binary-reference paths below be exercised without a fake organisation to
+  // fetch a Binary from. `REMOTE_NOTE`'s cache entry also proves that a call by
+  // its DocumentReference id and a call by its Binary reference hit the very
+  // same row.
+  await db.fhirCache.upsertMany(
+    a.id,
+    [
+      {
+        resourceType: "_binary_text",
+        id: "bin-remote",
+        text: "Discharge summary text.",
+        contentType: "text/html",
+        documentId: "doc-remote",
+      },
+      {
+        resourceType: "_binary_text",
+        id: "bin-rtf",
+        text: "RTF consult text.",
+        contentType: "application/rtf",
+        documentId: "doc-multi",
+      },
+      {
+        resourceType: "_binary_text",
+        id: "bin-html",
+        text: "HTML consult text.",
+        contentType: "text/html",
+        documentId: "doc-multi",
+      },
+    ],
+    8 * day,
+  );
+  await db.fhirCache.upsertMany(
+    b.id,
+    [
+      {
+        resourceType: "_binary_text",
+        id: "bin-html",
+        text: "Health system B's own HTML text.",
+        contentType: "text/html",
+        documentId: "doc-b-html",
       },
     ],
     8 * day,
@@ -726,5 +822,109 @@ describe("get_document_text", () => {
     const answer = await call(world.client, "get_health_summary");
 
     expect(answer.text).not.toContain("_binary_text");
+  });
+
+  describe("Binary references and DocumentReference-prefixed ids", () => {
+    it("resolves a DocumentReference/-prefixed id -- the prefix is stripped before blinding", async () => {
+      const prefixed = await call(world.client, "get_document_text", {
+        healthSystem: world.seeded.healthSystemA,
+        id: "DocumentReference/doc-inline",
+      });
+
+      expect(prefixed.items[0]?.text).toBe("Reviewed results.\nNo change.");
+      expect(prefixed.items[0]?.id).toBe("doc-inline");
+    });
+
+    it("resolves a relative Binary reference to the document that names it", async () => {
+      const answer = await call(world.client, "get_document_text", {
+        healthSystem: world.seeded.healthSystemA,
+        id: "Binary/bin-remote",
+      });
+
+      expect(answer.items[0]?.text).toBe("Discharge summary text.");
+      // Same identity as a lookup by the DocumentReference's own id.
+      expect(answer.items[0]?.id).toBe("doc-remote");
+    });
+
+    it("resolves an absolute URL ending in /Binary/<id>", async () => {
+      const answer = await call(world.client, "get_document_text", {
+        healthSystem: world.seeded.healthSystemA,
+        id: "https://a.fhir.example.test/R4/Binary/bin-remote",
+      });
+
+      expect(answer.items[0]?.text).toBe("Discharge summary text.");
+      expect(answer.items[0]?.id).toBe("doc-remote");
+    });
+
+    it("falls back to a bare Binary id when it is not a cached DocumentReference id", async () => {
+      const answer = await call(world.client, "get_document_text", {
+        healthSystem: world.seeded.healthSystemA,
+        id: "bin-remote",
+      });
+
+      expect(answer.items[0]?.text).toBe("Discharge summary text.");
+      expect(answer.items[0]?.id).toBe("doc-remote");
+    });
+
+    it("still prefers a bare id that IS a cached DocumentReference id", async () => {
+      // "doc-inline" is a real DocumentReference id, so the DocumentReference
+      // lookup must win -- no Binary search is even attempted.
+      const answer = await call(world.client, "get_document_text", {
+        healthSystem: world.seeded.healthSystemA,
+        id: "doc-inline",
+      });
+
+      expect(answer.items[0]?.text).toBe("Reviewed results.\nNo change.");
+    });
+
+    it("picks the attachment the Binary names, not pickAttachment's default, in a multi-attachment document", async () => {
+      const byDocumentId = await call(world.client, "get_document_text", {
+        healthSystem: world.seeded.healthSystemA,
+        id: "doc-multi",
+      });
+      const byHtmlBinary = await call(world.client, "get_document_text", {
+        healthSystem: world.seeded.healthSystemA,
+        id: "Binary/bin-html",
+      });
+      const byRtfBinary = await call(world.client, "get_document_text", {
+        healthSystem: world.seeded.healthSystemA,
+        id: "Binary/bin-rtf",
+      });
+
+      // The default choice is the first convertible attachment: RTF.
+      expect(byDocumentId.items[0]?.text).toBe("RTF consult text.");
+      expect(byHtmlBinary.items[0]?.text).toBe("HTML consult text.");
+      expect(byHtmlBinary.items[0]?.id).toBe("doc-multi");
+      expect(byRtfBinary.items[0]?.text).toBe("RTF consult text.");
+    });
+
+    it("keeps a Binary search scoped to one health system", async () => {
+      // Both health systems have a document naming Binary/bin-html; each must
+      // resolve to its own.
+      const forA = await call(world.client, "get_document_text", {
+        healthSystem: world.seeded.healthSystemA,
+        id: "Binary/bin-html",
+      });
+      const forB = await call(world.client, "get_document_text", {
+        healthSystem: world.seeded.healthSystemB,
+        id: "Binary/bin-html",
+      });
+
+      expect(forA.items[0]?.text).toBe("HTML consult text.");
+      expect(forA.items[0]?.id).toBe("doc-multi");
+      expect(forB.items[0]?.text).toBe("Health system B's own HTML text.");
+      expect(forB.items[0]?.id).toBe("doc-b-html");
+    });
+
+    it("answers not_found for an unknown Binary, with a detail pointing back at get_documents", async () => {
+      const answer = await call(world.client, "get_document_text", {
+        healthSystem: world.seeded.healthSystemA,
+        id: "Binary/nope",
+      });
+
+      expect(answer.error).toBe("not_found");
+      expect(answer.text).toContain("Binary");
+      expect(answer.text).toContain("get_documents");
+    });
   });
 });

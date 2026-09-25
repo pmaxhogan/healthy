@@ -83,7 +83,12 @@ export interface SyncStatusEntry {
 
 export interface DocumentTextRequest {
   healthSystemId: string;
-  /** The DocumentReference id, as `get_documents` reported it. */
+  /**
+   * What `get_documents` reported as the document's `id`, or a Binary reference
+   * copied from one of its `attachments[].url` -- `Binary/<id>`, a bare Binary
+   * id, or an absolute URL ending in one. Either form resolves to the same
+   * document; see `parseDocumentTextId` in `mcp/document-text.ts`.
+   */
   documentId: string;
 }
 
@@ -106,7 +111,17 @@ export type DocumentTextResult =
       /** True when the text came from the cache rather than from the organisation. */
       cached: boolean;
     }
-  | { ok: false; reason: DocumentTextFailure };
+  | {
+      ok: false;
+      reason: DocumentTextFailure;
+      /**
+       * Set on a `not_found` that a caller can act on: whether the id looked like
+       * a Binary reference or a DocumentReference id, and a pointer back at
+       * `get_documents`. Never set for the other failure reasons, which already
+       * say everything there is to say.
+       */
+      detail?: string;
+    };
 
 /** One `mcp_audit` row. Metadata only -- there is nowhere to put content. */
 export interface AuditRecord {

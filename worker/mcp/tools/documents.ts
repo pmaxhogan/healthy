@@ -38,7 +38,13 @@ const DOCUMENT_TEXT_ARGS = z.strictObject({
     .string()
     .min(1)
     .describe("Health system id, or a case-insensitive substring of its display name."),
-  id: z.string().min(1).describe("The DocumentReference id, as get_documents reported it."),
+  id: z
+    .string()
+    .min(1)
+    .describe(
+      "The document `id` get_documents reported, or one of its attachments[].url " +
+        '(a Binary reference such as "Binary/<id>"). Either form resolves to the same document.',
+    ),
   ...JQ_ARGS,
 });
 
@@ -47,9 +53,10 @@ export function registerDocumentTools(server: McpServer, deps: ToolDeps): void {
     name: "get_documents",
     description:
       "Clinical document metadata: type, date, author, description and what " +
-      "attachments exist. The text of one document is fetched with " +
-      "get_document_text, which costs the organisation a metered request. To keep " +
-      'only what you need, pass `jq`, e.g. `.[] | select(.date >= "2026-01-01") | {id, type, date}`.',
+      "attachments exist. Pass the document `id` (or an attachment url) to " +
+      "get_document_text for the text of one document, which costs the organisation " +
+      "a metered request. To keep only what you need, pass `jq`, e.g. " +
+      '`.[] | select(.date >= "2026-01-01") | {id, type, date}`.',
     schema: toolArgs(WINDOW_ARGS),
     specs: () => [spec("DocumentReference", { dateOf: (item) => item.date })],
   });
@@ -86,7 +93,10 @@ export function registerDocumentTools(server: McpServer, deps: ToolDeps): void {
         documentId: args.id,
       });
       if (!result.ok) {
-        return toolError(FAILURE_CODES[result.reason], { healthSystemIds: [healthSystem.id] });
+        return toolError(FAILURE_CODES[result.reason], {
+          healthSystemIds: [healthSystem.id],
+          ...(result.detail !== undefined && { detail: result.detail }),
+        });
       }
 
       return respond({
