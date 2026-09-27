@@ -10,6 +10,10 @@ export const MCP_INSTRUCTIONS =
   "A read-only copy of one person's health record, cached from their health " +
   "systems. Start with get_health_summary. For 'what conditions do I have', " +
   'use get_conditions with category ["problem-list-item"] or collapse: true. ' +
+  "Patient-portal secure messages (inbox conversations with a care team) are " +
+  "not part of this record and no tool returns them; get_documents holds " +
+  "clinical documents such as visit notes, not messages. Say so plainly " +
+  "rather than searching for them. " +
   "Every tool that reads a resource " +
   "type returns { items, total, matched, coverage, warnings, truncated, " +
   "generatedAt } and accepts an optional `jq` argument: a real jq program run " +
