@@ -38,10 +38,16 @@
 
 import { toIso } from "../lib/time.ts";
 import { isHealthSystemDenied } from "../policy/rules.ts";
-import { CATEGORY_REJECTED_PREFIX, UNSUPPORTED_ERROR_CODE } from "../sync/sync-state-codes.ts";
+import {
+  CATEGORY_REJECTED_PREFIX,
+  UNSUPPORTED_ERROR_CODE,
+  explainSyncCode,
+  explainSyncWarnings,
+} from "../sync/sync-state-codes.ts";
 
 import type { HealthSystemInfo, SyncStatusEntry } from "./deps.ts";
 import type { PolicyRules } from "../policy/rules.ts";
+import type { ExplainedSyncWarning } from "../sync/sync-state-codes.ts";
 
 export type CoverageStatus = "ok" | "partial" | "stale" | "failed" | "never" | "unsupported";
 
@@ -53,6 +59,16 @@ export interface CoverageEntry {
   status: CoverageStatus;
   /** Present for `failed`. Never present for `unsupported` (see `UNSUPPORTED_ERROR_CODE`). */
   errorCode?: string;
+  /** What `errorCode` means, in plain words (`worker/sync/sync-state-codes.ts`). */
+  errorMeaning?: string;
+  /**
+   * The last refresh's warnings that are more than informational -- severity
+   * `warning`, `error` or `unknown` -- each with its meaning. Absent when every
+   * warning was `info` (4101, 4119, 59204, ...): those say the search worked,
+   * and repeating them on every answer would bury the ones that matter.
+   * `get_sync_status` lists all of them.
+   */
+  notices?: ExplainedSyncWarning[];
   /** ISO instant of the last successful full refresh. Present for ok/stale/partial. */
   lastOkAt?: string;
   /** Hours since the last successful full refresh. Present for `stale`. */
@@ -76,17 +92,39 @@ function key(healthSystemId: string, resourceType: string): string {
   return `${healthSystemId}\u{0}${resourceType}`;
 }
 
-function statusOf(
-  state: SyncStatusEntry | undefined,
-  now: number,
-): Pick<CoverageEntry, "status" | "errorCode" | "lastOkAt" | "ageHours"> {
+/** The fields of a coverage entry that depend on the pair's sync state alone. */
+type StateFields = Pick<
+  CoverageEntry,
+  "status" | "errorCode" | "errorMeaning" | "lastOkAt" | "ageHours" | "notices"
+>;
+
+/**
+ * One pair's status from its sync state, in coverage's vocabulary. Exported
+ * for `get_sync_status`, whose rows carry the same `status`, so a caller can
+ * filter them exactly the way coverage reads them.
+ */
+export function syncStatusOf(state: SyncStatusEntry | undefined, now: number): CoverageStatus {
+  return statusOf(state, now).status;
+}
+
+function statusOf(state: SyncStatusEntry | undefined, now: number): StateFields {
   if (state === undefined) return { status: "never" };
+  const notices = explainSyncWarnings(state.warnings).filter(
+    (warning) => warning.severity !== "info",
+  );
+  return { ...baseStatusOf(state, now), ...(notices.length > 0 && { notices }) };
+}
+
+function baseStatusOf(state: SyncStatusEntry, now: number): StateFields {
   if (!state.lastOk) {
     return state.lastErrorCode === UNSUPPORTED_ERROR_CODE
       ? { status: "unsupported" }
       : {
           status: "failed",
-          ...(state.lastErrorCode !== null && { errorCode: state.lastErrorCode }),
+          ...(state.lastErrorCode !== null && {
+            errorCode: state.lastErrorCode,
+            errorMeaning: explainSyncCode(state.lastErrorCode).meaning,
+          }),
         };
   }
   const lastOkAt = state.lastFullAt === null ? undefined : toIso(state.lastFullAt);

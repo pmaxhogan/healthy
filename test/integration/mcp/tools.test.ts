@@ -374,6 +374,50 @@ describe("reading the real cache", () => {
   });
 });
 
+describe("get_sync_status over real fhir_sync_state rows", () => {
+  it("explains every recorded code, with coverage's status on each row", async () => {
+    const db = repos();
+    await db.fhirSyncState.record(world.seeded.healthSystemA, "Observation", {
+      ok: true,
+      warnings: [
+        { code: "4119", count: 4 },
+        { code: "59001", count: 7 },
+      ],
+    });
+    await db.fhirSyncState.record(world.seeded.healthSystemA, "Specimen", {
+      ok: false,
+      errorCode: "unsupported",
+    });
+    await db.fhirSyncState.record(world.seeded.healthSystemB, "Goal", {
+      ok: false,
+      errorCode: "upstream_error:4118",
+    });
+
+    const answer = await call(world.client, "get_sync_status", {
+      jq: '.[] | select(.kind == "resource_sync") | {resourceType, status, lastError, warnings}',
+    });
+    const byType = new Map(answer.items.map((item) => [item.resourceType, item]));
+
+    expect(byType.get("Observation")).toStrictEqual({
+      resourceType: "Observation",
+      status: "ok",
+      lastError: null,
+      warnings: [
+        { code: "4119", count: 4, meaning: expect.any(String), severity: "info" },
+        { code: "59001", count: 7, meaning: expect.any(String), severity: "unknown" },
+      ],
+    });
+    expect(byType.get("Specimen")).toMatchObject({
+      status: "unsupported",
+      lastError: { code: "unsupported", severity: "info" },
+    });
+    expect(byType.get("Goal")).toMatchObject({
+      status: "failed",
+      lastError: { code: "upstream_error:4118", severity: "error" },
+    });
+  });
+});
+
 describe("policy rows in D1", () => {
   it("hides a denied health system everywhere", async () => {
     await repos().mcpPolicy.add("health_system", world.seeded.healthSystemB, "test");

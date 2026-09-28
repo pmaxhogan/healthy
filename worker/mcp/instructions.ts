@@ -30,7 +30,10 @@ export const MCP_INSTRUCTIONS =
   "before concluding there is no data. `coverage` says, per health system and " +
   "resource type, whether the cache is `ok`, `partial` (one part of the search " +
   "was rejected), `stale`, `failed`, `unsupported` (the health system does not " +
-  "offer that type -- not a problem), or `never` synced yet. Any pair that is " +
+  "offer that type -- not a problem), or `never` synced yet; its `notices` " +
+  "explain any code the health system returned that is more than " +
+  "informational (get_sync_status lists every code, each with a meaning and " +
+  "a severity). Any pair that is " +
   "not ok or unsupported also gets a plain-text `warnings` entry -- " +
   "`sync_failed:<type>:<healthSystemId>:<errorCode>`, " +
   "`never_synced:<type>:<healthSystemId>`, `stale:<type>:<healthSystemId>:<age>h` " +

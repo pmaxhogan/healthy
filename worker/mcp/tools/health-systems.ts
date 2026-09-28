@@ -11,8 +11,10 @@
  */
 
 import { toIso } from "../../lib/time.ts";
+import { explainSyncCode, explainSyncWarnings } from "../../sync/sync-state-codes.ts";
 import { sharedOnlyArgs } from "../args.ts";
 import { effectiveLimit, selectHealthSystems } from "../collect.ts";
+import { syncStatusOf } from "../coverage.ts";
 import { respond } from "../respond.ts";
 
 import { readTool } from "./register.ts";
@@ -51,7 +53,7 @@ export function registerHealthSystemTools(server: McpServer, deps: ToolDeps): vo
         "The health systems this server holds a record from, with the id and " +
         "display name every other tool's `health_systems` argument accepts, and whether " +
         "each connection is healthy.",
-      schema: sharedOnlyArgs(),
+      schema: sharedOnlyArgs("list_health_systems"),
     },
     async (args, run) => {
       const healthSystems = selectHealthSystems(
@@ -77,12 +79,23 @@ export function registerHealthSystemTools(server: McpServer, deps: ToolDeps): vo
     {
       name: "get_sync_status",
       description:
-        "How fresh the cached record is: when each resource type was last " +
-        "refreshed per health system, whether it worked, and any warnings the " +
-        "organisation returned. This is the detail behind every other tool's " +
-        "`coverage` field -- read it before trusting an empty result from any " +
-        "of them.",
-      schema: sharedOnlyArgs(),
+        "How fresh the cached record is -- the detail behind every other tool's " +
+        "`coverage`. Many rows: first one `kind: health_system` row per health " +
+        "system (as list_health_systems gives), then one `kind: resource_sync` row " +
+        "per resource type per health system, typically two dozen each. A " +
+        "resource_sync row has `healthSystem`, `healthSystemId`, `resourceType`, " +
+        "`status` (coverage's vocabulary: ok, partial, stale, failed, unsupported, " +
+        "never), `lastFullAt` (last successful refresh), `lastOk`, `lastErrorCode` " +
+        "and `lastError` ({code, meaning, severity}, or null), and `warnings`: " +
+        "what the health system reported on the last refresh, as " +
+        "{code, count, meaning, severity}. Severity `info` (e.g. 4101 no " +
+        "results, 4119 some results withheld by the health system's " +
+        "patient-facing rules, 59204 outside records not included) means the " +
+        "search worked and nothing needs doing; `warning`, `error` and `unknown` " +
+        "are the ones worth reading. `unsupported` means the health system does " +
+        "not offer that type to patient apps (commonly Specimen) and is " +
+        "harmless. Filter with `jq` rather than reading every row.",
+      schema: sharedOnlyArgs("get_sync_status"),
     },
     async (args, run) => {
       const healthSystems = selectHealthSystems(
@@ -109,10 +122,15 @@ export function registerHealthSystemTools(server: McpServer, deps: ToolDeps): vo
           healthSystem: name,
           healthSystemId: entry.healthSystemId,
           resourceType: entry.resourceType,
+          status: syncStatusOf(entry, run.now),
           lastFullAt: iso(entry.lastFullAt),
           lastOk: entry.lastOk,
           lastErrorCode: entry.lastErrorCode,
-          warnings: entry.warnings,
+          lastError:
+            entry.lastErrorCode === null
+              ? null
+              : { code: entry.lastErrorCode, ...explainSyncCode(entry.lastErrorCode) },
+          warnings: explainSyncWarnings(entry.warnings),
         });
       }
 

@@ -33,3 +33,6 @@ export const TOOL_NAMES = [
   "get_coverage",
   "get_service_requests",
 ] as const;
+
+/** One tool's name. */
+export type ToolName = (typeof TOOL_NAMES)[number];

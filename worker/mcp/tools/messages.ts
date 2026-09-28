@@ -12,7 +12,7 @@
 
 import { z } from "zod";
 
-import { WINDOW_ARGS, toolArgs } from "../args.ts";
+import { jqArg, toolArgs, windowArgs } from "../args.ts";
 import { effectiveLimit, selectHealthSystems } from "../collect.ts";
 import { collectMessages, messageCoverage } from "../message-items.ts";
 import { respond } from "../respond.ts";
@@ -50,13 +50,14 @@ const THREAD_ID = z
   .describe("A `threadId` exactly as a get_messages item reported it.");
 
 const MESSAGE_ARGS = toolArgs({
-  ...WINDOW_ARGS,
+  ...windowArgs("`sent`"),
+  ...jqArg("get_messages"),
   threadId: THREAD_ID.optional(),
   folder: FOLDER,
   direction: DIRECTION,
 });
 
-const THREAD_ARGS = toolArgs({ threadId: THREAD_ID });
+const THREAD_ARGS = toolArgs({ threadId: THREAD_ID, ...jqArg("get_message_thread") });
 
 /** Shared by both tools: select, collect, cover, respond. */
 async function answer(

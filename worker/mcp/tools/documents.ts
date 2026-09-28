@@ -15,7 +15,7 @@
 
 import { z } from "zod";
 
-import { JQ_ARGS, WINDOW_ARGS, toolArgs } from "../args.ts";
+import { jqArg, toolArgs, windowArgs } from "../args.ts";
 import { selectHealthSystems, spec } from "../collect.ts";
 import { respond, toolError } from "../respond.ts";
 
@@ -45,7 +45,7 @@ const DOCUMENT_TEXT_ARGS = z.strictObject({
       "The document `id` get_documents reported, or one of its attachments[].url " +
         '(a Binary reference such as "Binary/<id>"). Either form resolves to the same document.',
     ),
-  ...JQ_ARGS,
+  ...jqArg("get_document_text"),
 });
 
 export function registerDocumentTools(server: McpServer, deps: ToolDeps): void {
@@ -56,9 +56,8 @@ export function registerDocumentTools(server: McpServer, deps: ToolDeps): void {
       "attachments exist. Patient-portal secure messages are not documents: " +
       "get_messages returns those. Pass the document `id` (or an attachment url) to " +
       "get_document_text for the text of one document, which costs the organisation " +
-      "a metered request. To keep only what you need, pass `jq`, e.g. " +
-      '`.[] | select(.date >= "2026-01-01") | {id, type, date}`.',
-    schema: toolArgs(WINDOW_ARGS),
+      "a metered request.",
+    schema: toolArgs({ ...windowArgs("`date`"), ...jqArg("get_documents") }),
     specs: () => [spec("DocumentReference", { dateOf: (item) => item.date })],
   });
 

@@ -151,6 +151,65 @@ describe("buildCoverage", () => {
     });
 
     expect(entry?.status).toBe("partial");
+    expect(entry?.notices).toStrictEqual([
+      {
+        code: "category_rejected:encounter",
+        count: 1,
+        meaning: expect.stringContaining('"encounter" category'),
+        severity: "warning",
+      },
+    ]);
+  });
+
+  it("explains a failed pair's error code", () => {
+    const [entry] = buildCoverage({
+      healthSystems: [healthSystem(HEALTH_SYSTEM_A, NAME_A)],
+      resourceTypes: ["CarePlan"],
+      syncStatus: [state({ lastOk: false, lastErrorCode: "upstream_error:4118" })],
+      rules: EMPTY_RULES,
+      now: NOW,
+    });
+
+    expect(entry?.errorMeaning).toContain("refused this app access");
+  });
+
+  it("lists only the warnings that are more than informational, as notices", () => {
+    const [quiet] = buildCoverage({
+      healthSystems: [healthSystem(HEALTH_SYSTEM_A, NAME_A)],
+      resourceTypes: ["CarePlan"],
+      syncStatus: [
+        state({
+          warnings: [
+            { code: "4101", count: 1 },
+            { code: "4119", count: 3 },
+            { code: "59204", count: 1 },
+          ],
+        }),
+      ],
+      rules: EMPTY_RULES,
+      now: NOW,
+    });
+    expect(quiet?.status).toBe("ok");
+    expect(quiet?.notices).toBeUndefined();
+
+    const [noisy] = buildCoverage({
+      healthSystems: [healthSystem(HEALTH_SYSTEM_A, NAME_A)],
+      resourceTypes: ["CarePlan"],
+      syncStatus: [
+        state({
+          warnings: [
+            { code: "4119", count: 3 },
+            { code: "59001", count: 7 },
+          ],
+        }),
+      ],
+      rules: EMPTY_RULES,
+      now: NOW,
+    });
+    expect(noisy?.status).toBe("ok");
+    expect(noisy?.notices).toStrictEqual([
+      { code: "59001", count: 7, meaning: expect.any(String), severity: "unknown" },
+    ]);
   });
 
   it("never mentions a resource type the exposure policy denies, for any health system", () => {

@@ -22,7 +22,7 @@ the underlying FHIR resource (filtered by the same policy as the normalised
 one). The admin UI's MCP page (`/connectors`) lists the live catalogue.
 
 Every answer is the same envelope:
-`{ items, total, matched, warnings, truncated, generatedAt }` (plus `raw` when
+`{ items, total, matched, coverage, warnings, truncated, generatedAt }` (plus `raw` when
 asked for). `total` is how many items the exposure policy let through;
 `matched` is the output count — how many values `jq` emitted (below), before
 `limit`; without `jq`, the number of items `limit` applies to (`total`, or
@@ -69,6 +69,12 @@ history. For example, on `get_lab_results`:
   it runs out — in practice only a filter that never terminates, like
   `[repeat(1)]`) and a 64 MiB memory ceiling (`jq_out_of_memory`); nothing is
   ever truncated. See [SECURITY.md](../SECURITY.md#jq-cost-bounds).
+- **Examples, per tool.** Each tool's `jq` argument description carries one
+  shared sentence and then one to three examples written against that tool's
+  own item fields (`worker/mcp/jq-examples.ts`). A unit test
+  (`test/unit/mcp/jq-examples.test.ts`) runs every one of them through the
+  real tool and the real jq engine over a synthetic record and fails if any
+  stops compiling or stops matching anything.
 
 **Engine.** jq-wasm (jq 1.8.2 built with Emscripten), vendored under
 `worker/mcp/jq/vendor/` by `scripts/build-jq-wasm.mjs`, which adds fuel
@@ -79,6 +85,113 @@ interrupted once a synchronous loop starts. Measured in Node 26 on synthetic
 lab items: 1.04 MB wasm (361 KB gzipped); a fresh instance per call costs
 ~0.5–1 ms; a call takes ~1 ms on 4 KB of input, ~8 ms on 470 KB and
 ~40–60 ms on 2.3 MB; metering adds ~10–15%.
+
+### Date windows: `from` and `to`
+
+The tools that take a window compare it against one date field of each item
+(`worker/mcp/collect.ts`, `bound` and `inWindow`):
+
+- **Both ends are inclusive.** An item dated exactly `from` or exactly `to` is
+  kept.
+- **A date without a time is a whole UTC period.** `from: "2026-01-31"` starts
+  at `2026-01-31T00:00:00.000Z`; `to: "2026-01-31"` runs through
+  `2026-01-31T23:59:59.999Z`, so the whole last day is included. `2026-01`
+  and `2026` work the same way for a month and a year (`to: "2026-01"` is the
+  end of January).
+- **An instant without an offset is UTC.** `2026-01-31T09:00` means 09:00Z.
+  The server does not know the owner's timezone and never assumes one; to mean
+  a local day, pass instants with their offset
+  (`from: "2026-01-31T00:00:00+HH:MM"`).
+- **Only ISO-8601 is accepted** (`YYYY`, `YYYY-MM`, `YYYY-MM-DD`, or a
+  date-time with optional seconds, fraction and `Z`/`±HH:MM`). Anything else is
+  a schema error, never a guess.
+- **Items are compared as instants.** An item's own date is parsed as written;
+  a date-only item date (`2025-10-01`) is midnight UTC of that day.
+- **Missing dates.** An item without the tool's field falls back to its
+  `lastUpdated` (when the health system last changed it); an item with no
+  usable date at all is left out of any windowed call, and kept when there is
+  no window.
+
+| Tool                                                  | Windows on                                 |
+| ----------------------------------------------------- | ------------------------------------------ |
+| `get_appointments`                                    | `start` (default `from` is now, see below) |
+| `get_encounters`                                      | `start`                                    |
+| `get_conditions`                                      | `recorded`, else `onset`                   |
+| `get_medications`                                     | `authoredOn`                               |
+| `get_medication_fills`                                | `whenHandedOver`                           |
+| `get_immunizations`                                   | `occurrence`                               |
+| `get_lab_results`, `get_vitals`, `get_social_history` | `effective`, else `issued`                 |
+| `get_procedures`                                      | `performed`                                |
+| `get_diagnostic_reports`                              | `effective`, else `issued`                 |
+| `get_documents`                                       | `date`                                     |
+| `get_care_plans`                                      | `period.start`                             |
+| `get_goals`                                           | `startDate`                                |
+| `get_service_requests`                                | `occurrence`                               |
+| `get_messages`                                        | `sent`                                     |
+
+The other tools take no window (a `from` passed to them is a schema error).
+`get_health_summary` in particular is always "nearest to now".
+
+### Freshness: `coverage` and `get_sync_status`
+
+Every tool that reads a resource type answers with `coverage`: one entry per
+(health system, resource type) it read, with a `status` of `ok`, `partial`
+(one category of a category-split search was refused), `stale` (no success in
+36 hours), `failed` (with `errorCode` and `errorMeaning`), `unsupported` or
+`never`. An entry whose last refresh recorded a code that is more than
+informational carries it under `notices` as `{code, count, meaning,
+severity}`; the informational ones (4101, 4119, 59204) are left out there, as
+they are on nearly every search.
+
+`get_sync_status` is the detail behind all of it, and it has many rows: one
+`kind: "health_system"` row per health system, then one `kind:
+"resource_sync"` row **per resource type per health system** — a couple of
+dozen per health system. A `resource_sync` row is:
+
+| Field                            | Meaning                                                                                |
+| -------------------------------- | -------------------------------------------------------------------------------------- |
+| `healthSystem`, `healthSystemId` | Which health system                                                                    |
+| `resourceType`                   | The FHIR type                                                                          |
+| `status`                         | The same vocabulary as `coverage`                                                      |
+| `lastFullAt`                     | Last successful full refresh (ISO instant), or null                                    |
+| `lastOk`                         | Whether the last attempt succeeded                                                     |
+| `lastErrorCode`, `lastError`     | The last attempt's error code, and `{code, meaning, severity}` for it (or null)        |
+| `warnings`                       | Every code the health system reported last time, as `{code, count, meaning, severity}` |
+
+Filter it with `jq` rather than reading every row — the tool's own `jq`
+description has examples: only the rows that are not `ok`/`unsupported`, only
+rows with a non-`info` warning, and one line per health system.
+
+**`unsupported`** means the health system's FHIR server does not offer that
+resource type to patient apps (its CapabilityStatement leaves it out), so it
+is never searched. It is harmless and is never reported as a gap. Specimen is
+the common one. No tool returns specimens — lab results come from Observation
+and DiagnosticReport — so an unsupported Specimen takes nothing away from any
+tool.
+
+#### What the codes mean
+
+Severity: `info` — expected, everything that could be returned was;
+`warning` — something was left out or deferred; `error` — the type (or that
+attempt) could not be read; `unknown` — no documented meaning, reported as
+such rather than guessed. The table lives in `worker/sync/sync-state-codes.ts`.
+Epic's free-text `diagnostics` is never stored or shown: it can echo the
+search's parameters.
+
+| Code                                                                                           | Severity | Meaning                                                                                                                                             | Source                                                                                          |
+| ---------------------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `4101`                                                                                         | info     | The search matched nothing.                                                                                                                         | Epic error list, as classified in `worker/fhir/operation-outcome.ts`                            |
+| `4113`                                                                                         | warning  | Epic's paged-search session expired; the refresh restarts it once.                                                                                  | Same                                                                                            |
+| `4118`                                                                                         | error    | The health system refused this app access to this data.                                                                                             | Same                                                                                            |
+| `4119`                                                                                         | info     | Epic's patient-facing view withheld some results under the health system's release rules; the rest were returned.                                   | Same                                                                                            |
+| `4122`                                                                                         | info     | An unknown search parameter was ignored.                                                                                                            | Same                                                                                            |
+| `4135`                                                                                         | warning  | The daily document-download cap was reached; the rest are fetched another day.                                                                      | Same                                                                                            |
+| `59109`                                                                                        | info     | An optional search parameter was invalid and ignored.                                                                                               | Same                                                                                            |
+| `59204`                                                                                        | info     | Not authorized for Epic's "Outside Record" variant of the type (other organisations' shared copies); the health system's own records were returned. | Epic's own `details.text` on a live search: "Client not authorized for <Type> - Outside Record" |
+| `59001`, `59205`                                                                               | unknown  | Seen from Epic, not publicly documented, and no text was captured.                                                                                  | —                                                                                               |
+| `category_rejected:<cat>`                                                                      | warning  | That category of a category-split search was refused while the others succeeded (coverage `partial`).                                               | This server                                                                                     |
+| `unsupported`                                                                                  | info     | The health system does not offer the type (above).                                                                                                  | This server                                                                                     |
+| `upstream_error[:<epic>]`, `upstream_auth`, `upstream_unavailable`, `needs_reauth`, `internal` | error    | The attempt failed; with an Epic suffix, the suffix's meaning applies.                                                                              | This server (`worker/lib/errors.ts`)                                                            |
 
 ### Appointments: FHIR and the patient portal
 

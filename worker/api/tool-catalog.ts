@@ -133,7 +133,9 @@ export const TOOL_CATALOG: readonly McpToolInfoDto[] = [
   {
     name: "get_service_requests",
     description: "Orders and referrals.",
-    resourceTypes: ["ServiceRequest", "Specimen"],
+    // Not Specimen: it is synced where a health system offers it (few do to
+    // patient apps), but no tool returns specimens.
+    resourceTypes: ["ServiceRequest"],
   },
   {
     name: "get_health_summary",

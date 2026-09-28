@@ -545,6 +545,17 @@ const DATATYPES: Readonly<Record<string, FieldSpecs>> = {
     name: ["string", "The file's name"],
     extension: ["string", "Its file type"],
   },
+  "N.SyncCode": {
+    code: "string",
+    meaning: ["string", "What the code means"],
+    severity: ["string", "info, warning, error or unknown"],
+  },
+  "N.SyncWarning": {
+    code: "string",
+    count: "integer",
+    meaning: ["string", "What the code means"],
+    severity: ["string", "info, warning, error or unknown"],
+  },
 };
 
 // --- raw FHIR resources, top level -----------------------------------------
@@ -1468,10 +1479,12 @@ const RESOURCE_SYNC_ROW = {
   kind: ["string", "resource_sync"],
   ...TAGS,
   resourceType: "string",
+  status: ["string", "ok, partial, stale, failed, unsupported or never"],
   lastFullAt: "string",
   lastOk: "boolean",
   lastErrorCode: "string",
-  warnings: "string[]",
+  lastError: ["N.SyncCode", "The last error, explained"],
+  warnings: ["N.SyncWarning[]", "What the health system reported on the last refresh"],
 } as const;
 
 // --- the shape registry ------------------------------------------------------

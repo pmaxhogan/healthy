@@ -23,6 +23,7 @@ import { mapResolver, normalizeResource } from "../fhir/normalize/index.ts";
 import { isHealthSystemDenied } from "../policy/rules.ts";
 
 import { buildCoverage } from "./coverage.ts";
+import { windowBound } from "./window.ts";
 
 import type { CoverageEntry } from "./coverage.ts";
 import type { CachedRow, HealthSystemInfo, ToolDeps } from "./deps.ts";
@@ -99,7 +100,7 @@ export interface CollectOptions {
   specs: readonly CollectSpec[];
   /** Inclusive lower bound on the spec's date, as an ISO date or instant. */
   from?: string | undefined;
-  /** Inclusive upper bound. A bare date means the end of that day. */
+  /** Inclusive upper bound. A bare date means the end of that UTC day, month or year. */
   to?: string | undefined;
   /** Include the raw FHIR resources alongside the normalized items. */
   raw?: boolean | undefined;
@@ -185,16 +186,6 @@ function isResource(value: unknown): value is fhir4.FhirResource {
   );
 }
 
-/** A date bound as a comparable millisecond value; `end` pads a bare date out. */
-function bound(value: string | undefined, end: boolean): number | undefined {
-  if (value === undefined) return undefined;
-  // A bare `YYYY-MM-DD` upper bound should include that whole day, or `to` would
-  // silently exclude everything that happened after midnight on the last day.
-  const padded = end && /^\d{4}-\d{2}-\d{2}$/u.test(value) ? `${value}T23:59:59.999Z` : value;
-  const ms = Date.parse(padded);
-  return Number.isNaN(ms) ? undefined : ms;
-}
-
 interface Entry {
   item: TaggedItem;
   raw: RawEntry;
@@ -239,7 +230,7 @@ export function withinWindow(
   to: string | undefined,
 ): boolean {
   const ms = date === undefined ? NaN : Date.parse(date);
-  return inWindow(Number.isNaN(ms) ? NO_DATE : ms, bound(from, false), bound(to, true));
+  return inWindow(Number.isNaN(ms) ? NO_DATE : ms, windowBound(from, false), windowBound(to, true));
 }
 
 /** Every entry one health system contributes for one spec. */
@@ -281,8 +272,8 @@ export async function collect(
   healthSystems: readonly HealthSystemInfo[],
   options: CollectOptions,
 ): Promise<Collected> {
-  const after = bound(options.from, false);
-  const before = bound(options.to, true);
+  const after = windowBound(options.from, false);
+  const before = windowBound(options.to, true);
   const entries: Entry[] = [];
 
   for (const healthSystem of healthSystems) {
