@@ -83,7 +83,7 @@ describe("the authorization server metadata", () => {
 
 describe("the protected resource metadata", () => {
   it("names the resource and its scope", async () => {
-    const response = await SELF.fetch(`${ORIGIN}/.well-known/oauth-protected-resource`);
+    const response = await SELF.fetch(`${ORIGIN}/.well-known/oauth-protected-resource/mcp`);
     const body = await response.json<Record<string, unknown>>();
 
     expect(response.status).toBe(200);
@@ -91,15 +91,16 @@ describe("the protected resource metadata", () => {
     expect(body.scopes_supported).toStrictEqual(["health:read"]);
   });
 
-  it("derives the resource from the request origin rather than a pinned URL", async () => {
+  it("names the MCP endpoint on the request's own origin as the resource", async () => {
     // `resourceFor()` (`worker/mcp/oauth-config.ts`) derives the resource from
     // the request the provider is built for on each call, not a fixed value:
     // pinning it to one hostname would bind every token's audience to that host
-    // and break both `wrangler dev` and this test file.
-    const response = await SELF.fetch(`${ORIGIN}/.well-known/oauth-protected-resource`);
+    // and break both `wrangler dev` and this test file. The path is part of it:
+    // clients bind their grants to the MCP URL, and 1.x matches audiences exactly.
+    const response = await SELF.fetch(`${ORIGIN}/.well-known/oauth-protected-resource/mcp`);
     const body = await response.json<Record<string, unknown>>();
 
-    expect(String(body.resource)).toContain("healthy.example");
+    expect(body.resource).toBe(`${ORIGIN}/mcp`);
   });
 });
 

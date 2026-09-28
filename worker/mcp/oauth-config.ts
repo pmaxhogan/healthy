@@ -66,21 +66,23 @@ const REGISTER_PATH = "/oauth/register";
  * actually bound to or checked against a real token. It only has to satisfy
  * the provider constructor's syntax validation.
  */
-const PLACEHOLDER_RESOURCE = "https://healthy.maxhogan.dev";
+const PLACEHOLDER_RESOURCE = `https://healthy.maxhogan.dev${MCP_API_ROUTE}`;
 
 /**
- * The canonical resource (RFC 8707) for whichever origin `request` arrived on.
+ * The canonical resource (RFC 8707) for whichever origin `request` arrived on:
+ * the MCP endpoint's own URL, `${origin}${MCP_API_ROUTE}`.
  *
- * The bare origin, not `${origin}${MCP_API_ROUTE}`: a resource with path `/`
- * covers every path under it (`audienceMatches`'s `pathname === "/"` case), so
- * a token audience still matches the real `/mcp` request, exactly as when 0.x
- * derived the resource from the request origin. It also keeps the protected
- * resource metadata document at the bare `/.well-known/oauth-protected-resource`
- * -- `getResourceMetadataUrl` only appends the resource's path when it isn't
- * `/` -- which is where this Worker's own wiring and clients expect it.
+ * Not the bare origin. 1.x checks a token's audience against this value
+ * exactly (`isExactResource`), and an MCP client binds its grant to the server
+ * URL it connected to -- claude.ai's grant and tokens carry
+ * `https://<host>/mcp`. A bare-origin resource made every one of those tokens
+ * fail with "not bound to the configured resource" and forced a re-sign-in.
+ * With the path, the protected resource metadata document is served at
+ * `/.well-known/oauth-protected-resource/mcp` (RFC 9728's path-suffixed form),
+ * which the `WWW-Authenticate` challenge points clients at.
  */
 export function resourceFor(request: Request): string {
-  return new URL(request.url).origin;
+  return `${new URL(request.url).origin}${MCP_API_ROUTE}`;
 }
 
 /** One hour, matching the locked spec. */

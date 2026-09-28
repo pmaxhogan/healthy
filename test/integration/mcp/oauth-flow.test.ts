@@ -553,6 +553,32 @@ describe("a real MCP session over the issued bearer", () => {
     expect(refreshed.access_token ?? "").not.toBe("");
     await callOverBearer(refreshed.access_token ?? "", "list_health_systems");
   });
+
+  it("accepts a 0.x grant bound to the MCP URL, the shape claude.ai's grant has", async () => {
+    // 0.x stored whatever `resource` the client sent, and an MCP client sends
+    // the server URL it connected to, path included. 1.x matches audiences
+    // exactly, so a resource of the bare origin rejected these with "not bound
+    // to the configured resource" and forced a re-sign-in in production.
+    const approved = await approve("Path-Bound Connector");
+    const tokens = await exchangeTokens(approved);
+    const accessToken = tokens.access_token ?? "";
+    const [userId = "", grantId = ""] = accessToken.split(":", 2);
+
+    const tokenKeys = await env.OAUTH_KV.list({ prefix: `token:${userId}:${grantId}:` });
+    const tokenKey = tokenKeys.keys[0]?.name ?? "";
+    const tokenRecord = await env.OAUTH_KV.get<Record<string, unknown>>(tokenKey, "json");
+    expect(tokenRecord).not.toBeNull();
+    await env.OAUTH_KV.put(tokenKey, JSON.stringify({ ...tokenRecord, audience: `${ORIGIN}/mcp` }));
+
+    const grantKey = `grant:${userId}:${grantId}`;
+    const grantRecord = await env.OAUTH_KV.get<Record<string, unknown>>(grantKey, "json");
+    expect(grantRecord).not.toBeNull();
+    await env.OAUTH_KV.put(grantKey, JSON.stringify({ ...grantRecord, resource: `${ORIGIN}/mcp` }));
+
+    await callOverBearer(accessToken, "list_health_systems");
+    const refreshed = await refresh(tokens.refresh_token ?? "", approved.clientId);
+    await callOverBearer(refreshed.access_token ?? "", "list_health_systems");
+  });
 });
 
 describe("the grant helpers the admin API calls", () => {
