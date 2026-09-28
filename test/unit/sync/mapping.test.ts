@@ -382,6 +382,18 @@ describe("description", () => {
     expect(model.description).not.toContain("\n".repeat(3));
     expect(model.description).toMatch(/below the line\nExample Regional\n/u);
   });
+
+  it("prints a line once when the department and the location share a name", async () => {
+    const { model } = await buildCalendarModel(
+      view({
+        department: "Clinic Building A",
+        location: { name: "clinic  building a", address: { lines: ["1 Test Way"] } },
+      }),
+      input(),
+    );
+
+    expect(model.description).toMatch(/Example Regional\nClinic Building A\n1 Test Way/u);
+  });
 });
 
 describe("colorId", () => {

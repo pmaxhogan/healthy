@@ -308,9 +308,22 @@ function formatStamp(iso: string, timezone: string): string {
   return formatInZone(iso, timezone);
 }
 
-/** Drop empty entries and join what is left, so a missing field leaves no gap. */
+/**
+ * Drop empty entries and repeats, then join what is left, so a missing field leaves
+ * no gap. Repeats are common: a portal often names the department and the location
+ * identically, and the same line printed twice reads as a bug.
+ */
 function joinLines(lines: readonly (string | undefined)[]): string {
-  return lines.filter((line): line is string => line !== undefined && line !== "").join("\n");
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  for (const line of lines) {
+    if (line === undefined || line === "") continue;
+    const key = line.trim().replaceAll(/\s+/gu, " ").toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    kept.push(line);
+  }
+  return kept.join("\n");
 }
 
 function joinSections(sections: readonly string[]): string {
