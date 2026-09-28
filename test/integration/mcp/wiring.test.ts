@@ -92,8 +92,10 @@ describe("the protected resource metadata", () => {
   });
 
   it("derives the resource from the request origin rather than a pinned URL", async () => {
-    // Pinning `resourceMetadata.resource` would bind every token's audience to one
-    // hostname and break both `wrangler dev` and this test file.
+    // `resourceFor()` (`worker/mcp/oauth-config.ts`) derives the resource from
+    // the request the provider is built for on each call, not a fixed value:
+    // pinning it to one hostname would bind every token's audience to that host
+    // and break both `wrangler dev` and this test file.
     const response = await SELF.fetch(`${ORIGIN}/.well-known/oauth-protected-resource`);
     const body = await response.json<Record<string, unknown>>();
 
