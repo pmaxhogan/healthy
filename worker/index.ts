@@ -78,7 +78,7 @@ const honoHandler: HandlerWithFetch = {
  * about to serve, and `env`/`request` are not available until then. Construction
  * is synchronous config validation, not I/O, so this costs nothing meaningful.
  */
-function healthSystemFor(request: Request): OAuthProvider<Env> {
+function oauthProviderFor(request: Request): OAuthProvider<Env> {
   return new OAuthProvider<Env>({
     ...oauthCoreFor(resourceFor(request)),
     apiRoute: MCP_API_ROUTE,
@@ -89,7 +89,7 @@ function healthSystemFor(request: Request): OAuthProvider<Env> {
 
 export default {
   fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    return healthSystemFor(request).fetch(request, env, ctx);
+    return oauthProviderFor(request).fetch(request, env, ctx);
   },
 
   /**
