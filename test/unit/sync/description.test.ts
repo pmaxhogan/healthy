@@ -240,7 +240,7 @@ describe("carriesBlock", () => {
   });
 
   it("ignores Google's HTML re-encoding and blank-line changes", () => {
-    const reencoded = `Note<br>${BLOCK.replace("&", "&amp;").replaceAll("\n", "<br>")}`;
+    const reencoded = `Note<br>${BLOCK.replaceAll("&", "&amp;").replaceAll("\n", "<br>")}`;
     const reflowed = BLOCK.replaceAll("\n\n", "\n");
     const linked = BLOCK.replace("Example Clinic", '<a href="x">Example Clinic</a>');
 
