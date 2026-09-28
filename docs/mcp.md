@@ -15,14 +15,14 @@ The server registers (in `worker/mcp/tools/index.ts`): `get_health_summary`,
 `get_medication_fills`, `get_allergies`, `get_immunizations`,
 `get_lab_results`, `get_vitals`, `get_social_history`, `get_procedures`,
 `get_diagnostic_reports`, `get_documents`, `get_document_text`,
-`get_care_team`, `get_care_plans`, `get_goals`, `get_devices`,
+`get_messages`, `get_message_thread`, `get_message_attachment`, `get_care_team`, `get_care_plans`, `get_goals`, `get_devices`,
 `get_coverage`, `get_service_requests`. Most accept an optional
 `health_systems[]` filter and an optional `raw` flag that additionally returns
 the underlying FHIR resource (filtered by the same policy as the normalised
 one). The admin UI's MCP page (`/connectors`) lists the live catalogue.
 
 Every answer is the same envelope:
-`{ items, total, matched, warnings, truncated, generatedAt }` (plus `raw` when
+`{ items, total, matched, coverage, warnings, truncated, generatedAt }` (plus `raw` when
 asked for). `total` is how many items the exposure policy let through;
 `matched` is the output count — how many values `jq` emitted (below), before
 `limit`; without `jq`, the number of items `limit` applies to (`total`, or
@@ -69,6 +69,12 @@ history. For example, on `get_lab_results`:
   it runs out — in practice only a filter that never terminates, like
   `[repeat(1)]`) and a 64 MiB memory ceiling (`jq_out_of_memory`); nothing is
   ever truncated. See [SECURITY.md](../SECURITY.md#jq-cost-bounds).
+- **Examples, per tool.** Each tool's `jq` argument description carries one
+  shared sentence and then one to three examples written against that tool's
+  own item fields (`worker/mcp/jq-examples.ts`). A unit test
+  (`test/unit/mcp/jq-examples.test.ts`) runs every one of them through the
+  real tool and the real jq engine over a synthetic record and fails if any
+  stops compiling or stops matching anything.
 
 **Engine.** jq-wasm (jq 1.8.2 built with Emscripten), vendored under
 `worker/mcp/jq/vendor/` by `scripts/build-jq-wasm.mjs`, which adds fuel
@@ -79,6 +85,128 @@ interrupted once a synchronous loop starts. Measured in Node 26 on synthetic
 lab items: 1.04 MB wasm (361 KB gzipped); a fresh instance per call costs
 ~0.5–1 ms; a call takes ~1 ms on 4 KB of input, ~8 ms on 470 KB and
 ~40–60 ms on 2.3 MB; metering adds ~10–15%.
+
+### Date windows: `from` and `to`
+
+The tools that take a window compare it against one date field of each item
+(`worker/mcp/collect.ts`, `bound` and `inWindow`):
+
+- **Both ends are inclusive.** An item dated exactly `from` or exactly `to` is
+  kept.
+- **A date without a time is a whole UTC period.** `from: "2026-01-31"` starts
+  at `2026-01-31T00:00:00.000Z`; `to: "2026-01-31"` runs through
+  `2026-01-31T23:59:59.999Z`, so the whole last day is included. `2026-01`
+  and `2026` work the same way for a month and a year (`to: "2026-01"` is the
+  end of January).
+- **An instant without an offset is UTC.** `2026-01-31T09:00` means 09:00Z.
+  The server does not know the owner's timezone and never assumes one; to mean
+  a local day, pass instants with their offset
+  (`from: "2026-01-31T00:00:00+HH:MM"`).
+- **Only ISO-8601 is accepted** (`YYYY`, `YYYY-MM`, `YYYY-MM-DD`, or a
+  date-time with optional seconds, fraction and `Z`/`±HH:MM`). Anything else is
+  a schema error, never a guess.
+- **Items are compared as instants.** An item's own date is parsed as written;
+  a date-only item date (`2025-10-01`) is midnight UTC of that day.
+- **Missing dates.** An item without the tool's field falls back to its
+  `lastUpdated` (when the health system last changed it); an item with no
+  usable date at all is left out of any windowed call, and kept when there is
+  no window.
+
+| Tool                                                  | Windows on                                 |
+| ----------------------------------------------------- | ------------------------------------------ |
+| `get_appointments`                                    | `start` (default `from` is now, see below) |
+| `get_encounters`                                      | `start`                                    |
+| `get_conditions`                                      | `recorded`, else `onset`                   |
+| `get_medications`                                     | `authoredOn`                               |
+| `get_medication_fills`                                | `whenHandedOver`                           |
+| `get_immunizations`                                   | `occurrence`                               |
+| `get_lab_results`, `get_vitals`, `get_social_history` | `effective`, else `issued`                 |
+| `get_procedures`                                      | `performed`                                |
+| `get_diagnostic_reports`                              | `effective`, else `issued`                 |
+| `get_documents`                                       | `date`                                     |
+| `get_care_plans`                                      | `period.start`                             |
+| `get_goals`                                           | `startDate`                                |
+| `get_service_requests`                                | `occurrence`                               |
+| `get_messages`                                        | `sent`                                     |
+
+The other tools take no window (a `from` passed to them is a schema error).
+`get_health_summary` in particular is always "nearest to now".
+
+### Freshness: `coverage` and `get_sync_status`
+
+Every tool that reads a resource type answers with `coverage`: one entry per
+(health system, resource type) it read, with a `status` of `ok`, `partial`
+(one category of a category-split search was refused), `stale` (no success in
+36 hours), `failed` (with `errorCode` and `errorMeaning`), `unsupported` or
+`never`. An entry whose last refresh recorded a code that is more than
+informational carries it under `notices` as `{code, count, meaning,
+severity}`; the informational ones (4101, 4119, 59204) are left out there, as
+they are on nearly every search.
+
+`get_sync_status` is the detail behind all of it, and it has many rows: one
+`kind: "health_system"` row per health system, then one `kind:
+"resource_sync"` row **per resource type per health system** — a couple of
+dozen per health system. A `resource_sync` row is:
+
+| Field                            | Meaning                                                                                |
+| -------------------------------- | -------------------------------------------------------------------------------------- |
+| `healthSystem`, `healthSystemId` | Which health system                                                                    |
+| `resourceType`                   | The FHIR type                                                                          |
+| `status`                         | The same vocabulary as `coverage`                                                      |
+| `lastFullAt`                     | Last successful full refresh (ISO instant), or null                                    |
+| `lastOk`                         | Whether the last attempt succeeded                                                     |
+| `lastErrorCode`, `lastError`     | The last attempt's error code, and `{code, meaning, severity}` for it (or null)        |
+| `warnings`                       | Every code the health system reported last time, as `{code, count, meaning, severity}` |
+
+Filter it with `jq` rather than reading every row — the tool's own `jq`
+description has examples: only the rows that are not `ok`/`unsupported`, only
+rows with a non-`info` warning, and one line per health system.
+
+**`unsupported`** means the health system's FHIR server does not offer that
+resource type to patient apps (its CapabilityStatement leaves it out), so it
+is never searched. It is harmless and is never reported as a gap. Specimen is
+the common one. No tool returns specimens — lab results come from Observation
+and DiagnosticReport — so an unsupported Specimen takes nothing away from any
+tool.
+
+#### What the codes mean
+
+Severity is what a code means for someone reading the cache, not Epic's own
+Fatal/Warning/Information label: `info` — expected, everything that could be
+returned was; `warning` — something was left out or deferred; `error` — the
+type (or that attempt) could not be read; `unknown` — no documented meaning,
+reported as such rather than guessed. The table lives in
+`worker/sync/sync-state-codes.ts`. Epic's free-text `diagnostics` is never
+stored or shown: it can echo the search's parameters.
+
+**Sources.** "Epic table" is the "FHIR Error Codes" table Epic publishes at
+the foot of every R4 API specification on fhir.epic.com (for example
+AllergyIntolerance.Search), read 2026-09-28. 59204 is not in it: its meaning
+comes from Epic's own `details.text` seen on a live search ("Client not
+authorized for <Type> - Outside Record") and from Epic's "(Outside Record)" API
+specifications, which describe that variant as data the health system received
+from payers, other providers or other FHIR servers.
+
+| Code                                                                                           | Severity | Meaning                                                                                                                                      | Source                                           |
+| ---------------------------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `4101`                                                                                         | info     | The search matched nothing.                                                                                                                  | Epic table                                       |
+| `4119`                                                                                         | info     | Epic's note on every patient-authorized search: additional data may exist, as a patient's view may not be the complete record.               | Epic table                                       |
+| `4117`                                                                                         | info     | An immunization came back without a CVX code; it is still included.                                                                          | Epic table                                       |
+| `4122`, `59100`                                                                                | info     | An unknown search parameter was ignored.                                                                                                     | Epic table                                       |
+| `59109`                                                                                        | info     | An optional search parameter was invalid and ignored.                                                                                        | Epic table                                       |
+| `59204`                                                                                        | info     | Not authorized for the type's "Outside Record" variant (payer and outside-organisation data); the health system's own records were returned. | Live `details.text`; Epic's Outside Record specs |
+| `4113`                                                                                         | warning  | Epic's paged-search session expired; the refresh restarts it once.                                                                           | Epic table                                       |
+| `4127`, `59133`                                                                                | warning  | The search matched more than Epic returns, so more may exist.                                                                                | Epic table                                       |
+| `4134`                                                                                         | warning  | The record is restricted (break-the-glass); some data may be withheld.                                                                       | Epic table                                       |
+| `4135`                                                                                         | warning  | The daily document-download cap was reached; the rest are fetched another day.                                                               | Epic table                                       |
+| `59101`                                                                                        | warning  | A parameter value (e.g. a category) was not recognised; that part may have returned nothing.                                                 | Epic table                                       |
+| `4100`, `4102`–`4104`, `4110`–`4112`, `4115`, `59102`, `59108`, `59111`                        | error    | The request was invalid or the resource could not be built; nothing was returned for it.                                                     | Epic table                                       |
+| `4118`                                                                                         | error    | The health system refused this app access to this data.                                                                                      | Epic table                                       |
+| `4130`, `4131`                                                                                 | error    | Break-the-glass security withheld the data.                                                                                                  | Epic table                                       |
+| `59001`, `59205`                                                                               | unknown  | Seen from Epic; not in Epic's published table and no text was captured.                                                                      | —                                                |
+| `category_rejected:<cat>`                                                                      | warning  | That category of a category-split search was refused while the others succeeded (coverage `partial`).                                        | This server                                      |
+| `unsupported`                                                                                  | info     | The health system does not offer the type (above).                                                                                           | This server                                      |
+| `upstream_error[:<epic>]`, `upstream_auth`, `upstream_unavailable`, `needs_reauth`, `internal` | error    | The attempt failed; with an Epic suffix, the suffix's meaning applies.                                                                       | This server (`worker/lib/errors.ts`)             |
 
 ### Appointments: FHIR and the patient portal
 
@@ -145,6 +273,103 @@ Encounters:
 `get_health_summary`'s appointments section uses the same merge: the five
 appointments nearest to now, upcoming ones first (soonest first), then the
 latest past ones.
+
+### Secure messages: the patient portal's Message Center
+
+Each hourly portal pass, after the upcoming visits and with the same session
+(never a sign-in of its own), reads every conversation in every Message
+Center folder — conversations, appointments, automated letters and notices,
+archive, bookmarked — of every organisation the portal shows, every page, and
+every message in each conversation, older pages included. It never opens a
+conversation the way the portal's own page does (that marks it read), and
+stores each message in `portal_messages`: the body as plain text (the portal's
+HTML is flattened, never kept), sealed and padded like the FHIR cache, keyed
+by a blind of its content rather than the portal's per-session ids.
+`portal_message_sync` records how each health system's last read went.
+
+The same pass then fetches every attachment it has not stored yet: the
+Message Center's own attachment link asks for the file's document details
+(`GetDocumentDetailsLegacy`) and downloads the file they name, relative to the
+portal's mount. It has to be the same run, because the portal names a file only
+by a per-session token. Every file is kept whole, sealed and padded in
+`portal_message_attachment_chunks` (base64, cut into pieces that each fit one
+D1 value), under a key derived from the message's content and the file's
+position in it, so a later run knows it is already stored. There is no size
+limit. A file on a message the portal still marks unread is left until the
+message has been read (whether the download marks a message read has not been
+observed, and the owner's unread messages must stay unread); a download that
+fails is recorded with its error code and tried again a day later; a session
+that ends mid-pass leaves the rest for the next run.
+
+- **`get_messages`: one item per conversation**, newest activity first
+  (`kind: "message_thread"`): `threadId`, `subject`, `folder`,
+  `firstMessageAt`, `lastMessageAt`, `messageCount`, `unreadCount` (the
+  portal's own unread flags, read without marking anything read; absent for
+  messages stored before the flag was kept), `attachmentCount`,
+  `hasAttachments`, `practitioners[]` (the care team), `participants[]`
+  (everyone who wrote in it: `role` — `patient`, `proxy`, `practitioner` or
+  `system` — and `name`), `lastMessage` (`id`, `sent`, `direction`, `from`,
+  and `preview`: the newest message's first 160 characters, whitespace
+  collapsed, with `previewTruncated`), and the health system tags. `total` is
+  the conversations; the envelope's `messages` is how many messages they hold.
+  `from`/`to` window on `lastMessageAt` and keep a conversation whole;
+  `folder` filters; `search` keeps conversations whose subject or any
+  message's full text contains the given text, ignoring case and spacing.
+- **`get_message_thread`: one conversation, every message in full**
+  (`kind: "message_thread_detail"`): the same conversation fields and
+  `messages[]`, oldest first — `id`, `sent`, `direction` (`from_patient` /
+  `to_patient`), `from`, `unread`, `body` (plain text), `attachments[]`
+  (`name`, `extension`, `id`, `status` — `stored`, `failed` with `errorCode`,
+  `waiting_until_read` or `not_fetched` — and, once stored, `contentType` and
+  `size`), and `noLongerListed` where it applies.
+- **`get_message_attachment`: one attached file**, by the `id` a message's
+  `attachments[]` reported (`kind: "message_attachment"`): its metadata and
+  status, and its content where it can be shown — a text file (plain text,
+  HTML, RTF, converted exactly as `get_document_text` converts them) as `text`;
+  an image a model can view (PNG, JPEG, GIF, WebP) as an MCP image content
+  block beside the JSON, only when the policy releases the item's `image`
+  field; anything else (a PDF, a TIFF scan) as its type and size with a `note`,
+  never as base64. It reads storage only; it never talks to a portal. A conversation whose messages come from
+  two health systems' portals (one has a reply the other has not listed yet) is
+  one item per health system, in both tools.
+- **One message, one item, across organisations.** Each portal also shows the
+  conversations of the other organisations the chart is linked to, so one
+  message can be stored twice. Two copies are one message only when they carry
+  the same content — the same delivery instant to the second, the same author
+  role, the same text; time alone never merges two messages. The copy that
+  answers is the one whose own organisation the conversation belongs to
+  (`firstParty: true`); a second-hand copy is kept, with `firstParty: false`,
+  `via` and `organization`, only when no first-party copy is stored (the same
+  ranking as visits, including the two-day staleness rule). `threadId` and
+  `id` are the same from either portal.
+- **Never deleted.** A first-party message its portal stops listing is kept
+  with `noLongerListed: true`; a second-hand one is never flagged, because a
+  linked organisation can drop out of the Message Center for a while with no
+  error at all.
+- **Policy.** The policy judges each message on its own, before any grouping:
+  both tools read one item per message (`resourceType: "Communication"`,
+  the rule builder's "Secure message" shape), filter those, and only then
+  group what the policy released into conversations (`respond()`'s reshape,
+  `worker/mcp/message-threads.ts`). So a `resource` rule on Communication
+  removes every conversation and the coverage, and every
+  `Communication.<field>` rule on a message field (`body`, `from.name`,
+  `subject`) reaches the participants, previews, bodies and search built
+  from it. `from.name` and `practitioners[].name` are names of people, judged
+  like any reference, one message at a time: a clinician's name goes
+  wherever the owner withholds clinicians' names (a denied Practitioner type,
+  a `Practitioner.name` rule, a rule on an Encounter's `practitioners`), the
+  patient's wherever the patient's name is withheld — and hiding one never
+  takes the other with it. The policy then runs over the conversation items
+  too, so a rule on their own fields (`lastMessage.preview`,
+  `messages[].body`, `participants`) reaches them. `search` matches only what
+  the first pass released: to keep bodies out of search, hide the message
+  field `body`, not only `messages[].body` in `get_message_thread`. The body is
+  prose and is not scrubbed (see SECURITY.md's known limits). There is no
+  `raw`.
+- **Coverage** is `Communication` per health system, from the portal pass's own
+  record: `failed` with the error code when the last read failed (for example
+  `portal_session_expired`), `partial` when it could not prove it saw
+  everything, `stale` after six hours without a successful read.
 
 ### Conditions: the problem list and encounter diagnoses
 

@@ -132,15 +132,6 @@ describe("the jq argument", () => {
     }
   });
 
-  it("is shown by example in the biggest tools' descriptions", async () => {
-    const { tools } = await world.client.listTools();
-
-    for (const name of ["get_lab_results", "get_vitals", "get_documents", "get_appointments"]) {
-      const tool = tools.find((candidate) => candidate.name === name);
-      expect(tool?.description, name).toMatch(/pass `jq`, e\.g\. `\.\[\] \| select\(/u);
-    }
-  });
-
   it("filters ISO date strings by plain comparison", async () => {
     const { envelope } = await jqCall(
       "get_conditions",

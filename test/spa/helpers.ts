@@ -201,6 +201,7 @@ function run(overrides: Partial<RunDto> = {}): RunDto {
       warningCodes: [],
       portalVisits: 0,
       portalSkipped: 0,
+      portalMessages: 0,
       portalErrors: [],
       filteredView: false,
       backedOff: false,

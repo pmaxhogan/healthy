@@ -69,7 +69,9 @@
  *
  * Every visit this pass reads is also written to `portal_visits`, with the same
  * "missing only if still ahead" rule, because that table -- not the calendar -- is
- * what `get_appointments` serves upcoming visits from.
+ * what `get_appointments` serves upcoming visits from. The same session then reads
+ * the portal's secure messages into `portal_messages` (`syncMessages`), which is
+ * what `get_messages` serves.
  *
  * Log lines carry health system ids, counts and stable codes. Never a visit, a
  * practitioner, a CSN, a code or a byte of portal markup -- the CSN is an upstream
@@ -85,7 +87,8 @@ import { errorFields } from "../lib/log.ts";
 import { fromIso, toIso } from "../lib/time.ts";
 
 import { resolveReconnectAlert } from "./alerts.ts";
-import { buildCalendarModel, ghostModel } from "./mapping.ts";
+import { mergeDescription } from "./description.ts";
+import { buildCalendarModel, connectedPortalOf, ghostModel } from "./mapping.ts";
 import { planChanges } from "./plan.ts";
 import {
   matchAcrossHealthSystems,
@@ -114,7 +117,7 @@ import {
 } from "./portal-signin.ts";
 
 import type { SyncDeps } from "./deps.ts";
-import type { CalendarMapping, MappingSettings } from "./mapping.ts";
+import type { CalendarMapping, ConnectedPortal, MappingSettings } from "./mapping.ts";
 import type { PlanCandidate, PlanEntry } from "./plan.ts";
 import type { Sighting } from "./portal-dedupe.ts";
 import type { PortalSession } from "./portal-signin.ts";
@@ -122,10 +125,11 @@ import type { RunState } from "./run.ts";
 import type { Blinder } from "../db/blind.ts";
 import type { Ctx } from "../db/client.ts";
 import type { Repos } from "../db/index.ts";
+import type { FetchableAttachment } from "../db/repos/portal-messages.ts";
 import type { CalendarEventRow, HealthSystemRow } from "../db/rows.ts";
 import type { PortalVisit } from "../ehr/mychart/index.ts";
 import type { CalendarClient } from "../google/calendar.ts";
-import type { CalendarEventModel, EventRecord } from "../google/types.ts";
+import type { CalendarEventBody, CalendarEventModel, EventRecord } from "../google/types.ts";
 
 /**
  * What the FHIR pass saw for one health system, as the dedupe needs it.
@@ -269,7 +273,168 @@ async function loadPortalVisits(
 
   if ((await repos.healthSystems.get(healthSystemId)) === null) return null;
   await recordVisits(input, healthSystemId, visits);
+  await syncMessages(input, healthSystemId, session);
   return visits;
+}
+
+/** What one run did with the attachments its Message Center read listed. Counts only. */
+interface AttachmentPass {
+  listed: number;
+  stored: number;
+  failed: number;
+  /** Already stored, or failed too recently to try again. */
+  skipped: number;
+  /** On a message the portal still marks unread: left for a run after it is read. */
+  deferredUnread: number;
+  /** Not tried because the session ended mid-pass. */
+  abandoned: number;
+}
+
+/** Fetch and store one attachment, or record why not. Never throws for the portal's reasons. */
+async function fetchAttachment(
+  input: PortalPassInput,
+  healthSystemId: string,
+  session: PortalSession,
+  attachment: FetchableAttachment,
+): Promise<"stored" | "failed" | "abandoned"> {
+  const { ctx, repos } = input;
+  const meta = { name: attachment.name, extension: attachment.extension };
+  try {
+    const file = await session.client.loadMessageAttachment(attachment.handle);
+    await repos.portalMessageAttachments.store(
+      healthSystemId,
+      attachment.key,
+      { ...meta, contentType: file.contentType },
+      file.bytes,
+    );
+    return "stored";
+  } catch (error) {
+    const code = isAppError(error) ? error.code : "internal";
+    if (code === "portal_session_expired") return "abandoned";
+    ctx.log.warn("portal.attachment_failed", { healthSystemId, ...errorFields(error) });
+    await repos.portalMessageAttachments.fail(healthSystemId, attachment.key, meta, code);
+    return "failed";
+  }
+}
+
+/**
+ * Fetch and seal every attachment the Message Center read listed and the store
+ * does not hold yet (`worker/db/repos/portal-message-attachments.ts`).
+ *
+ * It has to be now: the portal names an attachment by a per-session token, so
+ * only the run that listed it can ask for it. Every attachment is fetched,
+ * however many and however large; each one that is not is on the record -- a
+ * `failed` row with a stable code, tried again a day later -- or waiting, never
+ * silently dropped:
+ *
+ *  - An attachment on a message the portal still marks unread is left alone
+ *    until it has been read. Opening a message marks it read, and whether the
+ *    document download does too has not been observed; a message the owner has
+ *    not read yet must stay unread. It is fetched on the first run after.
+ *  - A session that ends mid-pass stops the pass: the rest are tried next run,
+ *    and none is marked failed for it.
+ *
+ * Never throws into the message sync: a failure here costs attachment content,
+ * not messages.
+ */
+async function syncAttachments(
+  input: PortalPassInput,
+  healthSystemId: string,
+  session: PortalSession,
+  listed: readonly FetchableAttachment[],
+): Promise<void> {
+  const { ctx, repos } = input;
+  const pass: AttachmentPass = {
+    listed: listed.length,
+    stored: 0,
+    failed: 0,
+    skipped: 0,
+    deferredUnread: 0,
+    abandoned: 0,
+  };
+  try {
+    const unique = new Map(listed.map((attachment) => [attachment.key, attachment]));
+    const due = await repos.portalMessageAttachments.needingFetch(
+      healthSystemId,
+      listed.map((attachment) => attachment.key),
+    );
+    pass.skipped = unique.size - due.size;
+    let sessionEnded = false;
+    for (const attachment of unique.values()) {
+      if (!due.has(attachment.key)) continue;
+      if (attachment.unread !== false) {
+        pass.deferredUnread += 1;
+        continue;
+      }
+      if (sessionEnded) {
+        pass.abandoned += 1;
+        continue;
+      }
+      const outcome = await fetchAttachment(input, healthSystemId, session, attachment);
+      pass[outcome] += 1;
+      if (outcome === "abandoned") sessionEnded = true;
+    }
+  } catch (error) {
+    ctx.log.warn("portal.attachments_failed", { healthSystemId, ...errorFields(error) });
+  }
+  ctx.log.info("portal.attachments", { healthSystemId, ...pass });
+}
+
+/**
+ * Read the whole Message Center with the session the visits just used, and store
+ * every message (`worker/db/repos/portal-messages.ts`).
+ *
+ * Never a sign-in of its own: it runs only after `ensureSession` handed back a
+ * live session, and a session that dies mid-read is recorded on the sync row
+ * (`portal_session_expired`) for the MCP's coverage to report, not retried.
+ * Isolated from the visits: a failure here costs the MCP one run's freshness and
+ * nothing else, so it is logged and recorded but never thrown. The jar is saved
+ * either way, because every one of these calls can refresh the session cookie.
+ */
+async function syncMessages(
+  input: PortalPassInput,
+  healthSystemId: string,
+  session: PortalSession,
+): Promise<void> {
+  const { ctx, repos } = input;
+  try {
+    const result = await session.client.loadMessages();
+    const messages = result.threads.reduce((sum, thread) => sum + thread.messages.length, 0);
+    const recorded = await repos.portalMessages.record(healthSystemId, result.threads, {
+      complete: result.complete,
+    });
+    await repos.portalMessages.markSync(healthSystemId, {
+      ok: true,
+      complete: result.complete,
+      threads: result.threads.length,
+      messages,
+    });
+    input.state.summary.portalMessages += messages;
+    ctx.log.info("portal.messages_stored", {
+      healthSystemId,
+      threads: result.threads.length,
+      messages,
+      complete: result.complete,
+    });
+    await syncAttachments(input, healthSystemId, session, recorded.attachments);
+  } catch (error) {
+    const code = isAppError(error) ? error.code : "internal";
+    ctx.log.warn("portal.messages_failed", { healthSystemId, ...errorFields(error) });
+    try {
+      await repos.portalMessages.markSync(healthSystemId, { ok: false, errorCode: code });
+    } catch (markError) {
+      ctx.log.warn("portal.messages_mark_failed", { healthSystemId, ...errorFields(markError) });
+    }
+  } finally {
+    try {
+      await repos.portalAccounts.saveCookieJar(healthSystemId, session.client.jar.serialise());
+    } catch (saveError) {
+      ctx.log.warn("portal.messages_jar_save_failed", {
+        healthSystemId,
+        ...errorFields(saveError),
+      });
+    }
+  }
 }
 
 /** One health system's second phase: diff and write its calendar events. */
@@ -281,8 +446,14 @@ async function syncPortalCalendar(
   const { ctx, repos } = input;
   const healthSystem = await repos.healthSystems.get(healthSystemId);
   if (healthSystem === null) return;
+  // Read fresh rather than carried from the first phase's `listActive()` row: by
+  // the time this runs the account's own base url/mount path cannot have moved
+  // (discovery only ever runs during sign-in, and the session this visit list came
+  // from already succeeded), so a second read costs one SELECT for code that
+  // otherwise has to thread the account through `loaded` for its own sake.
+  const portalAccount = connectedPortalOf(await repos.portalAccounts.get(healthSystemId));
 
-  const builds = await buildPortalCandidates(input, healthSystem, visits);
+  const builds = await buildPortalCandidates(input, healthSystem, visits, portalAccount);
   const stored = await repos.calendarEvents.list({ healthSystemId, source: "portal" });
   // Narrowed to the window before the diff sees them, exactly as the FHIR pass
   // narrows its own: a row older than the window would be ghosted for being old.
@@ -464,6 +635,7 @@ async function buildPortalCandidates(
   input: PortalPassInput,
   healthSystem: HealthSystemRow,
   visits: readonly PortalVisit[],
+  portalAccount: ConnectedPortal | null,
 ): Promise<PortalCandidateBuild[]> {
   const seen = input.fhirSeen.get(healthSystem.id);
   // Rows the FHIR pass wrote, whenever it wrote them: the Encounter for a visit
@@ -492,6 +664,7 @@ async function buildPortalCandidates(
         id: healthSystem.id,
         displayName: healthSystem.display_name,
         portalUrl: healthSystem.portal_url,
+        connectedPortal: portalAccount,
         config,
       },
       settings: input.settings,
@@ -633,6 +806,8 @@ async function portalPlanInputs(
       key: row.event_key,
       fingerprint: "",
       ghostFingerprint: null,
+      description: null,
+      ghostDescription: null,
       offSchedule: true,
       absent: true,
       upcoming: true,
@@ -701,6 +876,7 @@ async function portalCandidate(
 ): Promise<PlanCandidate> {
   args.models.set(args.key, args.mapping.model);
   let ghostFingerprint: string | null = null;
+  let ghostDescription: string | null = null;
   if (args.offSchedule || args.absent) {
     // When it FIRST went away, so the ghost's own description -- and therefore its
     // fingerprint -- stops moving after the run that ghosted it.
@@ -713,11 +889,14 @@ async function portalCandidate(
     });
     args.ghosts.set(args.key, ghost);
     ghostFingerprint = ghost.fingerprint;
+    ghostDescription = ghost.description;
   }
   return {
     key: args.key,
     fingerprint: args.mapping.model.fingerprint,
     ghostFingerprint,
+    description: args.mapping.model.description,
+    ghostDescription,
     offSchedule: args.offSchedule,
     absent: args.absent,
     upcoming: fromIso(args.mapping.reportedStart) > input.ctx.now(),
@@ -755,7 +934,7 @@ async function applyPortalEntry(
       const patched = await input.calendar.patchEvent(
         input.calendarId,
         entry.googleEventId,
-        buildEventBody(ghost),
+        patchBody(input, entry.googleEventId, ghost),
       );
       await input.repos.calendarEvents.markGhost(entry.key, {
         // A null patch means the owner deleted the event by hand. The row still
@@ -794,7 +973,7 @@ async function patchPortal(
   const patched = await input.calendar.patchEvent(
     input.calendarId,
     entry.googleEventId,
-    buildEventBody(model),
+    patchBody(input, entry.googleEventId, model),
   );
   if (patched === null) {
     // It went away between the listing and the patch; inserting is what the plan
@@ -807,6 +986,20 @@ async function patchPortal(
   await persistPortalRow(input, healthSystemId, entry.key, patched.id, model, restore);
   if (restore) input.state.summary.eventsRestored += 1;
   else input.state.summary.eventsPatched += 1;
+}
+
+/**
+ * A patch body whose description merges the model's block into the event's
+ * current one, as this run's listing saw it -- so the owner's text above the rule
+ * survives without a GET. That text is personal content: never logged.
+ */
+function patchBody(
+  input: PortalPassInput,
+  googleEventId: string,
+  model: CalendarEventModel,
+): CalendarEventBody {
+  const listed = input.googleEvents.find((event) => event.id === googleEventId);
+  return buildEventBody(model, mergeDescription(listed?.description ?? null, model.description));
 }
 
 function ghostedAtFor(key: string, rows: readonly CalendarEventRow[], now: number): number {

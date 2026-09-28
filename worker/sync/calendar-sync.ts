@@ -73,6 +73,7 @@ import { DAY_SECONDS, dateInZone, fromIso, startOfDayInZone, toIso } from "../li
 
 import { resolveReconnectAlert } from "./alerts.ts";
 import { backoffUntilSeconds, rateLimitOf } from "./backoff.ts";
+import { mergeDescription } from "./description.ts";
 import { getCapabilityIndex } from "./discovery.ts";
 import { getGoogleCalendarFor } from "./google-tokens.ts";
 import { sha256Hex } from "./hash.ts";
@@ -433,8 +434,11 @@ async function syncHealthSystem(run: RunContext, target: SyncTarget): Promise<vo
   }
 
   run.state.unchanged += plan.unchanged.length;
+  // What each event's description says now, by event id, from the listing the
+  // plan just read: a patch keeps the owner's text above the rule without a GET.
+  const descriptions = new Map(healthSystemEvents.map((event) => [event.id, event.description]));
   for (const entry of plan.entries) {
-    await applyEntry(run, healthSystemId, entry, models, ghosts, rows);
+    await applyEntry(run, healthSystemId, entry, { models, ghosts, descriptions }, rows);
   }
   await repos.connections.markConnected(target.connection.id);
   // A whole sync completed against this organisation, so whatever the alert was
@@ -519,6 +523,7 @@ function mappingInput(
       id: target.healthSystem.id,
       displayName: target.healthSystem.display_name,
       portalUrl: target.healthSystem.portal_url,
+      connectedPortal: target.portalAccount,
       config: target.config,
     },
     settings: run.settings,
@@ -672,6 +677,8 @@ async function candidateFor(
       key,
       fingerprint: "",
       ghostFingerprint: null,
+      description: null,
+      ghostDescription: null,
       offSchedule: true,
       absent,
       upcoming: false,
@@ -681,6 +688,7 @@ async function candidateFor(
   models.set(key, mapping.model);
   const wantsGhost = absent || mapping.offSchedule;
   let ghostFingerprint: string | null = null;
+  let ghostDescription: string | null = null;
   if (wantsGhost) {
     // The stamp the ghost quotes: when it FIRST disappeared, so the description
     // and therefore the fingerprint stop moving after the first ghosting run.
@@ -693,11 +701,14 @@ async function candidateFor(
     });
     ghosts.set(key, ghost);
     ghostFingerprint = ghost.fingerprint;
+    ghostDescription = ghost.description;
   }
   return {
     key,
     fingerprint: mapping.model.fingerprint,
     ghostFingerprint,
+    description: mapping.model.description,
+    ghostDescription,
     offSchedule: mapping.offSchedule,
     absent,
     upcoming: fromIso(mapping.reportedStart) > run.ctx.now(),
@@ -758,27 +769,34 @@ async function mappingFromCache(
   }
 }
 
+/** What a write renders from: the two model maps, and each event's current description. */
+interface WriteSources {
+  models: ReadonlyMap<string, CalendarEventModel>;
+  ghosts: ReadonlyMap<string, CalendarEventModel>;
+  /** By Google event id. Personal content in part: never logged. */
+  descriptions: ReadonlyMap<string, string | null>;
+}
+
 /** Carry out one planned change. */
 async function applyEntry(
   run: RunContext,
   healthSystemId: string,
   entry: PlanEntry,
-  models: ReadonlyMap<string, CalendarEventModel>,
-  ghosts: ReadonlyMap<string, CalendarEventModel>,
+  sources: WriteSources,
   rows: readonly CalendarEventRow[],
 ): Promise<void> {
   switch (entry.action) {
     case "insert": {
-      await writeInsert(run, healthSystemId, entry, models);
+      await writeInsert(run, healthSystemId, entry, sources.models);
       return;
     }
     case "patch":
     case "restore": {
-      await writePatch(run, healthSystemId, entry, models);
+      await writePatch(run, healthSystemId, entry, sources);
       return;
     }
     case "ghost": {
-      await writeGhostPatch(run, entry, ghosts, rows);
+      await writeGhostPatch(run, entry, sources, rows);
       return;
     }
     case "ghost-row-only": {
@@ -811,14 +829,15 @@ async function writePatch(
   run: RunContext,
   healthSystemId: string,
   entry: PlanEntry,
-  models: ReadonlyMap<string, CalendarEventModel>,
+  sources: WriteSources,
 ): Promise<void> {
-  const model = models.get(entry.key);
+  const model = sources.models.get(entry.key);
   if (model === undefined || entry.googleEventId === null) return;
+  const current = sources.descriptions.get(entry.googleEventId) ?? null;
   const patched = await run.calendar.patchEvent(
     run.calendarId,
     entry.googleEventId,
-    buildEventBody(model),
+    buildEventBody(model, mergeDescription(current, model.description)),
   );
   // Only a restore may move the row out of `ghost`; see `upsert` in the repo.
   const restore = entry.action === "restore";
@@ -838,15 +857,16 @@ async function writePatch(
 async function writeGhostPatch(
   run: RunContext,
   entry: PlanEntry,
-  ghosts: ReadonlyMap<string, CalendarEventModel>,
+  sources: WriteSources,
   rows: readonly CalendarEventRow[],
 ): Promise<void> {
-  const ghost = ghosts.get(entry.key);
+  const ghost = sources.ghosts.get(entry.key);
   if (ghost === undefined || entry.googleEventId === null) return;
+  const current = sources.descriptions.get(entry.googleEventId) ?? null;
   const patched = await run.calendar.patchEvent(
     run.calendarId,
     entry.googleEventId,
-    buildEventBody(ghost),
+    buildEventBody(ghost, mergeDescription(current, ghost.description)),
   );
   // A null patch means the owner deleted it. The row still becomes a ghost: the
   // appointment really is gone, and re-creating a deleted event is never wanted.

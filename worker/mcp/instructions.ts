@@ -10,10 +10,13 @@ export const MCP_INSTRUCTIONS =
   "A read-only copy of one person's health record, cached from their health " +
   "systems. Start with get_health_summary. For 'what conditions do I have', " +
   'use get_conditions with category ["problem-list-item"] or collapse: true. ' +
-  "Patient-portal secure messages (inbox conversations with a care team) are " +
-  "not part of this record and no tool returns them; get_documents holds " +
-  "clinical documents such as visit notes, not messages. Say so plainly " +
-  "rather than searching for them. " +
+  "Patient-portal secure messages (inbox conversations with a care team, and " +
+  "the letters and notices the portal sends) come from get_messages, one item " +
+  "per conversation with a short preview of its newest message (search the " +
+  "full text with its `search` argument); get_message_thread returns one " +
+  "conversation with every message in full, and get_message_attachment one " +
+  "attached file (text, or an image). get_documents holds clinical documents such as visit " +
+  "notes, not messages. " +
   "Every tool that reads a resource " +
   "type returns { items, total, matched, coverage, warnings, truncated, " +
   "generatedAt } and accepts an optional `jq` argument: a real jq program run " +
@@ -29,7 +32,10 @@ export const MCP_INSTRUCTIONS =
   "before concluding there is no data. `coverage` says, per health system and " +
   "resource type, whether the cache is `ok`, `partial` (one part of the search " +
   "was rejected), `stale`, `failed`, `unsupported` (the health system does not " +
-  "offer that type -- not a problem), or `never` synced yet. Any pair that is " +
+  "offer that type -- not a problem), or `never` synced yet; its `notices` " +
+  "explain any code the health system returned that is more than " +
+  "informational (get_sync_status lists every code, each with a meaning and " +
+  "a severity). Any pair that is " +
   "not ok or unsupported also gets a plain-text `warnings` entry -- " +
   "`sync_failed:<type>:<healthSystemId>:<errorCode>`, " +
   "`never_synced:<type>:<healthSystemId>`, `stale:<type>:<healthSystemId>:<age>h` " +

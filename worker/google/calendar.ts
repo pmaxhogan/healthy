@@ -246,6 +246,7 @@ function toEventRecord(value: unknown): EventRecord | null {
     id,
     status: asString(raw.status) ?? "confirmed",
     summary: asString(raw.summary),
+    description: asString(raw.description),
     start: toEventDateTime(raw.start),
     end: toEventDateTime(raw.end),
     colorId: asString(raw.colorId),
@@ -266,11 +267,18 @@ function toEventRecord(value: unknown): EventRecord | null {
  *     app never invents notification timings.
  *   - `extendedProperties.private.healthy: "1"` -- the invariant that makes an
  *     event ours. Without it the sync can neither find nor touch the event.
+ *
+ * `description` defaults to the model's own, which is Healthy's block alone --
+ * right for an insert. A patch passes the block merged into the event's current
+ * description (`mergeDescription`), so the owner's text above the rule survives.
  */
-export function buildEventBody(model: CalendarEventModel): CalendarEventBody {
+export function buildEventBody(
+  model: CalendarEventModel,
+  description: string = model.description,
+): CalendarEventBody {
   return {
     summary: model.title,
-    description: model.description,
+    description,
     ...(model.location !== undefined && { location: model.location }),
     start: { dateTime: model.start, timeZone: model.timeZone },
     end: { dateTime: model.end, timeZone: model.timeZone },

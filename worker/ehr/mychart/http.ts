@@ -141,6 +141,13 @@ export interface PortalRequest {
    * mid-session.
    */
   recognizeLanding?: ((landed: { url: string; body: string }) => boolean) | undefined;
+  /**
+   * Read a final answer that is not text as bytes (`PortalResponse.bytes`), for
+   * a file download. A text answer (HTML, JSON, plain text) is still read as
+   * `body`, so a login page or an error page where a file was expected is
+   * recognised exactly as it is everywhere else.
+   */
+  binary?: boolean | undefined;
 }
 
 export interface PortalResponse {
@@ -160,6 +167,29 @@ export interface PortalResponse {
   contentType: string | null;
   /** Redirects followed to get here, header and body alike. */
   hops: number;
+  /** A `binary` request's non-text answer, exactly as sent. `body` is then "". */
+  bytes?: Uint8Array | undefined;
+}
+
+/** True for a content type that is read as text even on a `binary` request. */
+function isTextual(contentType: string | null): boolean {
+  return (
+    contentType !== null &&
+    (contentType.startsWith("text/") ||
+      ["json", "xml", "javascript"].some((kind) => contentType.includes(kind)))
+  );
+}
+
+/** The final answer's content type and body -- as bytes, for a `binary` request's file. */
+async function readAnswer(
+  response: Response,
+  binary: boolean,
+): Promise<{ contentType: string | null; body: string; bytes: Uint8Array | undefined }> {
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? null;
+  const asBytes = binary && !isTextual(contentType);
+  return asBytes
+    ? { contentType, body: "", bytes: new Uint8Array(await response.arrayBuffer()) }
+    : { contentType, body: await response.text(), bytes: undefined };
 }
 
 /** Redirects that turn the next hop into a GET and drop the body (RFC 9110 §15.4). */
@@ -396,7 +426,7 @@ export async function portalFetch(
       continue;
     }
 
-    const body = await response.text();
+    const { contentType, body, bytes } = await readAnswer(response, request.binary === true);
     rejectIfBlocked(response, body, request.endpoint, deps.logger, hops);
     const recognized = request.recognizeLanding?.({ url: hop.url, body }) === true;
     const inBody = !recognized && request.followBodyRedirects === true ? bodyHop(body, hop) : null;
@@ -413,8 +443,9 @@ export async function portalFetch(
       status: response.status,
       url: hop.url,
       body,
-      contentType: response.headers.get("content-type")?.toLowerCase() ?? null,
+      contentType,
       hops,
+      ...(bytes !== undefined && { bytes }),
     };
   }
 

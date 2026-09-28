@@ -101,9 +101,81 @@ function rawEntries(value: unknown): RawEntry[] {
   return out;
 }
 
+/**
+ * Tools that cannot be called without an argument naming one record:
+ * `get_message_thread` needs a `threadId`, and is sampled on the newest
+ * conversation `get_messages` lists; `get_message_attachment` needs an
+ * attachment id, and is sampled on the first attachment of the newest
+ * conversation that has one.
+ */
+const NEEDS_RECORD: ReadonlySet<string> = new Set(["get_message_thread", "get_message_attachment"]);
+
+/** The parsed first text block of a tool answer's `items`, or null. */
+async function listItems(
+  deps: ToolDeps,
+  tool: string,
+  args: Record<string, unknown>,
+): Promise<unknown[] | null> {
+  const result = await callMcpTool(deps, tool, args);
+  const first = result?.content[0];
+  if (result === null || result.isError === true || first?.type !== "text") return null;
+  const payload: unknown = JSON.parse(first.text);
+  const items = isRecord(payload) ? own(payload, "items") : undefined;
+  return Array.isArray(items) ? (items as unknown[]) : null;
+}
+
+/** The array under `key` of every record in `values`, flattened. */
+function under(values: readonly unknown[], key: string): unknown[] {
+  const out: unknown[] = [];
+  for (const value of values) {
+    const found = isRecord(value) ? own(value, key) : undefined;
+    if (Array.isArray(found)) out.push(...(found as unknown[]));
+  }
+  return out;
+}
+
+/** The first attachment id of one conversation, as get_message_thread reports it. */
+async function firstAttachmentId(deps: ToolDeps, threadId: string): Promise<string | null> {
+  const items = (await listItems(deps, "get_message_thread", { threadId })) ?? [];
+  const attachments = under(under(items, "messages"), "attachments");
+  for (const attachment of attachments) {
+    const id = isRecord(attachment) ? own(attachment, "id") : undefined;
+    if (typeof id === "string") return id;
+  }
+  return null;
+}
+
+/**
+ * The arguments that name the record to sample, read from the listing tool's
+ * first item. Listed under the rules' resource and health system denials only --
+ * not a tool denial, and never a field rule:
+ * a draft that hides the id must still be previewed on the same record as the
+ * baseline it is compared with.
+ */
+async function recordArgs(
+  deps: ToolDeps,
+  tool: string,
+  rules: PolicyRules,
+): Promise<Record<string, unknown> | null> {
+  if (!NEEDS_RECORD.has(tool)) return sampleArgs(tool);
+  const idOnly = sampleDeps(deps, { ...rules, tools: new Set(), fields: [], allows: [] });
+  const threads = (await listItems(idOnly, "get_messages", sampleArgs("get_messages"))) ?? [];
+  const wanted = threads.find(
+    (item) =>
+      isRecord(item) && (tool === "get_message_thread" || own(item, "hasAttachments") === true),
+  );
+  const threadId = isRecord(wanted) ? own(wanted, "threadId") : undefined;
+  if (typeof threadId !== "string") return null;
+  if (tool === "get_message_thread") return { threadId };
+  const attachmentId = await firstAttachmentId(idOnly, threadId);
+  return attachmentId === null ? null : { attachmentId };
+}
+
 /** Run one tool under `rules`. Null when the tool does not exist or answered an error. */
 async function runTool(deps: ToolDeps, tool: string, rules: PolicyRules): Promise<Answer | null> {
-  const result = await callMcpTool(sampleDeps(deps, rules), tool, sampleArgs(tool));
+  const args = await recordArgs(deps, tool, rules);
+  if (args === null) return null;
+  const result = await callMcpTool(sampleDeps(deps, rules), tool, args);
   if (result === null || result.isError === true) return null;
   const first = result.content[0];
   if (first?.type !== "text") return null;

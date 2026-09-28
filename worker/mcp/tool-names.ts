@@ -24,6 +24,9 @@ export const TOOL_NAMES = [
   "get_diagnostic_reports",
   "get_documents",
   "get_document_text",
+  "get_messages",
+  "get_message_thread",
+  "get_message_attachment",
   "get_care_team",
   "get_care_plans",
   "get_goals",
@@ -31,3 +34,6 @@ export const TOOL_NAMES = [
   "get_coverage",
   "get_service_requests",
 ] as const;
+
+/** One tool's name. */
+export type ToolName = (typeof TOOL_NAMES)[number];

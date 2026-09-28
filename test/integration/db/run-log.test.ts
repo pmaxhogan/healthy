@@ -32,6 +32,7 @@ describe("run_log.start and finish", () => {
         backedOff: false,
         portalVisits: 0,
         portalSkipped: 0,
+        portalMessages: 0,
         portalErrors: [],
       },
     });

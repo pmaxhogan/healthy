@@ -22,6 +22,8 @@ import type {
   CacheCount,
   CachedRow,
   DocumentTextResult,
+  PortalMessageRecord,
+  PortalMessageSyncEntry,
   PortalVisitRecord,
   HealthSystemInfo,
   SyncStatusEntry,
@@ -230,6 +232,12 @@ export interface FakeState {
   pools: Map<string, Pool>;
   /** What the portal pass stored, by health system id. Empty unless a test adds some. */
   portalVisits: Map<string, PortalVisitRecord[]>;
+  /** What the portal pass stored of each health system's Message Center. */
+  portalMessages: Map<string, PortalMessageRecord[]>;
+  /** Stored attachment files by `<healthSystemId>:<attachmentId>`. */
+  attachmentContent: Map<string, Uint8Array>;
+  /** How each health system's last Message Center read went. */
+  messageSync: PortalMessageSyncEntry[];
   counts: CacheCount[];
   syncStatus: SyncStatusEntry[];
   document: DocumentTextResult;
@@ -245,6 +253,8 @@ export interface FakeOverrides {
   healthSystems?: HealthSystemInfo[];
   pools?: Map<string, Pool>;
   portalVisits?: Map<string, PortalVisitRecord[]>;
+  portalMessages?: Map<string, PortalMessageRecord[]>;
+  messageSync?: PortalMessageSyncEntry[];
   document?: DocumentTextResult;
 }
 
@@ -271,6 +281,9 @@ export function fakeState(overrides: FakeOverrides = {}): FakeState {
     ],
     pools,
     portalVisits: overrides.portalVisits ?? new Map(),
+    portalMessages: overrides.portalMessages ?? new Map(),
+    attachmentContent: new Map(),
+    messageSync: overrides.messageSync ?? [],
     counts,
     syncStatus: [
       {
@@ -349,6 +362,11 @@ export function fakeDeps(state: FakeState): ToolDeps {
       ]);
     },
     portalVisits: (healthSystemId) => Promise.resolve(state.portalVisits.get(healthSystemId) ?? []),
+    portalMessages: (healthSystemId) =>
+      Promise.resolve(state.portalMessages.get(healthSystemId) ?? []),
+    portalMessageSync: () => Promise.resolve(state.messageSync),
+    portalAttachmentContent: (healthSystemId, attachmentId) =>
+      Promise.resolve(state.attachmentContent.get(`${healthSystemId}:${attachmentId}`) ?? null),
     counts: () => Promise.resolve(state.counts),
     syncStatus: () => Promise.resolve(state.syncStatus),
     documentText: () => Promise.resolve(state.document),

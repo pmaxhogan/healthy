@@ -958,4 +958,22 @@ describe("everything after sign-in", () => {
     await expect(portal.isSessionAlive()).resolves.toBe(true);
     expect(find(stub, "POST", "/LoadUpcoming")?.headers.__requestverificationtoken).toBe("tok-1");
   });
+
+  it("reads the Message Center through the classic session too", async () => {
+    const stub = routed({
+      "GET /prd/Visits/VisitsList": () =>
+        html('<input name="__RequestVerificationToken" value="tok-1" />'),
+      "POST /prd/api/conversations/GetOrganizations": () => json({ organizations: {} }),
+      "POST /prd/api/conversations/GetConversationList": () =>
+        json({ conversations: [], localSummary: { hasMoreConversations: false } }),
+    });
+
+    const result = await client(stub).loadMessages();
+
+    expect(result).toMatchObject({ threads: [], complete: true });
+    expect(
+      find(stub, "POST", "/api/conversations/GetConversationList")?.headers
+        .__requestverificationtoken,
+    ).toBe("tok-1");
+  });
 });

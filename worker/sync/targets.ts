@@ -15,6 +15,9 @@
 
 import { parseJsonColumn, healthSystemConfigSchema } from "../db/schemas.ts";
 
+import { connectedPortalOf } from "./mapping.ts";
+
+import type { ConnectedPortal } from "./mapping.ts";
 import type { Repos } from "../db/index.ts";
 import type { ConnectionRow, HealthSystemRow } from "../db/rows.ts";
 import type { HealthSystemConfig } from "../db/schemas.ts";
@@ -27,6 +30,14 @@ export interface SyncTarget {
   connection: ConnectionRow;
   /** `health_systems.config_json`, parsed. */
   config: HealthSystemConfig;
+  /**
+   * The connected portal account's endpoint, when one has ever signed in.
+   * `mapping.ts` falls back to its visits list when the health system has no
+   * portal url of its own configured. Read fresh here rather than carried over
+   * from the portal pass, because the FHIR pass this target is built for runs
+   * whether or not a portal account exists at all.
+   */
+  portalAccount: ConnectedPortal | null;
 }
 
 /**
@@ -54,7 +65,8 @@ export async function syncTargets(
       `health_systems.config_json.${healthSystem.id}`,
     );
     if (!config.enabled) continue;
-    targets.push({ healthSystem, connection, config });
+    const portalAccount = connectedPortalOf(await repos.portalAccounts.get(healthSystem.id));
+    targets.push({ healthSystem, connection, config, portalAccount });
   }
   return targets;
 }

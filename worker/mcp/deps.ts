@@ -16,7 +16,7 @@
 
 import type { ConnectionStatus, HealthSystemEnvironment } from "../db/rows.ts";
 import type { SyncWarning } from "../db/schemas.ts";
-import type { PortalVisit } from "../ehr/mychart/index.ts";
+import type { PortalMessage, PortalThread, PortalVisit } from "../ehr/mychart/index.ts";
 import type { Logger } from "../lib/log.ts";
 import type { PolicyRules } from "../policy/rules.ts";
 
@@ -62,6 +62,64 @@ export interface PortalVisitRecord {
   missing: boolean;
   /** Unix seconds the portal pass last saw it. A stale copy loses cross-health system ties. */
   fetchedAt: number;
+}
+
+/**
+ * One secure message the portal pass stored (`portal_messages`), opened.
+ *
+ * `threadId` and `messageId` are keyed blinds of the thread's and the message's
+ * content, the same for one message whichever portal it was read from;
+ * `fingerprint` is the content digest two portals' copies are matched on (see
+ * `worker/sync/message-dedupe.ts`). Never returned as such.
+ */
+export interface PortalMessageRecord {
+  threadId: string;
+  messageId: string;
+  fingerprint: string;
+  thread: Omit<PortalThread, "messages">;
+  message: PortalMessage;
+  /**
+   * What is stored of each attachment's file, index-aligned with
+   * `message.attachments`. Absent means none of them has been looked up.
+   */
+  files?: MessageAttachmentFile[] | undefined;
+  /** The portal's own organisation stopped listing it. */
+  missing: boolean;
+}
+
+/**
+ * Where one attachment's file stands (`portal_message_attachments`):
+ *
+ *  - `stored`: fetched and sealed; `get_message_attachment` can read it.
+ *  - `failed`: the portal would not serve it; `errorCode` says how. Tried again
+ *    a day later.
+ *  - `waiting_until_read`: on a message the portal still marks unread; fetched
+ *    on the first portal pass after it has been read (fetching could mark it read).
+ *  - `not_fetched`: not tried yet, or not a file the portal serves (a clinical
+ *    reference, a link into another organisation's portal).
+ */
+type MessageAttachmentStatus = "stored" | "failed" | "waiting_until_read" | "not_fetched";
+
+export interface MessageAttachmentFile {
+  /** What `get_message_attachment` takes: a keyed blind, the same from either portal. */
+  id: string;
+  status: MessageAttachmentStatus;
+  errorCode?: string | undefined;
+  contentType?: string | undefined;
+  /** Bytes. */
+  size?: number | undefined;
+}
+
+/** How one health system's last Message Center read went. */
+export interface PortalMessageSyncEntry {
+  healthSystemId: string;
+  lastAttemptAt: number;
+  /** Unix seconds of the last successful read, or null when none has succeeded. */
+  lastOkAt: number | null;
+  /** Null when the last attempt succeeded. */
+  lastErrorCode: string | null;
+  /** False when that read could not prove it saw everything. */
+  complete: boolean;
 }
 
 /** Live row counts, for `get_health_summary` and the admin overview. */
@@ -197,6 +255,19 @@ export interface ToolDeps {
    * before it happens, so this is where `get_appointments` finds them.
    */
   portalVisits(healthSystemId: string): Promise<PortalVisitRecord[]>;
+  /**
+   * Every secure message the portal pass stored for one health system
+   * (`portal_messages`), in no particular order. What `get_messages` answers from.
+   */
+  portalMessages(healthSystemId: string): Promise<PortalMessageRecord[]>;
+  /** Every health system's last Message Center read, for `get_messages`' coverage. */
+  portalMessageSync(): Promise<PortalMessageSyncEntry[]>;
+  /**
+   * One stored attachment's file, by the `id` a message item reported, from
+   * `portal_message_attachment_chunks`. Null when that health system holds no
+   * stored file under that id. Never talks to a portal.
+   */
+  portalAttachmentContent(healthSystemId: string, attachmentId: string): Promise<Uint8Array | null>;
   counts(): Promise<CacheCount[]>;
   syncStatus(): Promise<SyncStatusEntry[]>;
   /**

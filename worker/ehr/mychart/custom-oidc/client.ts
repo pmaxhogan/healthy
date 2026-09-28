@@ -326,6 +326,10 @@ export function createCustomOidcClient(deps: CustomOidcClientDeps): PortalClient
     loadUpcoming: (timeZone: string): Promise<PortalVisit[]> => classic.loadUpcoming(timeZone),
     loadPast: (timeZone: string, oldestRenderedDate?: string): Promise<PortalVisit[]> =>
       classic.loadPast(timeZone, oldestRenderedDate),
+    // The Message Center is a classic-session page like the visits: the bridge's
+    // whole job is to leave that session behind.
+    loadMessages: () => classic.loadMessages(),
+    loadMessageAttachment: (handle) => classic.loadMessageAttachment(handle),
     isSessionAlive: (): Promise<boolean> => classic.isSessionAlive(),
     jar,
   };

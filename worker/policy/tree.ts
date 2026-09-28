@@ -536,6 +536,53 @@ const DATATYPES: Readonly<Record<string, FieldSpecs>> = {
   "N.Period": { start: "string", end: "string" },
   "N.PatientAddress": { city: "string", state: "string" },
   "N.Identifiers": { csn: ["string", "The visit's contact serial number"] },
+  "N.MessageSender": {
+    role: ["string", "patient, proxy, practitioner or system"],
+    name: ["string", "The sender's name"],
+  },
+  "N.PractitionerName": { name: ["string", "The clinician's name"] },
+  "N.MessageAttachment": {
+    name: ["string", "The file's name"],
+    extension: ["string", "Its file type"],
+    id: ["string", "What get_message_attachment takes"],
+    status: ["string", "stored, failed, waiting_until_read or not_fetched"],
+    errorCode: ["string", "Why the portal would not serve it"],
+    contentType: ["string", "The stored file's content type"],
+    size: ["integer", "The stored file's size in bytes"],
+  },
+  "N.AttachmentImage": {
+    contentType: ["string", "The image's type"],
+    returnedAs: ["string", "Always image content block"],
+  },
+  "N.SyncCode": {
+    code: "string",
+    meaning: ["string", "What the code means"],
+    severity: ["string", "info, warning, error or unknown"],
+  },
+  "N.SyncWarning": {
+    code: "string",
+    count: "integer",
+    meaning: ["string", "What the code means"],
+    severity: ["string", "info, warning, error or unknown"],
+  },
+  "N.LastMessage": {
+    id: ["string", "The message's id"],
+    sent: ["string", "When it was delivered"],
+    direction: ["string", "from_patient or to_patient"],
+    from: ["N.MessageSender", "Who wrote it"],
+    preview: ["string", "The start of its text, whitespace collapsed"],
+    previewTruncated: ["boolean", "True when the text goes on past the preview"],
+  },
+  "N.ThreadMessage": {
+    id: ["string", "The message's id"],
+    sent: ["string", "When it was delivered"],
+    direction: ["string", "from_patient or to_patient"],
+    from: ["N.MessageSender", "Who wrote it"],
+    unread: ["boolean", "The portal's own unread flag"],
+    body: ["string", "The message's full text"],
+    attachments: ["N.MessageAttachment[]", "Attached files"],
+    noLongerListed: ["boolean", "True when the portal stopped listing it"],
+  },
 };
 
 // --- raw FHIR resources, top level -----------------------------------------
@@ -1415,6 +1462,109 @@ const DOCUMENT_TEXT = {
   text: ["string", "The document's full text"],
 } as const;
 
+/**
+ * One secure message, as both message tools hand it to the policy before
+ * grouping messages into conversations. There is no FHIR resource behind it --
+ * it is read from the patient portal -- so this view is the whole of its shape,
+ * under FHIR's own name for a message.
+ */
+const MESSAGE = {
+  resourceType: ["string", "Always Communication"],
+  id: ["string", "The message's id"],
+  threadId: ["string", "The conversation's id"],
+  subject: ["string", "The conversation's subject line"],
+  folder: ["string", "conversations, appointments, automated, archive or bookmarked"],
+  sent: ["string", "When the message was delivered"],
+  direction: ["string", "from_patient or to_patient"],
+  from: ["N.MessageSender", "Who wrote it"],
+  practitioners: ["N.PractitionerName[]", "The care team the conversation is with"],
+  body: ["string", "The message's full text"],
+  attachments: ["N.MessageAttachment[]", "Attached files"],
+  unread: ["boolean", "The portal's own unread flag"],
+  organization: ["string", "The organisation a second-hand copy belongs to"],
+  source: ["string", "Always portal"],
+  firstParty: ["boolean", "False when another organisation's portal showed it"],
+  via: ["string", "The health system whose portal showed it second-hand"],
+  noLongerListed: ["boolean", "True when the portal stopped listing it"],
+  ...TAGS,
+} as const;
+
+const MESSAGE_SHAPE = "view:Message";
+
+/**
+ * What both message tools' conversation items share. Built by grouping message
+ * items the policy has already filtered (`worker/mcp/message-threads.ts`), so a
+ * rule on a message field reaches them through those; the policy also runs over
+ * the conversation items themselves, so a rule on one of these fields reaches
+ * them directly.
+ */
+const THREAD_BASE = {
+  resourceType: ["string", "Always Communication"],
+  kind: ["string", "message_thread, or message_thread_detail from get_message_thread"],
+  threadId: ["string", "The conversation's id"],
+  subject: ["string", "The conversation's subject line"],
+  folder: ["string", "conversations, appointments, automated, archive or bookmarked"],
+  firstMessageAt: ["string", "When its first message was delivered"],
+  lastMessageAt: ["string", "When its newest message was delivered"],
+  messageCount: ["integer", "How many messages it holds"],
+  unreadCount: ["integer", "How many of them the portal marks unread"],
+  attachmentCount: ["integer", "How many files are attached across its messages"],
+  hasAttachments: ["boolean", "True when any message has an attachment"],
+  practitioners: ["N.PractitionerName[]", "The care team the conversation is with"],
+  participants: ["N.MessageSender[]", "Everyone who wrote in it"],
+  organization: ["string", "The organisation a second-hand copy belongs to"],
+  source: ["string", "Always portal"],
+  firstParty: ["boolean", "False when another organisation's portal showed it"],
+  via: ["string", "The health system whose portal showed it second-hand"],
+  noLongerListed: ["boolean", "True when the portal stopped listing every message in it"],
+  ...TAGS,
+} as const;
+
+/** One conversation in `get_messages`' list. */
+const THREAD_SUMMARY = {
+  ...THREAD_BASE,
+  lastMessage: ["N.LastMessage", "The newest message, previewed"],
+} as const;
+
+/** One conversation from `get_message_thread`, every message in full. */
+const THREAD_DETAIL = {
+  ...THREAD_BASE,
+  messages: ["N.ThreadMessage[]", "Every message, oldest first"],
+} as const;
+
+/** One attached file (`get_message_attachment`). */
+const MESSAGE_ATTACHMENT = {
+  resourceType: ["string", "Always Communication"],
+  kind: ["string", "Always message_attachment"],
+  id: ["string", "The attachment's id"],
+  messageId: ["string", "The message it is attached to"],
+  threadId: ["string", "The conversation's id"],
+  subject: ["string", "The conversation's subject line"],
+  sent: ["string", "When its message was delivered"],
+  name: ["string", "The file's name"],
+  extension: ["string", "Its file type"],
+  status: ["string", "stored, failed, waiting_until_read or not_fetched"],
+  errorCode: ["string", "Why the portal would not serve it"],
+  contentType: ["string", "The stored file's content type"],
+  size: ["integer", "The stored file's size in bytes"],
+  chars: ["integer", "Length of the text"],
+  text: ["string", "A text file's full text"],
+  image: [
+    "N.AttachmentImage",
+    "An image, returned beside the item as an image content block; hiding this withholds it",
+  ],
+  note: ["string", "Why no content came back"],
+  source: ["string", "Always portal"],
+  firstParty: ["boolean", "False when another organisation's portal showed it"],
+  via: ["string", "The health system whose portal showed it second-hand"],
+  ...TAGS,
+} as const;
+
+const MESSAGE_ATTACHMENT_SHAPE = "view:MessageAttachment";
+
+const THREAD_SUMMARY_SHAPE = "view:MessageThread";
+const THREAD_DETAIL_SHAPE = "view:MessageThreadDetail";
+
 const HEALTH_SYSTEM_ROW = {
   kind: ["string", "health_system"],
   ...TAGS,
@@ -1432,10 +1582,12 @@ const RESOURCE_SYNC_ROW = {
   kind: ["string", "resource_sync"],
   ...TAGS,
   resourceType: "string",
+  status: ["string", "ok, partial, stale, failed, unsupported or never"],
   lastFullAt: "string",
   lastOk: "boolean",
   lastErrorCode: "string",
-  warnings: "string[]",
+  lastError: ["N.SyncCode", "The last error, explained"],
+  warnings: ["N.SyncWarning[]", "What the health system reported on the last refresh"],
 } as const;
 
 // --- the shape registry ------------------------------------------------------
@@ -1523,6 +1675,34 @@ const SHAPES: readonly ShapeDef[] = [
     fields: CONDITION_GROUP,
   },
   {
+    id: MESSAGE_SHAPE,
+    label: "Secure message (each message, before grouping)",
+    resourceType: "Communication",
+    vocabulary: "normalized",
+    fields: MESSAGE,
+  },
+  {
+    id: THREAD_SUMMARY_SHAPE,
+    label: "Message conversation (list item)",
+    resourceType: "Communication",
+    vocabulary: "normalized",
+    fields: THREAD_SUMMARY,
+  },
+  {
+    id: THREAD_DETAIL_SHAPE,
+    label: "Message conversation, every message in full",
+    resourceType: "Communication",
+    vocabulary: "normalized",
+    fields: THREAD_DETAIL,
+  },
+  {
+    id: MESSAGE_ATTACHMENT_SHAPE,
+    label: "Message attachment",
+    resourceType: "Communication",
+    vocabulary: "normalized",
+    fields: MESSAGE_ATTACHMENT,
+  },
+  {
     id: "summary:count",
     label: "Summary count row",
     resourceType: null,
@@ -1601,6 +1781,9 @@ const TOOL_SHAPES = {
   get_diagnostic_reports: collectionShapes("DiagnosticReport"),
   get_documents: collectionShapes("DocumentReference"),
   get_document_text: ["document:text"],
+  get_messages: [MESSAGE_SHAPE, THREAD_SUMMARY_SHAPE],
+  get_message_thread: [MESSAGE_SHAPE, THREAD_DETAIL_SHAPE],
+  get_message_attachment: [MESSAGE_ATTACHMENT_SHAPE],
   get_care_team: collectionShapes("CareTeam"),
   get_care_plans: collectionShapes("CarePlan"),
   get_goals: collectionShapes("Goal"),
@@ -1618,8 +1801,18 @@ export function toolShapes(tool: string): readonly string[] | undefined {
   return TOOL_SHAPES_MAP.get(tool);
 }
 
+/**
+ * Resource types a tool answers with that have a view of their own but no FHIR
+ * normalizer or raw model behind them: a secure message is read from the patient
+ * portal, not a FHIR server.
+ */
+const VIEW_ONLY_RESOURCE_TYPES: readonly string[] = ["Communication"];
+
 /** Every resource type the tree models, in a stable order. */
-export const MODELED_RESOURCE_TYPES: readonly string[] = RESOURCES.map((resource) => resource.type);
+export const MODELED_RESOURCE_TYPES: readonly string[] = [
+  ...RESOURCES.map((resource) => resource.type),
+  ...VIEW_ONLY_RESOURCE_TYPES,
+];
 
 // --- building nodes ------------------------------------------------------------
 

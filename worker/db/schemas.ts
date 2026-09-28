@@ -216,6 +216,8 @@ export const runSummarySchema = z.object({
   portalVisits: count,
   /** Portal visits skipped because a FHIR-sourced event already covered them. */
   portalSkipped: count,
+  /** Secure messages the portal pass read. Zero on a row written before it existed. */
+  portalMessages: count,
   /** Stable codes from portal accounts that failed. Codes only; see `RunSummary`. */
   portalErrors: z.array(z.string()).default([]),
 });

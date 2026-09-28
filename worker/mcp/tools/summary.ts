@@ -16,7 +16,7 @@
 
 import { applyPolicy } from "../../policy/filter.ts";
 import { collectAppointments } from "../appointment-items.ts";
-import { WINDOW_ARGS, toolArgs } from "../args.ts";
+import { sharedOnlyArgs } from "../args.ts";
 import {
   collect,
   deniedHealthSystems,
@@ -257,7 +257,9 @@ export function registerSummaryTool(server: McpServer, deps: ToolDeps): void {
         "whether the appointments, conditions, medications and labs sections are " +
         "each current, so a section with nothing in it can be told apart from " +
         "one whose last sync failed or has not happened yet.",
-      schema: toolArgs(WINDOW_ARGS),
+      // No `from`/`to`: the summary is always "nearest to now", and a window
+      // it accepted but ignored would be a filter the caller only believed in.
+      schema: sharedOnlyArgs(SUMMARY_TOOL),
     },
     async (args, run) => {
       const all = await deps.healthSystems();

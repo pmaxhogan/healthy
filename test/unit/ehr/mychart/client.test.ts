@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { createMyChartClient } from "../../../../worker/ehr/mychart/client.ts";
+import { createMyChartClient, downloadTarget } from "../../../../worker/ehr/mychart/client.ts";
 import { CookieJar } from "../../../../worker/ehr/mychart/cookie-jar.ts";
 import { DEVICE_ID_EXTRA_KEY } from "../../../../worker/ehr/mychart/wire.ts";
 import { makeLogger, noopLogger } from "../../../../worker/lib/log.ts";
@@ -48,6 +48,13 @@ import {
   upcomingPayload,
   visitsListPage,
 } from "./fixtures.ts";
+import {
+  LOCAL_ORG,
+  NURSE_KEY,
+  answerMessageCenter,
+  message,
+  messageCenter,
+} from "./message-fixtures.ts";
 
 import type { PortalCall, PortalFetchStub } from "./fixtures.ts";
 import type { PortalClient } from "../../../../worker/ehr/mychart/client.ts";
@@ -1155,5 +1162,187 @@ describe("a deployment that signs in through OpenID Connect", () => {
     // The credentials never went anywhere: the only call was the page fetch.
     expect(stub.calls).toHaveLength(1);
     expect(stub.calls[0]?.method).toBe("GET");
+  });
+});
+
+/** A signed-in portal whose Message Center answers from a synthetic mailbox. */
+function messagePortal(state = messageCenter()): PortalFetchStub {
+  const prefix = "/MyChart/";
+  return stubPortal((call) => {
+    const path = new URL(call.url).pathname;
+    if (path === "/MyChart/Visits/VisitsList" && call.method === "GET") {
+      return html(visitsListPage());
+    }
+    if (call.method === "POST" && path.startsWith(`${prefix}api/conversations/`)) {
+      const body = JSON.parse(call.body ?? "{}") as Record<string, unknown>;
+      return json(answerMessageCenter(state, path.slice(prefix.length), body));
+    }
+    return new Response("not found", { status: 404 });
+  });
+}
+
+describe("loadMessages", () => {
+  it("posts JSON with the visits page's token in a header and a fresh nonce", async () => {
+    const state = messageCenter({
+      conversations: [
+        {
+          id: "c1",
+          organizationId: LOCAL_ORG,
+          tag: 1,
+          subject: "Invented subject",
+          messages: [message("m1", 1, { empKey: NURSE_KEY })],
+        },
+      ],
+    });
+    const stub = messagePortal(state);
+
+    const result = await client(stub).loadMessages();
+
+    expect(result.threads).toHaveLength(1);
+    const list = find(stub, "POST", "/api/conversations/GetConversationList");
+    expect(list?.headers.__requestverificationtoken).toBe(TOKEN_2);
+    expect(list?.headers["content-type"]).toContain("application/json");
+    const body = JSON.parse(list?.body ?? "{}") as Record<string, unknown>;
+    expect(body.PageNonce).toMatch(/^[\da-f]{32}$/u);
+    expect(body.searchQuery).toBe("");
+  });
+
+  it("parses a message whose body quotes the sign-in page's own markers", async () => {
+    const quoting =
+      '<p>Welcome! Sign in at <a href="/MyChart/Authentication/Login/DoLogin">this link</a> ' +
+      'with your <input name="username"> and enter the TwoFactorCode we send.</p>';
+    const state = messageCenter({
+      conversations: [
+        {
+          id: "welcome",
+          organizationId: LOCAL_ORG,
+          tag: 6,
+          subject: "Invented welcome",
+          messages: [message("w1", 1, { displayName: "Messaging System" }, quoting)],
+        },
+      ],
+    });
+
+    const result = await client(messagePortal(state)).loadMessages();
+
+    expect(result.threads).toHaveLength(1);
+    expect(result.threads[0]?.messages[0]?.body).toContain("TwoFactorCode");
+  });
+
+  it("reads a 200 carrying a page as a token failure, not an empty inbox", async () => {
+    const stub = routed({
+      "GET /MyChart/Visits/VisitsList": () => html(visitsListPage()),
+      "POST /MyChart/api/conversations/GetOrganizations": () =>
+        html("<html><body>An error page</body></html>"),
+    });
+
+    await expect(codeOf(client(stub).loadMessages())).resolves.toBe("portal_parse_failed");
+  });
+
+  it("reports portal_session_expired when the token page bounces to login", async () => {
+    const stub = routed({
+      "GET /MyChart/Visits/VisitsList": () => redirect(`${HOST}/MyChart/Authentication/Login`),
+      "GET /MyChart/Authentication/Login": () => html(loginPageNew()),
+    });
+
+    await expect(codeOf(client(stub).loadMessages())).resolves.toBe("portal_session_expired");
+  });
+});
+
+describe("loadMessageAttachment", () => {
+  const HANDLE = { dcsId: "WP-invented-dcs", fileExtension: "PNG", organizationId: "" };
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+  const DETAILS = {
+    dcsId: "WP-invented-dcs",
+    mimeType: "image/png",
+    downloadUrl: "/Documents/ViewDocument/Download?dcsid=x&displayName=y&dcsExt=PNG",
+  };
+  const png = () => new Response(PNG, { headers: { "content-type": "image/png" } });
+
+  it("asks for the document details with the token, then downloads under the mount", async () => {
+    const stub = routed({
+      "GET /MyChart/Visits/VisitsList": () => html(visitsListPage()),
+      "POST /MyChart/api/documents/viewer/GetDocumentDetailsLegacy": () => json(DETAILS),
+      "GET /MyChart/Documents/ViewDocument/Download": png,
+    });
+
+    const file = await client(stub).loadMessageAttachment(HANDLE);
+
+    expect(file.contentType).toBe("image/png");
+    expect([...file.bytes]).toStrictEqual([...PNG]);
+    const details = find(stub, "POST", "/GetDocumentDetailsLegacy");
+    expect(details?.headers.__requestverificationtoken).toBe(TOKEN_2);
+    expect(JSON.parse(details?.body ?? "{}")).toStrictEqual({ ...HANDLE, useOldMobileLink: false });
+    const download = find(stub, "GET", "/Documents/ViewDocument/Download");
+    expect(new URL(download?.url ?? "").searchParams.get("dcsExt")).toBe("PNG");
+  });
+
+  it("takes the details' type when the download names none", async () => {
+    const stub = routed({
+      "GET /MyChart/Visits/VisitsList": () => html(visitsListPage()),
+      "POST /MyChart/api/documents/viewer/GetDocumentDetailsLegacy": () => json(DETAILS),
+      "GET /MyChart/Documents/ViewDocument/Download": () =>
+        new Response(PNG, { headers: { "content-type": "application/octet-stream" } }),
+    });
+
+    const file = await client(stub).loadMessageAttachment(HANDLE);
+
+    expect(file.contentType).toBe("image/png");
+  });
+
+  it("reads a page where the file should be as a failure, and a login page as an expired session", async () => {
+    const notFound = routed({
+      "GET /MyChart/Visits/VisitsList": () => html(visitsListPage()),
+      "POST /MyChart/api/documents/viewer/GetDocumentDetailsLegacy": () => json(DETAILS),
+      "GET /MyChart/Documents/ViewDocument/Download": () =>
+        html("<html><body>Not found</body></html>", { status: 404 }),
+    });
+    const bounced = routed({
+      "GET /MyChart/Visits/VisitsList": () => html(visitsListPage()),
+      "POST /MyChart/api/documents/viewer/GetDocumentDetailsLegacy": () => json(DETAILS),
+      "GET /MyChart/Documents/ViewDocument/Download": () =>
+        redirect(`${HOST}/MyChart/Authentication/Login`),
+      "GET /MyChart/Authentication/Login": () => html(loginPageNew()),
+    });
+
+    await expect(codeOf(client(notFound).loadMessageAttachment(HANDLE))).resolves.toBe(
+      "portal_parse_failed",
+    );
+    await expect(codeOf(client(bounced).loadMessageAttachment(HANDLE))).resolves.toBe(
+      "portal_session_expired",
+    );
+  });
+
+  it("refuses details that name no download", async () => {
+    const stub = routed({
+      "GET /MyChart/Visits/VisitsList": () => html(visitsListPage()),
+      "POST /MyChart/api/documents/viewer/GetDocumentDetailsLegacy": () => json({ dcsId: "x" }),
+    });
+
+    await expect(codeOf(client(stub).loadMessageAttachment(HANDLE))).resolves.toBe(
+      "portal_parse_failed",
+    );
+  });
+});
+
+describe("downloadTarget", () => {
+  const ROOT = `${HOST}/MyChart/`;
+
+  it("resolves a mount-relative download under the mount", () => {
+    expect(downloadTarget({ downloadUrl: "/Documents/X?a=1" }, ROOT)).toBe(
+      `${HOST}/MyChart/Documents/X?a=1`,
+    );
+  });
+
+  it("refuses anything that would leave the mount or the site", () => {
+    for (const downloadUrl of [
+      "https://elsewhere.example/x",
+      "//elsewhere.example/x",
+      "Documents/X",
+      "/../Other/X",
+      "",
+    ]) {
+      expect(() => downloadTarget({ downloadUrl }, ROOT)).toThrow();
+    }
   });
 });

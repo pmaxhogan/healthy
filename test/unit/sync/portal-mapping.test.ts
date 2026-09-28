@@ -55,6 +55,7 @@ function input(
       id: HEALTH_SYSTEM_ID,
       displayName: "Example Health",
       portalUrl: PORTAL_URL,
+      connectedPortal: null,
       config: healthSystemConfigSchema.parse(overrides.config ?? {}),
     },
     settings: { ...SETTINGS, ...overrides.settings },
@@ -162,7 +163,11 @@ describe("what the owner sees", () => {
       input({ settings: { timezone: "Etc/GMT-2" } }),
     );
     expect(mapping.model.timeZone).toBe("Etc/GMT-2");
-    expect(mapping.model.description.endsWith("Synced by Healthy · do not edit")).toBe(true);
+    expect(
+      mapping.model.description.startsWith(
+        "-------\nSynced by Healthy · do not edit below the line\n",
+      ),
+    ).toBe(true);
   });
 
   it("puts the location name and the address on the event", async () => {
