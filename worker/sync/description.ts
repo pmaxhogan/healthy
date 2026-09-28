@@ -21,8 +21,10 @@
  *
  * Three shapes of description turn up that the simple case does not cover.
  *
- * **HTML.** Google's web editor saves a description it has touched as HTML, with
- * `<br>` (or `<div>`/`<p>` blocks) where the newlines were. Lines are therefore
+ * **HTML.** A plain-text edit in Google's web editor stays plain text, but once
+ * the owner applies any formatting the editor saves the whole description as
+ * HTML -- `<br>` (or `<div>`/`<p>` blocks) where the newlines were, `&` as
+ * `&amp;`, Healthy's half included. Lines are therefore
  * split on those as well as on `\n`, the owner's HTML is sliced out of the raw
  * string and never re-serialised, and when the owner's part is HTML the block is
  * written as HTML too (escaped, joined with `<br>`), so the two halves render

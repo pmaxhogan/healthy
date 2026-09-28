@@ -122,6 +122,31 @@ describe("mergeDescription", () => {
   });
 });
 
+describe("what Google's web editor really stores", () => {
+  // The shape Google Calendar saved after the owner bolded a line of their own
+  // above the rule on a rehearsal event: the WHOLE description turns into HTML,
+  // `&` becomes `&amp;`, and the bold wraps a trailing <br>. Content is synthetic.
+  const saved =
+    "<b>Owner note: bring the referral &amp; ID<br></b><br>-------<br>" +
+    "Synced by Healthy · do not edit below the line<br>Example Clinic<br>" +
+    "1 Test Way &amp; Annex, Testville<br><br>Casey Example — Cardiology";
+
+  it("still reads as settled, so the edit costs no write", () => {
+    expect(carriesBlock(saved, BLOCK)).toBe(true);
+    expect(mergeDescription(saved, BLOCK)).toBe(saved);
+  });
+
+  it("keeps the owner's markup and writes a changed block as matching HTML", () => {
+    const merged = mergeDescription(saved, NEWER);
+
+    expect(
+      merged.startsWith("<b>Owner note: bring the referral &amp; ID<br></b><br>-------<br>"),
+    ).toBe(true);
+    expect(merged.endsWith("Casey Example — Neurology")).toBe(true);
+    expect(carriesBlock(merged, NEWER)).toBe(true);
+  });
+});
+
 describe("carriesBlock", () => {
   it("is true whatever the owner wrote above the rule", () => {
     expect(carriesBlock(BLOCK, BLOCK)).toBe(true);

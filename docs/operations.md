@@ -124,8 +124,8 @@ A synced event's description is shared with the owner. Healthy owns
 everything from a line that is exactly `-------` down: that line, then
 "Synced by Healthy · do not edit below the line", then the appointment
 details. Anything typed **above** the line is the owner's and is kept
-verbatim on every update (HTML included, since Google's web editor saves
-edited descriptions as HTML); anything **below** it is overwritten. If the line
+verbatim on every update (HTML included: once the owner applies any
+formatting, Google's web editor saves the whole description as HTML); anything **below** it is overwritten. If the line
 is missing, the Healthy block is appended again after whatever the
 description holds. An edit above the line never causes a write; an edit below
 it, or a deleted line, is repaired on the next sync. The current description
