@@ -124,7 +124,8 @@ export function windowArgs(field: string) {
       .describe(
         `Only items whose ${field} is on or after this, inclusive. A date ` +
           "(`2026-01-31`, `2026-01`, `2026`) starts at the first instant of that UTC " +
-          "day, month or year; an instant (`2026-01-31T09:00:00Z`) without an offset is UTC.",
+          "day, month or year; an instant (`2026-01-31T09:00:00Z`) is exact, and one " +
+          "without an offset is UTC.",
       ),
     to: instant
       .optional()
