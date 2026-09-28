@@ -25,6 +25,11 @@ updates:
       # @cloudflare/vitest-pool-workers pins vitest ^4; re-enable when the pool supports 5.x.
       - dependency-name: "vitest"
         update-types: ["version-update:semver-major"]
+      # TypeScript 7.0 (the native compiler) is outside typescript-eslint's and
+      # vue-tsc's peer ranges, so `npm ci` fails ERESOLVE. Only 7.0.x is skipped:
+      # 7.1 opens a PR again, whether or not the tooling has caught up by then.
+      - dependency-name: "typescript"
+        versions: ["7.0.x"]
       # Exact-pinned; see the file header. Never proposed at minor/patch, so
       # never swept into the grouped update or silently auto-merged.
       - dependency-name: "agents"
