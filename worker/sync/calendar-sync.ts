@@ -523,6 +523,7 @@ function mappingInput(
       id: target.healthSystem.id,
       displayName: target.healthSystem.display_name,
       portalUrl: target.healthSystem.portal_url,
+      connectedPortal: target.portalAccount,
       config: target.config,
     },
     settings: run.settings,

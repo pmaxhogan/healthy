@@ -114,11 +114,43 @@ export interface MappingSettings {
   defaultArrivalOffsetMin: number;
 }
 
+/**
+ * The connected portal account's endpoint, pared down to what a url needs.
+ *
+ * `worker/ehr/mychart/discovery.ts`'s `PortalEndpoint`, minus the sign-in
+ * fields nothing here touches. Absent means the health system has no portal
+ * account, or one that has never signed in successfully.
+ */
+export interface ConnectedPortal {
+  /** Origin only, e.g. `https://host.example`. Never a path. */
+  baseUrl: string;
+  /** One leading and one trailing slash. `/` when the app is root-mounted. */
+  mountPath: string;
+}
+
+/**
+ * A `ConnectedPortal` from a `portal_accounts` row's (already-opened) location
+ * columns, or null when the row itself is absent or has never discovered one.
+ */
+export function connectedPortalOf(
+  account: { base_url: string | null; mount_path: string | null } | null,
+): ConnectedPortal | null {
+  const baseUrl = account?.base_url ?? null;
+  const mountPath = account?.mount_path ?? null;
+  return baseUrl === null || mountPath === null ? null : { baseUrl, mountPath };
+}
+
 /** The health system fields the mapping reads, with its stored per-health system config. */
 interface MappingHealthSystem {
   id: string;
   displayName: string;
   portalUrl: string | null;
+  /**
+   * The connected portal account's endpoint, when one has ever signed in.
+   * `linkTargetFor` falls back to it -- specifically its visits list -- when
+   * `portalUrl` (the health system's own, owner-typed config field) is unset.
+   */
+  connectedPortal: ConnectedPortal | null;
   /** `health_systems.config_json`, already parsed. Snake_case, as stored. */
   config: HealthSystemConfig;
 }
@@ -336,17 +368,30 @@ function joinInline(parts: readonly (string | undefined)[], separator: string): 
 }
 
 /**
- * The visit-type/status line, linked to the health system's portal when one is
- * configured.
- *
  * No stable per-visit deep link exists to find: a live capture of MyChart's own
  * web client shows exactly one navigable URL for visits (the list page), and its
  * "view visit details" panel is a client-side overlay, not a URL -- confirmed
  * against Epic's own MyChart string tables, which name it as a view
- * (`visits.visitdetails`) rather than a route. So the link goes to the portal
- * itself rather than to the one appointment; a missing portal url or an empty
- * line leaves the plain text alone.
+ * (`visits.visitdetails`) rather than a route. So the visit-type/status line
+ * links to the portal itself rather than to the one appointment.
+ *
+ * **Which portal url.** An explicit one from the health system's own config
+ * wins when the owner set it. Otherwise, the connected portal account's own
+ * visits list -- the same url for every login flavour, `custom_oidc` included:
+ * a `custom_oidc` deployment's separate "shell" app is a login screen only
+ * ("the shell holds the password ... the classic pages hold the visits",
+ * `worker/ehr/mychart/custom-oidc/bridge.ts`), and its own hand-off lands the
+ * *scraper's* session on the same classic mount `connectedPortal` names --
+ * which is also where the owner's own browser ends up once signed in, shell or
+ * not. Null (no link, plain text) only when neither is known.
  */
+function linkTargetFor(healthSystem: MappingHealthSystem): string | null {
+  if (healthSystem.portalUrl !== null) return healthSystem.portalUrl;
+  const portal = healthSystem.connectedPortal;
+  return portal === null ? null : `${portal.baseUrl}${portal.mountPath}Visits`;
+}
+
+/** The visit-type/status line, as a link when a portal url could be found for it. */
 function linkedVisitLine(text: string, portalUrl: string | null): string {
   return portalUrl !== null && text !== "" ? linkify(text, portalUrl) : text;
 }
@@ -364,7 +409,7 @@ function descriptionBody(
   ]);
   const who = joinLines([
     joinInline([view.practitioner, view.specialty], " — "),
-    linkedVisitLine(joinInline([view.visitType, view.status], " · "), healthSystem.portalUrl),
+    linkedVisitLine(joinInline([view.visitType, view.status], " · "), linkTargetFor(healthSystem)),
   ]);
   return joinSections([where, who]);
 }

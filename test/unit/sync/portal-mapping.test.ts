@@ -55,6 +55,7 @@ function input(
       id: HEALTH_SYSTEM_ID,
       displayName: "Example Health",
       portalUrl: PORTAL_URL,
+      connectedPortal: null,
       config: healthSystemConfigSchema.parse(overrides.config ?? {}),
     },
     settings: { ...SETTINGS, ...overrides.settings },

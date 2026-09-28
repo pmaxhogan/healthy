@@ -25,11 +25,19 @@ import {
 } from "../../../worker/sync/mapping.ts";
 
 import type { NormalizedAppointmentView } from "../../../worker/fhir/normalize/types.ts";
-import type { MappingInput, MappingSettings } from "../../../worker/sync/mapping.ts";
+import type {
+  ConnectedPortal,
+  MappingInput,
+  MappingSettings,
+} from "../../../worker/sync/mapping.ts";
 
 const HEALTH_SYSTEM_ID = "prov-1";
 const START = "2026-10-01T15:30:00Z";
 const PORTAL = "https://portal.example.test/mychart";
+const CONNECTED_PORTAL: ConnectedPortal = {
+  baseUrl: "https://connected.example.test",
+  mountPath: "/mychart/",
+};
 
 /** A fresh random key per run: the blinds only have to be consistent within one. */
 function randomKey(): string {
@@ -55,6 +63,7 @@ function input(
     settings?: Partial<MappingSettings>;
     config?: Record<string, unknown>;
     portalUrl?: string | null;
+    connectedPortal?: ConnectedPortal | null;
   } = {},
 ): MappingInput {
   return {
@@ -62,6 +71,7 @@ function input(
       id: HEALTH_SYSTEM_ID,
       displayName: "Example Health",
       portalUrl: overrides.portalUrl === undefined ? PORTAL : overrides.portalUrl,
+      connectedPortal: overrides.connectedPortal ?? null,
       config: config(overrides.config),
     },
     settings: { ...SETTINGS, ...overrides.settings },
@@ -362,11 +372,37 @@ describe("description", () => {
     expect(model.description.match(new RegExp(PORTAL, "gu"))).toHaveLength(1);
   });
 
-  it("leaves the visit line plain when the health system has no portal url", async () => {
-    const { model } = await buildCalendarModel(view(), input({ portalUrl: null }));
+  it("leaves the visit line plain when there is no portal url at all", async () => {
+    const { model } = await buildCalendarModel(
+      view(),
+      input({ portalUrl: null, connectedPortal: null }),
+    );
 
     expect(model.description.endsWith("Office Visit · planned")).toBe(true);
     expect(model.description).not.toContain("<a href");
+  });
+
+  it("falls back to the connected portal account's visits list with no portal url set", async () => {
+    const { model } = await buildCalendarModel(
+      view(),
+      input({ portalUrl: null, connectedPortal: CONNECTED_PORTAL }),
+    );
+
+    expect(
+      model.description.endsWith(
+        '<a href="https://connected.example.test/mychart/Visits">Office Visit · planned</a>',
+      ),
+    ).toBe(true);
+  });
+
+  it("prefers an explicit portal url over the connected portal account", async () => {
+    const { model } = await buildCalendarModel(
+      view(),
+      input({ portalUrl: PORTAL, connectedPortal: CONNECTED_PORTAL }),
+    );
+
+    expect(model.description).toContain(`<a href="${PORTAL}">`);
+    expect(model.description).not.toContain("connected.example.test");
   });
 
   it("does not link an empty visit line", async () => {

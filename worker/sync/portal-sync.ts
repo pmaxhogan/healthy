@@ -88,7 +88,7 @@ import { fromIso, toIso } from "../lib/time.ts";
 
 import { resolveReconnectAlert } from "./alerts.ts";
 import { mergeDescription } from "./description.ts";
-import { buildCalendarModel, ghostModel } from "./mapping.ts";
+import { buildCalendarModel, connectedPortalOf, ghostModel } from "./mapping.ts";
 import { planChanges } from "./plan.ts";
 import {
   matchAcrossHealthSystems,
@@ -117,7 +117,7 @@ import {
 } from "./portal-signin.ts";
 
 import type { SyncDeps } from "./deps.ts";
-import type { CalendarMapping, MappingSettings } from "./mapping.ts";
+import type { CalendarMapping, ConnectedPortal, MappingSettings } from "./mapping.ts";
 import type { PlanCandidate, PlanEntry } from "./plan.ts";
 import type { Sighting } from "./portal-dedupe.ts";
 import type { PortalSession } from "./portal-signin.ts";
@@ -341,8 +341,14 @@ async function syncPortalCalendar(
   const { ctx, repos } = input;
   const healthSystem = await repos.healthSystems.get(healthSystemId);
   if (healthSystem === null) return;
+  // Read fresh rather than carried from the first phase's `listActive()` row: by
+  // the time this runs the account's own base url/mount path cannot have moved
+  // (discovery only ever runs during sign-in, and the session this visit list came
+  // from already succeeded), so a second read costs one SELECT for code that
+  // otherwise has to thread the account through `loaded` for its own sake.
+  const portalAccount = connectedPortalOf(await repos.portalAccounts.get(healthSystemId));
 
-  const builds = await buildPortalCandidates(input, healthSystem, visits);
+  const builds = await buildPortalCandidates(input, healthSystem, visits, portalAccount);
   const stored = await repos.calendarEvents.list({ healthSystemId, source: "portal" });
   // Narrowed to the window before the diff sees them, exactly as the FHIR pass
   // narrows its own: a row older than the window would be ghosted for being old.
@@ -524,6 +530,7 @@ async function buildPortalCandidates(
   input: PortalPassInput,
   healthSystem: HealthSystemRow,
   visits: readonly PortalVisit[],
+  portalAccount: ConnectedPortal | null,
 ): Promise<PortalCandidateBuild[]> {
   const seen = input.fhirSeen.get(healthSystem.id);
   // Rows the FHIR pass wrote, whenever it wrote them: the Encounter for a visit
@@ -552,6 +559,7 @@ async function buildPortalCandidates(
         id: healthSystem.id,
         displayName: healthSystem.display_name,
         portalUrl: healthSystem.portal_url,
+        connectedPortal: portalAccount,
         config,
       },
       settings: input.settings,
