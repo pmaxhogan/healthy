@@ -4,7 +4,19 @@
 # Weekly grouped updates: minor + patch bumps are bundled into one PR per
 # ecosystem and auto-merged once CI is green (see dependabot-automerge.yml);
 # majors open individually and are reviewed by hand, because this project pins
-# `agents` and `@modelcontextprotocol/sdk` exactly for API-churn reasons.
+# `agents`, `@modelcontextprotocol/sdk` and `jq-wasm` exactly for API-churn
+# reasons (see CLAUDE.md). An exact pin ("1.30.0", no `^`) does not stop
+# Dependabot proposing a minor/patch bump to it, and the npm-minor-patch group
+# would fold such a bump in alongside whatever else updated that week with
+# nothing to catch it -- that is what broke PR #6 (`agents` peer-depends on an
+# exact `@modelcontextprotocol/sdk` version; the group bumped the SDK alone,
+# and `npm ci` failed ERESOLVE). Rather than only pulling them out of the
+# group, minor/patch updates for these three are ignored outright below: CI
+# passing is not a substitute for the type-churn review CLAUDE.md asks for, so
+# there is no "opens its own PR" middle ground that auto-merge can't reach. A
+# real minor/patch release still gets in -- remove or edit the ignore entry to
+# let Dependabot propose it -- and a major bump for any of them is untouched by
+# `ignore` and still opens its own PR, same as today.
 version: 2
 updates:
   - package-ecosystem: "npm"
@@ -13,6 +25,14 @@ updates:
       # @cloudflare/vitest-pool-workers pins vitest ^4; re-enable when the pool supports 5.x.
       - dependency-name: "vitest"
         update-types: ["version-update:semver-major"]
+      # Exact-pinned; see the file header. Never proposed at minor/patch, so
+      # never swept into the grouped update or silently auto-merged.
+      - dependency-name: "agents"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "@modelcontextprotocol/sdk"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
+      - dependency-name: "jq-wasm"
+        update-types: ["version-update:semver-minor", "version-update:semver-patch"]
     schedule:
       interval: "weekly"
       day: "monday"
