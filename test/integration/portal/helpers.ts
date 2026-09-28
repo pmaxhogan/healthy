@@ -26,6 +26,7 @@ import type {
   PortalVisit,
   PortalVisitStatus,
 } from "../../../worker/ehr/mychart/index.ts";
+import type { VisitDetails } from "../../../worker/ehr/mychart/visit-details.ts";
 
 /** An invented portal host. Never a real one. */
 export const PORTAL_ORIGIN = "https://portal.example.test";
@@ -69,7 +70,15 @@ export interface FakePortal {
    * thrown instead. A handle with neither is a parse failure.
    */
   files: Map<string, AppError | { contentType: string; bytes: Uint8Array }>;
+  /**
+   * What `loadVisitDetails` answers with, by the visit's `csn`; an `AppError` is
+   * thrown instead. A visit with neither has an empty page: no wait list, no
+   * directions, no instructions.
+   */
+  details: Map<string, AppError | VisitDetails>;
   calls: {
+    /** `csn`s whose details page was asked for, in order. */
+    visitDetails: string[];
     loadMessages: number;
     /** `dcsId`s asked for, in order. */
     attachments: string[];
@@ -119,9 +128,11 @@ export function fakePortal(overrides: Partial<FakePortal> = {}): FakePortal {
     messagesComplete: true,
     messagesError: null,
     files: new Map(),
+    details: new Map(),
     calls: {
       loadMessages: 0,
       attachments: [],
+      visitDetails: [],
       logins: 0,
       sendCodes: 0,
       validates: 0,
@@ -164,6 +175,14 @@ export function fakePortal(overrides: Partial<FakePortal> = {}): FakePortal {
       // visits only, and FHIR is the source for history -- so the fake answers with
       // nothing rather than pretending to page through a past it has no fixture for.
       loadPast: () => Promise.resolve([]),
+      loadVisitDetails: (csn: string) => {
+        state.calls.visitDetails.push(csn);
+        const details = state.details.get(csn);
+        if (details instanceof AppError) return Promise.reject(details);
+        return Promise.resolve(
+          details === undefined ? { waitlist: null } : structuredClone(details),
+        );
+      },
       loadMessages: () => {
         state.calls.loadMessages += 1;
         if (state.messagesError !== null) throw state.messagesError;

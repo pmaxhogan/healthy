@@ -6,11 +6,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  confirmedOf,
   formatAddress,
+  getReadyOf,
   isVideoVisit,
   parsePast,
   parseUpcoming,
   parseWcfDate,
+  paymentOf,
   statusOf,
 } from "../../../../worker/ehr/mychart/visits.ts";
 
@@ -430,5 +433,113 @@ describe("parsePast", () => {
     for (const bad of [null, 42, "text", []]) {
       expect(codeOf(() => parsePast(bad, OWNER_ZONE))).toBe("portal_parse_failed");
     }
+  });
+});
+
+describe("a visit's own states", () => {
+  // Synthetic rows in the live payload's shape: a prepaid visit with nothing
+  // left to do, a copay still owed, and a visit waiting for confirmation and
+  // for its pre-visit tasks.
+  const prepaid = {
+    Csn: "WP-prepaid",
+    Instant: `/Date(${String(VISIT_INSTANT_MS)})/`,
+    IsConfirmed: true,
+    ConfirmationStatus: 1,
+    IsEcheckInEnabled: true,
+    IsECheckInIncomplete: false,
+    ECheckIn: { IsComplete: false, RequiredECheckInSteps: [] },
+    PrimaryDepartment: { Id: "WP-dept-1", Name: "Example Clinic" },
+    PrimaryProvider: { EncryptedId: "WP-prov-1", Name: "A. Example" },
+    Copay: {
+      AmountDueRawData: 0,
+      AmountPaidRawData: 12.5,
+      IsPaid: true,
+      IsPrepay: true,
+      IsCopay: false,
+      IsBalance: false,
+    },
+  };
+  const owed = {
+    ...prepaid,
+    Csn: "WP-owed",
+    ECheckIn: { IsComplete: true, RequiredECheckInSteps: [] },
+    Copay: {
+      AmountDueRawData: 7,
+      AmountPaidRawData: 0,
+      IsPaid: false,
+      IsPrepay: false,
+      IsCopay: true,
+      IsBalance: false,
+    },
+  };
+  const waiting = {
+    Csn: "WP-waiting",
+    Instant: `/Date(${String(VISIT_INSTANT_MS)})/`,
+    IsConfirmed: false,
+    ConfirmationStatus: 3,
+    IsEcheckInEnabled: true,
+    IsECheckInIncomplete: true,
+    ECheckIn: { IsComplete: false, RequiredECheckInSteps: [{}, {}, {}] },
+    Copay: null,
+  };
+
+  function parsed(): PortalVisit[] {
+    return parseUpcoming({ NextNDaysVisits: [prepaid, owed, waiting] }, OWNER_ZONE).visits;
+  }
+
+  it("reads a paid prepayment and an owed copay from the raw amounts", () => {
+    const visits = parsed();
+    expect(byCsn(visits, "WP-prepaid").payment).toStrictEqual({
+      kind: "prepay",
+      amount: 12.5,
+      amountDue: 0,
+      amountPaid: 12.5,
+      paid: true,
+    });
+    expect(byCsn(visits, "WP-owed").payment).toStrictEqual({
+      kind: "copay",
+      amount: 7,
+      amountDue: 7,
+      amountPaid: 0,
+      paid: false,
+    });
+    // No payment object at all: the portal names no payment.
+    expect(byCsn(visits, "WP-waiting").payment).toBeNull();
+  });
+
+  it("tells a confirmed visit from one still waiting to be confirmed", () => {
+    const visits = parsed();
+    expect(byCsn(visits, "WP-prepaid").confirmed).toBe(true);
+    expect(byCsn(visits, "WP-waiting").confirmed).toBe(false);
+  });
+
+  it("reads 'nothing to confirm' as null, and an absent field as unknown", () => {
+    expect(confirmedOf(fields({ IsConfirmed: false, ConfirmationStatus: 0 }))).toBeNull();
+    expect(confirmedOf(fields({}))).toBeUndefined();
+  });
+
+  it("reads the pre-visit tasks: done with nothing listed, or the steps still to do", () => {
+    const visits = parsed();
+    // Done even though its tasks never counted as a completed eCheck-in: nothing left.
+    expect(byCsn(visits, "WP-prepaid").getReady).toStrictEqual({
+      complete: true,
+      stepsRemaining: 0,
+    });
+    expect(byCsn(visits, "WP-waiting").getReady).toStrictEqual({
+      complete: false,
+      stepsRemaining: 3,
+    });
+    expect(getReadyOf(fields({ IsEcheckInEnabled: false }))).toBeNull();
+    expect(getReadyOf(fields({}))).toBeUndefined();
+  });
+
+  it("keeps the portal's own ids for the department and the practitioner", () => {
+    const visit = byCsn(parsed(), "WP-prepaid");
+    expect(visit.departmentId).toBe("WP-dept-1");
+    expect(visit.practitionerId).toBe("WP-prov-1");
+  });
+
+  it("reads a payload without a Copay key as unknown, not as no payment", () => {
+    expect(paymentOf(fields({}))).toBeUndefined();
   });
 });

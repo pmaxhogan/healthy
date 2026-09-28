@@ -79,18 +79,21 @@ import { getGoogleCalendarFor } from "./google-tokens.ts";
 import { sha256Hex } from "./hash.ts";
 import { buildCalendarModel, ghostModel } from "./mapping.ts";
 import { eventKeyOf, planChanges } from "./plan.ts";
-import { RANK_FHIR } from "./portal-dedupe.ts";
-import { portalKeyPrefix } from "./portal-mapping.ts";
+import { RANK_FHIR, sameVisitWithinHealthSystem } from "./portal-dedupe.ts";
+import { boilerplateOf } from "./portal-directions.ts";
+import { portalKeyPrefix, portalVisitView } from "./portal-mapping.ts";
 import { adoptPortalRows, runPortalPass } from "./portal-sync.ts";
 import { collectEncounterReferences, resolveReferences } from "./references.ts";
 import { emptySummary, record } from "./run.ts";
 import { syncTargets } from "./targets.ts";
+import { titleDigest, titleDigestsFor, titledBody, titleSeeds } from "./titles.ts";
 import { getFhirClientFor } from "./tokens.ts";
 
 import type { SyncDeps } from "./deps.ts";
 import type { CalendarMapping, MappingSettings } from "./mapping.ts";
 import type { PlanCandidate, PlanEntry } from "./plan.ts";
 import type { Sighting } from "./portal-dedupe.ts";
+import type { Boilerplate } from "./portal-directions.ts";
 import type { FhirSighting, PortalPassInput } from "./portal-sync.ts";
 import type { RunState } from "./run.ts";
 import type { SyncTarget } from "./targets.ts";
@@ -99,6 +102,7 @@ import type { Ctx } from "../db/client.ts";
 import type { Repos } from "../db/index.ts";
 import type { CalendarEventRow } from "../db/rows.ts";
 import type { Settings } from "../db/schemas.ts";
+import type { PortalVisit } from "../ehr/mychart/index.ts";
 import type { NormalizedAppointmentView } from "../fhir/normalize/index.ts";
 import type { Encounter, Resource, SearchWarning } from "../fhir/types.ts";
 import type { CalendarClient } from "../google/calendar.ts";
@@ -377,7 +381,8 @@ async function syncHealthSystem(run: RunContext, target: SyncTarget): Promise<vo
     run.state.warningCodes.add("references_deferred");
   }
 
-  const mappings = await mapAppointments(run, target, encounters, resolved.resources);
+  const portal = await portalCopies(run, healthSystemId);
+  const mappings = await mapAppointments(run, target, encounters, resolved.resources, portal);
   recordSightings(run, healthSystemId, mappings);
   await cacheEncounters(run, healthSystemId, encounters);
 
@@ -415,8 +420,17 @@ async function syncHealthSystem(run: RunContext, target: SyncTarget): Promise<vo
     (event) => !(eventKeyOf(event) ?? "").startsWith(portalPrefix),
   );
 
-  const { candidates, models, ghosts } = await buildCandidates(run, target, mappings, rows);
-  const plan = planChanges(rows, healthSystemEvents, candidates, { suppressGhosting: filtered });
+  const { candidates, models, ghosts } = await buildCandidates(run, target, mappings, rows, portal);
+  const titles = await titleDigestsFor(run.blinder, healthSystemId, {
+    events: healthSystemEvents,
+    keyOf: eventKeyOf,
+    models,
+    ghosts,
+  });
+  const plan = planChanges(rows, healthSystemEvents, candidates, {
+    suppressGhosting: filtered,
+    titles,
+  });
   ctx.log.info("sync.plan", {
     healthSystemId,
     inserts: plan.inserts.length,
@@ -426,6 +440,7 @@ async function syncHealthSystem(run: RunContext, target: SyncTarget): Promise<vo
     unchanged: plan.unchanged.length,
     skipped: plan.skipped.length,
     orphans: plan.orphans.length,
+    titlesKept: plan.titlesKept,
   });
   if (plan.orphans.length > 0) {
     // Ours by marker, unknown by key. Counted and left alone: guessing at its
@@ -440,6 +455,7 @@ async function syncHealthSystem(run: RunContext, target: SyncTarget): Promise<vo
   for (const entry of plan.entries) {
     await applyEntry(run, healthSystemId, entry, { models, ghosts, descriptions }, rows);
   }
+  await run.repos.calendarEvents.seedTitleDigests(titleSeeds(plan.unchanged, rows));
   await repos.connections.markConnected(target.connection.id);
   // A whole sync completed against this organisation, so whatever the alert was
   // warning about is over. This -- not only a successful token refresh -- is what
@@ -494,12 +510,61 @@ function countWarnings(run: RunContext, warnings: readonly SearchWarning[]): boo
   return filtered;
 }
 
+/** The portal's stored copies of one health system's visits, and their boilerplate. */
+interface PortalCopies {
+  visits: PortalVisit[];
+  boilerplate: Boilerplate;
+}
+
+async function portalCopies(run: RunContext, healthSystemId: string): Promise<PortalCopies> {
+  const stored = await run.repos.portalVisits.list(healthSystemId);
+  const visits = stored.map((row) => row.visit);
+  return { visits, boilerplate: boilerplateOf(visits) };
+}
+
+/**
+ * What the portal knows about the same visit, folded into an Encounter's view:
+ * the details-page link, the directions and the visit's instructions.
+ *
+ * The match is `sameVisitWithinHealthSystem` on start and practitioner, with the
+ * CSN left out on purpose: FHIR's CSN is Epic's number and the portal's is its
+ * own opaque token, so comparing them would say "different visit" every time and
+ * block the practitioner match. A visit another organisation's portal listed is
+ * never linked (see `portalVisitView`). No match: the view as it was.
+ */
+function withPortalCopy(
+  view: NormalizedAppointmentView,
+  portal: PortalCopies,
+): NormalizedAppointmentView {
+  if (view.start === undefined) return view;
+  const start = fromIso(view.start);
+  const match = portal.visits.find(
+    (visit) =>
+      visit.external !== true &&
+      sameVisitWithinHealthSystem(
+        { start, practitioner: view.practitioner },
+        { start: fromIso(visit.start), practitioner: visit.practitioner },
+      ),
+  );
+  if (match === undefined) return view;
+  const copy = portalVisitView(view.healthSystem, match, portal.boilerplate);
+  return {
+    ...view,
+    ...(copy.detailCsn !== undefined && { detailCsn: copy.detailCsn }),
+    ...(view.directions === undefined &&
+      copy.directions !== undefined && { directions: copy.directions }),
+    ...(view.visitInstructions === undefined &&
+      copy.visitInstructions !== undefined && { visitInstructions: copy.visitInstructions }),
+  };
+}
+
 /** Normalize and map every Encounter the search returned. */
 async function mapAppointments(
   run: RunContext,
   target: SyncTarget,
   encounters: readonly Encounter[],
   references: readonly Resource[],
+  portal: PortalCopies,
 ): Promise<Map<string, CalendarMapping>> {
   const resolver = mapResolver([...encounters, ...references]);
   const normalizeCtx = { healthSystem: target.healthSystem.id, refs: resolver };
@@ -507,7 +572,10 @@ async function mapAppointments(
   for (const encounter of encounters) {
     const view = appointmentView(encounter, normalizeCtx);
     if (view === null) continue;
-    const mapping = await buildCalendarModel(view, mappingInput(run, target));
+    const mapping = await buildCalendarModel(
+      withPortalCopy(view, portal),
+      mappingInput(run, target),
+    );
     out.set(mapping.model.key, mapping);
   }
   return out;
@@ -636,6 +704,7 @@ async function buildCandidates(
   target: SyncTarget,
   mappings: ReadonlyMap<string, CalendarMapping>,
   rows: readonly CalendarEventRow[],
+  portal: PortalCopies,
 ): Promise<CandidateSet> {
   const models = new Map<string, CalendarEventModel>();
   const ghosts = new Map<string, CalendarEventModel>();
@@ -656,7 +725,7 @@ async function buildCandidates(
 
   for (const key of absent) {
     const row = rowByKey.get(key);
-    const mapping = row === undefined ? null : await mappingFromCache(run, target, row);
+    const mapping = row === undefined ? null : await mappingFromCache(run, target, row, portal);
     candidates.push(await candidateFor(run, key, mapping, row, true, models, ghosts));
   }
   return { candidates, models, ghosts };
@@ -732,6 +801,7 @@ async function mappingFromCache(
   run: RunContext,
   target: SyncTarget,
   row: CalendarEventRow,
+  portal: PortalCopies,
 ): Promise<CalendarMapping | null> {
   if (row.encounter_id === "" || row.source !== "fhir") return null;
   const cached = await run.repos.fhirCache.getByStoredId(
@@ -759,7 +829,7 @@ async function mappingFromCache(
   });
   if (view === null) return null;
   try {
-    return await buildCalendarModel(view, mappingInput(run, target));
+    return await buildCalendarModel(withPortalCopy(view, portal), mappingInput(run, target));
   } catch (error) {
     run.ctx.log.warn("sync.ghost.remap_failed", {
       healthSystemId: target.healthSystem.id,
@@ -796,7 +866,7 @@ async function applyEntry(
       return;
     }
     case "ghost": {
-      await writeGhostPatch(run, entry, sources, rows);
+      await writeGhostPatch(run, healthSystemId, entry, sources, rows);
       return;
     }
     case "ghost-row-only": {
@@ -821,7 +891,9 @@ async function writeInsert(
   const model = models.get(entry.key);
   if (model === undefined) return;
   const created = await run.calendar.insertEvent(run.calendarId, buildEventBody(model));
-  await persistRow(run, healthSystemId, entry.key, created.id, model);
+  await persistRow(run, healthSystemId, entry.key, created.id, model, {
+    titleDigest: await titleDigest(run.blinder, healthSystemId, model.title),
+  });
   run.state.summary.eventsInserted += 1;
 }
 
@@ -834,28 +906,38 @@ async function writePatch(
   const model = sources.models.get(entry.key);
   if (model === undefined || entry.googleEventId === null) return;
   const current = sources.descriptions.get(entry.googleEventId) ?? null;
+  const body = buildEventBody(model, mergeDescription(current, model.description));
   const patched = await run.calendar.patchEvent(
     run.calendarId,
     entry.googleEventId,
-    buildEventBody(model, mergeDescription(current, model.description)),
+    titledBody(body, entry),
   );
   // Only a restore may move the row out of `ghost`; see `upsert` in the repo.
   const restore = entry.action === "restore";
+  const written = await titleDigest(run.blinder, healthSystemId, model.title);
   if (patched === null) {
     // The event went away between the list and the patch. Re-inserting is the
-    // same decision the plan would have made had it known.
+    // same decision the plan would have made had it known -- and a new event
+    // carries Healthy's title, whatever the old one said.
     const created = await run.calendar.insertEvent(run.calendarId, buildEventBody(model));
-    await persistRow(run, healthSystemId, entry.key, created.id, model, restore);
+    await persistRow(run, healthSystemId, entry.key, created.id, model, {
+      restore,
+      titleDigest: written,
+    });
     run.state.summary.eventsInserted += 1;
     return;
   }
-  await persistRow(run, healthSystemId, entry.key, patched.id, model, restore);
+  await persistRow(run, healthSystemId, entry.key, patched.id, model, {
+    restore,
+    titleDigest: entry.keepTitle ? entry.titleDigest : written,
+  });
   if (restore) run.state.summary.eventsRestored += 1;
   else run.state.summary.eventsPatched += 1;
 }
 
 async function writeGhostPatch(
   run: RunContext,
+  healthSystemId: string,
   entry: PlanEntry,
   sources: WriteSources,
   rows: readonly CalendarEventRow[],
@@ -863,16 +945,24 @@ async function writeGhostPatch(
   const ghost = sources.ghosts.get(entry.key);
   if (ghost === undefined || entry.googleEventId === null) return;
   const current = sources.descriptions.get(entry.googleEventId) ?? null;
+  const body = buildEventBody(ghost, mergeDescription(current, ghost.description));
   const patched = await run.calendar.patchEvent(
     run.calendarId,
     entry.googleEventId,
-    buildEventBody(ghost, mergeDescription(current, ghost.description)),
+    titledBody(body, entry),
   );
   // A null patch means the owner deleted it. The row still becomes a ghost: the
   // appointment really is gone, and re-creating a deleted event is never wanted.
+  let titleWritten: string | null = null;
+  if (patched !== null) {
+    titleWritten = entry.keepTitle
+      ? entry.titleDigest
+      : await titleDigest(run.blinder, healthSystemId, ghost.title);
+  }
   await run.repos.calendarEvents.markGhost(entry.key, {
     fingerprint: patched === null ? null : ghost.fingerprint,
     ghostedAt: ghostedAtFor(entry.key, rows, run.ctx.now()),
+    titleDigest: titleWritten,
   });
   run.state.summary.eventsGhosted += 1;
 }
@@ -911,7 +1001,7 @@ async function persistRow(
   key: string,
   googleEventId: string,
   model: CalendarEventModel,
-  restore = false,
+  options: { restore?: boolean; titleDigest: string | null },
 ): Promise<void> {
   await run.repos.calendarEvents.upsert({
     eventKey: key,
@@ -921,7 +1011,8 @@ async function persistRow(
     googleEventId,
     fingerprint: model.fingerprint,
     startAt: fromIso(model.start),
-    restore,
+    restore: options.restore ?? false,
+    titleDigest: options.titleDigest,
   });
 }
 

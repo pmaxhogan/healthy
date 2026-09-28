@@ -29,6 +29,13 @@
  *     edit below it, or a deleted rule, is rewritten on the next run
  *     (`description_drift`). Both halves read what `events.list` already
  *     returned, so an unchanged event costs no Google call either way.
+ *   - **The owner's title wins** (`titles.ts`). An event whose title differs
+ *     from what Healthy last wrote is the owner's: every write to it carries
+ *     `keepTitle` and leaves `summary` out, and the settled check never compares
+ *     the owner's title to the model's -- the fingerprint still covers the model's
+ *     title, so a model change patches once (without the title) and settles. A
+ *     title Healthy still owns but that is not the one it would write now (the
+ *     owner changed it back to an older Healthy title) is `title_drift`.
  *   - `suppressGhosting` exists for Epic 4119 -- the organisation admitted it
  *     filtered the patient-facing view. Partial results must never ghost real
  *     appointments, so absent candidates are skipped for that run while inserts
@@ -36,7 +43,9 @@
  */
 
 import { carriesBlock } from "./description.ts";
+import { titleOwnership } from "./titles.ts";
 
+import type { TitleDigests, TitleOwnership } from "./titles.ts";
 import type { CalendarEventRow } from "../db/rows.ts";
 import type { EventRecord } from "../google/types.ts";
 
@@ -85,6 +94,14 @@ export interface PlanEntry {
   variant: PlanVariant;
   /** Short, stable reason code. Logged; never anything but these literals. */
   reason: string;
+  /** The owner edited the event's title: a write must leave `summary` out. */
+  keepTitle: boolean;
+  /**
+   * What the row should record as the title Healthy last wrote, when the write
+   * does not itself write the title (`keepTitle`, or an `unchanged` legacy row
+   * being seeded). Null when there is nothing to record.
+   */
+  titleDigest: string | null;
 }
 
 interface OrphanEntry {
@@ -102,11 +119,18 @@ export interface ChangePlan {
   unchanged: PlanEntry[];
   skipped: PlanEntry[];
   orphans: OrphanEntry[];
+  /** Entries whose title the owner edited. Logged as a count: see `titles.ts`. */
+  titlesKept: number;
 }
 
 export interface PlanOptions {
   /** Epic 4119: the view was filtered, so absence proves nothing this run. */
   suppressGhosting?: boolean;
+  /**
+   * Title digests by event key (`titles.ts`). Absent: every title is treated as
+   * Healthy's and never drifts -- what the plan did before titles were tracked.
+   */
+  titles?: ReadonlyMap<string, TitleDigests>;
 }
 
 /** The `key` a Google event carries, or null when it is not one of ours. */
@@ -138,7 +162,11 @@ function entry(
   key: string,
   action: PlanAction,
   reason: string,
-  options: { googleEventId?: string | null; variant?: PlanVariant } = {},
+  options: {
+    googleEventId?: string | null;
+    variant?: PlanVariant;
+    title?: TitleOwnership;
+  } = {},
 ): PlanEntry {
   return {
     key,
@@ -146,7 +174,40 @@ function entry(
     googleEventId: options.googleEventId ?? null,
     variant: options.variant ?? "active",
     reason,
+    keepTitle: options.title?.ownerEdited ?? false,
+    titleDigest: options.title?.lastWritten ?? null,
   };
+}
+
+/** No title tracking for this key: Healthy's, nothing to record. */
+const HEALTHY_TITLE: TitleOwnership = { ownerEdited: false, lastWritten: null };
+
+/**
+ * Who owns this event's title, for the variant about to be considered.
+ *
+ * `drifted` is true when Healthy owns the title but it is not the one Healthy
+ * would write now -- only knowable when both digests are.
+ */
+function ownershipFor(
+  row: CalendarEventRow | undefined,
+  titles: TitleDigests | undefined,
+  variant: PlanVariant,
+  variantFingerprint: string | null,
+): { title: TitleOwnership; drifted: boolean } {
+  if (titles === undefined) return { title: HEALTHY_TITLE, drifted: false };
+  const variantTitle = variant === "ghost" ? titles.ghost : titles.active;
+  const title = titleOwnership(
+    row,
+    titles.google,
+    variantTitle,
+    row !== undefined && variantFingerprint !== null && row.fingerprint === variantFingerprint,
+  );
+  const drifted =
+    !title.ownerEdited &&
+    title.lastWritten !== null &&
+    variantTitle !== null &&
+    title.lastWritten !== variantTitle;
+  return { title, drifted };
 }
 
 /** The ghost branch: the appointment is cancelled, or gone from the search. */
@@ -154,6 +215,7 @@ function decideGhost(
   candidate: PlanCandidate,
   row: CalendarEventRow | undefined,
   event: EventRecord | undefined,
+  titles: TitleDigests | undefined,
 ): PlanEntry {
   // Never on the calendar, so there is no history to preserve.
   if (row === undefined) return entry(candidate.key, "skip", "never_written");
@@ -162,21 +224,32 @@ function decideGhost(
     const reason = candidate.hasModel ? "event_gone" : "no_model";
     return entry(candidate.key, "ghost-row-only", reason, { variant: "ghost" });
   }
+  const { title, drifted } = ownershipFor(row, titles, "ghost", candidate.ghostFingerprint);
   if (row.fingerprint === candidate.ghostFingerprint && row.state === "ghost") {
-    if (described(event, candidate.ghostDescription)) {
-      return entry(candidate.key, "unchanged", "already_ghost", {
-        googleEventId: row.google_event_id,
+    if (!described(event, candidate.ghostDescription)) {
+      return entry(candidate.key, "ghost", "description_drift", {
+        googleEventId: event.id,
         variant: "ghost",
+        title,
       });
     }
-    return entry(candidate.key, "ghost", "description_drift", {
-      googleEventId: event.id,
+    if (drifted) {
+      return entry(candidate.key, "ghost", "title_drift", {
+        googleEventId: event.id,
+        variant: "ghost",
+        title,
+      });
+    }
+    return entry(candidate.key, "unchanged", "already_ghost", {
+      googleEventId: row.google_event_id,
       variant: "ghost",
+      title,
     });
   }
   return entry(candidate.key, "ghost", candidate.offSchedule ? "cancelled" : "vanished", {
     googleEventId: event.id,
     variant: "ghost",
+    title,
   });
 }
 
@@ -185,6 +258,7 @@ function decideActive(
   candidate: PlanCandidate,
   row: CalendarEventRow | undefined,
   event: EventRecord | undefined,
+  titles: TitleDigests | undefined,
 ): PlanEntry {
   if (!candidate.hasModel) return entry(candidate.key, "skip", "no_model");
   if (event === undefined) {
@@ -201,17 +275,29 @@ function decideActive(
     // restore from a backup. Adopt it rather than inserting a duplicate.
     return entry(candidate.key, "patch", "adopt", { googleEventId: event.id });
   }
+  // A ghost row's fingerprint is the ghost's, so it cannot vouch for the active
+  // title: a legacy ghost coming back falls to the "unknown provenance" rule.
+  const { title, drifted } = ownershipFor(
+    row,
+    titles,
+    "active",
+    row.state === "ghost" ? null : candidate.fingerprint,
+  );
+  const googleEventId = event.id;
   if (row.state === "ghost") {
-    return entry(candidate.key, "restore", "reappeared", { googleEventId: event.id });
+    return entry(candidate.key, "restore", "reappeared", { googleEventId, title });
   }
   const googleFingerprint = eventFingerprintOf(event);
   const settled =
     row.fingerprint === candidate.fingerprint &&
     (googleFingerprint === null || googleFingerprint === candidate.fingerprint);
-  if (!settled) return entry(candidate.key, "patch", "changed", { googleEventId: event.id });
-  return described(event, candidate.description)
-    ? entry(candidate.key, "unchanged", "fingerprint_match", { googleEventId: event.id })
-    : entry(candidate.key, "patch", "description_drift", { googleEventId: event.id });
+  if (!settled) return entry(candidate.key, "patch", "changed", { googleEventId, title });
+  if (!described(event, candidate.description)) {
+    return entry(candidate.key, "patch", "description_drift", { googleEventId, title });
+  }
+  return drifted
+    ? entry(candidate.key, "patch", "title_drift", { googleEventId, title })
+    : entry(candidate.key, "unchanged", "fingerprint_match", { googleEventId, title });
 }
 
 /**
@@ -249,8 +335,11 @@ export function planChanges(
       entries.push(entry(candidate.key, "skip", "filtered_view"));
       continue;
     }
+    const titles = options.titles?.get(candidate.key);
     entries.push(
-      wantsGhost ? decideGhost(candidate, row, event) : decideActive(candidate, row, event),
+      wantsGhost
+        ? decideGhost(candidate, row, event, titles)
+        : decideActive(candidate, row, event, titles),
     );
   }
 
@@ -271,5 +360,6 @@ export function planChanges(
     unchanged: of("unchanged"),
     skipped: of("skip"),
     orphans,
+    titlesKept: entries.filter((item) => item.keepTitle).length,
   };
 }

@@ -233,6 +233,33 @@ Encounters:
   (`scheduled`, `confirmed`, `canceled`, …); a future visit the portal has
   stopped listing is reported as `canceled`, mirroring the grey "Cancelled"
   event on the calendar.
+- **What only the portal knows.** Read each hourly pass with the session it
+  already holds — the upcoming list itself, plus one read-only GET of each
+  visit's details page — and stored sealed with the visit. Each field is
+  _absent_ when unknown (a FHIR-only visit, or a copy stored before it was
+  read) and `null` when the portal says it does not apply to that visit:
+  - `confirmed`: `true`/`false`; `null` when there is nothing to confirm.
+  - `getReady`: the pre-visit tasks (eCheck-in), `{ complete, stepsRemaining }`;
+    `null` when not offered.
+  - `payment`: `{ kind, amount, amountDue, amountPaid, paid }` in US dollars,
+    `kind` being `copay`, `prepay`, `balance` or `null`; `amount` is what is due
+    while unpaid and what was paid once paid. `null` when the portal names no
+    payment for the visit.
+  - `waitlist`: `{ enrolled }` for the earlier-appointment wait list
+    (`enrolled: null` when the list is offered but its state could not be
+    read); `null` when the visit offers none.
+  - `directions`: the department's directions, with the health system's
+    boilerplate removed — a paragraph two different departments' directions
+    both carry is the health system's, not the department's. Only applied
+    once the health system has stored at least three visits with directions,
+    across at least two practitioners and two departments; below that nothing
+    is removed. `visitInstructions`: the visit's own instructions, as written.
+
+  A FHIR item merged with a portal copy takes these from it too. The calendar
+  shows only the directions and instructions (first, under the "Synced by
+  Healthy" line), and links the visit line to that visit's own page in the
+  portal when the portal lists it first-hand.
+
 - **Window and order.** With no arguments the window is "from now", with no
   upper bound, soonest first — every upcoming visit the portal lists is
   returned, up to `limit` (default 50). `includePast: true` or an explicit

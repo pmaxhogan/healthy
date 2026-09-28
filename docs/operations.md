@@ -142,6 +142,32 @@ than the window, and ghosts Healthy can no longer rebuild (the cached
 appointment has expired, or a portal visit that vanished), are not rewritten
 and keep the old layout.
 
+When the patient portal lists the visit first-hand, the visit-type line links
+to that visit's own page in the portal (`Visits/VisitDetails?csn=<the portal's
+token for the visit>`, on the connected portal account's own address);
+otherwise it links to the portal's visits list, or to the health system's
+configured portal url. The portal's directions for the department (its
+boilerplate removed, see [docs/mcp.md](mcp.md)) and the visit's instructions,
+when there are any, come first under the "Synced by Healthy" line.
+
+## Event titles
+
+The owner may rename any synced event, and that title is never overwritten.
+Each row records a keyed digest of the title Healthy last wrote
+(`calendar_events.title_digest`); every sync compares it with the title Google
+holds now, from the listing it already makes. Different means the owner edited
+it: every later write — a changed time, a new address, ghosting — leaves the
+title alone, and a cancelled visit then keeps the owner's title without the
+`Cancelled: ` prefix (it still turns grey and stops blocking time). Setting the
+title back to exactly what Healthy last wrote hands it back: Healthy updates it
+again from then on. The run log's `sync.plan` / `portal.plan` lines count the
+events whose title is the owner's (`titlesKept`).
+
+Rows from before this existed are seeded on the first sync: a title equal to
+the one Healthy computes now is Healthy's; a different one is the owner's when
+nothing upstream has changed since Healthy last wrote it; otherwise it is taken
+as Healthy's and updated.
+
 ## Ghost events
 
 An appointment that is cancelled, or simply no longer appears in the

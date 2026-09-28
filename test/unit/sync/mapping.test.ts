@@ -619,3 +619,63 @@ describe("keyed key and fingerprint", () => {
     expect(model.fingerprint.startsWith("~")).toBe(true);
   });
 });
+
+describe("the visit details link, directions and instructions", () => {
+  it("links the visit line to the one visit when its portal token is known", async () => {
+    const { model } = await buildCalendarModel(
+      view({ detailCsn: "WP-tok/en+1" }),
+      input({ portalUrl: PORTAL, connectedPortal: CONNECTED_PORTAL }),
+    );
+
+    // On the connected account's own mount, even with a portal url configured,
+    // and with the token escaped for the query string.
+    expect(
+      model.description.endsWith(
+        '<a href="https://connected.example.test/mychart/Visits/VisitDetails?csn=WP-tok%2Fen%2B1">Office Visit · planned</a>',
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps the configured portal url when no portal account ever signed in", async () => {
+    const { model } = await buildCalendarModel(
+      view({ detailCsn: "WP-token" }),
+      input({ portalUrl: PORTAL, connectedPortal: null }),
+    );
+
+    expect(model.description).toContain(`<a href="${PORTAL}">`);
+    expect(model.description).not.toContain("VisitDetails");
+  });
+
+  it("puts directions, then instructions, straight under the header", async () => {
+    const { model } = await buildCalendarModel(
+      view({ directions: "Tower A, suite 2.", visitInstructions: "Bring your cards." }),
+      input(),
+    );
+
+    const lines = model.description.split("\n");
+    const header = lines.findIndex((line) => line.startsWith("Synced by Healthy"));
+    expect(lines.slice(header + 1, header + 6)).toStrictEqual([
+      "Directions:",
+      "Tower A, suite 2.",
+      "",
+      "Visit instructions:",
+      "Bring your cards.",
+    ]);
+  });
+
+  it("leaves no empty heading when there are neither", async () => {
+    const { model } = await buildCalendarModel(view({ directions: "  " }), input());
+
+    expect(model.description).not.toContain("Directions:");
+    expect(model.description).not.toContain("Visit instructions:");
+  });
+
+  it("changes the fingerprint when the directions change, and only then", async () => {
+    const one = await buildCalendarModel(view({ directions: "Suite 1." }), input());
+    const same = await buildCalendarModel(view({ directions: "Suite 1." }), input());
+    const other = await buildCalendarModel(view({ directions: "Suite 2." }), input());
+
+    expect(same.model.fingerprint).toBe(one.model.fingerprint);
+    expect(other.model.fingerprint).not.toBe(one.model.fingerprint);
+  });
+});

@@ -33,6 +33,7 @@ function row(overrides: Partial<CalendarEventRow> = {}): CalendarEventRow {
     updated_at: 1_780_000_000,
     source: "fhir",
     portal_csn: null,
+    title_digest: null,
     ...overrides,
   };
 }
@@ -359,5 +360,141 @@ describe("grouping", () => {
 
     expect(plan.ghosts).toHaveLength(1);
     expect(plan.ghosts[0]?.action).toBe("ghost-row-only");
+  });
+});
+
+/** A one-key plan with title digests, and its only entry. */
+function titled(
+  rows: CalendarEventRow[],
+  events: EventRecord[],
+  candidates: PlanCandidate[],
+  titles: { google: string | null; active: string | null; ghost: string | null },
+) {
+  const plan = planChanges(rows, events, candidates, { titles: new Map([[KEY, titles]]) });
+  expect(plan.entries).toHaveLength(1);
+  return { entry: plan.entries[0]!, plan };
+}
+
+describe("the owner's title", () => {
+  // Stand-ins for keyed digests: the plan only ever compares them.
+  const HEALTHY = "~digest-healthy";
+  const NEWER = "~digest-newer";
+  const GHOSTLY = "~digest-ghost";
+  const OWNERS = "~digest-owner";
+
+  it("is Healthy's while Google holds what Healthy last wrote", () => {
+    const { entry } = titled([row({ title_digest: HEALTHY })], [event()], [candidate()], {
+      google: HEALTHY,
+      active: HEALTHY,
+      ghost: null,
+    });
+
+    expect(entry).toMatchObject({ action: "unchanged", keepTitle: false, titleDigest: HEALTHY });
+  });
+
+  it("is the owner's once it differs, and a change is written without it", () => {
+    const changed = candidate({ fingerprint: "fingerprint-new" });
+    const { entry, plan } = titled([row({ title_digest: HEALTHY })], [event()], [changed], {
+      google: OWNERS,
+      active: NEWER,
+      ghost: null,
+    });
+
+    expect(entry).toMatchObject({ action: "patch", reason: "changed", keepTitle: true });
+    // What the row goes on recording is what Healthy last wrote, not the owner's.
+    expect(entry.titleDigest).toBe(HEALTHY);
+    expect(plan.titlesKept).toBe(1);
+  });
+
+  it("never patches an owner's title that merely differs from the model", () => {
+    const { entry } = titled([row({ title_digest: HEALTHY })], [event()], [candidate()], {
+      google: OWNERS,
+      active: NEWER,
+      ghost: null,
+    });
+
+    expect(entry).toMatchObject({ action: "unchanged", keepTitle: true });
+  });
+
+  it("patches a title Healthy owns but would now write differently (title_drift)", () => {
+    // The owner put back an older Healthy title after the model had moved on.
+    const { entry } = titled([row({ title_digest: HEALTHY })], [event()], [candidate()], {
+      google: HEALTHY,
+      active: NEWER,
+      ghost: null,
+    });
+
+    expect(entry).toMatchObject({ action: "patch", reason: "title_drift", keepTitle: false });
+  });
+
+  it("keeps the owner's title on a ghost", () => {
+    const { entry } = titled(
+      [row({ title_digest: HEALTHY })],
+      [event()],
+      [candidate({ offSchedule: true })],
+      { google: OWNERS, active: HEALTHY, ghost: GHOSTLY },
+    );
+
+    expect(entry).toMatchObject({ action: "ghost", reason: "cancelled", keepTitle: true });
+  });
+
+  it("restores a ghost to Healthy's title when Google still shows the ghost's", () => {
+    const ghostRow = row({
+      state: "ghost",
+      ghosted_at: 1_780_000_000,
+      fingerprint: GHOST_FP,
+      title_digest: GHOSTLY,
+    });
+    const { entry } = titled([ghostRow], [event()], [candidate()], {
+      google: GHOSTLY,
+      active: HEALTHY,
+      ghost: null,
+    });
+
+    expect(entry).toMatchObject({ action: "restore", keepTitle: false });
+  });
+
+  describe("on a row from before titles were tracked", () => {
+    it("seeds Google's title as Healthy's when it is the one Healthy computes", () => {
+      const { entry } = titled([row()], [event()], [candidate()], {
+        google: HEALTHY,
+        active: HEALTHY,
+        ghost: null,
+      });
+
+      expect(entry).toMatchObject({ action: "unchanged", keepTitle: false, titleDigest: HEALTHY });
+    });
+
+    it("reads a difference as the owner's when the fingerprint proves what Healthy wrote", () => {
+      const { entry } = titled([row()], [event()], [candidate()], {
+        google: OWNERS,
+        active: HEALTHY,
+        ghost: null,
+      });
+
+      expect(entry).toMatchObject({ action: "unchanged", keepTitle: true, titleDigest: HEALTHY });
+    });
+
+    it("takes Google's title as Healthy's when the model moved since the last write", () => {
+      const moved = candidate({ fingerprint: "fingerprint-new" });
+      const { entry } = titled([row()], [event()], [moved], {
+        google: OWNERS,
+        active: NEWER,
+        ghost: null,
+      });
+
+      expect(entry).toMatchObject({ action: "patch", keepTitle: false, titleDigest: OWNERS });
+    });
+  });
+
+  it("is Healthy's, with nothing to record, for an event with no row", () => {
+    const { entry } = titled([], [event()], [candidate()], {
+      google: OWNERS,
+      active: HEALTHY,
+      ghost: null,
+    });
+
+    expect(entry).toMatchObject({ action: "patch", reason: "adopt", keepTitle: false });
+    expect(entry.titleDigest).toBeNull();
   });
 });

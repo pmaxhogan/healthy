@@ -536,6 +536,18 @@ const DATATYPES: Readonly<Record<string, FieldSpecs>> = {
   "N.Period": { start: "string", end: "string" },
   "N.PatientAddress": { city: "string", state: "string" },
   "N.Identifiers": { csn: ["string", "The visit's contact serial number"] },
+  "N.GetReady": {
+    complete: ["boolean", "True when no pre-visit task is left"],
+    stepsRemaining: ["number", "Tasks still outstanding"],
+  },
+  "N.Payment": {
+    kind: ["string", "copay, prepay or balance"],
+    amount: ["number", "Due while unpaid, paid once paid (USD)"],
+    amountDue: ["number", "Still due (USD)"],
+    amountPaid: ["number", "Already paid (USD)"],
+    paid: "boolean",
+  },
+  "N.Waitlist": { enrolled: ["boolean", "On the list for an earlier slot"] },
   "N.MessageSender": {
     role: ["string", "patient, proxy, practitioner or system"],
     name: ["string", "The sender's name"],
@@ -1209,6 +1221,13 @@ const N_APPOINTMENT = {
   department: "string",
   telehealth: ["boolean", "True for a video visit"],
   csn: ["string", "The visit's contact serial number"],
+  detailCsn: ["string", "The portal's token for the visit's details page"],
+  directions: ["string", "How to find the room, from the portal"],
+  visitInstructions: ["string", "The visit's own instructions, from the portal"],
+  confirmed: ["boolean", "Whether the appointment is confirmed; null: nothing to confirm"],
+  getReady: ["N.GetReady", "The pre-visit tasks; null: not offered"],
+  payment: ["N.Payment", "The copay or prepayment; null: none"],
+  waitlist: ["N.Waitlist", "The earlier-appointment wait list; null: not offered"],
   ...APPOINTMENT_EXTRAS,
 } as const satisfies NormalizedSpecs<NormalizedAppointmentView>;
 

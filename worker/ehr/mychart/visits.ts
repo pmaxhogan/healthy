@@ -38,15 +38,22 @@ import {
   DEPARTMENT_KEYS,
   DEPARTMENT_OBJECT_KEYS,
   PAST_BUCKET,
+  PAYMENT_KEYS,
   STATUS_PRIORITY,
   TELEHEALTH_MODE_KEYS,
   TELEMEDICINE_OBJECT_KEYS,
   VIDEO_KEYS,
   VISIT_BUCKETS,
   VISIT_KEYS,
+  VISIT_STATE_KEYS,
 } from "./wire.ts";
 
 import type { PortalVisitStatus } from "./wire.ts";
+import type {
+  AppointmentGetReady,
+  AppointmentPayment,
+  AppointmentWaitlist,
+} from "../../fhir/normalize/types.ts";
 
 /** One upcoming visit, in the shape the calendar mapping wants. */
 export interface PortalVisit {
@@ -72,6 +79,29 @@ export interface PortalVisit {
    * first-party, or unknown. See `external.ts`.
    */
   external?: true;
+  /**
+   * The portal's own ids for the visit's department and primary practitioner:
+   * opaque tokens, deterministic like `csn`. What the directions boilerplate rule
+   * counts distinct places and people by (`worker/sync/portal-directions.ts`).
+   */
+  departmentId?: string;
+  practitionerId?: string;
+  /**
+   * Read from the visits list itself. Absent: the payload did not carry the
+   * field at all; null: it says the thing does not apply to this visit. See
+   * `NormalizedAppointmentView`, which serves them.
+   */
+  confirmed?: boolean | null;
+  getReady?: AppointmentGetReady | null;
+  payment?: AppointmentPayment | null;
+  /**
+   * Read from the visit's details page (`visit-details.ts`), by the portal pass
+   * after the list. Absent when that page has not been read.
+   */
+  waitlist?: AppointmentWaitlist | null;
+  /** The department's directions, every paragraph, boilerplate included. */
+  directions?: string;
+  visitInstructions?: string;
 }
 
 export interface ParsedUpcoming {
@@ -301,6 +331,137 @@ function toVisit(record: object, fallbackTimeZone: string): PortalVisit | null {
     ...(isExternalVisit(fields) && { external: true as const }),
     status: statusOf(fields),
     ...optional,
+    ...identitiesOf(fields),
+    ...visitStatesOf(fields),
+  };
+}
+
+/** The department's and primary practitioner's portal ids, when present. */
+function identitiesOf(fields: ReadonlyMap<string, unknown>): {
+  departmentId?: string;
+  practitionerId?: string;
+} {
+  const department = nested(fields, DEPARTMENT_OBJECT_KEYS);
+  const practitioner = nested(fields, VISIT_STATE_KEYS.primaryPractitioner);
+  return {
+    ...pick(
+      "departmentId",
+      department === null ? undefined : text(department, VISIT_STATE_KEYS.departmentId),
+    ),
+    ...pick(
+      "practitionerId",
+      practitioner === null ? undefined : text(practitioner, VISIT_STATE_KEYS.practitionerId),
+    ),
+  };
+}
+
+/** The spellings of a boolean a .NET-generated payload has been seen to use. */
+const BOOLEANS: ReadonlyMap<unknown, boolean> = new Map<unknown, boolean>([
+  [true, true],
+  ["true", true],
+  ["True", true],
+  [false, false],
+  ["false", false],
+  ["False", false],
+]);
+
+/** A boolean field, or undefined when the key is absent or not a boolean. */
+function bool(fields: ReadonlyMap<string, unknown>, key: string): boolean | undefined {
+  return BOOLEANS.get(fields.get(key));
+}
+
+/** A finite number field, numeric strings included; undefined otherwise. */
+function num(fields: ReadonlyMap<string, unknown>, key: string): number | undefined {
+  const value = fields.get(key);
+  const numeric = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+  return typeof numeric === "number" && Number.isFinite(numeric) ? numeric : undefined;
+}
+
+/** `ConfirmationStatus` values that mean the visit has nothing to confirm. */
+const NOTHING_TO_CONFIRM: ReadonlySet<number | undefined> = new Set([undefined, 0]);
+/** An unset flag's answer, by whether the status says there is nothing to confirm. */
+const UNSET_FLAG: ReadonlyMap<boolean, false | null> = new Map([
+  [true, null],
+  [false, false],
+]);
+
+/**
+ * Whether the appointment is confirmed.
+ *
+ * `IsConfirmed` says yes or no; `ConfirmationStatus` says whether confirming
+ * applies at all. A live capture showed `1` on confirmed visits and `3` on one
+ * still waiting for a confirmation; `0` (or no status at all beside a false
+ * flag) is read as "nothing to confirm", the null answer.
+ */
+export function confirmedOf(fields: ReadonlyMap<string, unknown>): boolean | null | undefined {
+  const flagged = bool(fields, VISIT_STATE_KEYS.confirmed);
+  if (flagged === true) return true;
+  const status = num(fields, VISIT_STATE_KEYS.confirmationStatus);
+  if (flagged === undefined && status === undefined) return undefined;
+  // Any status but "nothing to confirm", beside a flag that is not set: unconfirmed.
+  return UNSET_FLAG.get(NOTHING_TO_CONFIRM.has(status));
+}
+
+/**
+ * The pre-visit tasks ("Get ready", which the portal's model still calls
+ * eCheck-in).
+ *
+ * Offered only when `IsEcheckInEnabled`; complete unless the portal says
+ * `IsECheckInIncomplete` -- a visit with nothing left to do reads complete
+ * however many steps it ever had, which is what "you're all set" means on the
+ * page. The steps the nested `ECheckIn` still lists as required are the ones
+ * outstanding: a live capture listed them on the unfinished visit and none on
+ * the finished ones.
+ */
+export function getReadyOf(
+  fields: ReadonlyMap<string, unknown>,
+): AppointmentGetReady | null | undefined {
+  const enabled = bool(fields, VISIT_STATE_KEYS.eCheckInEnabled);
+  const incomplete = bool(fields, VISIT_STATE_KEYS.eCheckInIncomplete);
+  if (enabled === undefined && incomplete === undefined) return undefined;
+  if (enabled === false) return null;
+  const complete = incomplete !== true;
+  const details = nested(fields, VISIT_STATE_KEYS.eCheckIn);
+  const steps = details?.get(VISIT_STATE_KEYS.requiredSteps);
+  const listed = Array.isArray(steps) ? steps.length : null;
+  return { complete, stepsRemaining: complete ? 0 : listed };
+}
+
+/**
+ * The visit's copay or prepayment, from the nested `Copay` object.
+ *
+ * Amounts come from the `...RawData` numbers, never the formatted strings.
+ * `amount` is what the owner would quote: what is due while unpaid, what was
+ * paid once paid. Null when the object is null -- the portal has no payment for
+ * this visit.
+ */
+export function paymentOf(
+  fields: ReadonlyMap<string, unknown>,
+): AppointmentPayment | null | undefined {
+  if (!fields.has(VISIT_STATE_KEYS.payment)) return undefined;
+  const payment = nested(fields, [VISIT_STATE_KEYS.payment]);
+  if (payment === null) return null;
+  const amountDue = num(payment, PAYMENT_KEYS.amountDue) ?? 0;
+  const amountPaid = num(payment, PAYMENT_KEYS.amountPaid) ?? 0;
+  const paid = bool(payment, PAYMENT_KEYS.paid) ?? amountDue <= 0;
+  let kind: AppointmentPayment["kind"] = null;
+  if (bool(payment, PAYMENT_KEYS.isPrepay) === true) kind = "prepay";
+  else if (bool(payment, PAYMENT_KEYS.isCopay) === true) kind = "copay";
+  else if (bool(payment, PAYMENT_KEYS.isBalance) === true) kind = "balance";
+  return { kind, amount: paid ? amountPaid : amountDue, amountDue, amountPaid, paid };
+}
+
+/** Every list-level state, each present only when the payload carried it. */
+function visitStatesOf(
+  fields: ReadonlyMap<string, unknown>,
+): Pick<PortalVisit, "confirmed" | "getReady" | "payment"> {
+  const confirmed = confirmedOf(fields);
+  const tasks = getReadyOf(fields);
+  const payment = paymentOf(fields);
+  return {
+    ...(confirmed !== undefined && { confirmed }),
+    ...(tasks !== undefined && { getReady: tasks }),
+    ...(payment !== undefined && { payment }),
   };
 }
 

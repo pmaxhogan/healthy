@@ -368,27 +368,42 @@ function joinInline(parts: readonly (string | undefined)[], separator: string): 
 }
 
 /**
- * No stable per-visit deep link exists to find: a live capture of MyChart's own
- * web client shows exactly one navigable URL for visits (the list page), and its
- * "view visit details" panel is a client-side overlay, not a URL -- confirmed
- * against Epic's own MyChart string tables, which name it as a view
- * (`visits.visitdetails`) rather than a route. So the visit-type/status line
- * links to the portal itself rather than to the one appointment.
+ * Where the visit-type/status line links to.
  *
- * **Which portal url.** An explicit one from the health system's own config
- * wins when the owner set it. Otherwise, the connected portal account's own
- * visits list -- the same url for every login flavour, `custom_oidc` included:
- * a `custom_oidc` deployment's separate "shell" app is a login screen only
- * ("the shell holds the password ... the classic pages hold the visits",
+ * **The one visit, when its portal token is known.** MyChart's own client opens
+ * an appointment at `<mount>Visits/VisitDetails?csn=<token>`, where the token is
+ * the visit's `Csn` from the visits list -- an opaque string, not the numeric
+ * contact serial number FHIR carries, and stable across sessions (it is also the
+ * portal pass's dedupe key, which has not churned). The client builds that link
+ * only for a first-party visit, so `detailCsn` is only ever set for one (see
+ * `portalVisitView`). It is built on the connected portal account's own base and
+ * mount rather than on an owner-typed `portalUrl`, which is a landing page with
+ * no known mount to append a path to.
+ *
+ * **Otherwise the portal itself.** An explicit url from the health system's own
+ * config wins when the owner set it. Otherwise, the connected portal account's
+ * own visits list -- the same url for every login flavour, `custom_oidc`
+ * included: a `custom_oidc` deployment's separate "shell" app is a login screen
+ * only ("the shell holds the password ... the classic pages hold the visits",
  * `worker/ehr/mychart/custom-oidc/bridge.ts`), and its own hand-off lands the
  * *scraper's* session on the same classic mount `connectedPortal` names --
  * which is also where the owner's own browser ends up once signed in, shell or
  * not. Null (no link, plain text) only when neither is known.
  */
-function linkTargetFor(healthSystem: MappingHealthSystem): string | null {
-  if (healthSystem.portalUrl !== null) return healthSystem.portalUrl;
+function linkTargetFor(healthSystem: MappingHealthSystem, detailCsn?: string): string | null {
   const portal = healthSystem.connectedPortal;
+  if (portal !== null && detailCsn !== undefined && detailCsn !== "") {
+    const token = encodeURIComponent(detailCsn);
+    return `${portal.baseUrl}${portal.mountPath}Visits/VisitDetails?csn=${token}`;
+  }
+  if (healthSystem.portalUrl !== null) return healthSystem.portalUrl;
   return portal === null ? null : `${portal.baseUrl}${portal.mountPath}Visits`;
+}
+
+/** A labelled free-text section: the label on its own line, then the text. */
+function labelled(label: string, text: string | undefined): string {
+  const trimmed = text?.trim() ?? "";
+  return trimmed === "" ? "" : `${label}\n${trimmed}`;
 }
 
 /** The visit-type/status line, as a link when a portal url could be found for it. */
@@ -409,9 +424,19 @@ function descriptionBody(
   ]);
   const who = joinLines([
     joinInline([view.practitioner, view.specialty], " — "),
-    linkedVisitLine(joinInline([view.visitType, view.status], " · "), linkTargetFor(healthSystem)),
+    linkedVisitLine(
+      joinInline([view.visitType, view.status], " · "),
+      linkTargetFor(healthSystem, view.detailCsn),
+    ),
   ]);
-  return joinSections([where, who]);
+  // How to find the room, then what to bring: first, straight under the header,
+  // because the address below is the part the owner already knows.
+  return joinSections([
+    labelled("Directions:", view.directions),
+    labelled("Visit instructions:", view.visitInstructions),
+    where,
+    who,
+  ]);
 }
 
 /**

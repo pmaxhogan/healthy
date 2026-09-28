@@ -105,6 +105,11 @@ export const PATHS = {
    */
   loadPast: "Visits/VisitsList/LoadPast",
   /**
+   * [confirmed from capture] One visit's details page, by the list's `Csn`
+   * token: `?csn=<token>`. Server-rendered HTML; see `visit-details.ts`.
+   */
+  visitDetails: "Visits/VisitDetails",
+  /**
    * [confirmed] The landing page, and the liveness check: a signed-in session is
    * served it without a redirect. `Home/KeepAlive` is deliberately not used for
    * that -- it keeps a session alive without saying whether anyone is signed in
@@ -500,6 +505,34 @@ export const TELEMEDICINE_OBJECT_KEYS: readonly string[] = ["Telemedicine"];
  * that this visit is one, and reading it would mark every visit as a video call.
  */
 export const TELEHEALTH_MODE_KEYS: readonly string[] = ["TelehealthMode"];
+
+/**
+ * [confirmed from capture] Keys of the visit's own states in a `LoadUpcoming`
+ * row: confirmation, the pre-visit tasks, payment, and the portal's ids for the
+ * department and practitioner. See `visits.ts`'s `visitStatesOf`.
+ */
+export const VISIT_STATE_KEYS = {
+  confirmed: "IsConfirmed",
+  confirmationStatus: "ConfirmationStatus",
+  eCheckInEnabled: "IsEcheckInEnabled",
+  eCheckInIncomplete: "IsECheckInIncomplete",
+  eCheckIn: ["ECheckIn"],
+  requiredSteps: "RequiredECheckInSteps",
+  payment: "Copay",
+  primaryPractitioner: ["PrimaryProvider"],
+  practitionerId: ["EncryptedId"],
+  departmentId: ["Id"],
+} as const;
+
+/** [confirmed from capture] Keys inside a row's `Copay` object. */
+export const PAYMENT_KEYS = {
+  amountDue: "AmountDueRawData",
+  amountPaid: "AmountPaidRawData",
+  paid: "IsPaid",
+  isPrepay: "IsPrepay",
+  isCopay: "IsCopay",
+  isBalance: "IsBalance",
+} as const;
 
 /** [confirmed] The three buckets `LoadUpcoming` answers with. */
 export const VISIT_BUCKETS: readonly string[] = [

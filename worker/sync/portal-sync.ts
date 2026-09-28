@@ -96,6 +96,7 @@ import {
   portalRank,
   sameVisitWithinHealthSystem,
 } from "./portal-dedupe.ts";
+import { boilerplateOf } from "./portal-directions.ts";
 import { SIGN_IN_BUSY_CODE, acquirePortalSignIn, releasePortalSignIn } from "./portal-gate.ts";
 import {
   DEDUPE_WINDOW_SECONDS,
@@ -115,11 +116,13 @@ import {
   signInAndWait,
   unattendedCodeWait,
 } from "./portal-signin.ts";
+import { titleDigest, titleDigestsFor, titledBody, titleSeeds } from "./titles.ts";
 
 import type { SyncDeps } from "./deps.ts";
 import type { CalendarMapping, ConnectedPortal, MappingSettings } from "./mapping.ts";
 import type { PlanCandidate, PlanEntry } from "./plan.ts";
 import type { Sighting } from "./portal-dedupe.ts";
+import type { Boilerplate } from "./portal-directions.ts";
 import type { PortalSession } from "./portal-signin.ts";
 import type { RunState } from "./run.ts";
 import type { Blinder } from "../db/blind.ts";
@@ -264,7 +267,8 @@ async function loadPortalVisits(
   const session = await ensureSession(input, healthSystemId);
   if (session === null) return null;
 
-  const visits = await session.client.loadUpcoming(input.timezone);
+  const listed = await session.client.loadUpcoming(input.timezone);
+  const visits = await withVisitDetails(input, healthSystemId, session, listed);
   // The jar as it is now: `LoadUpcoming` refreshes the session cookie, and
   // dropping that refresh is how a working session expires a day early.
   await repos.portalAccounts.saveCookieJar(healthSystemId, session.client.jar.serialise());
@@ -275,6 +279,77 @@ async function loadPortalVisits(
   await recordVisits(input, healthSystemId, visits);
   await syncMessages(input, healthSystemId, session);
   return visits;
+}
+
+/** The fields of a visit that only its details page carries. */
+type DetailFields = Pick<PortalVisit, "waitlist" | "directions" | "visitInstructions">;
+
+function detailFieldsOf(visit: PortalVisit | undefined): DetailFields {
+  if (visit === undefined) return {};
+  return {
+    ...(visit.waitlist !== undefined && { waitlist: visit.waitlist }),
+    ...(visit.directions !== undefined && { directions: visit.directions }),
+    ...(visit.visitInstructions !== undefined && { visitInstructions: visit.visitInstructions }),
+  };
+}
+
+/**
+ * Every listed visit with what its details page adds: the wait list, the
+ * directions and the visit's instructions.
+ *
+ * One GET per visit, every visit the list returned (all of them upcoming -- the
+ * list has nothing else), one after another: the list is a handful of visits,
+ * and the page is what the owner's own browser loads for each. With the held
+ * session only: this never signs in.
+ *
+ * A page that cannot be read keeps what the last run stored for that visit, so a
+ * transient failure does not strip the directions from the calendar for an hour
+ * and put them back the next -- two patches for nothing. A session that dies part
+ * way stops the reads, and every visit left keeps its stored copy the same way.
+ */
+async function withVisitDetails(
+  input: PortalPassInput,
+  healthSystemId: string,
+  session: PortalSession,
+  listed: readonly PortalVisit[],
+): Promise<PortalVisit[]> {
+  if (listed.length === 0) return [];
+  const rows = await input.repos.portalVisits.list(healthSystemId);
+  const stored = new Map(rows.map((row) => [row.csn, row.visit]));
+  const out: PortalVisit[] = [];
+  let read = 0;
+  let failed = 0;
+  let sessionEnded = false;
+  for (const visit of listed) {
+    if (sessionEnded) {
+      out.push({ ...visit, ...detailFieldsOf(stored.get(visit.csn)) });
+      continue;
+    }
+    try {
+      const details = await session.client.loadVisitDetails(visit.csn);
+      out.push({
+        ...visit,
+        waitlist: details.waitlist,
+        ...(details.directions !== undefined && { directions: details.directions }),
+        ...(details.visitInstructions !== undefined && {
+          visitInstructions: details.visitInstructions,
+        }),
+      });
+      read += 1;
+    } catch (error) {
+      failed += 1;
+      if (isAppError(error) && error.code === "portal_session_expired") sessionEnded = true;
+      input.ctx.log.warn("portal.visit_details_failed", { healthSystemId, ...errorFields(error) });
+      out.push({ ...visit, ...detailFieldsOf(stored.get(visit.csn)) });
+    }
+  }
+  input.ctx.log.info("portal.visit_details", {
+    healthSystemId,
+    visits: listed.length,
+    read,
+    failed,
+  });
+  return out;
 }
 
 /** What one run did with the attachments its Message Center read listed. Counts only. */
@@ -453,7 +528,17 @@ async function syncPortalCalendar(
   // otherwise has to thread the account through `loaded` for its own sake.
   const portalAccount = connectedPortalOf(await repos.portalAccounts.get(healthSystemId));
 
-  const builds = await buildPortalCandidates(input, healthSystem, visits, portalAccount);
+  // Over every visit this health system has stored, past ones included (this run's
+  // were stored in the first phase): see `portal-directions.ts`.
+  const known = await repos.portalVisits.list(healthSystemId);
+  const boilerplate = boilerplateOf(known.map((row) => row.visit));
+  const builds = await buildPortalCandidates(
+    input,
+    healthSystem,
+    visits,
+    portalAccount,
+    boilerplate,
+  );
   const stored = await repos.calendarEvents.list({ healthSystemId, source: "portal" });
   // Narrowed to the window before the diff sees them, exactly as the FHIR pass
   // narrows its own: a row older than the window would be ghosted for being old.
@@ -480,7 +565,13 @@ async function syncPortalCalendar(
   const dropped = new Set(duplicates.map((row) => row.event_key));
   const planRows = rows.filter((row) => !dropped.has(row.event_key));
   const planEvents = events.filter((event) => !dropped.has(keyOf(event) ?? ""));
-  const plan = planChanges(planRows, planEvents, candidates);
+  const titles = await titleDigestsFor(input.blinder, healthSystemId, {
+    events: planEvents,
+    keyOf,
+    models,
+    ghosts,
+  });
+  const plan = planChanges(planRows, planEvents, candidates, { titles });
   ctx.log.info("portal.plan", {
     healthSystemId,
     inserts: plan.inserts.length,
@@ -489,12 +580,14 @@ async function syncPortalCalendar(
     restores: plan.restores.length,
     unchanged: plan.unchanged.length,
     skipped: plan.skipped.length,
+    titlesKept: plan.titlesKept,
   });
 
   input.state.unchanged += plan.unchanged.length;
   for (const entry of plan.entries) {
     await applyPortalEntry(input, healthSystemId, entry, models, ghosts, planRows);
   }
+  await repos.calendarEvents.seedTitleDigests(titleSeeds(plan.unchanged, planRows));
   // Past visits the portal has stopped returning: not a change, but the rows were
   // looked at and `last_seen_at` has to say so.
   if (touched.length > 0) await repos.calendarEvents.touch(touched);
@@ -636,6 +729,7 @@ async function buildPortalCandidates(
   healthSystem: HealthSystemRow,
   visits: readonly PortalVisit[],
   portalAccount: ConnectedPortal | null,
+  boilerplate: Boilerplate,
 ): Promise<PortalCandidateBuild[]> {
   const seen = input.fhirSeen.get(healthSystem.id);
   // Rows the FHIR pass wrote, whenever it wrote them: the Encounter for a visit
@@ -659,7 +753,7 @@ async function buildPortalCandidates(
   const others = await otherSightings(input, healthSystem.id, now);
   const builds: PortalCandidateBuild[] = [];
   for (const visit of visits) {
-    const mapping = await buildCalendarModel(portalVisitView(healthSystem.id, visit), {
+    const mapping = await buildCalendarModel(portalVisitView(healthSystem.id, visit, boilerplate), {
       healthSystem: {
         id: healthSystem.id,
         displayName: healthSystem.display_name,
@@ -919,7 +1013,9 @@ async function applyPortalEntry(
       const model = models.get(entry.key);
       if (model === undefined) return;
       const created = await input.calendar.insertEvent(input.calendarId, buildEventBody(model));
-      await persistPortalRow(input, healthSystemId, entry.key, created.id, model);
+      await persistPortalRow(input, healthSystemId, entry.key, created.id, model, {
+        titleDigest: await titleDigest(input.blinder, healthSystemId, model.title),
+      });
       state.summary.eventsInserted += 1;
       return;
     }
@@ -934,14 +1030,21 @@ async function applyPortalEntry(
       const patched = await input.calendar.patchEvent(
         input.calendarId,
         entry.googleEventId,
-        patchBody(input, entry.googleEventId, ghost),
+        titledBody(patchBody(input, entry.googleEventId, ghost), entry),
       );
+      let titleWritten: string | null = null;
+      if (patched !== null) {
+        titleWritten = entry.keepTitle
+          ? entry.titleDigest
+          : await titleDigest(input.blinder, healthSystemId, ghost.title);
+      }
       await input.repos.calendarEvents.markGhost(entry.key, {
         // A null patch means the owner deleted the event by hand. The row still
         // becomes a ghost, but the stored fingerprint must keep describing
         // whatever is actually on the calendar -- which is now nothing.
         fingerprint: patched === null ? null : ghost.fingerprint,
         ghostedAt: ghostedAtFor(entry.key, rows, input.ctx.now()),
+        titleDigest: titleWritten,
       });
       state.summary.eventsGhosted += 1;
       return;
@@ -973,17 +1076,24 @@ async function patchPortal(
   const patched = await input.calendar.patchEvent(
     input.calendarId,
     entry.googleEventId,
-    patchBody(input, entry.googleEventId, model),
+    titledBody(patchBody(input, entry.googleEventId, model), entry),
   );
+  const written = await titleDigest(input.blinder, healthSystemId, model.title);
   if (patched === null) {
     // It went away between the listing and the patch; inserting is what the plan
-    // would have decided had it known.
+    // would have decided had it known. A new event carries Healthy's title.
     const created = await input.calendar.insertEvent(input.calendarId, buildEventBody(model));
-    await persistPortalRow(input, healthSystemId, entry.key, created.id, model, restore);
+    await persistPortalRow(input, healthSystemId, entry.key, created.id, model, {
+      restore,
+      titleDigest: written,
+    });
     input.state.summary.eventsInserted += 1;
     return;
   }
-  await persistPortalRow(input, healthSystemId, entry.key, patched.id, model, restore);
+  await persistPortalRow(input, healthSystemId, entry.key, patched.id, model, {
+    restore,
+    titleDigest: entry.keepTitle ? entry.titleDigest : written,
+  });
   if (restore) input.state.summary.eventsRestored += 1;
   else input.state.summary.eventsPatched += 1;
 }
@@ -1012,8 +1122,9 @@ async function persistPortalRow(
   key: string,
   googleEventId: string,
   model: CalendarEventModel,
-  restore = false,
+  options: { restore?: boolean; titleDigest: string | null },
 ): Promise<void> {
+  const restore = options.restore ?? false;
   await input.repos.calendarEvents.upsert({
     eventKey: key,
     healthSystemId,
@@ -1025,6 +1136,7 @@ async function persistPortalRow(
     source: "portal",
     portalCsn: csnOfEncounterId(model.encounterId),
     restore,
+    titleDigest: options.titleDigest,
   });
 }
 

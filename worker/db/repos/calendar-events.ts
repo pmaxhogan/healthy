@@ -141,6 +141,12 @@ interface UpsertEvent {
    * line, get a different fingerprint and patch the same event again, for ever.
    */
   restore?: boolean;
+  /**
+   * Keyed digest of the title this write left on the event (`worker/sync/titles.ts`).
+   * Undefined or null keeps whatever the row already holds -- the write did not
+   * touch the title, or the caller has nothing to record.
+   */
+  titleDigest?: string | null;
 }
 
 const SELECT = "SELECT * FROM calendar_events";
@@ -222,8 +228,8 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
             `INSERT INTO calendar_events
                (event_key, health_system_id, encounter_id, calendar_id, google_event_id, fingerprint,
                 state, first_seen_at, last_seen_at, ghosted_at, updated_at,
-                source, portal_csn, detail_enc)
-             VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, NULL, ?, ?, ?, ?)
+                source, portal_csn, detail_enc, title_digest)
+             VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, NULL, ?, ?, ?, ?, ?)
              ON CONFLICT (event_key) DO UPDATE SET
                encounter_id = excluded.encounter_id,
                calendar_id = excluded.calendar_id,
@@ -240,7 +246,10 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
                portal_csn = excluded.portal_csn,
                -- Sealed against the google_event_id written beside it, so the two
                -- always move together.
-               detail_enc = excluded.detail_enc`,
+               detail_enc = excluded.detail_enc,
+               -- A write that left the title alone has nothing to record, and the
+               -- digest of what Healthy last wrote must survive it.
+               title_digest = COALESCE(excluded.title_digest, calendar_events.title_digest)`,
           )
           .bind(
             input.eventKey,
@@ -255,6 +264,7 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
             input.source ?? "fhir",
             portalCsn,
             detailEnc,
+            input.titleDigest ?? null,
             restoring,
             restoring,
           ),
@@ -333,10 +343,15 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
      */
     async markGhost(
       eventKey: string,
-      options: { fingerprint?: string | null; ghostedAt?: number } = {},
+      options: {
+        fingerprint?: string | null;
+        ghostedAt?: number;
+        titleDigest?: string | null;
+      } = {},
     ): Promise<boolean> {
       const at = ctx.now();
       const fingerprint = options.fingerprint ?? null;
+      const titleDigest = options.titleDigest ?? null;
       const { changes } = await run(
         ctx.db
           .prepare(
@@ -344,11 +359,12 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
                 SET state = 'ghost',
                     ghosted_at = COALESCE(ghosted_at, ?),
                     fingerprint = COALESCE(?, fingerprint),
+                    title_digest = COALESCE(?, title_digest),
                     last_seen_at = ?,
                     updated_at = ?
               WHERE event_key = ? AND (state <> 'ghost' OR ? IS NOT NULL)`,
           )
-          .bind(options.ghostedAt ?? at, fingerprint, at, at, eventKey, fingerprint),
+          .bind(options.ghostedAt ?? at, fingerprint, titleDigest, at, at, eventKey, fingerprint),
       );
       if (changes > 0) ctx.log.info("calendar_events.ghosted", await logSafeKey(eventKey));
       return changes > 0;
@@ -481,6 +497,31 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
             eventKey,
           ),
       );
+    },
+
+    /**
+     * Record the title digest of rows that have none yet (0015's legacy rows).
+     *
+     * Only where `title_digest IS NULL`: a row that already records what Healthy
+     * last wrote must keep it, or an owner's edit would be adopted as Healthy's
+     * own and overwritten on the next change. One statement per row; the batch is
+     * the handful of rows the first run after the migration sees.
+     */
+    async seedTitleDigests(
+      seeds: readonly { eventKey: string; titleDigest: string }[],
+    ): Promise<number> {
+      if (seeds.length === 0) return 0;
+      const results = await ctx.db.batch(
+        seeds.map((seed) =>
+          ctx.db
+            .prepare(
+              `UPDATE calendar_events SET title_digest = ?
+                WHERE event_key = ? AND title_digest IS NULL`,
+            )
+            .bind(seed.titleDigest, seed.eventKey),
+        ),
+      );
+      return results.reduce((sum, result) => sum + result.meta.changes, 0);
     },
 
     /** Stamp `last_seen_at` for every key the current sync saw. */

@@ -55,6 +55,7 @@ import {
   sameVisitAcrossHealthSystems,
   sameVisitWithinHealthSystem,
 } from "../sync/portal-dedupe.ts";
+import { boilerplateOf } from "../sync/portal-directions.ts";
 import { portalVisitView } from "../sync/portal-mapping.ts";
 
 import { collect, spec, withinWindow } from "./collect.ts";
@@ -63,6 +64,7 @@ import type { TaggedItem } from "./collect.ts";
 import type { PortalVisitRecord, HealthSystemInfo, ToolDeps } from "./deps.ts";
 import type { RawEntry } from "../policy/filter.ts";
 import type { Sighting } from "../sync/portal-dedupe.ts";
+import type { Boilerplate } from "../sync/portal-directions.ts";
 
 /** Told to the caller whenever a portal item's `raw` is the bare placeholder. */
 export const PORTAL_RAW_WARNING = "portal_items_have_no_raw";
@@ -79,7 +81,20 @@ const NO_REFS = mapResolver([]);
  * none of its own. Never `status` or `start`: where both sources speak, FHIR is
  * the record.
  */
-const ENRICHED_FIELDS = ["practitioner", "department", "location", "end", "visitType"] as const;
+const ENRICHED_FIELDS = [
+  "practitioner",
+  "department",
+  "location",
+  "end",
+  "visitType",
+  // Only the portal has these at all.
+  "directions",
+  "visitInstructions",
+  "confirmed",
+  "getReady",
+  "payment",
+  "waitlist",
+] as const;
 
 export interface AppointmentOptions {
   /**
@@ -187,12 +202,18 @@ function portalEntry(
   healthSystem: HealthSystemInfo,
   record: PortalVisitRecord,
   now: number,
+  boilerplate: Boilerplate = new Set(),
 ): Entry {
   // No `encounterId`: a portal visit has no Encounter, and the view's stand-in
   // (`csn:<csn>`) is the calendar's event-key format -- a second copy of the CSN
-  // that an `Encounter.csn` deny rule would not reach.
-  const view: Record<string, unknown> = { ...portalVisitView(healthSystem.id, record.visit) };
+  // that an `Encounter.csn` deny rule would not reach. No `detailCsn` either: it
+  // is the same token as `csn`, for the calendar's link, and a second copy of it
+  // is one a `csn` deny rule would not reach.
+  const view: Record<string, unknown> = {
+    ...portalVisitView(healthSystem.id, record.visit, boilerplate),
+  };
   delete view.encounterId;
+  delete view.detailCsn;
   const external = record.visit.external;
   const tags = { healthSystem: healthSystem.displayName, healthSystemId: healthSystem.id };
   const item: TaggedItem = {
@@ -258,8 +279,10 @@ async function mergePortal(
   const claimed = new Set<Entry>();
   for (const healthSystem of healthSystems) {
     const records = await deps.portalVisits(healthSystem.id);
+    // Over every stored visit of this health system, as the calendar does.
+    const boilerplate = boilerplateOf(records.map((record) => record.visit));
     for (const record of records) {
-      const portal = portalEntry(healthSystem, record, now);
+      const portal = portalEntry(healthSystem, record, now, boilerplate);
       const match = entries.find(
         (entry) => !entry.portal && !claimed.has(entry) && sameVisit(entry, portal),
       );

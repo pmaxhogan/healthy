@@ -106,6 +106,54 @@ export interface NormalizedAppointmentView {
   department?: string;
   telehealth: boolean;
   csn?: string;
+  /**
+   * The patient portal's own token for this visit, when the visit is one the
+   * portal shows as first-party. Links the description to the visit's details
+   * page (`worker/sync/mapping.ts`'s `linkTargetFor`). Never FHIR's CSN.
+   */
+  detailCsn?: string;
+  /** How to find the room, from the portal's visit details, boilerplate removed. */
+  directions?: string;
+  /** The visit's own instructions, from the portal's visit details. */
+  visitInstructions?: string;
+  /**
+   * Whether the owner has confirmed the appointment. Null: nothing to confirm.
+   *
+   * This and the three portal-only states after it are absent when unknown (a
+   * FHIR-only visit, or a portal copy stored before they were read) and null
+   * when the portal says the thing does not apply to this visit.
+   */
+  confirmed?: boolean | null;
+  /** The pre-visit "get ready" (eCheck-in) tasks. Null: not offered for this visit. */
+  getReady?: AppointmentGetReady | null;
+  /** The visit's copay or prepayment. Null: the portal names no payment for it. */
+  payment?: AppointmentPayment | null;
+  /** The earlier-appointment wait list. Null: not offered for this visit. */
+  waitlist?: AppointmentWaitlist | null;
+}
+
+/** The pre-visit tasks the portal asks the patient to finish. */
+export interface AppointmentGetReady {
+  complete: boolean;
+  /** Tasks still listed as outstanding; null when the portal does not list them. */
+  stepsRemaining: number | null;
+}
+
+/** A visit's payment, in US dollars. */
+export interface AppointmentPayment {
+  /** Which kind of payment, when the portal says. */
+  kind: "copay" | "prepay" | "balance" | null;
+  /** What is due when unpaid, what was paid when paid. */
+  amount: number;
+  amountDue: number;
+  amountPaid: number;
+  paid: boolean;
+}
+
+/** Whether the patient is on the list to be offered an earlier slot. */
+export interface AppointmentWaitlist {
+  /** Null when the page offers the list but its state could not be read. */
+  enrolled: boolean | null;
 }
 
 interface NormalizedCodeableConcept {

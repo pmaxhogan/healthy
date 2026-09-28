@@ -34,6 +34,9 @@
 
 import { cleanPhone } from "../lib/text.ts";
 
+import { cleanDirections } from "./portal-directions.ts";
+
+import type { Boilerplate } from "./portal-directions.ts";
 import type { PortalVisit, PortalVisitStatus } from "../ehr/mychart/index.ts";
 import type { NormalizedAppointmentView, NormalizedLocationRef } from "../fhir/normalize/types.ts";
 
@@ -132,8 +135,10 @@ function locationOf(visit: PortalVisit): NormalizedLocationRef | undefined {
 export function portalVisitView(
   healthSystemId: string,
   visit: PortalVisit,
+  boilerplate: Boilerplate = new Set(),
 ): NormalizedAppointmentView {
   const location = locationOf(visit);
+  const directions = cleanDirections(visit.directions, boilerplate);
   return {
     healthSystem: healthSystemId,
     encounterId: portalEncounterId(visit.csn),
@@ -146,5 +151,23 @@ export function portalVisitView(
     ...(location !== undefined && { location }),
     telehealth: visit.isVideo,
     csn: visit.csn,
+    // The details page is only the portal's own for a first-party visit: its
+    // client sends another organisation's visit elsewhere (see `linkTargetFor`).
+    ...(visit.external !== true && { detailCsn: visit.csn }),
+    ...pick("directions", directions),
+    ...pick("visitInstructions", visit.visitInstructions),
+    ...portalStates(visit),
+  };
+}
+
+/** The portal-only states, each only when the visit carries it. */
+function portalStates(
+  visit: PortalVisit,
+): Pick<NormalizedAppointmentView, "confirmed" | "getReady" | "payment" | "waitlist"> {
+  return {
+    ...(visit.confirmed !== undefined && { confirmed: visit.confirmed }),
+    ...(visit.getReady !== undefined && { getReady: visit.getReady }),
+    ...(visit.payment !== undefined && { payment: visit.payment }),
+    ...(visit.waitlist !== undefined && { waitlist: visit.waitlist }),
   };
 }

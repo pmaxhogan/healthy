@@ -178,6 +178,11 @@ export interface CalendarEventRow {
   source: CalendarEventSource;
   /** `blindCsn(health_system, csn)`, set only when `source` is 'portal'. */
   portal_csn: string | null;
+  /**
+   * Keyed digest of the title Healthy last wrote to the event (0015), or null on
+   * a row no run has seeded yet. See `worker/sync/titles.ts`.
+   */
+  title_digest: string | null;
 }
 
 /**

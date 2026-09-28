@@ -41,6 +41,7 @@ import { isLoginPage } from "./discovery.ts";
 import { bodyMentions, findAntiforgeryField, formFields, inputFields } from "./html.ts";
 import { isOpenIdHandoff, mountedUrl, normaliseMount, pathOf, portalFetch } from "./http.ts";
 import { loadMessageCenter } from "./messages.ts";
+import { parseVisitDetails } from "./visit-details.ts";
 import { parsePast, parseUpcoming } from "./visits.ts";
 import {
   ANTIFORGERY_FIELD_NAMES,
@@ -70,6 +71,7 @@ import type { CookieJar } from "./cookie-jar.ts";
 import type { PortalEndpoint } from "./discovery.ts";
 import type { PortalHttpDeps, PortalResponse } from "./http.ts";
 import type { AttachmentHandle, PortalMessagesResult } from "./messages.ts";
+import type { VisitDetails } from "./visit-details.ts";
 import type { PortalVisit } from "./visits.ts";
 import type { UsernameField } from "./wire.ts";
 import type { Logger } from "../../lib/log.ts";
@@ -147,6 +149,13 @@ export interface PortalClient {
    * several; this flattens them, because the calendar does not care.
    */
   loadPast(timeZone: string, oldestRenderedDate?: string): Promise<PortalVisit[]>;
+  /**
+   * One visit's details page, by the `csn` token the same visits list gave:
+   * its wait list, directions and instructions. One GET, read-only. Throws
+   * `portal_session_expired` on a login page and `portal_parse_failed` on a
+   * non-200.
+   */
+  loadVisitDetails(csn: string): Promise<VisitDetails>;
   /**
    * Every secure-message conversation in every Message Center folder, with every
    * message in each, read to the end. Read-only: nothing is marked read. See
@@ -814,6 +823,26 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
     return parsed.visits;
   };
 
+  const loadVisitDetails = async (csn: string): Promise<VisitDetails> => {
+    const response = await portalFetch(http, {
+      url: url(PATHS.visitDetails, { csn }),
+      endpoint: "VisitDetails",
+      accept: "html",
+      followBodyRedirects: true,
+      // The same guard `tokenPage` uses: a dead session lands on a login page
+      // (or a `custom_oidc` hand-off), which must be recognised, not followed.
+      recognizeLanding: (landed) => isLoginPage(landed) || isOpenIdHandoff(landed),
+    });
+    assertSession(response, "VisitDetails");
+    if (response.status !== 200) {
+      throw new AppError("portal_parse_failed", "the visit details page failed", {
+        endpoint: "VisitDetails",
+        status: response.status,
+      });
+    }
+    return parseVisitDetails(response.body);
+  };
+
   /**
    * One Message Center POST: JSON in, JSON out, the antiforgery token in a header.
    *
@@ -964,6 +993,7 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
     secondaryValidation: { sendCode, validate },
     loadUpcoming,
     loadPast,
+    loadVisitDetails,
     loadMessages,
     loadMessageAttachment,
     isSessionAlive,

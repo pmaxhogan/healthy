@@ -57,8 +57,7 @@ import {
 import type { FhirServer, SeededHealthSystem, Upstreams } from "./helpers.ts";
 import type { Ctx } from "../../../worker/db/client.ts";
 import type { PortalAccountRow } from "../../../worker/db/rows.ts";
-import type { PortalVisit } from "../../../worker/ehr/mychart/index.ts";
-import type { PortalThread } from "../../../worker/ehr/mychart/index.ts";
+import type { PortalVisit, PortalThread } from "../../../worker/ehr/mychart/index.ts";
 import type { FakePortal } from "../portal/helpers.ts";
 import type { RunSummary } from "@shared/types.ts";
 import type * as fhir4 from "fhir/r4";
@@ -545,9 +544,11 @@ describe("portal visits stored for the MCP", () => {
     // leaves the dedupe to the tool, which also sees the Encounter.
     const stored = await syncRepos(fix.ctx).portalVisits.list(fix.healthSystem.healthSystemId);
     expect(stored.map((row) => row.csn)).toStrictEqual(["csn-1", "csn-2"]);
-    expect(stored[1]?.visit).toStrictEqual(
-      portalVisit({ csn: "csn-2", start: "2026-12-01T15:00:00+00:00", isVideo: true }),
-    );
+    // With what its (empty) details page added: no wait list offered.
+    expect(stored[1]?.visit).toStrictEqual({
+      ...portalVisit({ csn: "csn-2", start: "2026-12-01T15:00:00+00:00", isVideo: true }),
+      waitlist: null,
+    });
     expect(stored.every((row) => row.state === "active")).toBe(true);
   });
 
@@ -1496,5 +1497,261 @@ describe("portal secure messages", () => {
 
     expect(fix.portal.calls.loadMessages).toBe(0);
     expect(fix.portal.calls.logins).toBe(0);
+  });
+});
+
+/** The one calendared copy of a portal visit, or a test failure. */
+async function eventOf(fix: Fixture, csn: string): Promise<Record<string, unknown>> {
+  const event = fix.upstreams.calendar.byKey().get(await portalKey(fix.healthSystem, csn));
+  if (event === undefined) throw new Error(`${csn} was not calendared`);
+  return event;
+}
+
+describe("the owner's edits to a title", () => {
+  it("survive a change that patches the event, and cost no write once settled", async () => {
+    const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1" })] } });
+    await portalRun(fix);
+    const event = await eventOf(fix, "csn-1");
+    event.summary = "Follow-up · A. Example, MD (bring the forms)";
+
+    // The edit alone is not a change to write back.
+    const untouched = await portalRun(fix);
+    expect(untouched.eventsPatched).toBe(0);
+
+    fix.portal.visits = [portalVisit({ csn: "csn-1", department: "Another Clinic" })];
+    const patched = await portalRun(fix);
+    expect(patched.eventsPatched).toBe(1);
+    expect(event.summary).toBe("Follow-up · A. Example, MD (bring the forms)");
+    expect(String(event.description)).toContain("Another Clinic");
+
+    // A title Healthy would now write differently still does not move it.
+    fix.portal.visits = [portalVisit({ csn: "csn-1", visitType: "Annual physical" })];
+    await portalRun(fix);
+    expect(event.summary).toBe("Follow-up · A. Example, MD (bring the forms)");
+    const settled = await portalRun(fix);
+    expect(settled.eventsPatched).toBe(0);
+  });
+
+  it("hand the title back when the owner restores exactly what Healthy last wrote", async () => {
+    const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1" })] } });
+    await portalRun(fix);
+    const event = await eventOf(fix, "csn-1");
+    event.summary = "My own name for it";
+    fix.portal.visits = [portalVisit({ csn: "csn-1", visitType: "Annual physical" })];
+    await portalRun(fix);
+    expect(event.summary).toBe("My own name for it");
+
+    // Back to the title Healthy last wrote: Healthy's again, and the title it
+    // computes now replaces it (the fingerprint already matched: `title_drift`).
+    event.summary = "Follow-up · A. Example, MD";
+    const drift = await portalRun(fix);
+    expect(drift.eventsPatched).toBe(1);
+    expect(event.summary).toBe("Annual physical · A. Example, MD");
+    const again1 = await portalRun(fix);
+    expect(again1.eventsPatched).toBe(0);
+  });
+
+  it("survive ghosting: a cancelled visit keeps the owner's title, without the prefix", async () => {
+    const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1" })] } });
+    await portalRun(fix);
+    const event = await eventOf(fix, "csn-1");
+    event.summary = "Dentist, finally";
+
+    fix.portal.visits = [portalVisit({ csn: "csn-1", status: "canceled" })];
+    const ghosted = await portalRun(fix);
+    expect(ghosted.eventsGhosted).toBe(1);
+    expect(event.summary).toBe("Dentist, finally");
+    expect(event.transparency).toBe("transparent");
+    const again2 = await portalRun(fix);
+    expect(again2.eventsGhosted).toBe(0);
+  });
+
+  it("seed a row written before titles were tracked, so a later edit still survives", async () => {
+    const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1" })] } });
+    await portalRun(fix);
+    await fix.ctx.db.prepare("UPDATE calendar_events SET title_digest = NULL").run();
+
+    // Google's title is the one Healthy computes: Healthy's, seeded, no write.
+    const seeded = await portalRun(fix);
+    expect(seeded.eventsPatched).toBe(0);
+    const row = await syncRepos(fix.ctx).calendarEvents.getByKey(
+      await portalKey(fix.healthSystem, "csn-1"),
+    );
+    expect(row?.title_digest).not.toBeNull();
+
+    const event = await eventOf(fix, "csn-1");
+    event.summary = "Edited after the upgrade";
+    fix.portal.visits = [portalVisit({ csn: "csn-1", department: "Another Clinic" })];
+    await portalRun(fix);
+    expect(event.summary).toBe("Edited after the upgrade");
+  });
+
+  it("treat a legacy title Healthy provably did not write as the owner's", async () => {
+    const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1" })] } });
+    await portalRun(fix);
+    await fix.ctx.db.prepare("UPDATE calendar_events SET title_digest = NULL").run();
+    // Edited before titles were tracked, with nothing upstream moving since: the
+    // row's fingerprint still vouches for the title Healthy wrote.
+    const event = await eventOf(fix, "csn-1");
+    event.summary = "An edit from before the upgrade";
+
+    const again3 = await portalRun(fix);
+    expect(again3.eventsPatched).toBe(0);
+    fix.portal.visits = [portalVisit({ csn: "csn-1", department: "Another Clinic" })];
+    await portalRun(fix);
+    expect(event.summary).toBe("An edit from before the upgrade");
+  });
+
+  it("keep the recorded title when the FHIR pass adopts the portal's event", async () => {
+    const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1", start: SOON })] } });
+    await portalRun(fix);
+    const event = await eventOf(fix, "csn-1");
+    event.summary = "Mine";
+
+    withEncounters(fix, [appointment("enc-1", "2026-06-20T14:31:00+00:00", "csn-1")]);
+    await portalRun(fix, false);
+
+    // Rekeyed and patched from the Encounter, and the owner's title is still there.
+    expect(calendarKeys(fix)).toStrictEqual([await sk(`${fix.healthSystem.healthSystemId}:enc-1`)]);
+    expect(event.summary).toBe("Mine");
+  });
+});
+
+describe("a visit's details page", () => {
+  it("links the visit line to the visit itself, by the portal's own token", async () => {
+    const fix = await fixture({ portal: { visits: [portalVisit({ csn: "tok-1/+" })] } });
+    await portalRun(fix);
+
+    const event = await eventOf(fix, "tok-1/+");
+    expect(String(event.description)).toContain(
+      `<a href="${PORTAL_ORIGIN}/MyChart/Visits/VisitDetails?csn=tok-1%2F%2B">Follow-up · scheduled</a>`,
+    );
+    expect(fix.portal.calls.visitDetails).toStrictEqual(["tok-1/+"]);
+  });
+
+  it("never deep-links a second-hand visit, as the portal's own client does not", async () => {
+    const fix = await fixture({
+      portal: { visits: [portalVisit({ csn: "csn-x", external: true })] },
+    });
+    await portalRun(fix);
+
+    const event = await eventOf(fix, "csn-x");
+    // The health system's own portal url, as before: no details page for it.
+    expect(String(event.description)).toContain("<a href=");
+    expect(String(event.description)).not.toContain("VisitDetails");
+  });
+
+  it("puts the directions and instructions first, and stores them with the wait list", async () => {
+    const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1" })] } });
+    fix.portal.details.set("csn-1", {
+      waitlist: { enrolled: false },
+      directions: "Suite 200, second floor.",
+      visitInstructions: "Bring a list of your medicines.",
+    });
+    await portalRun(fix);
+
+    const event4 = await eventOf(fix, "csn-1");
+    const text = String(event4.description);
+    const header = text.indexOf("Synced by Healthy");
+    const directions = text.indexOf("Directions:\nSuite 200, second floor.");
+    const instructions = text.indexOf("Visit instructions:\nBring a list of your medicines.");
+    const clinic = text.indexOf("Example Clinic");
+    expect(header).toBeGreaterThanOrEqual(0);
+    expect(directions).toBeGreaterThan(header);
+    expect(instructions).toBeGreaterThan(directions);
+    expect(clinic).toBeGreaterThan(instructions);
+
+    const stored = await syncRepos(fix.ctx).portalVisits.list(fix.healthSystem.healthSystemId);
+    expect(stored[0]?.visit.waitlist).toStrictEqual({ enrolled: false });
+    expect(stored[0]?.visit.directions).toBe("Suite 200, second floor.");
+  });
+
+  it("strips the paragraphs the health system repeats under every department", async () => {
+    const boiler = "Check in online before you arrive.";
+    const visits = [
+      portalVisit({ csn: "csn-1", departmentId: "d1", practitionerId: "p1", start: SOON }),
+      portalVisit({
+        csn: "csn-2",
+        departmentId: "d2",
+        practitionerId: "p2",
+        start: "2026-07-01T14:30:00+00:00",
+      }),
+      portalVisit({
+        csn: "csn-3",
+        departmentId: "d2",
+        practitionerId: "p2",
+        start: "2026-07-02T14:30:00+00:00",
+      }),
+    ];
+    const fix = await fixture({ portal: { visits } });
+    fix.portal.details.set("csn-1", {
+      waitlist: null,
+      directions: `${boiler}\n\nTower A, suite 1.`,
+    });
+    fix.portal.details.set("csn-2", {
+      waitlist: null,
+      directions: `Tower B, suite 2.\n\n${boiler}`,
+    });
+    fix.portal.details.set("csn-3", {
+      waitlist: null,
+      directions: `Tower B, suite 2.\n\n${boiler}`,
+    });
+    await portalRun(fix);
+
+    const event5 = await eventOf(fix, "csn-1");
+    const first = String(event5.description);
+    expect(first).toContain("Directions:\nTower A, suite 1.");
+    expect(first).not.toContain(boiler);
+    // Repeated, but only ever under one department: real directions, kept.
+    const event6 = await eventOf(fix, "csn-2");
+    expect(String(event6.description)).toContain("Tower B, suite 2.");
+  });
+
+  it("keeps the stored details when a page cannot be read, so nothing is re-patched", async () => {
+    const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1" })] } });
+    fix.portal.details.set("csn-1", { waitlist: { enrolled: true }, directions: "Suite 200." });
+    await portalRun(fix);
+
+    fix.portal.details.set("csn-1", new AppError("portal_parse_failed", "the page failed"));
+    const summary = await portalRun(fix);
+    expect(summary.eventsPatched).toBe(0);
+    const stored = await syncRepos(fix.ctx).portalVisits.list(fix.healthSystem.healthSystemId);
+    expect(stored[0]?.visit.waitlist).toStrictEqual({ enrolled: true });
+    expect(stored[0]?.visit.directions).toBe("Suite 200.");
+  });
+
+  it("stops reading pages at an expired session, keeping every visit's stored copy", async () => {
+    const visits = [
+      portalVisit({ csn: "csn-1" }),
+      portalVisit({ csn: "csn-2", start: "2026-07-01T14:30:00+00:00" }),
+    ];
+    const fix = await fixture({ portal: { visits } });
+    fix.portal.details.set("csn-2", { waitlist: null, directions: "Suite 9." });
+    await portalRun(fix);
+
+    fix.portal.calls.visitDetails.length = 0;
+    fix.portal.details.set("csn-1", new AppError("portal_session_expired", "signed out"));
+    await portalRun(fix);
+    expect(fix.portal.calls.visitDetails).toStrictEqual(["csn-1"]);
+    const stored = await syncRepos(fix.ctx).portalVisits.list(fix.healthSystem.healthSystemId);
+    expect(stored.find((row) => row.csn === "csn-2")?.visit.directions).toBe("Suite 9.");
+  });
+
+  it("gives an Encounter the portal copy's link and directions for the same visit", async () => {
+    // The fixture's prac-1 renders as "Test Alpha"; the portal writes it its own way.
+    const visit = portalVisit({ csn: "csn-1", start: SOON, practitioner: "Alpha, Test MD" });
+    const fix = await fixture({ portal: { visits: [visit] } });
+    fix.portal.details.set("csn-1", { waitlist: null, directions: "Suite 200." });
+    // Stored by a first run, as the portal pass always has before the next FHIR pass.
+    await portalRun(fix);
+    withEncounters(fix, [appointment("enc-1", "2026-06-20T14:31:00+00:00")]);
+    withPractitioners(fix);
+    await portalRun(fix, false);
+
+    const event = fix.upstreams.calendar
+      .byKey()
+      .get(await sk(`${fix.healthSystem.healthSystemId}:enc-1`));
+    expect(String(event?.description)).toContain("VisitDetails?csn=csn-1");
+    expect(String(event?.description)).toContain("Directions:\nSuite 200.");
   });
 });
