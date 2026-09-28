@@ -29,6 +29,10 @@ describe("messageText", () => {
     );
   });
 
+  it("reads the invalid closing </br> as a line break, as browsers do", () => {
+    expect(messageText("One.</br></br>Two.</br>Three.")).toBe("One.\n\nTwo.\nThree.");
+  });
+
   it("keeps table cells apart", () => {
     expect(messageText("<table><tr><td>Sodium</td><td>140</td></tr></table>")).toBe("Sodium 140");
   });

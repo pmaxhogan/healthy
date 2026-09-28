@@ -49,10 +49,16 @@ const MIN_DISTINCT = 2;
 /** Normalised paragraphs the health system repeats across departments. */
 export type Boilerplate = ReadonlySet<string>;
 
-/** The paragraphs of a directions text: split on blank lines, empty ones dropped. */
+/**
+ * The paragraphs of a directions text: every line on its own, empty ones dropped.
+ *
+ * Lines rather than blank-line blocks, because the portal separates its
+ * boilerplate from the department's text with a single break as often as with a
+ * blank line, and a block that held both could never match another visit's.
+ */
 function paragraphs(text: string): string[] {
   return text
-    .split(/\n\s*\n/u)
+    .split("\n")
     .map((paragraph) => paragraph.trim())
     .filter((paragraph) => paragraph !== "");
 }
@@ -113,5 +119,5 @@ export function cleanDirections(
 ): string | undefined {
   if (text === undefined) return undefined;
   const kept = paragraphs(text).filter((paragraph) => !boilerplate.has(paragraphKey(paragraph)));
-  return kept.length === 0 ? undefined : kept.join("\n\n");
+  return kept.length === 0 ? undefined : kept.join("\n");
 }

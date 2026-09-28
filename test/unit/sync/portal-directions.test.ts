@@ -101,6 +101,18 @@ describe("boilerplateOf", () => {
   });
 });
 
+describe("line by line", () => {
+  it("strips a boilerplate line that a single break separates from real text", () => {
+    const visits = MANY.map((entry) => ({
+      ...entry,
+      directions: (entry.directions ?? "").replaceAll("\n\n", "\n"),
+    }));
+    const boilerplate = boilerplateOf(visits);
+
+    expect(cleanDirections(visits[0]?.directions, boilerplate)).toBe("Tower A, suite 1.");
+  });
+});
+
 describe("cleanDirections", () => {
   it("returns nothing when every paragraph was boilerplate", () => {
     const boilerplate = new Set([PAYMENT.toLowerCase()]);

@@ -19,7 +19,12 @@ const HIDDEN_BLOCK = /<(script|style|head|template)\b[^>]*>[\s\S]*?<\/\1\b[^>]*>
 /** An HTML comment, conditional comments included. */
 const COMMENT = /<!--[\s\S]*?-->/gu;
 
-const LINE_BREAK = /<br\b[^<>]*>/giu;
+/**
+ * A line break, `</br>` included: invalid HTML that browsers read as `<br>`, and
+ * exactly what the portal's own pages write between the lines of a
+ * department's directions.
+ */
+const LINE_BREAK = /<\/?br\b[^<>]*>/giu;
 /** Block ends a reader sees as a new line. A list item's end is not: the next one's start is. */
 const BLOCK_END = /<\/(?:p|div|tr|h[1-6]|table|ul|ol|section|article|blockquote|pre)\s*>/giu;
 /** A list item's start: shown as a bullet on its own line. */
