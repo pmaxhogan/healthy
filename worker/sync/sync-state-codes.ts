@@ -57,26 +57,45 @@ export interface SyncCodeMeaning {
  * sources.
  *
  * Epic's numeric codes come from `issue.details.coding[].code` on the
- * OperationOutcomes Epic interleaves with search results. The 41xx ones and
- * 59109 are the list `worker/fhir/operation-outcome.ts` classifies searches by;
- * 59204's wording follows Epic's own `details.text` for it, seen on a live
- * search ("Client not authorized for <Type> - Outside Record"). A code Epic has
- * not documented publicly and this server has not seen explained is left out on
- * purpose, so {@link explainSyncCode} calls it `unknown` rather than guessing.
+ * OperationOutcomes Epic interleaves with search results. The 41xx and 591xx
+ * meanings follow the "FHIR Error Codes" table Epic publishes at the foot of
+ * every R4 API specification on fhir.epic.com (read 2026-09-28); the severity
+ * here is what the code means for a reader of the cache, not Epic's own
+ * Fatal/Warning/Information label. 59204 is not in that table: its wording
+ * follows Epic's own `details.text` for it, seen on a live search ("Client not
+ * authorized for <Type> - Outside Record"), and Epic's "(Outside Record)" API
+ * specifications for what that variant returns. A code Epic does not document
+ * and this server has not seen explained is left out on purpose, so
+ * {@link explainSyncCode} calls it `unknown` rather than guessing.
  *
  * Only generic wording lives here. Epic's `diagnostics` text is never stored --
  * `fhir_sync_state.warnings` holds `{code, count}` alone -- because it can echo
  * the search's parameters.
  */
 const MEANINGS: Readonly<Record<string, SyncCodeMeaning>> = {
+  "4100": { meaning: "The search contained an invalid parameter.", severity: "error" },
   "4101": {
     meaning: "The search ran and matched nothing: there is no data of this kind to return.",
     severity: "info",
   },
+  "4102": { meaning: "A read asked for an id the health system does not have.", severity: "error" },
+  "4103": { meaning: "The resource asked for has been deleted.", severity: "error" },
+  "4104": {
+    meaning: "The health system could not build a required element of a resource, so sent none.",
+    severity: "error",
+  },
+  "4110": { meaning: "The search had no parameters.", severity: "error" },
+  "4111": { meaning: "A required search parameter was missing.", severity: "error" },
+  "4112": { meaning: "The search combined parameters that cannot be combined.", severity: "error" },
   "4113": {
     meaning:
       "Epic's paged-search session expired part-way through; the refresh restarts the search once.",
     severity: "warning",
+  },
+  "4115": { meaning: "A required search parameter had an invalid value.", severity: "error" },
+  "4117": {
+    meaning: "An immunization was returned without a CVX vaccine code; it is still included.",
+    severity: "info",
   },
   "4118": {
     meaning:
@@ -85,14 +104,30 @@ const MEANINGS: Readonly<Record<string, SyncCodeMeaning>> = {
   },
   "4119": {
     meaning:
-      "Epic's patient-facing view withheld some results under the health system's own " +
-      "release rules (what its patient portal would not show either); everything else " +
-      "was returned. Expected on almost every search.",
+      "Epic's note on every patient-authorized search: additional data may exist, because " +
+      "what a patient may see may not be the complete medical record. Everything the " +
+      "patient may see was returned. Expected on almost every search.",
     severity: "info",
   },
   "4122": {
     meaning: "The health system did not recognise one search parameter and ignored it.",
     severity: "info",
+  },
+  "4127": {
+    meaning: "The search matched more than Epic will return, so additional data may exist.",
+    severity: "warning",
+  },
+  "4130": {
+    meaning: "The health system's break-the-glass security withheld this resource.",
+    severity: "error",
+  },
+  "4131": {
+    meaning: "The patient's record is restricted (break-the-glass); its data was withheld.",
+    severity: "error",
+  },
+  "4134": {
+    meaning: "The patient's record is restricted (break-the-glass); some data may be withheld.",
+    severity: "warning",
   },
   "4135": {
     meaning:
@@ -100,15 +135,34 @@ const MEANINGS: Readonly<Record<string, SyncCodeMeaning>> = {
       "documents are fetched on a later day.",
     severity: "warning",
   },
+  "59100": {
+    meaning: "An unknown search parameter was ignored.",
+    severity: "info",
+  },
+  "59101": {
+    meaning:
+      "A search parameter value was not recognised (for example an unknown category); " +
+      "that part of the search may have returned nothing.",
+    severity: "warning",
+  },
+  "59102": { meaning: "The search was invalid (for example a bad patient id).", severity: "error" },
+  "59108": { meaning: "A required search parameter was missing.", severity: "error" },
   "59109": {
     meaning: "An optional search parameter was invalid and was ignored.",
     severity: "info",
   },
+  "59111": { meaning: "A required search parameter had an invalid value.", severity: "error" },
+  "59133": {
+    meaning:
+      "Epic reported processing issues: the search matched more than it returns, or " +
+      "the request carried fewer elements than it needs.",
+    severity: "warning",
+  },
   "59204": {
     meaning:
-      "This app is not authorized for Epic's 'Outside Record' variant of this type " +
-      "(records other organisations shared with this health system). The health " +
-      "system's own records were returned; those outside copies are not.",
+      "This app is not authorized for Epic's 'Outside Record' variant of this type, which " +
+      "holds data the health system received from payers, other providers or other FHIR " +
+      "servers. The health system's own records were returned; those outside copies are not.",
     severity: "info",
   },
   [UNSUPPORTED_ERROR_CODE]: {

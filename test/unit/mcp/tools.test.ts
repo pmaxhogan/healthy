@@ -516,7 +516,12 @@ describe("get_sync_status", () => {
     expect(row?.status).toBe("ok");
     expect(row?.lastError).toBeNull();
     expect(row?.warnings).toStrictEqual([
-      { code: "4119", count: 1, meaning: expect.stringContaining("withheld"), severity: "info" },
+      {
+        code: "4119",
+        count: 1,
+        meaning: expect.stringContaining("complete medical record"),
+        severity: "info",
+      },
     ]);
   });
 

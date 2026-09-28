@@ -89,8 +89,8 @@ export function registerHealthSystemTools(server: McpServer, deps: ToolDeps): vo
         "and `lastError` ({code, meaning, severity}, or null), and `warnings`: " +
         "what the health system reported on the last refresh, as " +
         "{code, count, meaning, severity}. Severity `info` (e.g. 4101 no " +
-        "results, 4119 some results withheld by the health system's " +
-        "patient-facing rules, 59204 outside records not included) means the " +
+        "results, 4119 a patient's view may not be the complete record, 59204 " +
+        "records from payers or other organisations not included) means the " +
         "search worked and nothing needs doing; `warning`, `error` and `unknown` " +
         "are the ones worth reading. `unsupported` means the health system does " +
         "not offer that type to patient apps (commonly Specimen) and is " +
