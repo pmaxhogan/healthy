@@ -771,10 +771,13 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
   /**
    * One Message Center POST: JSON in, JSON out, the antiforgery token in a header.
    *
-   * The same three checks as `visitJson`, in the same order and for the same
-   * reasons: a login page is an expired session, a 200 carrying HTML is a token
-   * failure (these endpoints answer a missing token exactly that way, silently),
-   * and only then is the body parsed.
+   * JSON is recognised FIRST, unlike `visitJson`: a message body is HTML the
+   * portal wrote, and a letter or a welcome notice can quote exactly the strings
+   * `assertSession` sniffs for (a sign-in link, "verification code"). Read that
+   * way, one such message would make every read an expired session. So a JSON
+   * answer from the URL asked for is parsed as is; only a non-JSON answer is
+   * classified -- a login page is an expired session, and any other page is a
+   * token failure (these endpoints answer a missing token with a 200 and HTML).
    */
   const messageCenterJson = async (
     token: string,
@@ -790,8 +793,8 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
       headers: { [ANTIFORGERY_HEADER]: token },
       jsonBody: body,
     });
-    assertSession(response, label);
     if (response.status !== 200 || !looksLikeJson(response)) {
+      assertSession(response, label);
       throw new AppError("portal_parse_failed", "the message center answered with a page", {
         endpoint: label,
         status: response.status,

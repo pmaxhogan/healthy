@@ -110,7 +110,12 @@ function messageFingerprint(message: PortalMessage): Promise<string> {
 
 /** The digest a thread is identified by: its subject and its first message. */
 async function threadFingerprint(thread: PortalThread): Promise<string | null> {
-  const first = thread.messages[0];
+  // The earliest message, whatever order the caller handed them in: the key must
+  // not depend on it.
+  let first: PortalMessage | undefined;
+  for (const message of thread.messages) {
+    if (first === undefined || message.sent < first.sent) first = message;
+  }
   return first === undefined
     ? null
     : sha256Hex(`${thread.subject}\u{0}${await messageFingerprint(first)}`);

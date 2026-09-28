@@ -1207,6 +1207,28 @@ describe("loadMessages", () => {
     expect(body.searchQuery).toBe("");
   });
 
+  it("parses a message whose body quotes the sign-in page's own markers", async () => {
+    const quoting =
+      '<p>Welcome! Sign in at <a href="/MyChart/Authentication/Login/DoLogin">this link</a> ' +
+      'with your <input name="username"> and enter the TwoFactorCode we send.</p>';
+    const state = messageCenter({
+      conversations: [
+        {
+          id: "welcome",
+          organizationId: LOCAL_ORG,
+          tag: 6,
+          subject: "Invented welcome",
+          messages: [message("w1", 1, { displayName: "Messaging System" }, quoting)],
+        },
+      ],
+    });
+
+    const result = await client(messagePortal(state)).loadMessages();
+
+    expect(result.threads).toHaveLength(1);
+    expect(result.threads[0]?.messages[0]?.body).toContain("TwoFactorCode");
+  });
+
   it("reads a 200 carrying a page as a token failure, not an empty inbox", async () => {
     const stub = routed({
       "GET /MyChart/Visits/VisitsList": () => html(visitsListPage()),

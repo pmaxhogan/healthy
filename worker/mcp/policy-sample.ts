@@ -102,8 +102,16 @@ function rawEntries(value: unknown): RawEntry[] {
 }
 
 /** Run one tool under `rules`. Null when the tool does not exist or answered an error. */
+/**
+ * Tools that cannot be called without an argument naming one record, sampled
+ * through the tool that lists those records: `get_message_thread` needs a
+ * `threadId`, and answers exactly `get_messages`' items for one conversation.
+ */
+const SAMPLED_AS = new Map([["get_message_thread", "get_messages"]]);
+
 async function runTool(deps: ToolDeps, tool: string, rules: PolicyRules): Promise<Answer | null> {
-  const result = await callMcpTool(sampleDeps(deps, rules), tool, sampleArgs(tool));
+  const sampled = SAMPLED_AS.get(tool) ?? tool;
+  const result = await callMcpTool(sampleDeps(deps, rules), sampled, sampleArgs(sampled));
   if (result === null || result.isError === true) return null;
   const first = result.content[0];
   if (first?.type !== "text") return null;
@@ -363,8 +371,10 @@ async function previewOne(
  */
 function candidateTools(field: FieldRuleSpec, tool: string | undefined): string[] {
   const named = tool ?? field.tool;
+  // A tool sampled through another (`SAMPLED_AS`) would only repeat its answer.
   const reached = (name: string): boolean =>
     name !== METERED_TOOL &&
+    !SAMPLED_AS.has(name) &&
     shapesForScope({ tool: name, resourceType: field.resourceType }).length > 0;
   return named === null ? TOOL_NAMES.filter((name) => reached(name)) : [named];
 }
