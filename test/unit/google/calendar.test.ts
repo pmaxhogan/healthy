@@ -76,6 +76,12 @@ describe("buildEventBody", () => {
     expect(body.description).toBe("Synced by Healthy");
   });
 
+  it("writes a merged description when a patch passes one", () => {
+    expect(buildEventBody(MODEL, "Owner note\n\nSynced by Healthy").description).toBe(
+      "Owner note\n\nSynced by Healthy",
+    );
+  });
+
   it("sets transparency from the flag", () => {
     expect(buildEventBody(MODEL).transparency).toBe("opaque");
     expect(buildEventBody({ ...MODEL, transparent: true }).transparency).toBe("transparent");
@@ -159,6 +165,7 @@ describe("listSyncedEvents", () => {
           id: "ev-1",
           status: "confirmed",
           summary: "Follow-up",
+          description: "Owner note<br>-------<br>Synced by Healthy",
           start: { dateTime: "2026-10-01T15:00:00Z", timeZone: "Etc/UTC" },
           end: { dateTime: "2026-10-01T15:30:00Z", timeZone: "Etc/UTC" },
           colorId: "5",
@@ -196,6 +203,9 @@ describe("listSyncedEvents", () => {
     expect(events.map((event) => event.id)).toEqual(["ev-1", "ev-2"]);
     expect(events[0]?.extendedProperties?.private.key).toBe("prov-1:enc-1");
     expect(events[0]?.etag).toBe('"1"');
+    // The listing carries the description, so a patch can merge without a GET.
+    expect(events[0]?.description).toBe("Owner note<br>-------<br>Synced by Healthy");
+    expect(events[1]?.description).toBeNull();
     // A page entry with no start normalises to null rather than throwing.
     expect(events[1]?.start).toBeNull();
   });

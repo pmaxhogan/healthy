@@ -15,14 +15,17 @@
  * offset is a 50-minute event -- which is what the owner's afternoon actually
  * costs.
  *
- * **The description carries no clock.** It ends with a fixed "Synced by Healthy ·
- * do not edit" footer and nothing that changes from run to run. An unchanged
- * event is never patched (that is what the fingerprint is for), so a "last
- * checked <time>" stamp would have shown the time of the first write for ever --
- * a claim of freshness that was not true. How recently a health system was synced
- * is shown in the admin UI, which knows. The whole description, footer included,
- * is fingerprinted: it is static, so nothing is patched until something real
- * changes.
+ * **The description carries no clock.** `model.description` is Healthy's half of
+ * the event description -- a `-------` rule, a fixed "Synced by Healthy · do not
+ * edit below the line" header, then the details (see `description.ts`, which
+ * also owns keeping the owner's own text above the rule) -- and nothing in it
+ * changes from run to run. An unchanged event is never patched (that is what the
+ * fingerprint is for), so a "last checked <time>" stamp would have shown the time
+ * of the first write for ever -- a claim of freshness that was not true. How
+ * recently a health system was synced is shown in the admin UI, which knows. The
+ * whole block, rule and header included, is fingerprinted: it is static, so
+ * nothing is patched until something real changes. The owner's text above the
+ * rule is not part of the model and never reaches the fingerprint.
  *
  * **A ghost is derived, not rebuilt.** `ghostModel` takes the active model and
  * prefixes, greys and de-blocks it, and its fingerprint is a hash of the active
@@ -44,6 +47,8 @@ import { blindEventKey } from "../db/blind.ts";
 import { AppError } from "../lib/errors.ts";
 import { addMinutes, formatInZone } from "../lib/time.ts";
 
+import { healthyBlock, VANISHED_PREFIX } from "./description.ts";
+
 import type { Blinder } from "../db/blind.ts";
 import type { HealthSystemConfig } from "../db/schemas.ts";
 import type { NormalizedAddress, NormalizedAppointmentView } from "../fhir/normalize/types.ts";
@@ -60,10 +65,7 @@ export const DEFAULT_DURATION_MIN = 30;
  */
 const OFF_SCHEDULE_STATUSES: ReadonlySet<string> = new Set(["cancelled", "entered-in-error"]);
 
-/** The fixed tail of every description. Quoted in tests; do not reword lightly. */
-const FOOTER = "Synced by Healthy · do not edit";
 const GHOST_TITLE_PREFIX = "Cancelled: ";
-const VANISHED_PREFIX = "No longer on the health system's schedule as of ";
 
 /**
  * Characters a title template uses to join two values.
@@ -320,7 +322,7 @@ function joinInline(parts: readonly (string | undefined)[], separator: string): 
   return parts.filter((part): part is string => part !== undefined && part !== "").join(separator);
 }
 
-/** The description, minus the footer. */
+/** The appointment details: what goes below the rule and the header. */
 function descriptionBody(
   view: NormalizedAppointmentView,
   healthSystem: MappingHealthSystem,
@@ -340,7 +342,7 @@ function descriptionBody(
 
 /**
  * Everything the fingerprint covers, in a fixed order: every field written to
- * Google, the whole description included. Nothing in it moves between runs.
+ * Google, Healthy's whole description block included. Nothing in it moves between runs.
  */
 function fingerprintPayload(model: Omit<CalendarEventModel, "fingerprint">): string {
   return JSON.stringify([
@@ -411,7 +413,7 @@ export async function buildCalendarModel(
     encounterId: view.encounterId,
     healthSystem: healthSystem.id,
     title,
-    description: joinSections([descriptionBody(view, healthSystem), FOOTER]),
+    description: healthyBlock(descriptionBody(view, healthSystem)),
     ...(location !== undefined && { location }),
     start,
     end,

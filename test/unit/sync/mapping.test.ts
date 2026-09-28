@@ -351,7 +351,14 @@ describe("description", () => {
     expect(model.description).toContain("Casey Example — Cardiology");
     expect(model.description).toContain("Office Visit · planned");
     expect(model.description).toContain(PORTAL);
-    expect(model.description.endsWith("\n\nSynced by Healthy · do not edit")).toBe(true);
+    // Healthy's block: the rule, the header right below it, then the details.
+    expect(
+      model.description.startsWith(
+        "-------\nSynced by Healthy · do not edit below the line\nExample Regional",
+      ),
+    ).toBe(true);
+    expect(model.description).not.toContain("Synced by Healthy · do not edit\n");
+    expect(model.description.endsWith(PORTAL)).toBe(true);
   });
 
   it("carries no clock: an unchanged event is never patched, so a time would go stale", async () => {
@@ -373,7 +380,7 @@ describe("description", () => {
     );
 
     expect(model.description).not.toContain("\n".repeat(3));
-    expect(model.description.startsWith("Example Regional")).toBe(true);
+    expect(model.description).toMatch(/below the line\nExample Regional\n/u);
   });
 });
 

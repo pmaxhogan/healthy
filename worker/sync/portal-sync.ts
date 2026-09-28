@@ -85,6 +85,7 @@ import { errorFields } from "../lib/log.ts";
 import { fromIso, toIso } from "../lib/time.ts";
 
 import { resolveReconnectAlert } from "./alerts.ts";
+import { mergeDescription } from "./description.ts";
 import { buildCalendarModel, ghostModel } from "./mapping.ts";
 import { planChanges } from "./plan.ts";
 import {
@@ -125,7 +126,7 @@ import type { Repos } from "../db/index.ts";
 import type { CalendarEventRow, HealthSystemRow } from "../db/rows.ts";
 import type { PortalVisit } from "../ehr/mychart/index.ts";
 import type { CalendarClient } from "../google/calendar.ts";
-import type { CalendarEventModel, EventRecord } from "../google/types.ts";
+import type { CalendarEventBody, CalendarEventModel, EventRecord } from "../google/types.ts";
 
 /**
  * What the FHIR pass saw for one health system, as the dedupe needs it.
@@ -633,6 +634,8 @@ async function portalPlanInputs(
       key: row.event_key,
       fingerprint: "",
       ghostFingerprint: null,
+      description: null,
+      ghostDescription: null,
       offSchedule: true,
       absent: true,
       upcoming: true,
@@ -701,6 +704,7 @@ async function portalCandidate(
 ): Promise<PlanCandidate> {
   args.models.set(args.key, args.mapping.model);
   let ghostFingerprint: string | null = null;
+  let ghostDescription: string | null = null;
   if (args.offSchedule || args.absent) {
     // When it FIRST went away, so the ghost's own description -- and therefore its
     // fingerprint -- stops moving after the run that ghosted it.
@@ -713,11 +717,14 @@ async function portalCandidate(
     });
     args.ghosts.set(args.key, ghost);
     ghostFingerprint = ghost.fingerprint;
+    ghostDescription = ghost.description;
   }
   return {
     key: args.key,
     fingerprint: args.mapping.model.fingerprint,
     ghostFingerprint,
+    description: args.mapping.model.description,
+    ghostDescription,
     offSchedule: args.offSchedule,
     absent: args.absent,
     upcoming: fromIso(args.mapping.reportedStart) > input.ctx.now(),
@@ -755,7 +762,7 @@ async function applyPortalEntry(
       const patched = await input.calendar.patchEvent(
         input.calendarId,
         entry.googleEventId,
-        buildEventBody(ghost),
+        patchBody(input, entry.googleEventId, ghost),
       );
       await input.repos.calendarEvents.markGhost(entry.key, {
         // A null patch means the owner deleted the event by hand. The row still
@@ -794,7 +801,7 @@ async function patchPortal(
   const patched = await input.calendar.patchEvent(
     input.calendarId,
     entry.googleEventId,
-    buildEventBody(model),
+    patchBody(input, entry.googleEventId, model),
   );
   if (patched === null) {
     // It went away between the listing and the patch; inserting is what the plan
@@ -807,6 +814,20 @@ async function patchPortal(
   await persistPortalRow(input, healthSystemId, entry.key, patched.id, model, restore);
   if (restore) input.state.summary.eventsRestored += 1;
   else input.state.summary.eventsPatched += 1;
+}
+
+/**
+ * A patch body whose description merges the model's block into the event's
+ * current one, as this run's listing saw it -- so the owner's text above the rule
+ * survives without a GET. That text is personal content: never logged.
+ */
+function patchBody(
+  input: PortalPassInput,
+  googleEventId: string,
+  model: CalendarEventModel,
+): CalendarEventBody {
+  const listed = input.googleEvents.find((event) => event.id === googleEventId);
+  return buildEventBody(model, mergeDescription(listed?.description ?? null, model.description));
 }
 
 function ghostedAtFor(key: string, rows: readonly CalendarEventRow[], now: number): number {

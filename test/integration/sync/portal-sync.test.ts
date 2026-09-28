@@ -194,6 +194,32 @@ describe("portal visits on the calendar", () => {
     ).toBe("Annual physical · A. Example, MD");
   });
 
+  it("keeps the owner's text above the rule through a patch and a ghost", async () => {
+    const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1" })] } });
+    await portalRun(fix);
+    const event = fix.upstreams.calendar.byKey().get(await portalKey(fix.healthSystem, "csn-1"));
+    if (event === undefined) throw new Error("csn-1 was not calendared");
+    const owner = "Owner note<br><br>";
+    event.description = `${owner}${String(event.description)}`;
+
+    // An edit above the rule alone costs no write.
+    const untouched = await portalRun(fix);
+    expect(untouched.eventsPatched).toBe(0);
+
+    fix.portal.visits = [portalVisit({ csn: "csn-1", visitType: "Annual physical" })];
+    const patched = await portalRun(fix);
+    expect(patched.eventsPatched).toBe(1);
+    expect(String(event.description).startsWith(`${owner}-------<br>Synced by Healthy`)).toBe(true);
+
+    fix.portal.visits = [portalVisit({ csn: "csn-1", status: "canceled" })];
+    const ghosted = await portalRun(fix);
+    expect(ghosted.eventsGhosted).toBe(1);
+    expect(String(event.description).startsWith(`${owner}-------<br>`)).toBe(true);
+    expect(String(event.description)).toContain("No longer on the health system");
+    const settled = await portalRun(fix);
+    expect(settled.eventsGhosted).toBe(0);
+  });
+
   it("ghosts a visit the portal reports as canceled, with its own details", async () => {
     const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1" })] } });
     await portalRun(fix);

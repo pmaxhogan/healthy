@@ -118,6 +118,30 @@ observed to vary)**. For Google, the 7-day expiry described in
 [docs/setup-google.md](setup-google.md) is the most common cause if the
 consent screen was ever left in Testing status.
 
+## Event descriptions
+
+A synced event's description is shared with the owner. Healthy owns
+everything from a line that is exactly `-------` down: that line, then
+"Synced by Healthy · do not edit below the line", then the appointment
+details. Anything typed **above** the line is the owner's and is kept
+verbatim on every update (HTML included, since Google's web editor saves
+edited descriptions as HTML); anything **below** it is overwritten. If the line
+is missing, the Healthy block is appended again after whatever the
+description holds. An edit above the line never causes a write; an edit below
+it, or a deleted line, is repaired on the next sync. The current description
+comes from the same `events.list` call the sync already makes, so none of this
+costs an extra Google request, and the owner's text is never logged or stored.
+
+Events written before the line existed (details ending in "Synced by Healthy ·
+do not edit") are rewritten once into the new layout, and any note the owner
+added after that old footer is kept above the new line. On that first sync
+after the change, every event inside the sync window is patched once and every
+existing ghost there is re-ghosted once, so the run's patched and ghosted
+counts are briefly high without anything having been cancelled. Events older
+than the window, and ghosts Healthy can no longer rebuild (the cached
+appointment has expired, or a portal visit that vanished), are not rewritten
+and keep the old layout.
+
 ## Ghost events
 
 An appointment that is cancelled, or simply no longer appears in the

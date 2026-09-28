@@ -93,6 +93,13 @@ export interface EventRecord {
   id: string;
   status: string;
   summary: string | null;
+  /**
+   * The description as Google holds it now, owner's edits and all. Read only so
+   * a write can keep the owner's text above the rule (`worker/sync/description.ts`);
+   * `events.list` returns it with everything else, so this costs no extra call.
+   * Personal content: never logged, never stored.
+   */
+  description: string | null;
   start: EventDateTime | null;
   end: EventDateTime | null;
   colorId: string | null;
