@@ -15,7 +15,7 @@ The server registers (in `worker/mcp/tools/index.ts`): `get_health_summary`,
 `get_medication_fills`, `get_allergies`, `get_immunizations`,
 `get_lab_results`, `get_vitals`, `get_social_history`, `get_procedures`,
 `get_diagnostic_reports`, `get_documents`, `get_document_text`,
-`get_care_team`, `get_care_plans`, `get_goals`, `get_devices`,
+`get_messages`, `get_message_thread`, `get_care_team`, `get_care_plans`, `get_goals`, `get_devices`,
 `get_coverage`, `get_service_requests`. Most accept an optional
 `health_systems[]` filter and an optional `raw` flag that additionally returns
 the underlying FHIR resource (filtered by the same policy as the normalised
@@ -145,6 +145,55 @@ Encounters:
 `get_health_summary`'s appointments section uses the same merge: the five
 appointments nearest to now, upcoming ones first (soonest first), then the
 latest past ones.
+
+### Secure messages: the patient portal's Message Center
+
+Each hourly portal pass, after the upcoming visits and with the same session
+(never a sign-in of its own), reads every conversation in every Message
+Center folder — conversations, appointments, automated letters and notices,
+archive, bookmarked — of every organisation the portal shows, every page, and
+every message in each conversation, older pages included. It never opens a
+conversation the way the portal's own page does (that marks it read), and
+stores each message in `portal_messages`: the body as plain text (the portal's
+HTML is flattened, never kept), sealed and padded like the FHIR cache, keyed
+by a blind of its content rather than the portal's per-session ids.
+`portal_message_sync` records how each health system's last read went.
+
+- **One item per message**, newest first: `id`, `threadId`, `subject`,
+  `folder`, `sent`, `direction` (`from_patient` / `to_patient`), `from`
+  (`role`: `patient`, `proxy`, `practitioner` or `system`, and `name`),
+  `practitioners[]` (the care team the conversation is with), `body`,
+  `attachments[]` (names and file types only; files are never fetched), and
+  the health system tags. `get_message_thread` returns one `threadId`'s messages
+  oldest first. `from`/`to` window on `sent`; `folder`, `direction` and
+  `threadId` filter.
+- **One message, one item, across organisations.** Each portal also shows the
+  conversations of the other organisations the chart is linked to, so one
+  message can be stored twice. Two copies are one message only when they carry
+  the same content — the same delivery instant to the second, the same author
+  role, the same text; time alone never merges two messages. The copy that
+  answers is the one whose own organisation the conversation belongs to
+  (`firstParty: true`); a second-hand copy is kept, with `firstParty: false`,
+  `via` and `organization`, only when no first-party copy is stored (the same
+  ranking as visits, including the two-day staleness rule). `threadId` and
+  `id` are the same from either portal.
+- **Never deleted.** A first-party message its portal stops listing is kept
+  with `noLongerListed: true`; a second-hand one is never flagged, because a
+  linked organisation can drop out of the Message Center for a while with no
+  error at all.
+- **Policy.** Items are tagged `resourceType: "Communication"`: a `resource`
+  rule on Communication removes them and their coverage, and every
+  `Communication.<field>` rule reaches them. `from.name` and
+  `practitioners[].name` are names of people, judged like any reference: a
+  clinician's name goes wherever the owner withholds clinicians' names
+  (a denied Practitioner type, a `Practitioner.name` rule, a rule on an
+  Encounter's `practitioners`), the patient's wherever the patient's name is
+  withheld. The body is prose and is not scrubbed (see SECURITY.md's known
+  limits). There is no `raw`.
+- **Coverage** is `Communication` per health system, from the portal pass's own
+  record: `failed` with the error code when the last read failed (for example
+  `portal_session_expired`), `partial` when it could not prove it saw
+  everything, `stale` after six hours without a successful read.
 
 ### Conditions: the problem list and encounter diagnoses
 

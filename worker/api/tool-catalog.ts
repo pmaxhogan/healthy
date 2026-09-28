@@ -104,6 +104,16 @@ export const TOOL_CATALOG: readonly McpToolInfoDto[] = [
     resourceTypes: ["DocumentReference", "Binary"],
   },
   {
+    name: "get_messages",
+    description: "Patient-portal secure messages, every folder, one item per message.",
+    resourceTypes: ["Communication"],
+  },
+  {
+    name: "get_message_thread",
+    description: "One patient-portal conversation, every message in order.",
+    resourceTypes: ["Communication"],
+  },
+  {
     name: "get_care_team",
     description: "Care team members and their roles.",
     resourceTypes: ["CareTeam", "Practitioner", "PractitionerRole"],

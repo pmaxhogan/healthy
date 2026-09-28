@@ -22,6 +22,7 @@ import type {
   PortalAdapter,
   PortalAdapterDeps,
   PortalClient,
+  PortalThread,
   PortalVisit,
   PortalVisitStatus,
 } from "../../../worker/ehr/mychart/index.ts";
@@ -57,7 +58,14 @@ export interface FakePortal {
   loginError: AppError | null;
   /** Thrown by `loadUpcoming` instead of resolving. */
   loadError: AppError | null;
+  /** Threads `loadMessages` answers with. Assign to change what the Message Center shows. */
+  threads: PortalThread[];
+  /** False to make `loadMessages` report a read it could not prove complete. */
+  messagesComplete: boolean;
+  /** Thrown by `loadMessages` instead of resolving. */
+  messagesError: AppError | null;
   calls: {
+    loadMessages: number;
     logins: number;
     sendCodes: number;
     validates: number;
@@ -100,7 +108,17 @@ export function fakePortal(overrides: Partial<FakePortal> = {}): FakePortal {
     loginStatus: "awaiting_code",
     loginError: null,
     loadError: null,
-    calls: { logins: 0, sendCodes: 0, validates: 0, loadUpcoming: 0, sessionChecks: 0 },
+    threads: [],
+    messagesComplete: true,
+    messagesError: null,
+    calls: {
+      loadMessages: 0,
+      logins: 0,
+      sendCodes: 0,
+      validates: 0,
+      loadUpcoming: 0,
+      sessionChecks: 0,
+    },
     submitted: [],
     clientDeps: [],
     ...overrides,
@@ -137,6 +155,15 @@ export function fakePortal(overrides: Partial<FakePortal> = {}): FakePortal {
       // visits only, and FHIR is the source for history -- so the fake answers with
       // nothing rather than pretending to page through a past it has no fixture for.
       loadPast: () => Promise.resolve([]),
+      loadMessages: () => {
+        state.calls.loadMessages += 1;
+        if (state.messagesError !== null) throw state.messagesError;
+        return Promise.resolve({
+          threads: structuredClone(state.threads),
+          complete: state.messagesComplete,
+          pages: 1,
+        });
+      },
       isSessionAlive: () => {
         state.calls.sessionChecks += 1;
         return Promise.resolve(state.alive);

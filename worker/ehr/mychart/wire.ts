@@ -111,6 +111,23 @@ export const PATHS = {
    * to it, so an anonymous session can answer it too. See `isSessionAlive`.
    */
   home: "Home",
+  /**
+   * [confirmed from capture] The Message Center's organisation list: the
+   * portal's own (`isLocal`) and every linked one whose messages it shows.
+   * JSON in, JSON out; see `worker/ehr/mychart/messages.ts`.
+   */
+  conversationOrganizations: "api/conversations/GetOrganizations",
+  /**
+   * [confirmed from capture] One page of one folder's conversations, each with
+   * its newest (up to five) messages. Paged per organisation.
+   */
+  conversationList: "api/conversations/GetConversationList",
+  /**
+   * [confirmed from capture] A conversation's older messages, five at a time,
+   * before a given instant. Read-only: unlike `GetConversationDetails`, which
+   * the sync never calls, it does not mark anything read.
+   */
+  conversationMessages: "api/conversations/GetConversationMessages",
 } as const;
 
 /** Form field names. */
@@ -265,6 +282,28 @@ export const OLDEST_RENDERED_DATE_PARAM = "oldestRenderedDate";
 
 /** [confirmed] The cache-buster every one of these endpoints carries. */
 export const NO_CACHE_PARAM = "noCache";
+
+/**
+ * [confirmed from capture] The Message Center folders, by the numeric `tag` the
+ * list endpoint takes. Disjoint: a conversation is in exactly one of them, and
+ * each folder's `totalCount` matched the paginated count in the capture. Every
+ * one is read -- "automated" holds the letters and notices the portal sends on
+ * its own, which are messages too.
+ */
+export const MESSAGE_FOLDERS = [
+  { tag: 1, folder: "conversations" },
+  { tag: 7, folder: "appointments" },
+  { tag: 6, folder: "automated" },
+  { tag: 2, folder: "archive" },
+  { tag: 3, folder: "bookmarked" },
+] as const;
+
+/**
+ * [confirmed from capture] The body property every Message Center request
+ * carries: 32 hex characters the page's own script generates per request. A
+ * fresh random value is accepted.
+ */
+export const PAGE_NONCE_KEY = "PageNonce";
 
 /**
  * [confirmed from capture] The `SendCode` body, exactly as the page's own

@@ -308,6 +308,7 @@ describe("toRunSummaryDto", () => {
     backedOff: false,
     portalVisits: 5,
     portalSkipped: 2,
+    portalMessages: 0,
     portalErrors: ["portal_session_expired"],
   };
 
@@ -384,6 +385,7 @@ describe("toRunDto", () => {
         backedOff: false,
         portalVisits: 0,
         portalSkipped: 0,
+        portalMessages: 0,
         portalErrors: [],
       },
     });

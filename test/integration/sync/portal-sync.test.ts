@@ -64,6 +64,12 @@ import type * as fhir4 from "fhir/r4";
 
 beforeEach(resetSyncDb);
 
+/** A copy, sorted. */
+function sorted(values: readonly string[]): string[] {
+  // eslint-disable-next-line unicorn/no-array-sort -- Array#toSorted is ES2023 and the integration project compiles against the Worker's ES2022 lib; this sorts a fresh copy.
+  return [...values].sort((a, b) => a.localeCompare(b));
+}
+
 const HOST = "fhir.a.example.test";
 /** An hour ahead of the fixed clock, so a visit is unambiguously upcoming. */
 const SOON = "2026-06-20T14:30:00+00:00";
@@ -1295,5 +1301,85 @@ describe("a session proven good minutes ago", () => {
     await seedPortalAccount(syncCtx(), healthSystem.healthSystemId, { active: false });
 
     await expect(recentSessionAge(syncCtx(), healthSystem.healthSystemId)).resolves.toBeNull();
+  });
+});
+
+describe("portal secure messages", () => {
+  const THREAD = {
+    subject: "Invented subject",
+    folder: "conversations" as const,
+    external: false,
+    practitioners: [{ name: "Nurse Example A" }],
+    messages: [
+      {
+        sent: "2026-05-01T10:00:00.000Z",
+        role: "patient" as const,
+        body: "An invented question.",
+        attachments: [],
+      },
+      {
+        sent: "2026-05-01T12:00:00.000Z",
+        role: "practitioner" as const,
+        author: "Nurse Example A",
+        body: "An invented answer.",
+        attachments: [],
+      },
+    ],
+  };
+
+  it("reads the Message Center with the same session and stores every message", async () => {
+    const fix = await fixture({ portal: { threads: [THREAD] } });
+
+    const summary = await portalRun(fix);
+
+    expect(fix.portal.calls.loadMessages).toBe(1);
+    expect(summary.portalMessages).toBe(2);
+    expect(summary.portalErrors).toStrictEqual([]);
+    const repos = syncRepos(fix.ctx);
+    const stored = await repos.portalMessages.list(fix.healthSystem.healthSystemId);
+    expect(sorted(stored.map((row) => row.message.body))).toStrictEqual([
+      "An invented answer.",
+      "An invented question.",
+    ]);
+    expect(await repos.portalMessages.listSync()).toStrictEqual([
+      expect.objectContaining({
+        healthSystemId: fix.healthSystem.healthSystemId,
+        lastErrorCode: null,
+        complete: true,
+        threads: 1,
+        messages: 2,
+      }),
+    ]);
+  });
+
+  it("records a failed read without costing the visits, and never signs in for it", async () => {
+    const fix = await fixture({
+      portal: {
+        visits: [portalVisit({ csn: "csn-1" })],
+        messagesError: new AppError("portal_session_expired", "the session died mid-read"),
+      },
+    });
+
+    const summary = await portalRun(fix);
+
+    expect(summary.eventsInserted).toBe(1);
+    expect(summary.portalMessages).toBe(0);
+    expect(fix.portal.calls.logins).toBe(0);
+    const [sync] = await syncRepos(fix.ctx).portalMessages.listSync();
+    expect(sync).toMatchObject({ lastErrorCode: "portal_session_expired", lastOkAt: null });
+  });
+
+  it("does not read messages at all when the session is dead and the run will not sign in", async () => {
+    const fix = await fixture({ portal: { alive: false, threads: [THREAD] } });
+
+    await runCalendarSync(fix.ctx, {
+      trigger: "manual",
+      portalOnly: true,
+      signInWaitSeconds: 0,
+      deps: { ...fix.upstreams.deps, portalAdapter: fix.portal.adapter },
+    });
+
+    expect(fix.portal.calls.loadMessages).toBe(0);
+    expect(fix.portal.calls.logins).toBe(0);
   });
 });

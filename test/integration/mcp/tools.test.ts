@@ -950,3 +950,85 @@ describe("get_document_text", () => {
     });
   });
 });
+
+describe("portal messages through the MCP", () => {
+  const shared = {
+    sent: "2026-04-10T15:00:00.000Z",
+    role: "practitioner" as const,
+    author: "Nurse Example A",
+    body: "An invented reply both portals show.",
+    attachments: [],
+  };
+  const thread = (external: boolean, extra: (typeof shared)[] = []) => ({
+    subject: "Invented subject",
+    folder: "conversations" as const,
+    external,
+    ...(external && { organization: NAME_A }),
+    practitioners: [{ name: "Nurse Example A" }],
+    messages: [shared, ...extra],
+  });
+
+  async function storeBoth(): Promise<void> {
+    const db = repos();
+    await db.portalMessages.record(world.seeded.healthSystemA, [thread(false)], {
+      complete: true,
+    });
+    await db.portalMessages.record(
+      world.seeded.healthSystemB,
+      [
+        thread(true),
+        {
+          ...thread(false),
+          subject: "Only at B",
+          messages: [
+            {
+              ...shared,
+              author: "Messaging System",
+              body: "An invented notice only B has.",
+              role: "system" as const,
+            },
+          ],
+        },
+      ],
+      { complete: true },
+    );
+    for (const id of [world.seeded.healthSystemA, world.seeded.healthSystemB]) {
+      await db.portalMessages.markSync(id, { ok: true, complete: true, threads: 1, messages: 1 });
+    }
+  }
+
+  it("answers a message two portals show once, from its own health system, after a real seal", async () => {
+    await storeBoth();
+
+    const answer = await call(world.client, "get_messages");
+
+    expect(answer.isError).toBe(false);
+    expect(answer.items).toHaveLength(2);
+    const reply = answer.items.find((item) => item.body === shared.body);
+    expect(reply).toMatchObject({
+      healthSystem: NAME_A,
+      firstParty: true,
+      direction: "to_patient",
+      subject: "Invented subject",
+    });
+    const notice = answer.items.find((item) => item.subject === "Only at B");
+    expect(notice).toMatchObject({ healthSystem: NAME_B, firstParty: true });
+
+    const threadId = String(reply?.threadId);
+    const conversation = await call(world.client, "get_message_thread", { threadId });
+    expect(conversation.items.map((item) => item.body)).toStrictEqual([shared.body]);
+  });
+
+  it("withholds clinicians' names on the owner's field rule, and every message on a resource rule", async () => {
+    await storeBoth();
+    await repos().mcpPolicy.add("field", "Practitioner.name");
+
+    const named = await call(world.client, "get_messages");
+    expect(named.text).not.toContain("Nurse Example A");
+    expect(named.text).toContain(shared.body);
+
+    await repos().mcpPolicy.add("resource", "Communication");
+    const hidden = await call(world.client, "get_messages");
+    expect(hidden.items).toStrictEqual([]);
+  });
+});

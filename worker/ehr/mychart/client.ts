@@ -40,6 +40,7 @@ import { base64Utf8 } from "../adapter.ts";
 import { isLoginPage } from "./discovery.ts";
 import { bodyMentions, findAntiforgeryField, formFields, inputFields } from "./html.ts";
 import { isOpenIdHandoff, mountedUrl, normaliseMount, pathOf, portalFetch } from "./http.ts";
+import { loadMessageCenter } from "./messages.ts";
 import { parsePast, parseUpcoming } from "./visits.ts";
 import {
   ANTIFORGERY_FIELD_NAMES,
@@ -68,6 +69,7 @@ import {
 import type { CookieJar } from "./cookie-jar.ts";
 import type { PortalEndpoint } from "./discovery.ts";
 import type { PortalHttpDeps, PortalResponse } from "./http.ts";
+import type { PortalMessagesResult } from "./messages.ts";
 import type { PortalVisit } from "./visits.ts";
 import type { UsernameField } from "./wire.ts";
 import type { Logger } from "../../lib/log.ts";
@@ -138,6 +140,12 @@ export interface PortalClient {
    * several; this flattens them, because the calendar does not care.
    */
   loadPast(timeZone: string, oldestRenderedDate?: string): Promise<PortalVisit[]>;
+  /**
+   * Every secure-message conversation in every Message Center folder, with every
+   * message in each, read to the end. Read-only: nothing is marked read. See
+   * `messages.ts`.
+   */
+  loadMessages(): Promise<PortalMessagesResult>;
   /** A cheap authenticated GET. False means the session is gone, not that it failed. */
   isSessionAlive(): Promise<boolean>;
   /** The live jar, for the caller to seal after any call. */
@@ -761,6 +769,65 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
   };
 
   /**
+   * One Message Center POST: JSON in, JSON out, the antiforgery token in a header.
+   *
+   * The same three checks as `visitJson`, in the same order and for the same
+   * reasons: a login page is an expired session, a 200 carrying HTML is a token
+   * failure (these endpoints answer a missing token exactly that way, silently),
+   * and only then is the body parsed.
+   */
+  const messageCenterJson = async (
+    token: string,
+    path: string,
+    label: string,
+    body: unknown,
+  ): Promise<unknown> => {
+    const response = await portalFetch(http, {
+      url: url(path),
+      method: "POST",
+      endpoint: label,
+      accept: "json",
+      headers: { [ANTIFORGERY_HEADER]: token },
+      jsonBody: body,
+    });
+    assertSession(response, label);
+    if (response.status !== 200 || !looksLikeJson(response)) {
+      throw new AppError("portal_parse_failed", "the message center answered with a page", {
+        endpoint: label,
+        status: response.status,
+      });
+    }
+    try {
+      return JSON.parse(response.body);
+    } catch (error) {
+      throw new AppError(
+        "portal_parse_failed",
+        "the message center body was not JSON",
+        { endpoint: label, status: response.status },
+        { cause: error },
+      );
+    }
+  };
+
+  const loadMessages = async (): Promise<PortalMessagesResult> => {
+    // The visits page's token: a capture confirmed the Message Center accepts it,
+    // and it is the page this client already knows how to reach on both flavours.
+    const page = await tokenPage(PATHS.visitsList, "VisitsList", { [NO_CACHE_PARAM]: noCache() });
+    assertSession(page.response, "VisitsList");
+    const result = await loadMessageCenter({
+      post: (path, label, body) => messageCenterJson(page.value, path, label, body),
+      nonce: () => crypto.randomUUID().replaceAll("-", ""),
+    });
+    logger.info("portal.messages", {
+      threads: result.threads.length,
+      messages: result.threads.reduce((sum, thread) => sum + thread.messages.length, 0),
+      pages: result.pages,
+      complete: result.complete,
+    });
+    return result;
+  };
+
+  /**
    * Is the session alive -- decided by a page only a signed-in session is served.
    *
    * `Home`, and only a chain that *ends* on `Home` under this mount, counts. That
@@ -804,6 +871,7 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
     secondaryValidation: { sendCode, validate },
     loadUpcoming,
     loadPast,
+    loadMessages,
     isSessionAlive,
     jar,
   };

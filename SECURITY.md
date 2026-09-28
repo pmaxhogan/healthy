@@ -37,6 +37,7 @@ Three treatments, and every column is in exactly one of them:
 | Patient FHIR id on the connection                                                           | D1                  | Sealed, padded                                           |
 | Cached FHIR resources (including the Patient)                                               | D1                  | Payload sealed; resource id blinded; content hash keyed  |
 | Patient-portal upcoming visits                                                              | D1                  | Payload sealed; visit number blinded; content hash keyed |
+| Patient-portal secure messages                                                              | D1                  | Payload sealed, padded; keys blinded; content hash keyed |
 | Calendar bookkeeping: event key, encounter, visit number, calendar id                       | D1                  | Blinded; fingerprint keyed                               |
 | Calendar bookkeeping: a row's start and real calendar id                                    | D1                  | Sealed together, padded (`calendar_events.detail_enc`)   |
 | Google event marker (`extendedProperties.private.key`, `fp`)                                | Google              | The blinded event key and the keyed fingerprint          |
@@ -78,6 +79,13 @@ listed rather than left to be inferred:
   `fetched_at`, `expires_at`**: a word from a fixed status vocabulary and
   bookkeeping. `expires_at` is rounded up to a 30-day boundary, so it does not
   date the visit (see "The visit timeline" below).
+- **`portal_messages.health_system_id`, `state`, `missing_since`,
+  `fetched_at`**, and **`portal_message_sync`**: whether a stored message is
+  still listed by its own portal, bookkeeping, and each health system's last
+  Message Center read (when, whether it was complete, a stable error code, and
+  thread and message counts). The subject, body, sender, care team, folder and
+  owning organisation are all in the sealed payload; the row keys are blinds of
+  the message's content, never the portal's ids.
 - **`portal_accounts.session_state`, the attempt counters and the
   timestamps**: whether the session is live, how many sign-ins were spent
   today, and how many emailed codes the scheduled sync asked for and when.
@@ -342,8 +350,16 @@ history in CI.
 
 - The exposure policy removes structured fields, references and narratives; it
   does not scrub free prose. A name a clinician typed into a report's
-  `conclusion`, a note, or a document's text (`get_document_text`) is returned
-  as written unless that field is hidden or the tool denied.
+  `conclusion`, a note, a document's text (`get_document_text`) or a secure
+  message's `body` or `subject` (`get_messages`) is returned as written unless
+  that field is hidden or the tool denied. A message's sender and care team are
+  structured and are withheld by the name rules; a signature inside the body is
+  prose.
+- A secure message two portals show is recognised as one only by identical
+  content (instant, author role, text). A copy of a denied health system's
+  message is dropped only when that system's own copy is stored, as with visits;
+  a linked organisation that is not connected has no copy to match against, so
+  its messages are answered as the showing portal's, marked `firstParty: false`.
 
 - `DATA_KEY` has no key id in the envelope, so rotating it invalidates existing
   sealed columns and moves every blinded value. Rotation currently means

@@ -16,7 +16,7 @@
 
 import type { ConnectionStatus, HealthSystemEnvironment } from "../db/rows.ts";
 import type { SyncWarning } from "../db/schemas.ts";
-import type { PortalVisit } from "../ehr/mychart/index.ts";
+import type { PortalMessage, PortalThread, PortalVisit } from "../ehr/mychart/index.ts";
 import type { Logger } from "../lib/log.ts";
 import type { PolicyRules } from "../policy/rules.ts";
 
@@ -62,6 +62,36 @@ export interface PortalVisitRecord {
   missing: boolean;
   /** Unix seconds the portal pass last saw it. A stale copy loses cross-health system ties. */
   fetchedAt: number;
+}
+
+/**
+ * One secure message the portal pass stored (`portal_messages`), opened.
+ *
+ * `threadId` and `messageId` are keyed blinds of the thread's and the message's
+ * content, the same for one message whichever portal it was read from;
+ * `fingerprint` is the content digest two portals' copies are matched on (see
+ * `worker/sync/message-dedupe.ts`). Never returned as such.
+ */
+export interface PortalMessageRecord {
+  threadId: string;
+  messageId: string;
+  fingerprint: string;
+  thread: Omit<PortalThread, "messages">;
+  message: PortalMessage;
+  /** The portal's own organisation stopped listing it. */
+  missing: boolean;
+}
+
+/** How one health system's last Message Center read went. */
+export interface PortalMessageSyncEntry {
+  healthSystemId: string;
+  lastAttemptAt: number;
+  /** Unix seconds of the last successful read, or null when none has succeeded. */
+  lastOkAt: number | null;
+  /** Null when the last attempt succeeded. */
+  lastErrorCode: string | null;
+  /** False when that read could not prove it saw everything. */
+  complete: boolean;
 }
 
 /** Live row counts, for `get_health_summary` and the admin overview. */
@@ -197,6 +227,13 @@ export interface ToolDeps {
    * before it happens, so this is where `get_appointments` finds them.
    */
   portalVisits(healthSystemId: string): Promise<PortalVisitRecord[]>;
+  /**
+   * Every secure message the portal pass stored for one health system
+   * (`portal_messages`), in no particular order. What `get_messages` answers from.
+   */
+  portalMessages(healthSystemId: string): Promise<PortalMessageRecord[]>;
+  /** Every health system's last Message Center read, for `get_messages`' coverage. */
+  portalMessageSync(): Promise<PortalMessageSyncEntry[]>;
   counts(): Promise<CacheCount[]>;
   syncStatus(): Promise<SyncStatusEntry[]>;
   /**

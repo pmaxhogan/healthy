@@ -169,6 +169,7 @@ describe("reposFor", () => {
         "mcpPolicy",
         "oauthStates",
         "portalAccounts",
+        "portalMessages",
         "portalVisits",
         "healthSystems",
         "runLog",

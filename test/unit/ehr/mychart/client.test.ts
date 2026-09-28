@@ -48,6 +48,13 @@ import {
   upcomingPayload,
   visitsListPage,
 } from "./fixtures.ts";
+import {
+  LOCAL_ORG,
+  NURSE_KEY,
+  answerMessageCenter,
+  message,
+  messageCenter,
+} from "./message-fixtures.ts";
 
 import type { PortalCall, PortalFetchStub } from "./fixtures.ts";
 import type { PortalClient } from "../../../../worker/ehr/mychart/client.ts";
@@ -1155,5 +1162,67 @@ describe("a deployment that signs in through OpenID Connect", () => {
     // The credentials never went anywhere: the only call was the page fetch.
     expect(stub.calls).toHaveLength(1);
     expect(stub.calls[0]?.method).toBe("GET");
+  });
+});
+
+/** A signed-in portal whose Message Center answers from a synthetic mailbox. */
+function messagePortal(state = messageCenter()): PortalFetchStub {
+  const prefix = "/MyChart/";
+  return stubPortal((call) => {
+    const path = new URL(call.url).pathname;
+    if (path === "/MyChart/Visits/VisitsList" && call.method === "GET") {
+      return html(visitsListPage());
+    }
+    if (call.method === "POST" && path.startsWith(`${prefix}api/conversations/`)) {
+      const body = JSON.parse(call.body ?? "{}") as Record<string, unknown>;
+      return json(answerMessageCenter(state, path.slice(prefix.length), body));
+    }
+    return new Response("not found", { status: 404 });
+  });
+}
+
+describe("loadMessages", () => {
+  it("posts JSON with the visits page's token in a header and a fresh nonce", async () => {
+    const state = messageCenter({
+      conversations: [
+        {
+          id: "c1",
+          organizationId: LOCAL_ORG,
+          tag: 1,
+          subject: "Invented subject",
+          messages: [message("m1", 1, { empKey: NURSE_KEY })],
+        },
+      ],
+    });
+    const stub = messagePortal(state);
+
+    const result = await client(stub).loadMessages();
+
+    expect(result.threads).toHaveLength(1);
+    const list = find(stub, "POST", "/api/conversations/GetConversationList");
+    expect(list?.headers.__requestverificationtoken).toBe(TOKEN_2);
+    expect(list?.headers["content-type"]).toContain("application/json");
+    const body = JSON.parse(list?.body ?? "{}") as Record<string, unknown>;
+    expect(body.PageNonce).toMatch(/^[\da-f]{32}$/u);
+    expect(body.searchQuery).toBe("");
+  });
+
+  it("reads a 200 carrying a page as a token failure, not an empty inbox", async () => {
+    const stub = routed({
+      "GET /MyChart/Visits/VisitsList": () => html(visitsListPage()),
+      "POST /MyChart/api/conversations/GetOrganizations": () =>
+        html("<html><body>An error page</body></html>"),
+    });
+
+    await expect(codeOf(client(stub).loadMessages())).resolves.toBe("portal_parse_failed");
+  });
+
+  it("reports portal_session_expired when the token page bounces to login", async () => {
+    const stub = routed({
+      "GET /MyChart/Visits/VisitsList": () => redirect(`${HOST}/MyChart/Authentication/Login`),
+      "GET /MyChart/Authentication/Login": () => html(loginPageNew()),
+    });
+
+    await expect(codeOf(client(stub).loadMessages())).resolves.toBe("portal_session_expired");
   });
 });

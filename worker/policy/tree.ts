@@ -536,6 +536,15 @@ const DATATYPES: Readonly<Record<string, FieldSpecs>> = {
   "N.Period": { start: "string", end: "string" },
   "N.PatientAddress": { city: "string", state: "string" },
   "N.Identifiers": { csn: ["string", "The visit's contact serial number"] },
+  "N.MessageSender": {
+    role: ["string", "patient, proxy, practitioner or system"],
+    name: ["string", "The sender's name"],
+  },
+  "N.PractitionerName": { name: ["string", "The clinician's name"] },
+  "N.MessageAttachment": {
+    name: ["string", "The file's name"],
+    extension: ["string", "Its file type"],
+  },
 };
 
 // --- raw FHIR resources, top level -----------------------------------------
@@ -1415,6 +1424,33 @@ const DOCUMENT_TEXT = {
   text: ["string", "The document's full text"],
 } as const;
 
+/**
+ * One secure message (`get_messages`, `get_message_thread`). There is no FHIR
+ * resource behind it -- it is read from the patient portal -- so this view is the
+ * whole of its shape, under FHIR's own name for a message.
+ */
+const MESSAGE = {
+  resourceType: ["string", "Always Communication"],
+  id: ["string", "The message's id"],
+  threadId: ["string", "The conversation's id"],
+  subject: ["string", "The conversation's subject line"],
+  folder: ["string", "conversations, appointments, automated, archive or bookmarked"],
+  sent: ["string", "When the message was delivered"],
+  direction: ["string", "from_patient or to_patient"],
+  from: ["N.MessageSender", "Who wrote it"],
+  practitioners: ["N.PractitionerName[]", "The care team the conversation is with"],
+  body: ["string", "The message's full text"],
+  attachments: ["N.MessageAttachment[]", "Attached files (names only)"],
+  organization: ["string", "The organisation a second-hand copy belongs to"],
+  source: ["string", "Always portal"],
+  firstParty: ["boolean", "False when another organisation's portal showed it"],
+  via: ["string", "The health system whose portal showed it second-hand"],
+  noLongerListed: ["boolean", "True when the portal stopped listing it"],
+  ...TAGS,
+} as const;
+
+const MESSAGE_SHAPE = "view:Message";
+
 const HEALTH_SYSTEM_ROW = {
   kind: ["string", "health_system"],
   ...TAGS,
@@ -1523,6 +1559,13 @@ const SHAPES: readonly ShapeDef[] = [
     fields: CONDITION_GROUP,
   },
   {
+    id: MESSAGE_SHAPE,
+    label: "Secure message item",
+    resourceType: "Communication",
+    vocabulary: "normalized",
+    fields: MESSAGE,
+  },
+  {
     id: "summary:count",
     label: "Summary count row",
     resourceType: null,
@@ -1601,6 +1644,8 @@ const TOOL_SHAPES = {
   get_diagnostic_reports: collectionShapes("DiagnosticReport"),
   get_documents: collectionShapes("DocumentReference"),
   get_document_text: ["document:text"],
+  get_messages: [MESSAGE_SHAPE],
+  get_message_thread: [MESSAGE_SHAPE],
   get_care_team: collectionShapes("CareTeam"),
   get_care_plans: collectionShapes("CarePlan"),
   get_goals: collectionShapes("Goal"),
@@ -1618,8 +1663,18 @@ export function toolShapes(tool: string): readonly string[] | undefined {
   return TOOL_SHAPES_MAP.get(tool);
 }
 
+/**
+ * Resource types a tool answers with that have a view of their own but no FHIR
+ * normalizer or raw model behind them: a secure message is read from the patient
+ * portal, not a FHIR server.
+ */
+const VIEW_ONLY_RESOURCE_TYPES: readonly string[] = ["Communication"];
+
 /** Every resource type the tree models, in a stable order. */
-export const MODELED_RESOURCE_TYPES: readonly string[] = RESOURCES.map((resource) => resource.type);
+export const MODELED_RESOURCE_TYPES: readonly string[] = [
+  ...RESOURCES.map((resource) => resource.type),
+  ...VIEW_ONLY_RESOURCE_TYPES,
+];
 
 // --- building nodes ------------------------------------------------------------
 

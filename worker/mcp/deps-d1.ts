@@ -31,6 +31,8 @@ import type {
   CallerIdentity,
   DocumentTextRequest,
   DocumentTextResult,
+  PortalMessageRecord,
+  PortalMessageSyncEntry,
   PortalVisitRecord,
   HealthSystemInfo,
   SyncStatusEntry,
@@ -61,6 +63,8 @@ interface CallCache {
   pools: Map<string, Promise<unknown[]>>;
   resources: Map<string, Promise<CachedRow[]>>;
   visits: Map<string, Promise<PortalVisitRecord[]>>;
+  messages: Map<string, Promise<PortalMessageRecord[]>>;
+  messageSync: Promise<PortalMessageSyncEntry[]> | null;
 }
 
 function emptyCache(): CallCache {
@@ -73,6 +77,8 @@ function emptyCache(): CallCache {
     pools: new Map(),
     resources: new Map(),
     visits: new Map(),
+    messages: new Map(),
+    messageSync: null,
   };
 }
 
@@ -135,6 +141,33 @@ async function loadPortalVisits(
     visit: row.visit,
     missing: row.state === "missing",
     fetchedAt: row.fetchedAt,
+  }));
+}
+
+/** One health system's stored secure messages, projected to what the tools read. */
+async function loadPortalMessages(
+  repos: Repos,
+  healthSystemId: string,
+): Promise<PortalMessageRecord[]> {
+  const rows = await repos.portalMessages.list(healthSystemId);
+  return rows.map((row) => ({
+    threadId: row.threadId,
+    messageId: row.messageId,
+    fingerprint: row.fingerprint,
+    thread: row.thread,
+    message: row.message,
+    missing: row.missing,
+  }));
+}
+
+async function loadMessageSync(repos: Repos): Promise<PortalMessageSyncEntry[]> {
+  const rows = await repos.portalMessages.listSync();
+  return rows.map((row) => ({
+    healthSystemId: row.healthSystemId,
+    lastAttemptAt: row.lastAttemptAt,
+    lastOkAt: row.lastOkAt,
+    lastErrorCode: row.lastErrorCode,
+    complete: row.complete,
   }));
 }
 
@@ -204,6 +237,20 @@ export function makeToolDeps(options: ToolDepsOptions): ToolDeps {
         cache.visits.set(healthSystemId, pending);
       }
       return pending;
+    },
+
+    portalMessages(healthSystemId: string): Promise<PortalMessageRecord[]> {
+      let pending = cache.messages.get(healthSystemId);
+      if (pending === undefined) {
+        pending = loadPortalMessages(repos, healthSystemId);
+        cache.messages.set(healthSystemId, pending);
+      }
+      return pending;
+    },
+
+    portalMessageSync(): Promise<PortalMessageSyncEntry[]> {
+      cache.messageSync ??= loadMessageSync(repos);
+      return cache.messageSync;
     },
 
     counts(): Promise<CacheCount[]> {

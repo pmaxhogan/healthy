@@ -140,6 +140,8 @@ const TABLES = [
   "data_migrations",
   "login_attempts",
   "mail_inbox",
+  "portal_messages",
+  "portal_message_sync",
   "portal_visits",
   "portal_accounts",
   "mcp_policy",

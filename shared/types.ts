@@ -140,6 +140,8 @@ export interface RunSummary {
   portalVisits: number;
   /** Portal visits not calendared because a FHIR event already covers them. */
   portalSkipped: number;
+  /** Secure messages the patient-portal pass read, across every portal account. */
+  portalMessages: number;
   /**
    * Stable codes from portal accounts that failed, and only codes.
    *

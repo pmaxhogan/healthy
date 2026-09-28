@@ -69,7 +69,9 @@
  *
  * Every visit this pass reads is also written to `portal_visits`, with the same
  * "missing only if still ahead" rule, because that table -- not the calendar -- is
- * what `get_appointments` serves upcoming visits from.
+ * what `get_appointments` serves upcoming visits from. The same session then reads
+ * the portal's secure messages into `portal_messages` (`syncMessages`), which is
+ * what `get_messages` serves.
  *
  * Log lines carry health system ids, counts and stable codes. Never a visit, a
  * practitioner, a CSN, a code or a byte of portal markup -- the CSN is an upstream
@@ -270,7 +272,64 @@ async function loadPortalVisits(
 
   if ((await repos.healthSystems.get(healthSystemId)) === null) return null;
   await recordVisits(input, healthSystemId, visits);
+  await syncMessages(input, healthSystemId, session);
   return visits;
+}
+
+/**
+ * Read the whole Message Center with the session the visits just used, and store
+ * every message (`worker/db/repos/portal-messages.ts`).
+ *
+ * Never a sign-in of its own: it runs only after `ensureSession` handed back a
+ * live session, and a session that dies mid-read is recorded on the sync row
+ * (`portal_session_expired`) for the MCP's coverage to report, not retried.
+ * Isolated from the visits: a failure here costs the MCP one run's freshness and
+ * nothing else, so it is logged and recorded but never thrown. The jar is saved
+ * either way, because every one of these calls can refresh the session cookie.
+ */
+async function syncMessages(
+  input: PortalPassInput,
+  healthSystemId: string,
+  session: PortalSession,
+): Promise<void> {
+  const { ctx, repos } = input;
+  try {
+    const result = await session.client.loadMessages();
+    const messages = result.threads.reduce((sum, thread) => sum + thread.messages.length, 0);
+    await repos.portalMessages.record(healthSystemId, result.threads, {
+      complete: result.complete,
+    });
+    await repos.portalMessages.markSync(healthSystemId, {
+      ok: true,
+      complete: result.complete,
+      threads: result.threads.length,
+      messages,
+    });
+    input.state.summary.portalMessages += messages;
+    ctx.log.info("portal.messages_stored", {
+      healthSystemId,
+      threads: result.threads.length,
+      messages,
+      complete: result.complete,
+    });
+  } catch (error) {
+    const code = isAppError(error) ? error.code : "internal";
+    ctx.log.warn("portal.messages_failed", { healthSystemId, ...errorFields(error) });
+    try {
+      await repos.portalMessages.markSync(healthSystemId, { ok: false, errorCode: code });
+    } catch (markError) {
+      ctx.log.warn("portal.messages_mark_failed", { healthSystemId, ...errorFields(markError) });
+    }
+  } finally {
+    try {
+      await repos.portalAccounts.saveCookieJar(healthSystemId, session.client.jar.serialise());
+    } catch (saveError) {
+      ctx.log.warn("portal.messages_jar_save_failed", {
+        healthSystemId,
+        ...errorFields(saveError),
+      });
+    }
+  }
 }
 
 /** One health system's second phase: diff and write its calendar events. */

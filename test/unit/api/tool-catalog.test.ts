@@ -27,6 +27,8 @@ const EXPECTED_NAMES = [
   "get_diagnostic_reports",
   "get_documents",
   "get_document_text",
+  "get_messages",
+  "get_message_thread",
   "get_care_team",
   "get_care_plans",
   "get_goals",

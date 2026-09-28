@@ -53,8 +53,8 @@ export function registerDocumentTools(server: McpServer, deps: ToolDeps): void {
     name: "get_documents",
     description:
       "Clinical document metadata: type, date, author, description and what " +
-      "attachments exist. Patient-portal secure messages are not documents and " +
-      "no tool returns them. Pass the document `id` (or an attachment url) to " +
+      "attachments exist. Patient-portal secure messages are not documents: " +
+      "get_messages returns those. Pass the document `id` (or an attachment url) to " +
       "get_document_text for the text of one document, which costs the organisation " +
       "a metered request. To keep only what you need, pass `jq`, e.g. " +
       '`.[] | select(.date >= "2026-01-01") | {id, type, date}`.',
