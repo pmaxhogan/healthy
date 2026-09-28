@@ -105,6 +105,9 @@ export function registerAppointmentTools(server: McpServer, deps: ToolDeps): voi
         "Upcoming appointments across every connected health system, including " +
         "every visit the patient portal lists however far ahead: when, with whom, " +
         "which department, where, and whether it is a video visit. Soonest first. " +
+        "Portal visits also carry `confirmed`, `getReady` (pre-visit tasks), " +
+        "`payment` (copay/prepay in USD, paid or not), `waitlist`, `directions` and " +
+        "`visitInstructions`: absent when unknown, null when not applicable. " +
         "Each item says whether it came from the health record (`source: fhir`) or " +
         "the patient portal (`source: portal`). Pass `includePast: true` or a " +
         "`from` date to see past visits as well (then newest first). `coverage` " +

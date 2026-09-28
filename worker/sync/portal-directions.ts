@@ -22,9 +22,14 @@
  *     most visits.)
  *
  * Paragraphs are compared after whitespace and case normalisation. Departments
- * and practitioners are counted by the portal's own ids (`departmentId`,
- * `practitionerId`, deterministic tokens like the visit's own), falling back to
- * the normalised name when a visit has no id.
+ * and practitioners are counted by their normalised names first, and by the
+ * portal's own ids (`departmentId`, `practitionerId`) only when a visit has no
+ * name. Names on purpose, although ids are the better identity in principle:
+ * the stored visits span many sessions, and the ids' stability across sessions
+ * has not been observed (the visit's own token's has). An id that changed per
+ * session would count one department twice and strip its real directions -- the
+ * one failure here that loses what the owner asked for -- while two departments
+ * sharing a name only strips less.
  *
  * Visit instructions are not filtered: they are written per visit type, and no
  * capture has shown shared noise in them.
@@ -57,12 +62,18 @@ function paragraphKey(paragraph: string): string {
   return paragraph.replaceAll(/\s+/gu, " ").trim().toLowerCase();
 }
 
+/** A name's normalised form, or the id with a prefix no name can produce. */
+function identity(name: string | undefined, id: string | undefined): string {
+  const label = normalizeLabel(name);
+  return label === "" ? `id:${id ?? ""}` : label;
+}
+
 function departmentKey(visit: PortalVisit): string {
-  return visit.departmentId ?? `name:${normalizeLabel(visit.department ?? visit.locationName)}`;
+  return identity(visit.department ?? visit.locationName, visit.departmentId);
 }
 
 function practitionerKey(visit: PortalVisit): string {
-  return visit.practitionerId ?? `name:${normalizeLabel(visit.practitioner)}`;
+  return identity(visit.practitioner, visit.practitionerId);
 }
 
 /** The boilerplate of one health system, from every visit it has stored. */

@@ -189,7 +189,14 @@ export function makeCalendarEventsRepo(ctx: Ctx) {
     const detail = JSON.parse(
       await open(ctx.env, detailEnc, calendarDetailAad(row.google_event_id)),
     ) as EventDetail;
-    return { ...rest, calendar_id: detail.calendarId, start_at: detail.startAt };
+    return {
+      ...rest,
+      calendar_id: detail.calendarId,
+      start_at: detail.startAt,
+      // Never undefined, even against a table 0015 has not reached: an undefined
+      // digest would read as "recorded, and different", freezing every title.
+      title_digest: rest.title_digest ?? null,
+    };
   };
 
   const byKey = async (eventKey: string): Promise<CalendarEventRow | null> => {

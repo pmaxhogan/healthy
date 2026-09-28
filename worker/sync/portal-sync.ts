@@ -321,7 +321,10 @@ async function withVisitDetails(
   let failed = 0;
   let sessionEnded = false;
   for (const visit of listed) {
-    if (sessionEnded) {
+    // Another organisation's visit has no details page here: the portal's own
+    // client never links one, and whatever answers must not be able to end the
+    // reads for every visit after it.
+    if (sessionEnded || visit.external === true) {
       out.push({ ...visit, ...detailFieldsOf(stored.get(visit.csn)) });
       continue;
     }

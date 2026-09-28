@@ -73,13 +73,31 @@ describe("boilerplateOf", () => {
     expect(boilerplateOf(oneDepartment).size).toBe(0);
   });
 
-  it("counts places by name when the portal gave no id", () => {
-    const named = MANY.map(({ departmentId: _id, ...rest }, index) => ({
-      ...rest,
-      department: index === 0 ? "Clinic One" : "Clinic Two",
-    }));
+  it("counts a department by its name before its id, so a changed id cannot split it", () => {
+    // One department whose id differed between sessions: its real directions
+    // must survive, since only one place ever carried them.
+    const own = "Tower A, suite 1.";
+    const visits = [
+      visit({
+        csn: "1",
+        department: "Clinic One",
+        departmentId: "x1",
+        practitioner: "Pat One",
+        directions: `${own}\n\n${PAYMENT}`,
+      }),
+      visit({
+        csn: "2",
+        department: "Clinic One",
+        departmentId: "x2",
+        practitioner: "Pat One",
+        directions: `${own}\n\n${PAYMENT}`,
+      }),
+      visit({ csn: "3", department: "Clinic Two", practitioner: "Sam Two", directions: PAYMENT }),
+    ];
+    const boilerplate = boilerplateOf(visits);
 
-    expect(boilerplateOf(named).has(PAYMENT.toLowerCase())).toBe(true);
+    expect(boilerplate.has(PAYMENT.toLowerCase())).toBe(true);
+    expect(cleanDirections(visits[0]?.directions, boilerplate)).toBe(own);
   });
 });
 

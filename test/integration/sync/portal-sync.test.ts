@@ -1669,17 +1669,17 @@ describe("a visit's details page", () => {
   it("strips the paragraphs the health system repeats under every department", async () => {
     const boiler = "Check in online before you arrive.";
     const visits = [
-      portalVisit({ csn: "csn-1", departmentId: "d1", practitionerId: "p1", start: SOON }),
+      portalVisit({ csn: "csn-1", start: SOON }),
       portalVisit({
         csn: "csn-2",
-        departmentId: "d2",
-        practitionerId: "p2",
+        department: "Other Clinic",
+        practitioner: "B. Example, DO",
         start: "2026-07-01T14:30:00+00:00",
       }),
       portalVisit({
         csn: "csn-3",
-        departmentId: "d2",
-        practitionerId: "p2",
+        department: "Other Clinic",
+        practitioner: "B. Example, DO",
         start: "2026-07-02T14:30:00+00:00",
       }),
     ];
