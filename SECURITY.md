@@ -351,8 +351,10 @@ history in CI.
 - The exposure policy removes structured fields, references and narratives; it
   does not scrub free prose. A name a clinician typed into a report's
   `conclusion`, a note, a document's text (`get_document_text`) or a secure
-  message's `body` or `subject` (`get_messages`) is returned as written unless
-  that field is hidden or the tool denied. A message's sender and care team are
+  message's `body` or `subject` (`get_messages`, `get_message_thread`) is
+  returned as written unless that field is hidden or the tool denied; a
+  `get_messages` preview and `search` are built from the body the policy
+  released, so hiding the message field `body` removes both. A message's sender and care team are
   structured and are withheld by the name rules; a signature inside the body is
   prose.
 - A secure message two portals show is recognised as one only by identical

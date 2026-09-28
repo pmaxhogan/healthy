@@ -83,10 +83,14 @@ export const JQ_EXAMPLES = {
   ],
   get_document_text: [".[] | {id, chars}", '.[] | .text | test("follow"; "i")'],
   get_messages: [
-    ".[] | {sent, subject, direction, from: .from.role, threadId}",
-    '.[] | select(.body | test("refill"; "i")) | {sent, subject, body}',
+    ".[] | {threadId, subject, lastMessageAt, messageCount, preview: .lastMessage.preview}",
+    '.[] | select(.lastMessage.from.role == "practitioner") | {threadId, subject, lastMessageAt}',
+    '.[] | select(.folder == "conversations" and .messageCount > 1) | {threadId, subject}',
   ],
-  get_message_thread: [".[] | {sent, from: .from.role, body}"],
+  get_message_thread: [
+    ".[] | .messages[] | {sent, from: .from.role, body}",
+    '.[] | .messages[] | select(.body | test("refill"; "i")) | {id, sent, body}',
+  ],
   get_care_team: [".[] | {name, status, participants}", ".[] | .participants[] | {name, role}"],
   get_care_plans: ['.[] | select(.status == "active") | {title, period, activities}'],
   get_goals: [".[] | {description, lifecycleStatus, achievementStatus, targets, startDate}"],

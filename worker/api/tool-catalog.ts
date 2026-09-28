@@ -105,12 +105,12 @@ export const TOOL_CATALOG: readonly McpToolInfoDto[] = [
   },
   {
     name: "get_messages",
-    description: "Patient-portal secure messages, every folder, one item per message.",
+    description: "Patient-portal secure messages, every folder, one item per conversation.",
     resourceTypes: ["Communication"],
   },
   {
     name: "get_message_thread",
-    description: "One patient-portal conversation, every message in order.",
+    description: "One patient-portal conversation, every message in full, in order.",
     resourceTypes: ["Communication"],
   },
   {

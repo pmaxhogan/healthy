@@ -4,8 +4,9 @@
  *
  * The portal pass stores every message each health system's Message Center shows
  * (`portal_messages`), including the copies one portal shows of another
- * organisation's conversations. This module turns those rows into what
- * `get_messages` and `get_message_thread` answer with.
+ * organisation's conversations. This module turns those rows into the
+ * per-message items both message tools hand the exposure policy; only what the
+ * policy releases is then grouped into conversations (`message-threads.ts`).
  *
  * ### One message, one item
  *
@@ -78,13 +79,11 @@ const SENDER_TYPE: Readonly<Record<MessageAuthorRole, string>> = {
 };
 
 export interface MessageFilters {
+  /** On the conversation's newest message: a conversation active in the window is kept whole. */
   from?: string | undefined;
   to?: string | undefined;
   threadId?: string | undefined;
   folder?: MessageFolder | undefined;
-  direction?: "from_patient" | "to_patient" | undefined;
-  /** `desc` newest first (the list); `asc` oldest first (one thread). */
-  order: "asc" | "desc";
 }
 
 export interface Messages {
@@ -122,6 +121,7 @@ function messageItem(healthSystem: HealthSystemInfo, record: PortalMessageRecord
     practitioners: thread.practitioners.map((practitioner) => ({ name: practitioner.name })),
     body: message.body,
     attachments: message.attachments.map((attachment) => ({ ...attachment })),
+    ...(message.unread !== undefined && { unread: message.unread }),
     ...(thread.organization !== undefined && { organization: thread.organization }),
     source: "portal",
     // A copy another organisation's portal showed: which portal it was seen in.
@@ -153,25 +153,40 @@ function matches<T>(wanted: T | undefined, actual: T): boolean {
 
 function keep(record: PortalMessageRecord, filters: MessageFilters): boolean {
   return (
-    matches(filters.threadId, record.threadId) &&
-    matches(filters.folder, record.thread.folder) &&
-    matches(filters.direction, directionOf(record.message.role)) &&
-    withinWindow(record.message.sent, filters.from, filters.to)
+    matches(filters.threadId, record.threadId) && matches(filters.folder, record.thread.folder)
   );
 }
 
-function compare(order: "asc" | "desc"): (a: Entry, b: Entry) => number {
-  return (a, b) => {
-    const left = a.record.message.sent;
-    const right = b.record.message.sent;
-    if (left !== right) {
-      const earlier = left < right ? -1 : 1;
-      return order === "asc" ? earlier : -earlier;
+/** The conversation a kept message is grouped into (see `message-threads.ts`). */
+const conversationOf = (entry: Entry): string =>
+  `${entry.healthSystem.id}\u{0}${entry.record.threadId}`;
+
+/**
+ * Only the conversations whose newest message falls inside the window, every
+ * message of each: a window picks conversations, it does not cut them in half.
+ */
+function inWindow(entries: readonly Entry[], filters: MessageFilters): Entry[] {
+  if (filters.from === undefined && filters.to === undefined) return [...entries];
+  const newest = new Map<string, string>();
+  for (const entry of entries) {
+    const key = conversationOf(entry);
+    const seen = newest.get(key);
+    if (seen === undefined || entry.record.message.sent > seen) {
+      newest.set(key, entry.record.message.sent);
     }
-    return a.record.messageId < b.record.messageId
-      ? -1
-      : Number(a.record.messageId > b.record.messageId);
-  };
+  }
+  return entries.filter((entry) =>
+    withinWindow(newest.get(conversationOf(entry)), filters.from, filters.to),
+  );
+}
+
+function compare(a: Entry, b: Entry): number {
+  const left = a.record.message.sent;
+  const right = b.record.message.sent;
+  if (left !== right) return left < right ? -1 : 1;
+  return a.record.messageId < b.record.messageId
+    ? -1
+    : Number(a.record.messageId > b.record.messageId);
 }
 
 /**
@@ -220,11 +235,12 @@ export async function collectMessages(
       denied.every((sighting) => !sameMessageAcrossHealthSystems(sighting, entry.sighting)) &&
       keep(entry.record, filters),
   );
-  kept.sort(compare(filters.order));
+  const windowed = inWindow(kept, filters);
+  windowed.sort(compare);
 
   return {
-    items: kept.map((entry) => messageItem(entry.healthSystem, entry.record)),
-    sources: kept.map((entry) => messageSource(entry.healthSystem, entry.record)),
+    items: windowed.map((entry) => messageItem(entry.healthSystem, entry.record)),
+    sources: windowed.map((entry) => messageSource(entry.healthSystem, entry.record)),
     healthSystemIds: selected.map((healthSystem) => healthSystem.id),
   };
 }

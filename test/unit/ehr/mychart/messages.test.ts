@@ -253,4 +253,25 @@ describe("loadMessageCenter parsing", () => {
       { name: "invented-scan", extension: "PDF" },
     ]);
   });
+
+  it("keeps the portal's own unread flag on each message", async () => {
+    const state = messageCenter({
+      conversations: [
+        {
+          id: "u1",
+          organizationId: LOCAL_ORG,
+          tag: 1,
+          subject: "Unread",
+          messages: [
+            { ...message("um1", 1, { empKey: DOCTOR_KEY }), unread: true },
+            message("um2", 2, { empKey: DOCTOR_KEY }),
+          ],
+        },
+      ],
+    });
+
+    const { threads } = await load(state);
+
+    expect(threads[0]?.messages.map((entry) => entry.unread)).toStrictEqual([true, false]);
+  });
 });

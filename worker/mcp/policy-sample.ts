@@ -101,17 +101,43 @@ function rawEntries(value: unknown): RawEntry[] {
   return out;
 }
 
-/** Run one tool under `rules`. Null when the tool does not exist or answered an error. */
 /**
- * Tools that cannot be called without an argument naming one record, sampled
- * through the tool that lists those records: `get_message_thread` needs a
- * `threadId`, and answers exactly `get_messages`' items for one conversation.
+ * Tools that cannot be called without an argument naming one record, and the
+ * listing tool that names one: `get_message_thread` needs a `threadId`, and is
+ * sampled on the newest conversation `get_messages` lists.
  */
-const SAMPLED_AS = new Map([["get_message_thread", "get_messages"]]);
+const SAMPLED_THROUGH = new Map([["get_message_thread", "get_messages"]]);
 
+/**
+ * The arguments that name the record to sample, read from the listing tool's
+ * first item. Listed under the rules' resource and health system denials only --
+ * not a tool denial, and never a field rule:
+ * a draft that hides the id must still be previewed on the same record as the
+ * baseline it is compared with.
+ */
+async function recordArgs(
+  deps: ToolDeps,
+  tool: string,
+  rules: PolicyRules,
+): Promise<Record<string, unknown> | null> {
+  const listing = SAMPLED_THROUGH.get(tool);
+  if (listing === undefined) return sampleArgs(tool);
+  const idOnly: PolicyRules = { ...rules, tools: new Set(), fields: [], allows: [] };
+  const result = await callMcpTool(sampleDeps(deps, idOnly), listing, sampleArgs(listing));
+  const first = result?.content[0];
+  if (result === null || result.isError === true || first?.type !== "text") return null;
+  const payload: unknown = JSON.parse(first.text);
+  const items = isRecord(payload) ? own(payload, "items") : undefined;
+  const item: unknown = Array.isArray(items) ? (items as unknown[])[0] : undefined;
+  const threadId = isRecord(item) ? own(item, "threadId") : undefined;
+  return typeof threadId === "string" ? { threadId } : null;
+}
+
+/** Run one tool under `rules`. Null when the tool does not exist or answered an error. */
 async function runTool(deps: ToolDeps, tool: string, rules: PolicyRules): Promise<Answer | null> {
-  const sampled = SAMPLED_AS.get(tool) ?? tool;
-  const result = await callMcpTool(sampleDeps(deps, rules), sampled, sampleArgs(sampled));
+  const args = await recordArgs(deps, tool, rules);
+  if (args === null) return null;
+  const result = await callMcpTool(sampleDeps(deps, rules), tool, args);
   if (result === null || result.isError === true) return null;
   const first = result.content[0];
   if (first?.type !== "text") return null;
@@ -371,10 +397,8 @@ async function previewOne(
  */
 function candidateTools(field: FieldRuleSpec, tool: string | undefined): string[] {
   const named = tool ?? field.tool;
-  // A tool sampled through another (`SAMPLED_AS`) would only repeat its answer.
   const reached = (name: string): boolean =>
     name !== METERED_TOOL &&
-    !SAMPLED_AS.has(name) &&
     shapesForScope({ tool: name, resourceType: field.resourceType }).length > 0;
   return named === null ? TOOL_NAMES.filter((name) => reached(name)) : [named];
 }

@@ -25,6 +25,7 @@ export interface FixtureMessage {
   body: string;
   author: { empKey: string } | { wprKey: string } | { displayName: string };
   attachments?: { name: string; fileExtension: string }[];
+  unread?: boolean;
 }
 
 export interface FixtureConversation {
@@ -76,7 +77,7 @@ function newestOf(conversation: FixtureConversation): string {
 function wireMessage(entry: FixtureMessage): Record<string, unknown> {
   return {
     wmgId: entry.id,
-    isUnread: false,
+    isUnread: entry.unread === true,
     deliveryInstantISO: entry.sent,
     body: entry.body,
     author: { displayName: "", ...entry.author },

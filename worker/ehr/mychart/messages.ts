@@ -69,6 +69,12 @@ export interface PortalMessage {
   /** Plain text, flattened from the portal's HTML (`message-text.ts`). */
   body: string;
   attachments: PortalMessageAttachment[];
+  /**
+   * The portal's own unread flag, as the list reported it. Reading it never marks
+   * anything read (the crawl uses only read-safe endpoints). Absent on rows stored
+   * before it was kept.
+   */
+  unread?: boolean;
 }
 
 export interface PortalThread {
@@ -393,6 +399,7 @@ function toMessage(
     ...authorOf(crawl, overrides, own(message, "author")),
     body: messageText(str(message, "body")),
     attachments: attachmentsOf(message),
+    unread: bool(message, "isUnread"),
   };
 }
 

@@ -2,22 +2,30 @@
 //
 // What is pinned here:
 //
-//   - the envelope every tool answers with, every message, newest first
-//   - one message two portals show is one item, from the health system whose own
-//     conversation it is; a message only one portal shows is kept, second-hand
-//     copies included; near-duplicates are not merged
+//   - the envelope every tool answers with; get_messages lists one item per
+//     conversation, newest activity first, with counts, dates, participants and
+//     a labelled preview of the newest message; get_message_thread answers one
+//     conversation with every message in full, oldest first
+//   - one message two portals show is one message, from the health system whose
+//     own conversation it is; a message only one portal shows is kept,
+//     second-hand copies included; near-duplicates are not merged
 //   - a denied health system's messages are gone, and so is any copy of them
 //     another portal shows
-//   - the owner's rules on people's names reach the sender and the care team, by
-//     who they are; a `Communication` resource rule removes messages and their
-//     coverage
+//   - the owner's rules on people's names reach each sender by who they are --
+//     one message at a time, so hiding the patient's name leaves a clinician's
+//     name in the same conversation -- and the care team; a rule on a
+//     conversation's own fields reaches those; a `Communication` resource rule
+//     removes every conversation and its coverage
+//   - `search` sees only what the policy released
 //   - coverage comes from the portal pass's own record of its last read
-//   - the window, folder, direction and thread filters
+//   - the window (on the newest message), folder and search filters
 //
 // Every message below is synthetic.
 
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { PREVIEW_CHARS, previewOf } from "../../../worker/mcp/message-threads.ts";
+import { previewDraft, sampleStructure } from "../../../worker/mcp/policy-sample.ts";
 import { buildRules } from "../../../worker/policy/rules.ts";
 import { STALE_SECONDS } from "../../../worker/sync/portal-dedupe.ts";
 
@@ -50,6 +58,8 @@ interface RecordOptions {
   external?: boolean;
   folder?: PortalMessageRecord["thread"]["folder"];
   missing?: boolean;
+  unread?: boolean;
+  attachments?: { name?: string; extension?: string }[];
   /** Defaults to one derived from `sent` and `body`: what the repo would compute. */
   fingerprint?: string;
 }
@@ -75,7 +85,8 @@ function record(options: RecordOptions): PortalMessageRecord {
       role: options.role ?? "practitioner",
       ...(options.author !== undefined && { author: options.author }),
       body,
-      attachments: [],
+      attachments: options.attachments ?? [],
+      ...(options.unread !== undefined && { unread: options.unread }),
     },
     missing: options.missing === true,
   };
@@ -109,40 +120,100 @@ function store(healthSystemId: string, records: PortalMessageRecord[]): void {
   world.state.portalMessages.set(healthSystemId, records);
 }
 
+/** The one thread get_message_thread answers, and its messages. */
+async function thread(threadId = "thread-1") {
+  const answer = await callTool(world.client, "get_message_thread", { threadId });
+  const item = answer.items[0] ?? {};
+  return { answer, item, messages: (item.messages ?? []) as Record<string, unknown>[] };
+}
+
+/** Every message body across every conversation get_message_thread answers for these ids. */
+async function bodies(...threadIds: string[]): Promise<unknown[]> {
+  const out: unknown[] = [];
+  for (const id of threadIds) {
+    const { messages } = await thread(id);
+    out.push(...messages.map((message) => message.body));
+  }
+  return out;
+}
+
 describe("get_messages", () => {
-  it("answers every message, newest first, in the shared envelope", async () => {
+  it("answers one item per conversation, newest activity first, in the shared envelope", async () => {
     store(HEALTH_SYSTEM_A, [
       record({ sent: "2026-03-01T10:00:00.000Z", role: "patient", author: "Test Person" }),
-      record({ sent: "2026-03-02T10:00:00.000Z", author: "Nurse Example A" }),
+      record({
+        sent: "2026-03-02T10:00:00.000Z",
+        author: "Nurse Example A",
+        unread: true,
+        attachments: [{ name: "invented.pdf", extension: "PDF" }],
+      }),
       record({ thread: "thread-2", sent: "2026-02-01T10:00:00.000Z", role: "system" }),
     ]);
 
     const answer = await callTool(world.client, "get_messages");
 
     expect(answer.isError).toBe(false);
-    expect(answer.total).toBe(3);
-    expect(answer.truncated).toBe(false);
-    expect(answer.items.map((item) => item.sent)).toStrictEqual([
-      "2026-03-02T10:00:00.000Z",
-      "2026-03-01T10:00:00.000Z",
-      "2026-02-01T10:00:00.000Z",
-    ]);
-    expect(answer.items[1]).toMatchObject({
+    expect(answer.total).toBe(2);
+    expect(JSON.parse(answer.text)).toMatchObject({ messages: 3 });
+    expect(answer.items.map((item) => item.threadId)).toStrictEqual(["thread-1", "thread-2"]);
+    expect(answer.items[0]).toStrictEqual({
       resourceType: "Communication",
+      kind: "message_thread",
       threadId: "thread-1",
       subject: "Invented subject",
-      direction: "from_patient",
-      from: { role: "patient", name: "Test Person" },
+      folder: "conversations",
+      firstMessageAt: "2026-03-01T10:00:00.000Z",
+      lastMessageAt: "2026-03-02T10:00:00.000Z",
+      messageCount: 2,
+      unreadCount: 1,
+      attachmentCount: 1,
+      hasAttachments: true,
+      practitioners: [{ name: "Nurse Example A" }],
+      participants: [
+        { role: "patient", name: "Test Person" },
+        { role: "practitioner", name: "Nurse Example A" },
+      ],
+      lastMessage: {
+        id: "msg:thread-1:fp:2026-03-02T10:00:00.000Z:practitioner:Invented text sent 2026-03-02T10:00:00.000Z",
+        sent: "2026-03-02T10:00:00.000Z",
+        direction: "to_patient",
+        from: { role: "practitioner", name: "Nurse Example A" },
+        preview: "Invented text sent 2026-03-02T10:00:00.000Z",
+        previewTruncated: false,
+      },
       source: "portal",
       firstParty: true,
       healthSystem: NAME_A,
       healthSystemId: HEALTH_SYSTEM_A,
     });
-    expect(answer.items[0]).toMatchObject({ direction: "to_patient" });
+    // No body in the list: the preview is all there is of it.
+    expect(answer.items[0]).not.toHaveProperty("messages");
     expect(answer.coverage).toStrictEqual([
       expect.objectContaining({ healthSystemId: HEALTH_SYSTEM_A, status: "ok" }),
       expect.objectContaining({ healthSystemId: HEALTH_SYSTEM_B, status: "ok" }),
     ]);
+  });
+
+  it("previews the newest message's first characters, and says when it cut them", async () => {
+    const long = `${"word ".repeat(60)}end`;
+    store(HEALTH_SYSTEM_A, [record({ sent: "2026-03-01T10:00:00.000Z", body: long })]);
+
+    const answer = await callTool(world.client, "get_messages");
+    const last = answer.items[0]?.lastMessage as Record<string, unknown>;
+
+    expect(last.previewTruncated).toBe(true);
+    expect(String(last.preview).endsWith("…")).toBe(true);
+    expect(String(last.preview).length).toBeLessThanOrEqual(PREVIEW_CHARS + 1);
+    expect(long.startsWith(String(last.preview).slice(0, -1))).toBe(true);
+  });
+
+  it("omits unreadCount for rows stored before the unread flag was kept", async () => {
+    store(HEALTH_SYSTEM_A, [record({ sent: "2026-03-01T10:00:00.000Z" })]);
+
+    const answer = await callTool(world.client, "get_messages");
+
+    expect(answer.items[0]).not.toHaveProperty("unreadCount");
+    expect(answer.items[0]).toMatchObject({ hasAttachments: false, attachmentCount: 0 });
   });
 
   it("answers a message both portals show once, from the health system it belongs to", async () => {
@@ -153,14 +224,23 @@ describe("get_messages", () => {
     const answer = await callTool(world.client, "get_messages");
 
     expect(answer.items).toHaveLength(1);
-    expect(answer.items[0]).toMatchObject({ healthSystemId: HEALTH_SYSTEM_B, firstParty: true });
+    expect(answer.items[0]).toMatchObject({
+      healthSystemId: HEALTH_SYSTEM_B,
+      firstParty: true,
+      messageCount: 1,
+    });
     expect(answer.items[0]).not.toHaveProperty("via");
   });
 
   it("keeps a message only one portal shows, and a second-hand copy with no first-party one", async () => {
     store(HEALTH_SYSTEM_A, [
       record({ sent: "2026-03-01T10:00:00.000Z", role: "system", body: "An invented notice." }),
-      record({ sent: "2026-03-03T10:00:00.000Z", external: true, body: "From elsewhere." }),
+      record({
+        thread: "thread-2",
+        sent: "2026-03-03T10:00:00.000Z",
+        external: true,
+        body: "From elsewhere.",
+      }),
     ]);
     store(HEALTH_SYSTEM_B, []);
 
@@ -168,10 +248,29 @@ describe("get_messages", () => {
 
     expect(answer.items).toHaveLength(2);
     expect(answer.items[0]).toMatchObject({
+      threadId: "thread-2",
       firstParty: false,
       via: HEALTH_SYSTEM_A,
       organization: "Elsewhere Example Group",
     });
+  });
+
+  it("answers a conversation split across two portals as one item per health system", async () => {
+    // B has not listed the newest reply yet; A's second-hand copy is all there is of it.
+    store(HEALTH_SYSTEM_A, [
+      record({ sent: "2026-03-01T10:00:00.000Z", external: true, body: "First." }),
+      record({ sent: "2026-03-02T10:00:00.000Z", external: true, body: "Reply." }),
+    ]);
+    store(HEALTH_SYSTEM_B, [record({ sent: "2026-03-01T10:00:00.000Z", body: "First." })]);
+
+    const answer = await callTool(world.client, "get_messages");
+    const detail = await thread();
+
+    expect(answer.items.map((item) => [item.healthSystemId, item.messageCount])).toStrictEqual([
+      [HEALTH_SYSTEM_A, 1],
+      [HEALTH_SYSTEM_B, 1],
+    ]);
+    expect(detail.answer.items).toHaveLength(2);
   });
 
   it("does not merge near-duplicates: same second with other text, same text a second apart", async () => {
@@ -186,7 +285,7 @@ describe("get_messages", () => {
 
     const answer = await callTool(world.client, "get_messages");
 
-    expect(answer.items).toHaveLength(4);
+    expect(JSON.parse(answer.text)).toMatchObject({ messages: 4 });
   });
 
   it("drops a denied health system's messages and every copy another portal shows", async () => {
@@ -200,7 +299,8 @@ describe("get_messages", () => {
 
     const answer = await callTool(world.client, "get_messages");
 
-    expect(answer.items.map((item) => item.body)).toStrictEqual(["A's own."]);
+    expect(answer.items).toHaveLength(1);
+    expect(await bodies("thread-1")).toStrictEqual(["A's own."]);
     expect(answer.coverage?.map((entry) => entry.healthSystemId)).toStrictEqual([HEALTH_SYSTEM_A]);
   });
 
@@ -214,28 +314,57 @@ describe("get_messages", () => {
     expect(onlyA.items).toStrictEqual([]);
   });
 
-  it("windows on sent, and filters by folder, direction and thread", async () => {
+  it("windows on the newest message, keeping a conversation whole, and filters by folder", async () => {
     store(HEALTH_SYSTEM_A, [
       record({ sent: "2026-01-15T10:00:00.000Z", role: "patient" }),
-      record({ sent: "2026-02-15T10:00:00.000Z", folder: "automated", thread: "thread-auto" }),
-      record({ sent: "2026-03-15T10:00:00.000Z" }),
+      record({ sent: "2026-02-15T10:00:00.000Z" }),
+      record({ thread: "thread-auto", sent: "2026-03-15T10:00:00.000Z", folder: "automated" }),
     ]);
 
     const february = await callTool(world.client, "get_messages", {
       from: "2026-02-01",
       to: "2026-02-28",
     });
+    const january = await callTool(world.client, "get_messages", { to: "2026-01-31" });
     const automated = await callTool(world.client, "get_messages", { folder: "automated" });
-    const sent = await callTool(world.client, "get_messages", { direction: "from_patient" });
-    const thread = await callTool(world.client, "get_messages", { threadId: "thread-1" });
 
-    expect(february.items.map((item) => item.sent)).toStrictEqual(["2026-02-15T10:00:00.000Z"]);
-    expect(automated.items).toHaveLength(1);
-    expect(sent.items.map((item) => item.sent)).toStrictEqual(["2026-01-15T10:00:00.000Z"]);
-    expect(thread.items).toHaveLength(2);
+    expect(february.items.map((item) => [item.threadId, item.messageCount])).toStrictEqual([
+      ["thread-1", 2],
+    ]);
+    expect(january.items).toStrictEqual([]);
+    expect(automated.items.map((item) => item.threadId)).toStrictEqual(["thread-auto"]);
   });
 
-  it("marks a message its own portal stopped listing", async () => {
+  it("searches the subject and every message's full text, ignoring case and spacing", async () => {
+    store(HEALTH_SYSTEM_A, [
+      record({ sent: "2026-03-01T10:00:00.000Z", body: "An early note about a Refill\nrequest." }),
+      record({ sent: "2026-03-02T10:00:00.000Z", body: "Something else entirely." }),
+      record({ thread: "thread-2", subject: "Refill request", sent: "2026-02-01T10:00:00.000Z" }),
+      record({ thread: "thread-3", sent: "2026-02-02T10:00:00.000Z" }),
+    ]);
+
+    const answer = await callTool(world.client, "get_messages", { search: "refill  REQUEST" });
+
+    expect(answer.items.map((item) => item.threadId)).toStrictEqual(["thread-1", "thread-2"]);
+  });
+
+  it("does not let search see a body the policy withheld", async () => {
+    store(HEALTH_SYSTEM_A, [
+      record({ sent: "2026-03-01T10:00:00.000Z", body: "Invented secret." }),
+    ]);
+    world.state.rules = rules({
+      rule_type: "field",
+      target: "sig-body",
+      scope_resource: "Communication",
+      paths_json: JSON.stringify(["body"]),
+    });
+
+    const answer = await callTool(world.client, "get_messages", { search: "secret" });
+
+    expect(answer.items).toStrictEqual([]);
+  });
+
+  it("marks a conversation its own portal stopped listing entirely", async () => {
     store(HEALTH_SYSTEM_A, [record({ sent: "2026-03-01T10:00:00.000Z", missing: true })]);
 
     const answer = await callTool(world.client, "get_messages");
@@ -244,7 +373,7 @@ describe("get_messages", () => {
   });
 });
 
-describe("get_messages under the owner's name rules", () => {
+describe("the message tools under the owner's name rules", () => {
   // The shape of a real deployment's rules: clinicians' records denied, the
   // care-team field and every top-level name hidden.
   const OWNER_RULES = rules(
@@ -263,32 +392,59 @@ describe("get_messages under the owner's name rules", () => {
     },
   );
 
-  it("removes clinicians' and the patient's names but keeps the message", async () => {
+  beforeEach(() => {
     store(HEALTH_SYSTEM_A, [
       record({ sent: "2026-03-01T10:00:00.000Z", role: "patient", author: "Test Person" }),
       record({ sent: "2026-03-02T10:00:00.000Z", author: "Nurse Example A" }),
       record({ sent: "2026-03-03T10:00:00.000Z", role: "system", author: "Messaging System" }),
     ]);
+  });
+
+  it("removes clinicians' and the patient's names but keeps every message", async () => {
     world.state.rules = OWNER_RULES;
 
-    const answer = await callTool(world.client, "get_messages");
+    const list = await callTool(world.client, "get_messages");
+    const detail = await thread();
 
-    expect(answer.text).not.toContain("Test Person");
-    expect(answer.text).not.toContain("Nurse Example A");
-    const [system, practitioner, patient] = answer.items;
-    expect(practitioner?.from).toStrictEqual({ role: "practitioner" });
+    for (const text of [list.text, detail.answer.text]) {
+      expect(text).not.toContain("Test Person");
+      expect(text).not.toContain("Nurse Example A");
+    }
+    expect(list.items[0]?.participants).toStrictEqual([
+      { role: "patient" },
+      { role: "practitioner" },
+      // Nobody's name: a system sender is the organisation's own mailbox.
+      { role: "system", name: "Messaging System" },
+    ]);
+    expect(list.items[0]).not.toHaveProperty("practitioners");
+    const [patient, practitioner, system] = detail.messages;
     expect(patient?.from).toStrictEqual({ role: "patient" });
-    // Nobody's name: a system sender is the organisation's own mailbox.
+    expect(practitioner?.from).toStrictEqual({ role: "practitioner" });
     expect(system?.from).toStrictEqual({ role: "system", name: "Messaging System" });
-    expect(practitioner).not.toHaveProperty("practitioners");
     expect(practitioner?.body).toBe("Invented text sent 2026-03-02T10:00:00.000Z");
-    expect(practitioner?.subject).toBe("Invented subject");
+    expect(detail.item.subject).toBe("Invented subject");
+  });
+
+  it("withholds the patient's name alone, leaving the clinician's in the same conversation", async () => {
+    world.state.rules = rules({
+      rule_type: "field",
+      target: "sig-5",
+      scope_resource: "Patient",
+      paths_json: JSON.stringify(["name"]),
+    });
+
+    const detail = await thread();
+
+    expect(detail.answer.text).not.toContain("Test Person");
+    expect(detail.messages.map((message) => message.from)).toStrictEqual([
+      { role: "patient" },
+      { role: "practitioner", name: "Nurse Example A" },
+      { role: "system", name: "Messaging System" },
+    ]);
+    expect(detail.answer.warnings).toContain("policy_reference_display_removed:Patient");
   });
 
   it("removes clinicians' names wherever a rule withholds them from another record", async () => {
-    store(HEALTH_SYSTEM_A, [
-      record({ sent: "2026-03-02T10:00:00.000Z", author: "Nurse Example A" }),
-    ]);
     world.state.rules = rules({
       rule_type: "field",
       target: "sig-4",
@@ -302,14 +458,39 @@ describe("get_messages under the owner's name rules", () => {
     expect(answer.warnings).toContain("policy_reference_display_removed:Practitioner");
   });
 
-  it("removes every message, and the coverage, on a Communication resource rule", async () => {
-    store(HEALTH_SYSTEM_A, [record({ sent: "2026-03-02T10:00:00.000Z" })]);
+  it("reaches a conversation's own fields: a preview in the list, bodies in the thread", async () => {
+    world.state.rules = rules(
+      {
+        rule_type: "field",
+        target: "sig-6",
+        scope_tool: "get_messages",
+        paths_json: JSON.stringify(["lastMessage.preview"]),
+      },
+      {
+        rule_type: "field",
+        target: "sig-7",
+        scope_tool: "get_message_thread",
+        paths_json: JSON.stringify(["messages[].body"]),
+      },
+    );
+
+    const list = await callTool(world.client, "get_messages");
+    const detail = await thread();
+
+    expect(list.items[0]?.lastMessage).not.toHaveProperty("preview");
+    expect(detail.messages).toHaveLength(3);
+    for (const message of detail.messages) expect(message).not.toHaveProperty("body");
+  });
+
+  it("removes every conversation, and the coverage, on a Communication resource rule", async () => {
     world.state.rules = rules({ rule_type: "resource", target: "Communication" });
 
     const answer = await callTool(world.client, "get_messages");
+    const detail = await thread();
 
     expect(answer.items).toStrictEqual([]);
     expect(answer.coverage).toStrictEqual([]);
+    expect(detail.answer.items).toStrictEqual([]);
   });
 
   it("answers policy_denied when the tool itself is denied", async () => {
@@ -370,27 +551,111 @@ describe("get_messages coverage", () => {
 });
 
 describe("get_message_thread", () => {
-  it("answers one conversation oldest first, and says when there is no such thread", async () => {
+  it("answers one conversation with every message in full, oldest first", async () => {
     store(HEALTH_SYSTEM_A, [
-      record({ sent: "2026-03-02T10:00:00.000Z" }),
-      record({ sent: "2026-03-01T10:00:00.000Z", role: "patient" }),
+      record({ sent: "2026-03-02T10:00:00.000Z", author: "Nurse Example A", unread: false }),
+      record({
+        sent: "2026-03-01T10:00:00.000Z",
+        role: "patient",
+        attachments: [{ name: "invented.png", extension: "PNG" }],
+      }),
       record({ thread: "thread-2", sent: "2026-03-05T10:00:00.000Z" }),
     ]);
 
-    const thread = await callTool(world.client, "get_message_thread", { threadId: "thread-1" });
-    const none = await callTool(world.client, "get_message_thread", { threadId: "no-such" });
+    const { answer, item, messages } = await thread();
 
-    expect(thread.items.map((item) => item.sent)).toStrictEqual([
-      "2026-03-01T10:00:00.000Z",
-      "2026-03-02T10:00:00.000Z",
+    expect(answer.total).toBe(1);
+    expect(item).toMatchObject({
+      kind: "message_thread_detail",
+      threadId: "thread-1",
+      messageCount: 2,
+      firstMessageAt: "2026-03-01T10:00:00.000Z",
+      lastMessageAt: "2026-03-02T10:00:00.000Z",
+    });
+    expect(item).not.toHaveProperty("lastMessage");
+    expect(messages).toStrictEqual([
+      {
+        id: "msg:thread-1:fp:2026-03-01T10:00:00.000Z:patient:Invented text sent 2026-03-01T10:00:00.000Z",
+        sent: "2026-03-01T10:00:00.000Z",
+        direction: "from_patient",
+        from: { role: "patient" },
+        body: "Invented text sent 2026-03-01T10:00:00.000Z",
+        attachments: [{ name: "invented.png", extension: "PNG" }],
+      },
+      {
+        id: "msg:thread-1:fp:2026-03-02T10:00:00.000Z:practitioner:Invented text sent 2026-03-02T10:00:00.000Z",
+        sent: "2026-03-02T10:00:00.000Z",
+        direction: "to_patient",
+        from: { role: "practitioner", name: "Nurse Example A" },
+        unread: false,
+        body: "Invented text sent 2026-03-02T10:00:00.000Z",
+        attachments: [],
+      },
     ]);
-    expect(none.items).toStrictEqual([]);
-    expect(none.warnings).toContain("thread_not_found");
+  });
+
+  it("says when there is no such thread", async () => {
+    const { answer } = await thread("no-such");
+
+    expect(answer.items).toStrictEqual([]);
+    expect(answer.warnings).toContain("thread_not_found");
   });
 
   it("requires a thread id", async () => {
     const answer = await callTool(world.client, "get_message_thread");
 
     expect(answer.isError).toBe(true);
+  });
+});
+
+/** The bodies of a get_message_thread item's messages. */
+const bodiesOf = (item: unknown) =>
+  ((item as { messages?: { body?: string }[] }).messages ?? []).map((entry) => entry.body);
+
+describe("the rule builder's samples of the message tools", () => {
+  beforeEach(() => {
+    store(HEALTH_SYSTEM_A, [
+      record({ sent: "2026-03-01T10:00:00.000Z", role: "patient" }),
+      record({ thread: "thread-2", sent: "2026-03-05T10:00:00.000Z" }),
+    ]);
+  });
+
+  it("reads get_message_thread's structure from the newest conversation get_messages lists", async () => {
+    const structure = await sampleStructure(fakeDeps(world.state), "get_message_thread");
+
+    expect(structure?.items).toBe(1);
+    const names = structure?.item.map((node) => node.name) ?? [];
+    expect(names).toContain("messages");
+    expect(names).not.toContain("lastMessage");
+  });
+
+  it("previews a draft on a conversation's own field, in the thread tool", async () => {
+    const preview = await previewDraft(fakeDeps(world.state), [], {
+      tool: "get_message_thread",
+      field: {
+        effect: "hide",
+        tool: "get_message_thread",
+        resourceType: "Communication",
+        healthSystemId: null,
+        paths: ["messages[].body"],
+      },
+    });
+
+    const [only] = preview.tools;
+    expect(only).toMatchObject({ tool: "get_message_thread", total: 1, affected: 1 });
+    expect(bodiesOf(only?.sample?.before)).toStrictEqual([
+      "Invented text sent 2026-03-05T10:00:00.000Z",
+    ]);
+    expect(bodiesOf(only?.sample?.after)).toStrictEqual([undefined]);
+  });
+});
+
+describe("previewOf", () => {
+  it("collapses whitespace, keeps a short text whole, and never cuts a character in two", () => {
+    expect(previewOf("  a\n\n b  ")).toStrictEqual({ preview: "a b", previewTruncated: false });
+    const emoji = "😀".repeat(PREVIEW_CHARS + 5);
+    const cut = previewOf(emoji);
+    expect(cut.previewTruncated).toBe(true);
+    expect(cut.preview).toBe(`${"😀".repeat(PREVIEW_CHARS)}…`);
   });
 });

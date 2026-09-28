@@ -1041,26 +1041,33 @@ describe("portal messages through the MCP", () => {
     }
   }
 
-  it("answers a message two portals show once, from its own health system, after a real seal", async () => {
+  it("answers a conversation two portals show once, from its own health system, after a real seal", async () => {
     await storeBoth();
 
     const answer = await call(world.client, "get_messages");
 
     expect(answer.isError).toBe(false);
     expect(answer.items).toHaveLength(2);
-    const reply = answer.items.find((item) => item.body === shared.body);
+    const reply = answer.items.find((item) => item.subject === "Invented subject");
     expect(reply).toMatchObject({
+      kind: "message_thread",
       healthSystem: NAME_A,
       firstParty: true,
-      direction: "to_patient",
-      subject: "Invented subject",
+      messageCount: 1,
+      lastMessage: expect.objectContaining({
+        direction: "to_patient",
+        preview: shared.body,
+        previewTruncated: false,
+      }),
     });
     const notice = answer.items.find((item) => item.subject === "Only at B");
     expect(notice).toMatchObject({ healthSystem: NAME_B, firstParty: true });
 
     const threadId = String(reply?.threadId);
     const conversation = await call(world.client, "get_message_thread", { threadId });
-    expect(conversation.items.map((item) => item.body)).toStrictEqual([shared.body]);
+    expect(conversation.items).toHaveLength(1);
+    const messages = (conversation.items[0]?.messages ?? []) as Record<string, unknown>[];
+    expect(messages.map((message) => message.body)).toStrictEqual([shared.body]);
   });
 
   it("withholds clinicians' names on the owner's field rule, and every message on a resource rule", async () => {

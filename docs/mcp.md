@@ -287,14 +287,27 @@ HTML is flattened, never kept), sealed and padded like the FHIR cache, keyed
 by a blind of its content rather than the portal's per-session ids.
 `portal_message_sync` records how each health system's last read went.
 
-- **One item per message**, newest first: `id`, `threadId`, `subject`,
-  `folder`, `sent`, `direction` (`from_patient` / `to_patient`), `from`
-  (`role`: `patient`, `proxy`, `practitioner` or `system`, and `name`),
-  `practitioners[]` (the care team the conversation is with), `body`,
-  `attachments[]` (names and file types only; files are never fetched), and
-  the health system tags. `get_message_thread` returns one `threadId`'s messages
-  oldest first. `from`/`to` window on `sent`; `folder`, `direction` and
-  `threadId` filter.
+- **`get_messages`: one item per conversation**, newest activity first
+  (`kind: "message_thread"`): `threadId`, `subject`, `folder`,
+  `firstMessageAt`, `lastMessageAt`, `messageCount`, `unreadCount` (the
+  portal's own unread flags, read without marking anything read; absent for
+  messages stored before the flag was kept), `attachmentCount`,
+  `hasAttachments`, `practitioners[]` (the care team), `participants[]`
+  (everyone who wrote in it: `role` — `patient`, `proxy`, `practitioner` or
+  `system` — and `name`), `lastMessage` (`id`, `sent`, `direction`, `from`,
+  and `preview`: the newest message's first 160 characters, whitespace
+  collapsed, with `previewTruncated`), and the health system tags. `total` is
+  the conversations; the envelope's `messages` is how many messages they hold.
+  `from`/`to` window on `lastMessageAt` and keep a conversation whole;
+  `folder` filters; `search` keeps conversations whose subject or any
+  message's full text contains the given text, ignoring case and spacing.
+- **`get_message_thread`: one conversation, every message in full**
+  (`kind: "message_thread_detail"`): the same conversation fields and
+  `messages[]`, oldest first — `id`, `sent`, `direction` (`from_patient` /
+  `to_patient`), `from`, `unread`, `body` (plain text), `attachments[]`, and
+  `noLongerListed` where it applies. A conversation whose messages come from
+  two health systems' portals (one has a reply the other has not listed yet) is
+  one item per health system, in both tools.
 - **One message, one item, across organisations.** Each portal also shows the
   conversations of the other organisations the chart is linked to, so one
   message can be stored twice. Two copies are one message only when they carry
@@ -309,15 +322,26 @@ by a blind of its content rather than the portal's per-session ids.
   with `noLongerListed: true`; a second-hand one is never flagged, because a
   linked organisation can drop out of the Message Center for a while with no
   error at all.
-- **Policy.** Items are tagged `resourceType: "Communication"`: a `resource`
-  rule on Communication removes them and their coverage, and every
-  `Communication.<field>` rule reaches them. `from.name` and
-  `practitioners[].name` are names of people, judged like any reference: a
-  clinician's name goes wherever the owner withholds clinicians' names
-  (a denied Practitioner type, a `Practitioner.name` rule, a rule on an
-  Encounter's `practitioners`), the patient's wherever the patient's name is
-  withheld. The body is prose and is not scrubbed (see SECURITY.md's known
-  limits). There is no `raw`.
+- **Policy.** The policy judges each message on its own, before any grouping:
+  both tools read one item per message (`resourceType: "Communication"`,
+  the rule builder's "Secure message" shape), filter those, and only then
+  group what the policy released into conversations (`respond()`'s reshape,
+  `worker/mcp/message-threads.ts`). So a `resource` rule on Communication
+  removes every conversation and the coverage, and every
+  `Communication.<field>` rule on a message field (`body`, `from.name`,
+  `subject`) reaches the participants, previews, bodies and search built
+  from it. `from.name` and `practitioners[].name` are names of people, judged
+  like any reference, one message at a time: a clinician's name goes
+  wherever the owner withholds clinicians' names (a denied Practitioner type,
+  a `Practitioner.name` rule, a rule on an Encounter's `practitioners`), the
+  patient's wherever the patient's name is withheld — and hiding one never
+  takes the other with it. The policy then runs over the conversation items
+  too, so a rule on their own fields (`lastMessage.preview`,
+  `messages[].body`, `participants`) reaches them. `search` matches only what
+  the first pass released: to keep bodies out of search, hide the message
+  field `body`, not only `messages[].body` in `get_message_thread`. The body is
+  prose and is not scrubbed (see SECURITY.md's known limits). There is no
+  `raw`.
 - **Coverage** is `Communication` per health system, from the portal pass's own
   record: `failed` with the error code when the last read failed (for example
   `portal_session_expired`), `partial` when it could not prove it saw
