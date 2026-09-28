@@ -341,7 +341,7 @@ describe("location", () => {
 });
 
 describe("description", () => {
-  it("carries the place, the people, the portal link and the footer", async () => {
+  it("carries the place, the people and a link on the visit line", async () => {
     const { model } = await buildCalendarModel(view(), input());
 
     expect(model.description).toContain("Example Regional");
@@ -350,7 +350,6 @@ describe("description", () => {
     expect(model.description).toContain("1 Test Way, Testville, TS, 00001 · 555-0100");
     expect(model.description).toContain("Casey Example — Cardiology");
     expect(model.description).toContain("Office Visit · planned");
-    expect(model.description).toContain(PORTAL);
     // Healthy's block: the rule, the header right below it, then the details.
     expect(
       model.description.startsWith(
@@ -358,7 +357,22 @@ describe("description", () => {
       ),
     ).toBe(true);
     expect(model.description).not.toContain("Synced by Healthy · do not edit\n");
-    expect(model.description.endsWith(PORTAL)).toBe(true);
+    // The visit line is a link to the portal, not a bare trailing url section.
+    expect(model.description.endsWith(`<a href="${PORTAL}">Office Visit · planned</a>`)).toBe(true);
+    expect(model.description.match(new RegExp(PORTAL, "gu"))).toHaveLength(1);
+  });
+
+  it("leaves the visit line plain when the health system has no portal url", async () => {
+    const { model } = await buildCalendarModel(view(), input({ portalUrl: null }));
+
+    expect(model.description.endsWith("Office Visit · planned")).toBe(true);
+    expect(model.description).not.toContain("<a href");
+  });
+
+  it("does not link an empty visit line", async () => {
+    const { model } = await buildCalendarModel(view({ visitType: undefined, status: "" }), input());
+
+    expect(model.description).not.toContain("<a href");
   });
 
   it("carries no clock: an unchanged event is never patched, so a time would go stale", async () => {

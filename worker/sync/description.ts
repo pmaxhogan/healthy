@@ -48,6 +48,17 @@
  *
  * Pure and silent. The owner's text is personal content: nothing here logs it,
  * and nothing that calls this stores it.
+ *
+ * **One line of the details may be a link.** `mapping.ts` turns the visit-type
+ * line into a hyperlink (`linkify`) when the health system has a portal url, and
+ * that is the one piece of real markup this module ever writes into the block
+ * itself. `htmlBlock` has to know that when it escapes the rest of the block for
+ * an HTML owner: it recognises a well-formed `<a>`/`</a>` tag structurally (by
+ * tag name, the same way `plainText` already reads the owner's own HTML) and
+ * copies it through unescaped, so the link keeps working instead of showing up
+ * as literal angle brackets. Anything else that merely looks like a tag --
+ * including a stray `<` in upstream data -- is escaped like any other
+ * character, exactly as it always was.
  */
 
 /** The line that separates the owner's text from Healthy's. Exactly this. */
@@ -194,9 +205,54 @@ function escapeHtml(text: string): string {
   return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
-/** The block as HTML, to sit below an owner's text that Google has made HTML. */
+/** `escapeHtml`, plus the one character that matters inside a quoted attribute. */
+function escapeAttr(url: string): string {
+  return escapeHtml(url).replaceAll('"', "&quot;");
+}
+
+/**
+ * A line of the details as a hyperlink -- the one piece of real markup this
+ * module ever writes into a block. Both the visible text and the url are
+ * escaped, so a stray `&` or `<` in either (upstream data, or a portal url
+ * copied out of a health system's config) cannot break out of the tag.
+ */
+export function linkify(text: string, url: string): string {
+  return `<a href="${escapeAttr(url)}">${escapeHtml(text)}</a>`;
+}
+
+/** Tag names `htmlBlock` passes through unescaped: see `linkify`. */
+const SAFE_TAGS: ReadonlySet<string> = new Set(["a"]);
+
+/**
+ * The block as HTML, to sit below an owner's text that Google has made HTML.
+ *
+ * Escapes every character except a well-formed `<a>` or `</a>` tag, which is
+ * copied through verbatim -- attributes included -- so a link `linkify` wrote
+ * stays a link instead of turning into visible markup. `parseTag` (below) is
+ * the same recogniser `plainText` uses to read the owner's own HTML, so this
+ * treats a tag as structural on exactly the same terms reading already does.
+ */
 function htmlBlock(block: string): string {
-  return escapeHtml(block).replaceAll("\n", "<br>");
+  let out = "";
+  let at = 0;
+  while (at < block.length) {
+    const char = block.charAt(at);
+    if (char === "\n") {
+      out += "<br>";
+      at += 1;
+      continue;
+    }
+    const close = char === "<" ? block.indexOf(">", at) : -1;
+    const tag = close === -1 ? null : parseTag(block.slice(at + 1, close));
+    if (tag !== null && SAFE_TAGS.has(tag.name)) {
+      out += block.slice(at, close + 1);
+      at = close + 1;
+      continue;
+    }
+    out += escapeHtml(char);
+    at += 1;
+  }
+  return out;
 }
 
 /** The block in the same flavour as the owner's text above it. */

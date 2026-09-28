@@ -4,11 +4,20 @@
 
 import { describe, expect, it } from "vitest";
 
-import { carriesBlock, healthyBlock, mergeDescription } from "../../../worker/sync/description.ts";
+import {
+  carriesBlock,
+  healthyBlock,
+  linkify,
+  mergeDescription,
+} from "../../../worker/sync/description.ts";
 
 const DETAILS = "Example Clinic\n1 Test Way & Annex, Testville\n\nCasey Example — Cardiology";
 const BLOCK = healthyBlock(DETAILS);
 const NEWER = healthyBlock(DETAILS.replace("Cardiology", "Neurology"));
+const PORTAL = "https://portal.example.test/mychart";
+const LINK = linkify("Office Visit · confirmed", PORTAL);
+const LINKED_DETAILS = `${DETAILS}\n${LINK}`;
+const LINKED_BLOCK = healthyBlock(LINKED_DETAILS);
 /** What the pre-rule format wrote. */
 const LEGACY = `${DETAILS}\n\nSynced by Healthy · do not edit`;
 const LEGACY_GHOST = `${LEGACY}\n\nNo longer on the health system's schedule as of Oct 1, 2026.`;
@@ -119,6 +128,75 @@ describe("mergeDescription", () => {
       expect(carriesBlock(once, BLOCK)).toBe(true);
       expect(mergeDescription(once, BLOCK)).toBe(once);
     }
+  });
+
+  it("is idempotent for a block that carries a link too", () => {
+    for (const current of [null, "Owner wrote this", "<b>Owner</b><br>-------<br>stale"]) {
+      const once = mergeDescription(current, LINKED_BLOCK);
+      expect(carriesBlock(once, LINKED_BLOCK)).toBe(true);
+      expect(mergeDescription(once, LINKED_BLOCK)).toBe(once);
+    }
+  });
+});
+
+describe("linkify", () => {
+  it("wraps the text in an anchor to the url", () => {
+    expect(linkify("Office Visit · confirmed", PORTAL)).toBe(
+      `<a href="${PORTAL}">Office Visit · confirmed</a>`,
+    );
+  });
+
+  it("escapes an ampersand and a quote in the url, and entities in the text", () => {
+    expect(linkify("A & B", 'https://portal.example.test/v?a=1&b="x"')).toBe(
+      '<a href="https://portal.example.test/v?a=1&amp;b=&quot;x&quot;">A &amp; B</a>',
+    );
+  });
+});
+
+describe("a link inside the block", () => {
+  it("stays a real anchor under plain owner text, alongside literal & and <", () => {
+    // Mirrors a live rehearsal: raw "&"/"<" in the owner's own plain text render
+    // as literal characters right next to a working link, with no other markup.
+    const owner = "Bring card & ID <3\n\n";
+
+    const merged = mergeDescription(`${owner}${LINKED_BLOCK}`, LINKED_BLOCK);
+
+    expect(merged).toBe(`${owner}${LINKED_BLOCK}`);
+    expect(merged).toContain(LINK);
+    expect(carriesBlock(merged, LINKED_BLOCK)).toBe(true);
+  });
+
+  it("survives escaping when the owner's part is HTML, instead of becoming visible markup", () => {
+    const owner = "<b>Fasting</b> from midnight<br><br>";
+    const google = `${owner}-------<br>Synced by Healthy · do not edit below the line<br>stale`;
+
+    const merged = mergeDescription(google, LINKED_BLOCK);
+
+    expect(merged).toBe(
+      `${owner}-------<br>Synced by Healthy · do not edit below the line<br>` +
+        `Example Clinic<br>1 Test Way &amp; Annex, Testville<br><br>Casey Example — Cardiology<br>` +
+        LINK,
+    );
+    expect(carriesBlock(merged, LINKED_BLOCK)).toBe(true);
+  });
+
+  it('still reads as settled after Google\'s editor adds target="_blank" and un-escapes the href', () => {
+    // Observed live (2026-09-28): saving any edit through Google's web editor --
+    // even to text that has nothing to do with the link -- rewrites our anchor to
+    // add this attribute and turns a pre-escaped "&amp;" in the href back into a
+    // raw "&". Neither changes the link's visible text, so it must not read as a
+    // change and force a patch every time the owner touches their own note.
+    const linkWithQuery = linkify(
+      "Office Visit · confirmed",
+      "https://portal.example.test/mychart?a=1&b=2",
+    );
+    const block = healthyBlock(`Example Clinic\n${linkWithQuery}`);
+    const saved =
+      "Bring card &amp; ID<br>-------<br>Synced by Healthy · do not edit below the line<br>" +
+      'Example Clinic<br><a href="https://portal.example.test/mychart?a=1&b=2" target="_blank">' +
+      "Office Visit · confirmed</a>";
+
+    expect(carriesBlock(saved, block)).toBe(true);
   });
 });
 

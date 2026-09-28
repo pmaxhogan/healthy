@@ -47,7 +47,7 @@ import { blindEventKey } from "../db/blind.ts";
 import { AppError } from "../lib/errors.ts";
 import { addMinutes, formatInZone } from "../lib/time.ts";
 
-import { healthyBlock, VANISHED_PREFIX } from "./description.ts";
+import { healthyBlock, linkify, VANISHED_PREFIX } from "./description.ts";
 
 import type { Blinder } from "../db/blind.ts";
 import type { HealthSystemConfig } from "../db/schemas.ts";
@@ -335,6 +335,22 @@ function joinInline(parts: readonly (string | undefined)[], separator: string): 
   return parts.filter((part): part is string => part !== undefined && part !== "").join(separator);
 }
 
+/**
+ * The visit-type/status line, linked to the health system's portal when one is
+ * configured.
+ *
+ * No stable per-visit deep link exists to find: a live capture of MyChart's own
+ * web client shows exactly one navigable URL for visits (the list page), and its
+ * "view visit details" panel is a client-side overlay, not a URL -- confirmed
+ * against Epic's own MyChart string tables, which name it as a view
+ * (`visits.visitdetails`) rather than a route. So the link goes to the portal
+ * itself rather than to the one appointment; a missing portal url or an empty
+ * line leaves the plain text alone.
+ */
+function linkedVisitLine(text: string, portalUrl: string | null): string {
+  return portalUrl !== null && text !== "" ? linkify(text, portalUrl) : text;
+}
+
 /** The appointment details: what goes below the rule and the header. */
 function descriptionBody(
   view: NormalizedAppointmentView,
@@ -348,9 +364,9 @@ function descriptionBody(
   ]);
   const who = joinLines([
     joinInline([view.practitioner, view.specialty], " — "),
-    joinInline([view.visitType, view.status], " · "),
+    linkedVisitLine(joinInline([view.visitType, view.status], " · "), healthSystem.portalUrl),
   ]);
-  return joinSections([where, who, healthSystem.portalUrl ?? ""]);
+  return joinSections([where, who]);
 }
 
 /**
