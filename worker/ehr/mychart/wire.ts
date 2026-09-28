@@ -128,6 +128,16 @@ export const PATHS = {
    * the sync never calls, it does not mark anything read.
    */
   conversationMessages: "api/conversations/GetConversationMessages",
+  /**
+   * [confirmed from capture] A message attachment's document details: what the
+   * Message Center's own attachment link asks for (`useDcsDocument` with legacy
+   * encryption). JSON in (`dcsId`, `fileExtension`, `organizationId`), JSON out
+   * with a `downloadUrl` that is relative to the MOUNT, not the origin -- a
+   * capture fetched at the origin root got a 404 page. Only the portal's own
+   * organisation's attachments have been exercised; another organisation's is
+   * asked for the same way, and a failure is recorded per attachment.
+   */
+  documentDetails: "api/documents/viewer/GetDocumentDetailsLegacy",
 } as const;
 
 /** Form field names. */

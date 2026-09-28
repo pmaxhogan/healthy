@@ -53,11 +53,26 @@ export type MessageFolder = (typeof MESSAGE_FOLDERS)[number]["folder"];
  */
 export type MessageAuthorRole = "patient" | "proxy" | "practitioner" | "system";
 
-/** Metadata of one attachment. The file itself is never fetched. */
-interface PortalMessageAttachment {
+/**
+ * What fetching one attachment's file takes, as the list reported it. Per-session
+ * tokens: used by the same sync run that read them (`client.ts`
+ * `loadMessageAttachment`) and never stored -- `worker/db/repos/portal-messages.ts`
+ * strips it before a message is sealed.
+ */
+export interface AttachmentHandle {
+  dcsId: string;
+  fileExtension: string;
+  /** "" for the portal's own organisation. */
+  organizationId: string;
+}
+
+/** One attachment: its metadata, and in memory only, how to fetch it. */
+export interface PortalMessageAttachment {
   name?: string;
   /** File extension as the portal reports it, e.g. `PDF`. */
   extension?: string;
+  /** Present only between the crawl and the store. Never persisted. */
+  handle?: AttachmentHandle;
 }
 
 export interface PortalMessage {
@@ -383,7 +398,21 @@ function attachmentsOf(message: unknown): PortalMessageAttachment[] {
   return records(message, "attachments").map((attachment) => {
     const name = str(attachment, "name").trim();
     const extension = str(attachment, "fileExtension").trim();
-    return { ...(name !== "" && { name }), ...(extension !== "" && { extension }) };
+    // A file the portal stores (a `dcsId`) can be fetched; a clinical reference
+    // (`etxId`) or a link into another organisation's portal cannot, and is kept
+    // as metadata only.
+    const dcsId = str(attachment, "dcsId");
+    return {
+      ...(name !== "" && { name }),
+      ...(extension !== "" && { extension }),
+      ...(dcsId !== "" && {
+        handle: {
+          dcsId,
+          fileExtension: str(attachment, "fileExtension"),
+          organizationId: str(attachment, "organizationId"),
+        },
+      }),
+    };
   });
 }
 

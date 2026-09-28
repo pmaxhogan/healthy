@@ -31,7 +31,14 @@ export type { PortalClient, PortalCredentials, SecondaryValidation } from "./cli
 export type { PortalCustomSettings } from "./custom-oidc/client.ts";
 export type { PortalEndpoint } from "./discovery.ts";
 export type { PortalVisit } from "./visits.ts";
-export type { MessageAuthorRole, MessageFolder, PortalMessage, PortalThread } from "./messages.ts";
+export type {
+  AttachmentHandle,
+  MessageAuthorRole,
+  MessageFolder,
+  PortalMessage,
+  PortalMessageAttachment,
+  PortalThread,
+} from "./messages.ts";
 export type { PortalFlavor, PortalVisitStatus, UsernameField } from "./wire.ts";
 export { CookieJar } from "./cookie-jar.ts";
 

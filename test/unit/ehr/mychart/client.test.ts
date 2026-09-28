@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { createMyChartClient } from "../../../../worker/ehr/mychart/client.ts";
+import { createMyChartClient, downloadTarget } from "../../../../worker/ehr/mychart/client.ts";
 import { CookieJar } from "../../../../worker/ehr/mychart/cookie-jar.ts";
 import { DEVICE_ID_EXTRA_KEY } from "../../../../worker/ehr/mychart/wire.ts";
 import { makeLogger, noopLogger } from "../../../../worker/lib/log.ts";
@@ -1246,5 +1246,103 @@ describe("loadMessages", () => {
     });
 
     await expect(codeOf(client(stub).loadMessages())).resolves.toBe("portal_session_expired");
+  });
+});
+
+describe("loadMessageAttachment", () => {
+  const HANDLE = { dcsId: "WP-invented-dcs", fileExtension: "PNG", organizationId: "" };
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+  const DETAILS = {
+    dcsId: "WP-invented-dcs",
+    mimeType: "image/png",
+    downloadUrl: "/Documents/ViewDocument/Download?dcsid=x&displayName=y&dcsExt=PNG",
+  };
+  const png = () => new Response(PNG, { headers: { "content-type": "image/png" } });
+
+  it("asks for the document details with the token, then downloads under the mount", async () => {
+    const stub = routed({
+      "GET /MyChart/Visits/VisitsList": () => html(visitsListPage()),
+      "POST /MyChart/api/documents/viewer/GetDocumentDetailsLegacy": () => json(DETAILS),
+      "GET /MyChart/Documents/ViewDocument/Download": png,
+    });
+
+    const file = await client(stub).loadMessageAttachment(HANDLE);
+
+    expect(file.contentType).toBe("image/png");
+    expect([...file.bytes]).toStrictEqual([...PNG]);
+    const details = find(stub, "POST", "/GetDocumentDetailsLegacy");
+    expect(details?.headers.__requestverificationtoken).toBe(TOKEN_2);
+    expect(JSON.parse(details?.body ?? "{}")).toStrictEqual({ ...HANDLE, useOldMobileLink: false });
+    const download = find(stub, "GET", "/Documents/ViewDocument/Download");
+    expect(new URL(download?.url ?? "").searchParams.get("dcsExt")).toBe("PNG");
+  });
+
+  it("takes the details' type when the download names none", async () => {
+    const stub = routed({
+      "GET /MyChart/Visits/VisitsList": () => html(visitsListPage()),
+      "POST /MyChart/api/documents/viewer/GetDocumentDetailsLegacy": () => json(DETAILS),
+      "GET /MyChart/Documents/ViewDocument/Download": () =>
+        new Response(PNG, { headers: { "content-type": "application/octet-stream" } }),
+    });
+
+    const file = await client(stub).loadMessageAttachment(HANDLE);
+
+    expect(file.contentType).toBe("image/png");
+  });
+
+  it("reads a page where the file should be as a failure, and a login page as an expired session", async () => {
+    const notFound = routed({
+      "GET /MyChart/Visits/VisitsList": () => html(visitsListPage()),
+      "POST /MyChart/api/documents/viewer/GetDocumentDetailsLegacy": () => json(DETAILS),
+      "GET /MyChart/Documents/ViewDocument/Download": () =>
+        html("<html><body>Not found</body></html>", { status: 404 }),
+    });
+    const bounced = routed({
+      "GET /MyChart/Visits/VisitsList": () => html(visitsListPage()),
+      "POST /MyChart/api/documents/viewer/GetDocumentDetailsLegacy": () => json(DETAILS),
+      "GET /MyChart/Documents/ViewDocument/Download": () =>
+        redirect(`${HOST}/MyChart/Authentication/Login`),
+      "GET /MyChart/Authentication/Login": () => html(loginPageNew()),
+    });
+
+    await expect(codeOf(client(notFound).loadMessageAttachment(HANDLE))).resolves.toBe(
+      "portal_parse_failed",
+    );
+    await expect(codeOf(client(bounced).loadMessageAttachment(HANDLE))).resolves.toBe(
+      "portal_session_expired",
+    );
+  });
+
+  it("refuses details that name no download", async () => {
+    const stub = routed({
+      "GET /MyChart/Visits/VisitsList": () => html(visitsListPage()),
+      "POST /MyChart/api/documents/viewer/GetDocumentDetailsLegacy": () => json({ dcsId: "x" }),
+    });
+
+    await expect(codeOf(client(stub).loadMessageAttachment(HANDLE))).resolves.toBe(
+      "portal_parse_failed",
+    );
+  });
+});
+
+describe("downloadTarget", () => {
+  const ROOT = `${HOST}/MyChart/`;
+
+  it("resolves a mount-relative download under the mount", () => {
+    expect(downloadTarget({ downloadUrl: "/Documents/X?a=1" }, ROOT)).toBe(
+      `${HOST}/MyChart/Documents/X?a=1`,
+    );
+  });
+
+  it("refuses anything that would leave the mount or the site", () => {
+    for (const downloadUrl of [
+      "https://elsewhere.example/x",
+      "//elsewhere.example/x",
+      "Documents/X",
+      "/../Other/X",
+      "",
+    ]) {
+      expect(() => downloadTarget({ downloadUrl }, ROOT)).toThrow();
+    }
   });
 });

@@ -33,8 +33,10 @@ are largely in place; hardening and the first real deployment are ongoing.
   pass also reads its Message Center -- every folder, every conversation, every
   message -- with the session it already holds, and the MCP serves them
   (`get_messages` lists conversations with a preview of the newest message;
-  `get_message_thread` returns one conversation in full), deduplicated across
-  health systems, sealed at rest like everything else.
+  `get_message_thread` returns one conversation in full;
+  `get_message_attachment` returns an attached file the pass fetched and
+  sealed), deduplicated across health systems, sealed at rest like everything
+  else.
 - **Re-auth alerts.** When a connection's refresh token stops working, opens
   a Trello card with a one-click reconnect link, and closes it automatically
   once the connection is restored.

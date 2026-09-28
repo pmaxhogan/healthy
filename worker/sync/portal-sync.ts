@@ -125,6 +125,7 @@ import type { RunState } from "./run.ts";
 import type { Blinder } from "../db/blind.ts";
 import type { Ctx } from "../db/client.ts";
 import type { Repos } from "../db/index.ts";
+import type { FetchableAttachment } from "../db/repos/portal-messages.ts";
 import type { CalendarEventRow, HealthSystemRow } from "../db/rows.ts";
 import type { PortalVisit } from "../ehr/mychart/index.ts";
 import type { CalendarClient } from "../google/calendar.ts";
@@ -276,6 +277,109 @@ async function loadPortalVisits(
   return visits;
 }
 
+/** What one run did with the attachments its Message Center read listed. Counts only. */
+interface AttachmentPass {
+  listed: number;
+  stored: number;
+  failed: number;
+  /** Already stored, or failed too recently to try again. */
+  skipped: number;
+  /** On a message the portal still marks unread: left for a run after it is read. */
+  deferredUnread: number;
+  /** Not tried because the session ended mid-pass. */
+  abandoned: number;
+}
+
+/** Fetch and store one attachment, or record why not. Never throws for the portal's reasons. */
+async function fetchAttachment(
+  input: PortalPassInput,
+  healthSystemId: string,
+  session: PortalSession,
+  attachment: FetchableAttachment,
+): Promise<"stored" | "failed" | "abandoned"> {
+  const { ctx, repos } = input;
+  const meta = { name: attachment.name, extension: attachment.extension };
+  try {
+    const file = await session.client.loadMessageAttachment(attachment.handle);
+    await repos.portalMessageAttachments.store(
+      healthSystemId,
+      attachment.key,
+      { ...meta, contentType: file.contentType },
+      file.bytes,
+    );
+    return "stored";
+  } catch (error) {
+    const code = isAppError(error) ? error.code : "internal";
+    if (code === "portal_session_expired") return "abandoned";
+    ctx.log.warn("portal.attachment_failed", { healthSystemId, ...errorFields(error) });
+    await repos.portalMessageAttachments.fail(healthSystemId, attachment.key, meta, code);
+    return "failed";
+  }
+}
+
+/**
+ * Fetch and seal every attachment the Message Center read listed and the store
+ * does not hold yet (`worker/db/repos/portal-message-attachments.ts`).
+ *
+ * It has to be now: the portal names an attachment by a per-session token, so
+ * only the run that listed it can ask for it. Every attachment is fetched,
+ * however many and however large; each one that is not is on the record -- a
+ * `failed` row with a stable code, tried again a day later -- or waiting, never
+ * silently dropped:
+ *
+ *  - An attachment on a message the portal still marks unread is left alone
+ *    until it has been read. Opening a message marks it read, and whether the
+ *    document download does too has not been observed; a message the owner has
+ *    not read yet must stay unread. It is fetched on the first run after.
+ *  - A session that ends mid-pass stops the pass: the rest are tried next run,
+ *    and none is marked failed for it.
+ *
+ * Never throws into the message sync: a failure here costs attachment content,
+ * not messages.
+ */
+async function syncAttachments(
+  input: PortalPassInput,
+  healthSystemId: string,
+  session: PortalSession,
+  listed: readonly FetchableAttachment[],
+): Promise<void> {
+  const { ctx, repos } = input;
+  const pass: AttachmentPass = {
+    listed: listed.length,
+    stored: 0,
+    failed: 0,
+    skipped: 0,
+    deferredUnread: 0,
+    abandoned: 0,
+  };
+  try {
+    const unique = new Map(listed.map((attachment) => [attachment.key, attachment]));
+    const due = await repos.portalMessageAttachments.needingFetch(
+      healthSystemId,
+      listed.map((attachment) => attachment.key),
+    );
+    pass.skipped = unique.size - due.size;
+    let sessionEnded = false;
+    for (const attachment of unique.values()) {
+      if (!due.has(attachment.key)) continue;
+      if (attachment.unread !== false) {
+        pass.deferredUnread += 1;
+        continue;
+      }
+      if (sessionEnded) {
+        pass.abandoned += 1;
+        continue;
+      }
+      const outcome = await fetchAttachment(input, healthSystemId, session, attachment);
+      pass[outcome] += 1;
+      if (outcome === "abandoned") sessionEnded = true;
+    }
+  } catch (error) {
+    ctx.log.warn("portal.attachments_failed", { healthSystemId, ...errorFields(error) });
+  }
+  ctx.log.info("portal.attachments", { healthSystemId, ...pass });
+}
+
 /**
  * Read the whole Message Center with the session the visits just used, and store
  * every message (`worker/db/repos/portal-messages.ts`).
@@ -296,7 +400,7 @@ async function syncMessages(
   try {
     const result = await session.client.loadMessages();
     const messages = result.threads.reduce((sum, thread) => sum + thread.messages.length, 0);
-    await repos.portalMessages.record(healthSystemId, result.threads, {
+    const recorded = await repos.portalMessages.record(healthSystemId, result.threads, {
       complete: result.complete,
     });
     await repos.portalMessages.markSync(healthSystemId, {
@@ -312,6 +416,7 @@ async function syncMessages(
       messages,
       complete: result.complete,
     });
+    await syncAttachments(input, healthSystemId, session, recorded.attachments);
   } catch (error) {
     const code = isAppError(error) ? error.code : "internal";
     ctx.log.warn("portal.messages_failed", { healthSystemId, ...errorFields(error) });

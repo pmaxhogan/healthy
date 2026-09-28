@@ -544,6 +544,15 @@ const DATATYPES: Readonly<Record<string, FieldSpecs>> = {
   "N.MessageAttachment": {
     name: ["string", "The file's name"],
     extension: ["string", "Its file type"],
+    id: ["string", "What get_message_attachment takes"],
+    status: ["string", "stored, failed, waiting_until_read or not_fetched"],
+    errorCode: ["string", "Why the portal would not serve it"],
+    contentType: ["string", "The stored file's content type"],
+    size: ["integer", "The stored file's size in bytes"],
+  },
+  "N.AttachmentImage": {
+    contentType: ["string", "The image's type"],
+    returnedAs: ["string", "Always image content block"],
   },
   "N.SyncCode": {
     code: "string",
@@ -1523,6 +1532,36 @@ const THREAD_DETAIL = {
   messages: ["N.ThreadMessage[]", "Every message, oldest first"],
 } as const;
 
+/** One attached file (`get_message_attachment`). */
+const MESSAGE_ATTACHMENT = {
+  resourceType: ["string", "Always Communication"],
+  kind: ["string", "Always message_attachment"],
+  id: ["string", "The attachment's id"],
+  messageId: ["string", "The message it is attached to"],
+  threadId: ["string", "The conversation's id"],
+  subject: ["string", "The conversation's subject line"],
+  sent: ["string", "When its message was delivered"],
+  name: ["string", "The file's name"],
+  extension: ["string", "Its file type"],
+  status: ["string", "stored, failed, waiting_until_read or not_fetched"],
+  errorCode: ["string", "Why the portal would not serve it"],
+  contentType: ["string", "The stored file's content type"],
+  size: ["integer", "The stored file's size in bytes"],
+  chars: ["integer", "Length of the text"],
+  text: ["string", "A text file's full text"],
+  image: [
+    "N.AttachmentImage",
+    "An image, returned beside the item as an image content block; hiding this withholds it",
+  ],
+  note: ["string", "Why no content came back"],
+  source: ["string", "Always portal"],
+  firstParty: ["boolean", "False when another organisation's portal showed it"],
+  via: ["string", "The health system whose portal showed it second-hand"],
+  ...TAGS,
+} as const;
+
+const MESSAGE_ATTACHMENT_SHAPE = "view:MessageAttachment";
+
 const THREAD_SUMMARY_SHAPE = "view:MessageThread";
 const THREAD_DETAIL_SHAPE = "view:MessageThreadDetail";
 
@@ -1657,6 +1696,13 @@ const SHAPES: readonly ShapeDef[] = [
     fields: THREAD_DETAIL,
   },
   {
+    id: MESSAGE_ATTACHMENT_SHAPE,
+    label: "Message attachment",
+    resourceType: "Communication",
+    vocabulary: "normalized",
+    fields: MESSAGE_ATTACHMENT,
+  },
+  {
     id: "summary:count",
     label: "Summary count row",
     resourceType: null,
@@ -1737,6 +1783,7 @@ const TOOL_SHAPES = {
   get_document_text: ["document:text"],
   get_messages: [MESSAGE_SHAPE, THREAD_SUMMARY_SHAPE],
   get_message_thread: [MESSAGE_SHAPE, THREAD_DETAIL_SHAPE],
+  get_message_attachment: [MESSAGE_ATTACHMENT_SHAPE],
   get_care_team: collectionShapes("CareTeam"),
   get_care_plans: collectionShapes("CarePlan"),
   get_goals: collectionShapes("Goal"),

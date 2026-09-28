@@ -38,6 +38,7 @@ Three treatments, and every column is in exactly one of them:
 | Cached FHIR resources (including the Patient)                                               | D1                  | Payload sealed; resource id blinded; content hash keyed  |
 | Patient-portal upcoming visits                                                              | D1                  | Payload sealed; visit number blinded; content hash keyed |
 | Patient-portal secure messages                                                              | D1                  | Payload sealed, padded; keys blinded; content hash keyed |
+| Secure-message attachments: the files, their names, types and sizes                         | D1                  | Each piece sealed, padded; metadata sealed; keys blinded |
 | Calendar bookkeeping: event key, encounter, visit number, calendar id                       | D1                  | Blinded; fingerprint keyed                               |
 | Calendar bookkeeping: a row's start and real calendar id                                    | D1                  | Sealed together, padded (`calendar_events.detail_enc`)   |
 | Google event marker (`extendedProperties.private.key`, `fp`)                                | Google              | The blinded event key and the keyed fingerprint          |
@@ -86,6 +87,13 @@ listed rather than left to be inferred:
   thread and message counts). The subject, body, sender, care team, folder and
   owning organisation are all in the sealed payload; the row keys are blinds of
   the message's content, never the portal's ids.
+- **`portal_message_attachments.state`, `error_code`, `chunks`,
+  `attempted_at`, `fetched_at`** and the chunks' `seq`: whether a file is
+  stored or why it failed (a stable code), how many pieces it has -- which
+  bounds its size to within about 576 KiB -- and when it was tried. The name,
+  type, size and every byte are sealed; the key is a blind of the message's
+  content and the file's position, never the portal's per-session id, which is
+  used by the run that listed it and never stored.
 - **`portal_accounts.session_state`, the attempt counters and the
   timestamps**: whether the session is live, how many sign-ins were spent
   today, and how many emailed codes the scheduled sync asked for and when.

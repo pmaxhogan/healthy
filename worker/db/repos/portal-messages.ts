@@ -34,7 +34,12 @@ import { blinderFor } from "../blind.ts";
 import { BATCH_CHUNK, all, batch, chunk, run, sha256Hex } from "../client.ts";
 import { aadFor, open, seal } from "../crypto.ts";
 
-import type { PortalMessage, PortalThread } from "../../ehr/mychart/index.ts";
+import type {
+  AttachmentHandle,
+  PortalMessage,
+  PortalMessageAttachment,
+  PortalThread,
+} from "../../ehr/mychart/index.ts";
 import type { Blinder } from "../blind.ts";
 import type { Ctx } from "../client.ts";
 import type { PortalMessageRow, PortalMessageSyncRow } from "../rows.ts";
@@ -52,6 +57,14 @@ interface MessagePayload {
   message: PortalMessage;
 }
 
+/** How one stored attachment is named: in storage, and to the MCP's caller. */
+export interface AttachmentIds {
+  /** The `portal_message_attachments` key: bound to the health system. */
+  key: string;
+  /** What `get_message_attachment` is called with: stable across portals, like `messageId`. */
+  id: string;
+}
+
 /** A stored message, opened. */
 export interface StoredPortalMessage {
   healthSystemId: string;
@@ -62,15 +75,29 @@ export interface StoredPortalMessage {
   fingerprint: string;
   thread: StoredThreadInfo;
   message: PortalMessage;
+  /** Index-aligned with `message.attachments`. */
+  attachments: AttachmentIds[];
   /** True when the portal's own organisation stopped listing it. */
   missing: boolean;
   fetchedAt: number;
+}
+
+/** An attachment a read listed with a handle: what the portal pass may fetch. */
+export interface FetchableAttachment {
+  key: string;
+  handle: AttachmentHandle;
+  name?: string | undefined;
+  extension?: string | undefined;
+  /** The message's own unread flag: see `worker/sync/portal-sync.ts`. */
+  unread: boolean | undefined;
 }
 
 export interface RecordMessagesReport {
   written: number;
   unchanged: number;
   missing: number;
+  /** Every attachment this read listed that has a file behind it. Never logged. */
+  attachments: FetchableAttachment[];
 }
 
 export interface RecordMessagesOptions {
@@ -135,10 +162,41 @@ function publicIds(
   ]);
 }
 
+/**
+ * The keys of one message's attachments, by position. Derived from the same
+ * digests as the message's own keys, so a later run -- another session, other
+ * portal ids -- arrives at the same ones.
+ */
+async function attachmentIds(
+  blinder: Blinder,
+  healthSystemId: string,
+  payload: Pick<MessagePayload, "threadFingerprint" | "fingerprint">,
+  count: number,
+): Promise<AttachmentIds[]> {
+  const out: AttachmentIds[] = [];
+  for (let ordinal = 0; ordinal < count; ordinal++) {
+    const identity = `${payload.threadFingerprint}\u{0}${payload.fingerprint}\u{0}${String(ordinal)}`;
+    out.push({
+      key: await blinder.id("portal_message_attachments.key", `${healthSystemId}\u{0}${identity}`),
+      id: await blinder.id("portal_messages.attachment_id", identity),
+    });
+  }
+  return out;
+}
+
+/** An attachment as it is sealed: metadata only, never the per-session handle. */
+function withoutHandle(attachment: PortalMessageAttachment): PortalMessageAttachment {
+  return {
+    ...(attachment.name !== undefined && { name: attachment.name }),
+    ...(attachment.extension !== undefined && { extension: attachment.extension }),
+  };
+}
+
 interface Prepared {
   messageKey: string;
   threadKey: string;
   payload: MessagePayload;
+  fetchable: FetchableAttachment[];
 }
 
 /** Every message of one read, keyed by its stored key. */
@@ -162,12 +220,31 @@ async function prepare(
         "portal_messages.message_key",
         `${healthSystemId}\u{0}${threadPrint}\u{0}${fingerprint}`,
       );
+      const stored: PortalMessage = {
+        ...message,
+        attachments: message.attachments.map((attachment) => withoutHandle(attachment)),
+      };
+      const payload = {
+        threadFingerprint: threadPrint,
+        fingerprint,
+        thread: info,
+        message: stored,
+      };
+      const ids = await attachmentIds(blinder, healthSystemId, payload, message.attachments.length);
+      const fetchable: FetchableAttachment[] = [];
+      for (const [ordinal, attachment] of message.attachments.entries()) {
+        const key = ids[ordinal]?.key;
+        if (key === undefined || attachment.handle === undefined) continue;
+        fetchable.push({
+          key,
+          handle: attachment.handle,
+          name: attachment.name,
+          extension: attachment.extension,
+          unread: message.unread,
+        });
+      }
       // The same message twice in one read is one row; the later sighting wins.
-      out.set(messageKey, {
-        messageKey,
-        threadKey,
-        payload: { threadFingerprint: threadPrint, fingerprint, thread: info, message },
-      });
+      out.set(messageKey, { messageKey, threadKey, payload, fetchable });
     }
   }
   return out;
@@ -210,6 +287,12 @@ export function makePortalMessagesRepo(ctx: Ctx) {
       fingerprint: payload.fingerprint,
       thread: payload.thread,
       message: payload.message,
+      attachments: await attachmentIds(
+        blinder,
+        row.health_system_id,
+        payload,
+        payload.message.attachments.length,
+      ),
       missing: row.state === "missing",
       fetchedAt: row.fetched_at,
     };
@@ -333,7 +416,12 @@ export function makePortalMessagesRepo(ctx: Ctx) {
       options: RecordMessagesOptions,
     ): Promise<RecordMessagesReport> {
       const now = ctx.now();
-      const report: RecordMessagesReport = { written: 0, unchanged: 0, missing: 0 };
+      const report: RecordMessagesReport = {
+        written: 0,
+        unchanged: 0,
+        missing: 0,
+        attachments: [],
+      };
       const known = await all<KnownRow>(
         ctx.db
           .prepare(
@@ -347,6 +435,7 @@ export function makePortalMessagesRepo(ctx: Ctx) {
 
       const statements: D1PreparedStatement[] = [];
       for (const entry of prepared.values()) {
+        report.attachments.push(...entry.fetchable);
         const statement = await upsertFor(
           healthSystemId,
           entry,
@@ -378,7 +467,13 @@ export function makePortalMessagesRepo(ctx: Ctx) {
       }
 
       for (const page of chunk(statements, BATCH_CHUNK)) await batch(ctx.db, page);
-      ctx.log.info("portal_messages.recorded", { healthSystemId, ...report });
+      ctx.log.info("portal_messages.recorded", {
+        healthSystemId,
+        written: report.written,
+        unchanged: report.unchanged,
+        missing: report.missing,
+        attachments: report.attachments.length,
+      });
       return report;
     },
 

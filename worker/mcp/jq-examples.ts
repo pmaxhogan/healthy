@@ -90,7 +90,9 @@ export const JQ_EXAMPLES = {
   get_message_thread: [
     ".[] | .messages[] | {sent, from: .from.role, body}",
     '.[] | .messages[] | select(.body | test("refill"; "i")) | {id, sent, body}',
+    ".[] | .messages[] | .attachments[] | {id, name, status, contentType}",
   ],
+  get_message_attachment: [".[] | {name, contentType, size, status, note}"],
   get_care_team: [".[] | {name, status, participants}", ".[] | .participants[] | {name, role}"],
   get_care_plans: ['.[] | select(.status == "active") | {title, period, activities}'],
   get_goals: [".[] | {description, lifecycleStatus, achievementStatus, targets, startDate}"],

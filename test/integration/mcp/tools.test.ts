@@ -1070,6 +1070,61 @@ describe("portal messages through the MCP", () => {
     expect(messages.map((message) => message.body)).toStrictEqual([shared.body]);
   });
 
+  it("serves a stored attachment's image through get_message_attachment, after a real seal", async () => {
+    const db = repos();
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 7, 7]);
+    const report = await db.portalMessages.record(
+      world.seeded.healthSystemA,
+      [
+        {
+          ...thread(false),
+          messages: [
+            {
+              ...shared,
+              unread: false,
+              attachments: [
+                {
+                  name: "invented-photo",
+                  extension: "PNG",
+                  handle: { dcsId: "WP-invented", fileExtension: "PNG", organizationId: "" },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      { complete: true },
+    );
+    const key = report.attachments[0]?.key ?? "";
+    await db.portalMessageAttachments.store(
+      world.seeded.healthSystemA,
+      key,
+      { name: "invented-photo", extension: "PNG", contentType: "image/png" },
+      png,
+    );
+
+    const list = await call(world.client, "get_messages");
+    const threadId = String(list.items[0]?.threadId);
+    const detail = await call(world.client, "get_message_thread", { threadId });
+    const messages = (detail.items[0]?.messages ?? []) as {
+      attachments: Record<string, unknown>[];
+    }[];
+    const attachment = messages[0]?.attachments[0];
+    expect(attachment).toMatchObject({
+      name: "invented-photo",
+      status: "stored",
+      contentType: "image/png",
+      size: png.length,
+    });
+
+    const result = (await world.client.callTool({
+      name: "get_message_attachment",
+      arguments: { attachmentId: String(attachment?.id) },
+    })) as { content: { type: string; data?: string }[] };
+    expect(result.content.map((block) => block.type)).toStrictEqual(["text", "image"]);
+    expect(result.content[1]?.data).toBe("iVBORwcH");
+  });
+
   it("withholds clinicians' names on the owner's field rule, and every message on a resource rule", async () => {
     await storeBoth();
     await repos().mcpPolicy.add("field", "Practitioner.name");

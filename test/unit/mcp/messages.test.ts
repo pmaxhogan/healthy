@@ -60,6 +60,7 @@ interface RecordOptions {
   missing?: boolean;
   unread?: boolean;
   attachments?: { name?: string; extension?: string }[];
+  files?: PortalMessageRecord["files"];
   /** Defaults to one derived from `sent` and `body`: what the repo would compute. */
   fingerprint?: string;
 }
@@ -88,6 +89,7 @@ function record(options: RecordOptions): PortalMessageRecord {
       attachments: options.attachments ?? [],
       ...(options.unread !== undefined && { unread: options.unread }),
     },
+    ...(options.files !== undefined && { files: options.files }),
     missing: options.missing === true,
   };
 }
@@ -326,12 +328,15 @@ describe("get_messages", () => {
       to: "2026-02-28",
     });
     const january = await callTool(world.client, "get_messages", { to: "2026-01-31" });
+    // A month-only bound is that whole UTC month, both ends inclusive.
+    const month = await callTool(world.client, "get_messages", { from: "2026-02", to: "2026-02" });
     const automated = await callTool(world.client, "get_messages", { folder: "automated" });
 
     expect(february.items.map((item) => [item.threadId, item.messageCount])).toStrictEqual([
       ["thread-1", 2],
     ]);
     expect(january.items).toStrictEqual([]);
+    expect(month.items.map((item) => item.threadId)).toStrictEqual(["thread-1"]);
     expect(automated.items.map((item) => item.threadId)).toStrictEqual(["thread-auto"]);
   });
 
@@ -647,6 +652,140 @@ describe("the rule builder's samples of the message tools", () => {
       "Invented text sent 2026-03-05T10:00:00.000Z",
     ]);
     expect(bodiesOf(only?.sample?.after)).toStrictEqual([undefined]);
+  });
+});
+
+/** One message on HEALTH_SYSTEM_A with these attachment files. */
+function withFiles(files: NonNullable<PortalMessageRecord["files"]>): void {
+  store(HEALTH_SYSTEM_A, [
+    record({
+      sent: "2026-03-01T10:00:00.000Z",
+      attachments: files.map((_, index) => ({
+        name: `invented-${String(index)}`,
+        extension: "X",
+      })),
+      files,
+    }),
+  ]);
+}
+
+describe("get_message_attachment", () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 9, 9]);
+
+  it("reports each attachment's id and status on the thread's messages", async () => {
+    withFiles([
+      { id: "att-1", status: "stored", contentType: "image/png", size: 6 },
+      { id: "att-2", status: "waiting_until_read" },
+    ]);
+
+    const { messages } = await thread();
+
+    expect(messages[0]?.attachments).toStrictEqual([
+      {
+        name: "invented-0",
+        extension: "X",
+        id: "att-1",
+        status: "stored",
+        contentType: "image/png",
+        size: 6,
+      },
+      { name: "invented-1", extension: "X", id: "att-2", status: "waiting_until_read" },
+    ]);
+  });
+
+  it("returns a stored image as an image content block beside the item", async () => {
+    withFiles([{ id: "att-1", status: "stored", contentType: "image/png", size: 6 }]);
+    world.state.attachmentContent.set(`${HEALTH_SYSTEM_A}:att-1`, PNG);
+
+    const result = (await world.client.callTool({
+      name: "get_message_attachment",
+      arguments: { attachmentId: "att-1" },
+    })) as { content: { type: string; data?: string; mimeType?: string; text?: string }[] };
+
+    const [text, image] = result.content;
+    const payload = JSON.parse(text?.text ?? "{}") as { items: Record<string, unknown>[] };
+    expect(payload.items[0]).toMatchObject({
+      kind: "message_attachment",
+      id: "att-1",
+      status: "stored",
+      name: "invented-0",
+      image: { contentType: "image/png" },
+      threadId: "thread-1",
+      healthSystemId: HEALTH_SYSTEM_A,
+    });
+    expect(image).toStrictEqual({ type: "image", data: "iVBORwkJ", mimeType: "image/png" });
+  });
+
+  it("withholds the image when a rule hides it", async () => {
+    withFiles([{ id: "att-1", status: "stored", contentType: "image/png", size: 6 }]);
+    world.state.attachmentContent.set(`${HEALTH_SYSTEM_A}:att-1`, PNG);
+    world.state.rules = rules({
+      rule_type: "field",
+      target: "sig-img",
+      scope_tool: "get_message_attachment",
+      paths_json: JSON.stringify(["image"]),
+    });
+
+    const result = (await world.client.callTool({
+      name: "get_message_attachment",
+      arguments: { attachmentId: "att-1" },
+    })) as { content: { type: string }[] };
+
+    expect(result.content.map((block) => block.type)).toStrictEqual(["text"]);
+  });
+
+  it("returns a stored text file's text", async () => {
+    withFiles([
+      { id: "att-1", status: "stored", contentType: "text/html; charset=utf-8", size: 20 },
+    ]);
+    world.state.attachmentContent.set(
+      `${HEALTH_SYSTEM_A}:att-1`,
+      new TextEncoder().encode("<p>Invented &amp; text</p>"),
+    );
+
+    const answer = await callTool(world.client, "get_message_attachment", {
+      attachmentId: "att-1",
+    });
+
+    expect(answer.items[0]).toMatchObject({ text: "Invented & text", chars: 15 });
+  });
+
+  it("says why there is no content: a PDF, a failure, an unread message", async () => {
+    withFiles([
+      { id: "att-pdf", status: "stored", contentType: "application/pdf", size: 1000 },
+      { id: "att-bad", status: "failed", errorCode: "portal_parse_failed" },
+      { id: "att-wait", status: "waiting_until_read" },
+    ]);
+    world.state.attachmentContent.set(`${HEALTH_SYSTEM_A}:att-pdf`, new Uint8Array(1000));
+
+    const pdf = await callTool(world.client, "get_message_attachment", { attachmentId: "att-pdf" });
+    const bad = await callTool(world.client, "get_message_attachment", { attachmentId: "att-bad" });
+    const wait = await callTool(world.client, "get_message_attachment", {
+      attachmentId: "att-wait",
+    });
+
+    expect(pdf.items[0]).toMatchObject({ contentType: "application/pdf", size: 1000 });
+    expect(pdf.items[0]).not.toHaveProperty("text");
+    expect(pdf.items[0]?.note).toContain("cannot be returned");
+    expect(bad.items[0]).toMatchObject({ status: "failed", errorCode: "portal_parse_failed" });
+    expect(wait.items[0]?.note).toContain("unread");
+  });
+
+  it("finds nothing under an id no visible message has, or under a Communication rule", async () => {
+    withFiles([{ id: "att-1", status: "stored", contentType: "image/png", size: 6 }]);
+    world.state.attachmentContent.set(`${HEALTH_SYSTEM_A}:att-1`, PNG);
+
+    const none = await callTool(world.client, "get_message_attachment", { attachmentId: "nope" });
+    world.state.rules = rules({ rule_type: "resource", target: "Communication" });
+    const denied = (await world.client.callTool({
+      name: "get_message_attachment",
+      arguments: { attachmentId: "att-1" },
+    })) as { content: { type: string; text?: string }[] };
+
+    expect(none.items).toStrictEqual([]);
+    expect(none.warnings).toContain("attachment_not_found");
+    expect(denied.content.map((block) => block.type)).toStrictEqual(["text"]);
+    expect(JSON.parse(denied.content[0]?.text ?? "{}")).toMatchObject({ items: [] });
   });
 });
 

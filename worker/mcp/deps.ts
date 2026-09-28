@@ -78,8 +78,36 @@ export interface PortalMessageRecord {
   fingerprint: string;
   thread: Omit<PortalThread, "messages">;
   message: PortalMessage;
+  /**
+   * What is stored of each attachment's file, index-aligned with
+   * `message.attachments`. Absent means none of them has been looked up.
+   */
+  files?: MessageAttachmentFile[] | undefined;
   /** The portal's own organisation stopped listing it. */
   missing: boolean;
+}
+
+/**
+ * Where one attachment's file stands (`portal_message_attachments`):
+ *
+ *  - `stored`: fetched and sealed; `get_message_attachment` can read it.
+ *  - `failed`: the portal would not serve it; `errorCode` says how. Tried again
+ *    a day later.
+ *  - `waiting_until_read`: on a message the portal still marks unread; fetched
+ *    on the first portal pass after it has been read (fetching could mark it read).
+ *  - `not_fetched`: not tried yet, or not a file the portal serves (a clinical
+ *    reference, a link into another organisation's portal).
+ */
+type MessageAttachmentStatus = "stored" | "failed" | "waiting_until_read" | "not_fetched";
+
+export interface MessageAttachmentFile {
+  /** What `get_message_attachment` takes: a keyed blind, the same from either portal. */
+  id: string;
+  status: MessageAttachmentStatus;
+  errorCode?: string | undefined;
+  contentType?: string | undefined;
+  /** Bytes. */
+  size?: number | undefined;
 }
 
 /** How one health system's last Message Center read went. */
@@ -234,6 +262,12 @@ export interface ToolDeps {
   portalMessages(healthSystemId: string): Promise<PortalMessageRecord[]>;
   /** Every health system's last Message Center read, for `get_messages`' coverage. */
   portalMessageSync(): Promise<PortalMessageSyncEntry[]>;
+  /**
+   * One stored attachment's file, by the `id` a message item reported, from
+   * `portal_message_attachment_chunks`. Null when that health system holds no
+   * stored file under that id. Never talks to a portal.
+   */
+  portalAttachmentContent(healthSystemId: string, attachmentId: string): Promise<Uint8Array | null>;
   counts(): Promise<CacheCount[]>;
   syncStatus(): Promise<SyncStatusEntry[]>;
   /**

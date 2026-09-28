@@ -69,7 +69,7 @@ describe("portal_messages.record", () => {
 
     const report = await repos.portalMessages.record(healthSystemId, [thread()], COMPLETE);
 
-    expect(report).toStrictEqual({ written: 2, unchanged: 0, missing: 0 });
+    expect(report).toStrictEqual({ written: 2, unchanged: 0, missing: 0, attachments: [] });
     const rows = await repos.ctx.db
       .prepare("SELECT * FROM portal_messages WHERE health_system_id = ?")
       .bind(healthSystemId)
@@ -131,7 +131,7 @@ describe("portal_messages.record", () => {
 
     time.advance(3600);
     const again = await repos.portalMessages.record(healthSystemId, [thread()], COMPLETE);
-    expect(again).toStrictEqual({ written: 0, unchanged: 2, missing: 0 });
+    expect(again).toStrictEqual({ written: 0, unchanged: 2, missing: 0, attachments: [] });
     expect(await rawColumn("portal_messages", "payload_enc", "1 = 1 ORDER BY message_key")).toBe(
       before,
     );
@@ -142,7 +142,7 @@ describe("portal_messages.record", () => {
       [thread({ folder: "archive" })],
       COMPLETE,
     );
-    expect(moved).toStrictEqual({ written: 2, unchanged: 0, missing: 0 });
+    expect(moved).toStrictEqual({ written: 2, unchanged: 0, missing: 0, attachments: [] });
     const stored = await repos.portalMessages.list(healthSystemId);
     expect(stored.every((row) => row.thread.folder === "archive")).toBe(true);
   });

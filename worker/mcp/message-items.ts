@@ -120,7 +120,12 @@ function messageItem(healthSystem: HealthSystemInfo, record: PortalMessageRecord
     },
     practitioners: thread.practitioners.map((practitioner) => ({ name: practitioner.name })),
     body: message.body,
-    attachments: message.attachments.map((attachment) => ({ ...attachment })),
+    // Metadata, and where the file stands: its `id` is what get_message_attachment takes.
+    attachments: message.attachments.map((attachment, index) => ({
+      ...(attachment.name !== undefined && { name: attachment.name }),
+      ...(attachment.extension !== undefined && { extension: attachment.extension }),
+      ...record.files?.at(index),
+    })),
     ...(message.unread !== undefined && { unread: message.unread }),
     ...(thread.organization !== undefined && { organization: thread.organization }),
     source: "portal",

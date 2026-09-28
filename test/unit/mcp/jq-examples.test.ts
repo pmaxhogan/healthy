@@ -263,7 +263,12 @@ function everything(): Record<string, unknown[]> {
   };
 }
 
-function message(sent: string, role: "patient" | "practitioner", body: string) {
+function message(
+  sent: string,
+  role: "patient" | "practitioner",
+  body: string,
+  files: NonNullable<PortalMessageRecord["files"]> = [],
+) {
   return {
     threadId: "thread-1",
     messageId: `msg:${sent}`,
@@ -274,7 +279,13 @@ function message(sent: string, role: "patient" | "practitioner", body: string) {
       external: false,
       practitioners: [{ name: "Nurse Example A" }],
     },
-    message: { sent, role, body, attachments: [] },
+    message: {
+      sent,
+      role,
+      body,
+      attachments: files.map((_, index) => ({ name: `invented-${String(index)}.pdf` })),
+    },
+    files,
     missing: false,
   } satisfies PortalMessageRecord;
 }
@@ -296,7 +307,9 @@ beforeAll(async () => {
         HEALTH_SYSTEM_A,
         [
           message("2026-05-01T10:00:00.000Z", "patient", "Could I get a refill please?"),
-          message("2026-05-01T15:00:00.000Z", "practitioner", "Sent to your pharmacy."),
+          message("2026-05-01T15:00:00.000Z", "practitioner", "Sent to your pharmacy.", [
+            { id: "att-1", status: "stored", contentType: "application/pdf", size: 1024 },
+          ]),
         ],
       ],
     ]),
@@ -358,6 +371,7 @@ beforeAll(async () => {
 const EXTRA_ARGS: Partial<Record<(typeof TOOL_NAMES)[number], Record<string, unknown>>> = {
   get_document_text: { healthSystem: NAME_A, id: "doc-1" },
   get_message_thread: { threadId: "thread-1" },
+  get_message_attachment: { attachmentId: "att-1" },
 };
 
 describe("jq examples", () => {

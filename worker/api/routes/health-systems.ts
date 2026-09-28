@@ -193,6 +193,7 @@ healthSystemsRouter.delete("/:id", async (c) => {
   // never fires their ON DELETE CASCADE either.
   await api.repos.portalVisits.clearHealthSystem(row.id);
   // Messages even more so: they are the most personal thing the portal holds.
+  await api.repos.portalMessageAttachments.clearHealthSystem(row.id);
   await api.repos.portalMessages.clearHealthSystem(row.id);
   // For the same reason the cache is cleared rather than left: a portal login is a
   // password to a whole medical record, and the row's ON DELETE CASCADE never fires

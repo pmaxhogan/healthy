@@ -18,6 +18,7 @@ import { z } from "zod";
 
 import { jqArg, toolArgs, windowArgs } from "../args.ts";
 import { effectiveLimit, selectHealthSystems } from "../collect.ts";
+import { attachmentItem, findAttachment, imageReleased } from "../message-attachment.ts";
 import { collectMessages, messageCoverage } from "../message-items.ts";
 import { threadsReshape } from "../message-threads.ts";
 import { respond } from "../respond.ts";
@@ -71,6 +72,69 @@ const MESSAGE_ARGS = toolArgs({
 });
 
 const THREAD_ARGS = toolArgs({ threadId: THREAD_ID, ...jqArg("get_message_thread") });
+
+const ATTACHMENT_TOOL = "get_message_attachment";
+
+const ATTACHMENT_ARGS = toolArgs({
+  attachmentId: z
+    .string()
+    .min(1)
+    .max(64)
+    .describe(
+      "An attachment's `id` exactly as a get_message_thread message's `attachments[]` reported it.",
+    ),
+  ...jqArg(ATTACHMENT_TOOL),
+});
+
+/** One attachment's file: find it among the messages the caller may see, read it, respond. */
+async function attachmentAnswer(
+  deps: ToolDeps,
+  run: { rules: PolicyRules; now: number },
+  args: SharedArgs & { attachmentId: string },
+): Promise<ToolOutcome> {
+  const all = await deps.healthSystems();
+  const selected = selectHealthSystems(all, run.rules, args.healthSystems);
+  const collected = await collectMessages(deps, all, selected, run.rules, {});
+  const coverage = await messageCoverage(deps, selected, run.rules, run.now);
+  const found = findAttachment(collected, args.attachmentId);
+  const healthSystemId = found?.message.healthSystemId;
+  const stored = found?.attachment.status === "stored";
+  const bytes =
+    stored && typeof healthSystemId === "string"
+      ? await deps.portalAttachmentContent(healthSystemId, args.attachmentId)
+      : null;
+  const built = found === null ? null : attachmentItem(found, bytes);
+  const outcome = await respond({
+    tool: ATTACHMENT_TOOL,
+    rules: run.rules,
+    items: built === null ? [] : [built.item],
+    sources: found === null ? [] : [found.source],
+    limit: effectiveLimit(args.limit),
+    jq: args.jq,
+    healthSystemIds: collected.healthSystemIds,
+    warnings: [
+      ...(args.raw === true ? [NO_RAW_WARNING] : []),
+      ...(found === null ? ["attachment_not_found"] : []),
+    ],
+    coverage,
+    now: run.now,
+  });
+  const image = built?.image ?? null;
+  if (image === null || outcome.errorCode !== null) return outcome;
+  if (built === null || !imageReleased(ATTACHMENT_TOOL, run.rules, built.item, found?.source)) {
+    return outcome;
+  }
+  return {
+    ...outcome,
+    result: {
+      ...outcome.result,
+      content: [
+        ...outcome.result.content,
+        { type: "image", data: image.data, mimeType: image.mimeType },
+      ],
+    },
+  };
+}
 
 /** Shared by both tools: select, collect, cover, respond, grouped by conversation. */
 async function answer(
@@ -159,5 +223,26 @@ export function registerMessageTools(server: McpServer, deps: ToolDeps): void {
     },
     async (args, run) =>
       answer(deps, "get_message_thread", run, args, { threadId: args.threadId }, { detail: true }),
+  );
+
+  readTool(
+    server,
+    deps,
+    {
+      name: ATTACHMENT_TOOL,
+      description:
+        "The file attached to a patient-portal secure message: pass an attachment `id` " +
+        "from get_message_thread (`messages[].attachments[].id`). Read from what the " +
+        "hourly portal pass fetched and stored -- never fetched now. The item has the " +
+        "file's `name`, `contentType`, `size` and `status`: `stored`, `failed` (the " +
+        "portal would not serve it; `errorCode` says how), `waiting_until_read` (its " +
+        "message is still unread in the portal, so it has not been fetched) or " +
+        "`not_fetched`. A stored text file (plain text, HTML, RTF) comes back as " +
+        "`text`; a stored image (PNG, JPEG, GIF, WebP) comes back as an image content " +
+        "block beside the item; any other type (PDF, TIFF) comes back as its type and " +
+        "size with a `note` -- its content cannot be returned here.",
+      schema: ATTACHMENT_ARGS,
+    },
+    async (args, run) => attachmentAnswer(deps, run, args),
   );
 }

@@ -64,8 +64,15 @@ export interface FakePortal {
   messagesComplete: boolean;
   /** Thrown by `loadMessages` instead of resolving. */
   messagesError: AppError | null;
+  /**
+   * Files `loadMessageAttachment` answers with, by `dcsId`; an `AppError` is
+   * thrown instead. A handle with neither is a parse failure.
+   */
+  files: Map<string, AppError | { contentType: string; bytes: Uint8Array }>;
   calls: {
     loadMessages: number;
+    /** `dcsId`s asked for, in order. */
+    attachments: string[];
     logins: number;
     sendCodes: number;
     validates: number;
@@ -111,8 +118,10 @@ export function fakePortal(overrides: Partial<FakePortal> = {}): FakePortal {
     threads: [],
     messagesComplete: true,
     messagesError: null,
+    files: new Map(),
     calls: {
       loadMessages: 0,
+      attachments: [],
       logins: 0,
       sendCodes: 0,
       validates: 0,
@@ -163,6 +172,14 @@ export function fakePortal(overrides: Partial<FakePortal> = {}): FakePortal {
           complete: state.messagesComplete,
           pages: 1,
         });
+      },
+      loadMessageAttachment: (handle) => {
+        state.calls.attachments.push(handle.dcsId);
+        const file = state.files.get(handle.dcsId);
+        if (file instanceof AppError) return Promise.reject(file);
+        return file === undefined
+          ? Promise.reject(new AppError("portal_parse_failed", "no such fake attachment"))
+          : Promise.resolve({ contentType: file.contentType, bytes: new Uint8Array(file.bytes) });
       },
       isSessionAlive: () => {
         state.calls.sessionChecks += 1;

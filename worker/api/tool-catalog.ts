@@ -114,6 +114,11 @@ export const TOOL_CATALOG: readonly McpToolInfoDto[] = [
     resourceTypes: ["Communication"],
   },
   {
+    name: "get_message_attachment",
+    description: "One secure message's attached file, as the portal pass stored it.",
+    resourceTypes: ["Communication"],
+  },
+  {
     name: "get_care_team",
     description: "Care team members and their roles.",
     resourceTypes: ["CareTeam", "Practitioner", "PractitionerRole"],

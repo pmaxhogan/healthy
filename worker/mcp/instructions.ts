@@ -14,7 +14,8 @@ export const MCP_INSTRUCTIONS =
   "the letters and notices the portal sends) come from get_messages, one item " +
   "per conversation with a short preview of its newest message (search the " +
   "full text with its `search` argument); get_message_thread returns one " +
-  "conversation with every message in full. get_documents holds clinical documents such as visit " +
+  "conversation with every message in full, and get_message_attachment one " +
+  "attached file (text, or an image). get_documents holds clinical documents such as visit " +
   "notes, not messages. " +
   "Every tool that reads a resource " +
   "type returns { items, total, matched, coverage, warnings, truncated, " +

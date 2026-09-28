@@ -69,7 +69,7 @@ import {
 import type { CookieJar } from "./cookie-jar.ts";
 import type { PortalEndpoint } from "./discovery.ts";
 import type { PortalHttpDeps, PortalResponse } from "./http.ts";
-import type { PortalMessagesResult } from "./messages.ts";
+import type { AttachmentHandle, PortalMessagesResult } from "./messages.ts";
 import type { PortalVisit } from "./visits.ts";
 import type { UsernameField } from "./wire.ts";
 import type { Logger } from "../../lib/log.ts";
@@ -120,6 +120,13 @@ export interface SecondaryValidation {
   validate(code: string, rememberMe?: boolean): Promise<void>;
 }
 
+/** One attachment's file, as the portal served it. */
+interface PortalAttachmentFile {
+  /** The download's own `Content-Type`, or the details' `mimeType` when it sent none. */
+  contentType: string;
+  bytes: Uint8Array;
+}
+
 export interface PortalClient {
   login(credentials: PortalCredentials): Promise<PortalSignInStatus>;
   readonly secondaryValidation: SecondaryValidation;
@@ -146,6 +153,13 @@ export interface PortalClient {
    * `messages.ts`.
    */
   loadMessages(): Promise<PortalMessagesResult>;
+  /**
+   * One message attachment's file, by the handle the same session's
+   * `loadMessages` read: its document details, then the download they name.
+   * Throws `portal_parse_failed` when the portal answers with a page or with
+   * details that name no download, and `portal_session_expired` on a login page.
+   */
+  loadMessageAttachment(handle: AttachmentHandle): Promise<PortalAttachmentFile>;
   /** A cheap authenticated GET. False means the session is gone, not that it failed. */
   isSessionAlive(): Promise<boolean>;
   /** The live jar, for the caller to seal after any call. */
@@ -295,6 +309,38 @@ function usernameFieldOn(html: string, fallback: UsernameField): UsernameField {
  * the distinction being drawn is between "JSON arrived" and "an HTML page
  * arrived with a 200 on it", and the second one has to fail loudly.
  */
+/** One string field of an attachment's document details, or "". */
+function detailString(details: unknown, key: string): string {
+  if (typeof details !== "object" || details === null || !Object.hasOwn(details, key)) return "";
+  const value: unknown = Reflect.get(details, key);
+  return typeof value === "string" ? value : "";
+}
+
+/**
+ * The absolute URL an attachment's `downloadUrl` names.
+ *
+ * The portal hands it back relative to the MOUNT (a leading slash, no mount), so
+ * it is resolved under `mountRoot`. Anything that would leave the mount -- an
+ * absolute URL, a protocol-relative one, a `..` -- is refused rather than
+ * followed: the value is the portal's, not ours.
+ */
+export function downloadTarget(details: unknown, mountRoot: string): string {
+  const relative = detailString(details, "downloadUrl");
+  if (relative === "" || !relative.startsWith("/") || relative.startsWith("//")) {
+    throw new AppError("portal_parse_failed", "the attachment details named no download", {
+      endpoint: "DocumentDetails",
+    });
+  }
+  const root = new URL(mountRoot);
+  const target = new URL(relative.slice(1), root);
+  if (target.origin !== root.origin || !target.pathname.startsWith(root.pathname)) {
+    throw new AppError("portal_parse_failed", "the attachment download left the portal", {
+      endpoint: "DocumentDetails",
+    });
+  }
+  return target.href;
+}
+
 function looksLikeJson(response: PortalResponse): boolean {
   if (response.contentType?.includes("json") === true) return true;
   const trimmed = response.body.trimStart();
@@ -812,13 +858,22 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
     }
   };
 
-  const loadMessages = async (): Promise<PortalMessagesResult> => {
+  /** The antiforgery token the Message Center calls send, from the last page that carried one. */
+  let messageCenterToken: string | undefined;
+
+  const messageToken = async (): Promise<string> => {
     // The visits page's token: a capture confirmed the Message Center accepts it,
     // and it is the page this client already knows how to reach on both flavours.
     const page = await tokenPage(PATHS.visitsList, "VisitsList", { [NO_CACHE_PARAM]: noCache() });
     assertSession(page.response, "VisitsList");
+    messageCenterToken = page.value;
+    return page.value;
+  };
+
+  const loadMessages = async (): Promise<PortalMessagesResult> => {
+    const token = await messageToken();
     const result = await loadMessageCenter({
-      post: (path, label, body) => messageCenterJson(page.value, path, label, body),
+      post: (path, label, body) => messageCenterJson(token, path, label, body),
       nonce: () => crypto.randomUUID().replaceAll("-", ""),
     });
     logger.info("portal.messages", {
@@ -828,6 +883,41 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
       complete: result.complete,
     });
     return result;
+  };
+
+  const loadMessageAttachment = async (handle: AttachmentHandle): Promise<PortalAttachmentFile> => {
+    const token = messageCenterToken ?? (await messageToken());
+    const details = await messageCenterJson(token, PATHS.documentDetails, "DocumentDetails", {
+      dcsId: handle.dcsId,
+      fileExtension: handle.fileExtension,
+      organizationId: handle.organizationId,
+      useOldMobileLink: false,
+    });
+    const target = downloadTarget(details, url(""));
+    const response = await portalFetch(http, {
+      url: target,
+      method: "GET",
+      endpoint: "DocumentDownload",
+      binary: true,
+    });
+    if (response.status !== 200 || response.bytes === undefined) {
+      // A page where a file was expected: a login page is an expired session,
+      // anything else (a 404, an error page) is a download that did not work.
+      assertSession(response, "DocumentDownload");
+      throw new AppError("portal_parse_failed", "the attachment download answered with a page", {
+        endpoint: "DocumentDownload",
+        status: response.status,
+      });
+    }
+    const declared = response.contentType?.split(";", 1)[0]?.trim() ?? "";
+    const mimeType = detailString(details, "mimeType");
+    return {
+      contentType:
+        declared === "" || declared === "application/octet-stream"
+          ? mimeType || declared
+          : declared,
+      bytes: response.bytes,
+    };
   };
 
   /**
@@ -875,6 +965,7 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
     loadUpcoming,
     loadPast,
     loadMessages,
+    loadMessageAttachment,
     isSessionAlive,
     jar,
   };

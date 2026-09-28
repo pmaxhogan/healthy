@@ -15,7 +15,7 @@ The server registers (in `worker/mcp/tools/index.ts`): `get_health_summary`,
 `get_medication_fills`, `get_allergies`, `get_immunizations`,
 `get_lab_results`, `get_vitals`, `get_social_history`, `get_procedures`,
 `get_diagnostic_reports`, `get_documents`, `get_document_text`,
-`get_messages`, `get_message_thread`, `get_care_team`, `get_care_plans`, `get_goals`, `get_devices`,
+`get_messages`, `get_message_thread`, `get_message_attachment`, `get_care_team`, `get_care_plans`, `get_goals`, `get_devices`,
 `get_coverage`, `get_service_requests`. Most accept an optional
 `health_systems[]` filter and an optional `raw` flag that additionally returns
 the underlying FHIR resource (filtered by the same policy as the normalised
@@ -287,6 +287,20 @@ HTML is flattened, never kept), sealed and padded like the FHIR cache, keyed
 by a blind of its content rather than the portal's per-session ids.
 `portal_message_sync` records how each health system's last read went.
 
+The same pass then fetches every attachment it has not stored yet: the
+Message Center's own attachment link asks for the file's document details
+(`GetDocumentDetailsLegacy`) and downloads the file they name, relative to the
+portal's mount. It has to be the same run, because the portal names a file only
+by a per-session token. Every file is kept whole, sealed and padded in
+`portal_message_attachment_chunks` (base64, cut into pieces that each fit one
+D1 value), under a key derived from the message's content and the file's
+position in it, so a later run knows it is already stored. There is no size
+limit. A file on a message the portal still marks unread is left until the
+message has been read (whether the download marks a message read has not been
+observed, and the owner's unread messages must stay unread); a download that
+fails is recorded with its error code and tried again a day later; a session
+that ends mid-pass leaves the rest for the next run.
+
 - **`get_messages`: one item per conversation**, newest activity first
   (`kind: "message_thread"`): `threadId`, `subject`, `folder`,
   `firstMessageAt`, `lastMessageAt`, `messageCount`, `unreadCount` (the
@@ -304,8 +318,18 @@ by a blind of its content rather than the portal's per-session ids.
 - **`get_message_thread`: one conversation, every message in full**
   (`kind: "message_thread_detail"`): the same conversation fields and
   `messages[]`, oldest first — `id`, `sent`, `direction` (`from_patient` /
-  `to_patient`), `from`, `unread`, `body` (plain text), `attachments[]`, and
-  `noLongerListed` where it applies. A conversation whose messages come from
+  `to_patient`), `from`, `unread`, `body` (plain text), `attachments[]`
+  (`name`, `extension`, `id`, `status` — `stored`, `failed` with `errorCode`,
+  `waiting_until_read` or `not_fetched` — and, once stored, `contentType` and
+  `size`), and `noLongerListed` where it applies.
+- **`get_message_attachment`: one attached file**, by the `id` a message's
+  `attachments[]` reported (`kind: "message_attachment"`): its metadata and
+  status, and its content where it can be shown — a text file (plain text,
+  HTML, RTF, converted exactly as `get_document_text` converts them) as `text`;
+  an image a model can view (PNG, JPEG, GIF, WebP) as an MCP image content
+  block beside the JSON, only when the policy releases the item's `image`
+  field; anything else (a PDF, a TIFF scan) as its type and size with a `note`,
+  never as base64. It reads storage only; it never talks to a portal. A conversation whose messages come from
   two health systems' portals (one has a reply the other has not listed yet) is
   one item per health system, in both tools.
 - **One message, one item, across organisations.** Each portal also shows the

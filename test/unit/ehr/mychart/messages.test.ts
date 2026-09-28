@@ -226,7 +226,7 @@ describe("loadMessageCenter parsing", () => {
     expect(body).toBe("Take it – twice daily.\n\n- With food\n- At bedtime & morning\nLink");
   });
 
-  it("marks another organisation's conversation external, with its name, and keeps attachments' names", async () => {
+  it("marks another organisation's conversation external, with its name, and keeps attachments' names and handles", async () => {
     const state = messageCenter({
       conversations: [
         {
@@ -249,8 +249,13 @@ describe("loadMessageCenter parsing", () => {
 
     expect(thread?.external).toBe(true);
     expect(thread?.organization).toBe("Other Example Clinic");
+    // The handle is what the same run fetches the file with; it is never stored.
     expect(thread?.messages[0]?.attachments).toStrictEqual([
-      { name: "invented-scan", extension: "PDF" },
+      {
+        name: "invented-scan",
+        extension: "PDF",
+        handle: { dcsId: "dcs-xm1", fileExtension: "PDF", organizationId: "" },
+      },
     ]);
   });
 

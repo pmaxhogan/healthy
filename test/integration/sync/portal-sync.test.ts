@@ -58,6 +58,7 @@ import type { FhirServer, SeededHealthSystem, Upstreams } from "./helpers.ts";
 import type { Ctx } from "../../../worker/db/client.ts";
 import type { PortalAccountRow } from "../../../worker/db/rows.ts";
 import type { PortalVisit } from "../../../worker/ehr/mychart/index.ts";
+import type { PortalThread } from "../../../worker/ehr/mychart/index.ts";
 import type { FakePortal } from "../portal/helpers.ts";
 import type { RunSummary } from "@shared/types.ts";
 import type * as fhir4 from "fhir/r4";
@@ -1304,6 +1305,41 @@ describe("a session proven good minutes ago", () => {
   });
 });
 
+/** A file's per-session handle, as the crawl hands it over. */
+function attachmentHandle(dcsId: string) {
+  return { dcsId, fileExtension: "PNG", organizationId: "" };
+}
+
+/** A conversation whose reply carries two fetchable files and a clinical reference. */
+function withAttachments(unread: boolean): PortalThread {
+  return {
+    subject: "Invented subject",
+    folder: "conversations",
+    external: false,
+    practitioners: [{ name: "Nurse Example A" }],
+    messages: [
+      { sent: "2026-05-01T10:00:00.000Z", role: "patient", body: "A question.", attachments: [] },
+      {
+        sent: "2026-05-01T12:00:00.000Z",
+        role: "practitioner",
+        body: "An invented answer with files.",
+        unread,
+        attachments: [
+          { name: "invented-a", extension: "PNG", handle: attachmentHandle("WP-a") },
+          { name: "invented-b", extension: "PNG", handle: attachmentHandle("WP-b") },
+          // A clinical reference: no file behind it, so nothing to fetch.
+          { name: "invented-reference" },
+        ],
+      },
+    ],
+  };
+}
+
+/** What the fake portal serves per `dcsId`. */
+function files(entries: [string, AppError | { contentType: string; bytes: Uint8Array }][]) {
+  return new Map(entries) as FakePortal["files"];
+}
+
 describe("portal secure messages", () => {
   const THREAD = {
     subject: "Invented subject",
@@ -1367,6 +1403,85 @@ describe("portal secure messages", () => {
     expect(fix.portal.calls.logins).toBe(0);
     const [sync] = await syncRepos(fix.ctx).portalMessages.listSync();
     expect(sync).toMatchObject({ lastErrorCode: "portal_session_expired", lastOkAt: null });
+  });
+
+  describe("attachments", () => {
+    const FILE = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]);
+
+    it("fetches and seals every file the read listed, once, and never stores the handle", async () => {
+      const fix = await fixture({
+        portal: {
+          threads: [withAttachments(false)],
+          files: files([
+            ["WP-a", { contentType: "image/png", bytes: FILE }],
+            ["WP-b", new AppError("portal_parse_failed", "a page where the file should be")],
+          ]),
+        },
+      });
+
+      await portalRun(fix);
+      await portalRun(fix);
+
+      // WP-b failed on the first run and is not retried within the day; WP-a is stored.
+      expect(fix.portal.calls.attachments).toStrictEqual(["WP-a", "WP-b"]);
+      const repos = syncRepos(fix.ctx);
+      const id = fix.healthSystem.healthSystemId;
+      const rows = await repos.portalMessageAttachments.list(id);
+      expect(sorted(rows.map((row) => `${row.state}:${row.errorCode ?? ""}`))).toStrictEqual([
+        "failed:portal_parse_failed",
+        "stored:",
+      ]);
+      const stored = rows.find((row) => row.state === "stored");
+      expect(stored?.meta).toStrictEqual({
+        name: "invented-a",
+        extension: "PNG",
+        contentType: "image/png",
+        size: FILE.length,
+      });
+      expect([
+        ...((await repos.portalMessageAttachments.content(id, stored?.attachmentKey ?? "")) ?? []),
+      ]).toStrictEqual([...FILE]);
+      const messages = await repos.portalMessages.list(id);
+      expect(JSON.stringify(messages)).not.toContain("WP-a");
+    });
+
+    it("leaves a message the portal still marks unread alone until it has been read", async () => {
+      const fix = await fixture({
+        portal: {
+          threads: [withAttachments(true)],
+          files: files([
+            ["WP-a", { contentType: "image/png", bytes: FILE }],
+            ["WP-b", { contentType: "image/png", bytes: FILE }],
+          ]),
+        },
+      });
+
+      await portalRun(fix);
+      expect(fix.portal.calls.attachments).toStrictEqual([]);
+
+      fix.portal.threads = [withAttachments(false)];
+      await portalRun(fix);
+      expect(fix.portal.calls.attachments).toStrictEqual(["WP-a", "WP-b"]);
+    });
+
+    it("stops at an expired session without marking anything failed", async () => {
+      const fix = await fixture({
+        portal: {
+          threads: [withAttachments(false)],
+          files: files([["WP-a", new AppError("portal_session_expired", "gone")]]),
+        },
+      });
+
+      await portalRun(fix);
+
+      expect(fix.portal.calls.attachments).toStrictEqual(["WP-a"]);
+      const rows = await syncRepos(fix.ctx).portalMessageAttachments.list(
+        fix.healthSystem.healthSystemId,
+      );
+      expect(rows).toStrictEqual([]);
+      const [sync] = await syncRepos(fix.ctx).portalMessages.listSync();
+      expect(sync).toMatchObject({ lastErrorCode: null });
+    });
   });
 
   it("does not read messages at all when the session is dead and the run will not sign in", async () => {
