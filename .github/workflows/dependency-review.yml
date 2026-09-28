@@ -5,9 +5,28 @@ name: Dependency review
 # threshold; moderate advisories still surface as Dependabot alerts and get
 # security-update PRs, but do not stall the Dependabot auto-merge flow.
 # `dependency-review` is a required status check on main.
+#
+# workflow_dispatch exists so a bot-authored branch (which never fires
+# `pull_request`, since events triggered by GITHUB_TOKEN don't cascade to
+# other workflows) can still get this check reported for its head commit; see
+# brands.yml. base_ref/head_ref are only consulted outside pull_request
+# events — dependency-review-action's own optional-input handling treats an
+# empty string as unset, so passing the (empty) expression below on a normal
+# pull_request run is a no-op and the action falls back to the PR's base/head
+# as usual.
 on:
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: Base git ref/SHA to compare against (required outside pull_request events)
+        required: false
+        type: string
+      head_ref:
+        description: Head git ref/SHA to compare (required outside pull_request events)
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -21,3 +40,5 @@ jobs:
       - uses: actions/dependency-review-action@v5
         with:
           fail-on-severity: high
+          base-ref: ${{ github.event_name == 'workflow_dispatch' && inputs.base_ref || '' }}
+          head-ref: ${{ github.event_name == 'workflow_dispatch' && inputs.head_ref || '' }}

@@ -6,32 +6,91 @@ on:
     - cron: "17 9 * * 1"
   workflow_dispatch: {}
 
+# main requires 4 status checks (check, gitleaks, codeql, dependency-review)
+# plus a CodeQL code scanning result for the commit. A push authenticated
+# with GITHUB_TOKEN straight to main never satisfies any of that: GitHub does
+# not cascade push/pull_request events triggered by GITHUB_TOKEN into other
+# workflows, so none of those checks would ever run for such a commit (this
+# is exactly why run 36459691246 got GH013'd). Instead this job pushes to a
+# fixed branch, opens (or refreshes) a PR for it, explicitly dispatches the
+# three workflows that produce the required checks against that branch's tip
+# commit -- GITHUB_TOKEN *can* trigger workflow_dispatch, since that is a
+# direct request rather than a cascaded event -- and lets auto-merge take it
+# from there once they all report.
 permissions:
   contents: write
+  pull-requests: write
+  actions: write
 
 jobs:
   refresh:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      BRANCH: chore/brands-refresh
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
 
       - name: Refresh data/epic-brands.json
         run: node scripts/slim-brands.mjs
 
-      - name: Commit and push if changed
+      - name: Check for changes
+        id: diff
         run: |
           if git diff --quiet data/epic-brands.json; then
             echo "No changes to data/epic-brands.json"
-            exit 0
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Push refresh branch
+        if: steps.diff.outputs.changed == 'true'
+        id: push
+        run: |
+          base_sha=$(git rev-parse origin/main)
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/epic-brands.json
           git commit -m "chore(data): refresh Epic brands index"
-          git push origin HEAD:main
+          git push --force origin "HEAD:refs/heads/$BRANCH"
+          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the pull request
+        if: steps.diff.outputs.changed == 'true'
+        id: pr
+        run: |
+          existing=$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[0].number // empty')
+          if [ -z "$existing" ]; then
+            gh pr create --base main --head "$BRANCH" \
+              --title "chore(data): refresh Epic brands index" \
+              --body "Automated weekly refresh of \`data/epic-brands.json\` from the Epic brands index (\`scripts/slim-brands.mjs\`). Merges automatically once the required checks pass."
+          else
+            gh pr edit "$existing" \
+              --body "Automated weekly refresh of \`data/epic-brands.json\` from the Epic brands index (\`scripts/slim-brands.mjs\`). Merges automatically once the required checks pass. Last pushed: $(date -u +%Y-%m-%dT%H:%M:%SZ)."
+          fi
+          echo "number=$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[0].number')" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch the required-check workflows for the branch tip
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          gh workflow run ci.yml --ref "$BRANCH"
+          gh workflow run codeql.yml --ref "$BRANCH"
+          gh workflow run dependency-review.yml --ref "$BRANCH" \
+            -f base_ref="${{ steps.push.outputs.base_sha }}" \
+            -f head_ref="${{ steps.push.outputs.head_sha }}"
+
+      - name: Enable auto-merge
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          already=$(gh pr view "${{ steps.pr.outputs.number }}" --json autoMergeRequest --jq '.autoMergeRequest.enabledAt // empty')
+          if [ -z "$already" ]; then
+            gh pr merge "${{ steps.pr.outputs.number }}" --auto --squash
+          fi
