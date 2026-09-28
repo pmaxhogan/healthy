@@ -12,11 +12,20 @@
  *
  * Choices worth knowing about:
  *
- *  - `resourceMetadata.resource` is deliberately NOT set. Configuring it pins
- *    every access token's audience to that exact URL, which would break both
- *    `wrangler dev` on localhost and the integration tests. Left unset, the
- *    library derives the resource from the request origin, which is right at
- *    every origin this Worker is ever served from.
+ *  - `resourceMetadata.resource` is required since 1.x (omitting it is a
+ *    construction-time error) and it is what every access token's audience is
+ *    bound to. It cannot be a single hardcoded value here: `/mcp`'s own bearer
+ *    check independently recomputes "the resource this request just hit"
+ *    (`${protocol}//${host}${pathname}`) and rejects a token whose audience
+ *    disagrees, so a resource pinned to the production domain would 401 every
+ *    call made through `wrangler dev` or a test origin -- both were, and still
+ *    are, real deployments of this Worker, not lesser ones. `resourceFor()`
+ *    below reproduces exactly what 0.x did automatically when
+ *    `resourceMetadata` was left unset: derive the resource from the request
+ *    that is actually being served. The provider is constructed per request
+ *    (`worker/index.ts`) rather than once at module scope so this can happen at
+ *    all; construction is synchronous config validation, not I/O, so the extra
+ *    construction per request costs nothing meaningful in a single-user Worker.
  *  - `disallowPublicClientRegistration: false` is the library default, stated
  *    anyway: claude.ai registers itself through Dynamic Client Registration as a
  *    public client, and without DCR the connector cannot be added at all.
@@ -47,6 +56,32 @@ export const MCP_API_ROUTE = "/mcp";
 const AUTHORIZE_PATH = "/authorize";
 const TOKEN_PATH = "/oauth/token";
 const REGISTER_PATH = "/oauth/register";
+
+/**
+ * A syntactically valid resource used only when there is no request to derive
+ * one from: `oauthHelpers()` called without a request, for the admin API's
+ * grant listing and revocation. `listUserGrants`, `revokeGrant` and
+ * `lookupClient` are resource-agnostic KV operations -- the library never
+ * consults `resourceMetadata.resource` to serve them -- so this value is never
+ * actually bound to or checked against a real token. It only has to satisfy
+ * the provider constructor's syntax validation.
+ */
+const PLACEHOLDER_RESOURCE = "https://healthy.maxhogan.dev";
+
+/**
+ * The canonical resource (RFC 8707) for whichever origin `request` arrived on.
+ *
+ * The bare origin, not `${origin}${MCP_API_ROUTE}`: a resource with path `/`
+ * covers every path under it (`audienceMatches`'s `pathname === "/"` case), so
+ * a token audience still matches the real `/mcp` request, exactly as when 0.x
+ * derived the resource from the request origin. It also keeps the protected
+ * resource metadata document at the bare `/.well-known/oauth-protected-resource`
+ * -- `getResourceMetadataUrl` only appends the resource's path when it isn't
+ * `/` -- which is where this Worker's own wiring and clients expect it.
+ */
+export function resourceFor(request: Request): string {
+  return new URL(request.url).origin;
+}
 
 /** One hour, matching the locked spec. */
 const ACCESS_TOKEN_TTL = 3600;
@@ -92,7 +127,7 @@ function stampCallerProps(options: TokenExchangeCallbackOptions): TokenExchangeC
   };
 }
 
-/** Everything but the handlers. `worker/index.ts` adds those. */
+/** Everything but the handlers and the resource. `worker/index.ts` adds those. */
 export const OAUTH_CORE = {
   authorizeEndpoint: AUTHORIZE_PATH,
   tokenEndpoint: TOKEN_PATH,
@@ -104,12 +139,22 @@ export const OAUTH_CORE = {
   accessTokenTTL: ACCESS_TOKEN_TTL,
   refreshTokenTTL: REFRESH_TOKEN_TTL,
   clientRegistrationTTL: CLIENT_REGISTRATION_TTL,
-  resourceMetadata: {
-    resource_name: "Healthy",
-    scopes_supported: [MCP_SCOPE],
-  },
   tokenExchangeCallback: stampCallerProps,
 };
+
+/** `OAUTH_CORE` plus the one piece that has to vary per request: the resource. */
+export function oauthCoreFor(resource: string): typeof OAUTH_CORE & {
+  resourceMetadata: { resource: string; resource_name: string; scopes_supported: string[] };
+} {
+  return {
+    ...OAUTH_CORE,
+    resourceMetadata: {
+      resource,
+      resource_name: "Healthy",
+      scopes_supported: [MCP_SCOPE],
+    },
+  };
+}
 
 /**
  * A handler that exists only to satisfy the provider's constructor.
@@ -132,12 +177,26 @@ const UNROUTED = {
  * `OAUTH_CORE`. Both read and write the same `OAUTH_KV` namespace, so the fallback
  * is not a second, divergent view of the grants -- it is the same store reached
  * another way.
+ *
+ * `request` matters only for the fallback, and only because `parseAuthRequest`
+ * and `completeAuthorization` (the consent page's calls) bind a resource into
+ * what they return -- a resource that must agree with whatever the *real*
+ * per-request provider in `worker/index.ts` will later check a token against.
+ * Passing the request lets the fallback derive the same resource
+ * (`resourceFor`) instead of a placeholder. The admin API's grant listing and
+ * revocation never bind or check a resource, so they can omit it.
  */
-export function oauthHelpers(env: Env): OAuthHelpers {
+export function oauthHelpers(env: Env, request?: Request): OAuthHelpers {
+  const resource = request ? resourceFor(request) : PLACEHOLDER_RESOURCE;
   return (
     (env as OAuthEnv).OAUTH_PROVIDER ??
     getOAuthApi<Env>(
-      { ...OAUTH_CORE, apiRoute: MCP_API_ROUTE, apiHandler: UNROUTED, defaultHandler: UNROUTED },
+      {
+        ...oauthCoreFor(resource),
+        apiRoute: MCP_API_ROUTE,
+        apiHandler: UNROUTED,
+        defaultHandler: UNROUTED,
+      },
       env,
     )
   );

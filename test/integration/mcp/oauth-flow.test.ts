@@ -518,6 +518,41 @@ describe("a real MCP session over the issued bearer", () => {
 
     expect(strayed.response.status).toBeGreaterThanOrEqual(400);
   });
+
+  it("still authenticates and refreshes a grant minted before resource binding (0.x)", async () => {
+    // The 1.0 migration's one hard promise: "stored 0.x state keeps working,"
+    // because a token or grant written before resource binding has no `audience`
+    // or `resource` field, and both fall back to `getLegacyGrantResource()` --
+    // which, with exactly one configured resource, is always that resource. This
+    // reproduces a pre-1.0 record by minting one for real and then stripping the
+    // fields 1.0 added, rather than hand-writing a guess at the 0.x KV shape.
+    const approved = await approve("Legacy Connector");
+    const tokens = await exchangeTokens(approved);
+    const accessToken = tokens.access_token ?? "";
+    const [userId = "", grantId = ""] = accessToken.split(":", 2);
+
+    const tokenKeys = await env.OAUTH_KV.list({ prefix: `token:${userId}:${grantId}:` });
+    expect(tokenKeys.keys).toHaveLength(1);
+    const tokenKey = tokenKeys.keys[0]?.name ?? "";
+    const tokenRecord = await env.OAUTH_KV.get<Record<string, unknown>>(tokenKey, "json");
+    expect(tokenRecord).not.toBeNull();
+    delete tokenRecord?.audience;
+    await env.OAUTH_KV.put(tokenKey, JSON.stringify(tokenRecord));
+
+    const grantKey = `grant:${userId}:${grantId}`;
+    const grantRecord = await env.OAUTH_KV.get<Record<string, unknown>>(grantKey, "json");
+    expect(grantRecord).not.toBeNull();
+    delete grantRecord?.resource;
+    await env.OAUTH_KV.put(grantKey, JSON.stringify(grantRecord));
+
+    // The now-unbound access token still authenticates a real MCP call.
+    await callOverBearer(accessToken, "list_health_systems");
+
+    // Refreshing the now-unbound grant still mints a working, bound replacement.
+    const refreshed = await refresh(tokens.refresh_token ?? "", approved.clientId);
+    expect(refreshed.access_token ?? "").not.toBe("");
+    await callOverBearer(refreshed.access_token ?? "", "list_health_systems");
+  });
 });
 
 describe("the grant helpers the admin API calls", () => {

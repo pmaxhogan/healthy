@@ -32,8 +32,13 @@ import { MCP_SCOPE, OWNER_USER_ID, oauthHelpers } from "./oauth-config.ts";
 import type { Env } from "../env.ts";
 import type { AuthRequest, ClientInfo, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 
-/** RFC 8707 allows one resource indicator or several. */
-const RESOURCE_INDICATOR = z.union([z.string(), z.array(z.string())]);
+/**
+ * The library resolves a request's resource indicator(s) down to its one
+ * configured canonical resource before an `AuthRequest` ever reaches here
+ * (1.x): several `resource` query parameters, or one that doesn't match, fail
+ * earlier with a redirect and never produce a request to encode.
+ */
+const RESOURCE_INDICATOR = z.string();
 
 /** What the hidden field carries, validated on the way back in. */
 const encodedRequestSchema = z.object({
@@ -213,7 +218,7 @@ p { color: #5b6572; margin: 0 0 1rem; }
 
 /** GET /authorize: show what is being asked for. */
 export async function consentPage(request: Request, env: Env, nonce: string): Promise<Response> {
-  const helpers = oauthHelpers(env);
+  const helpers = oauthHelpers(env, request);
   let authRequest: AuthRequest;
   try {
     authRequest = await helpers.parseAuthRequest(request);
@@ -293,7 +298,7 @@ export async function consentDecision(
     return badRequest(nonce, "That authorisation request is not valid or has expired.");
   }
 
-  const helpers = oauthHelpers(env);
+  const helpers = oauthHelpers(env, request);
   const client = await helpers.lookupClient(authRequest.clientId);
   // Re-validated on both branches. `completeAuthorization` checks this too, but the
   // denial branch builds its own redirect, and an unchecked redirect target there

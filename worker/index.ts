@@ -35,7 +35,7 @@ import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 
 import { app } from "./app.ts";
 import { handleInboundEmail } from "./mail/handler.ts";
-import { MCP_API_ROUTE, OAUTH_CORE } from "./mcp/oauth-config.ts";
+import { MCP_API_ROUTE, oauthCoreFor, resourceFor } from "./mcp/oauth-config.ts";
 import { HealthyMcp } from "./mcp/server.ts";
 import { handleScheduled } from "./sync/index.ts";
 
@@ -72,16 +72,24 @@ const honoHandler: HandlerWithFetch = {
   fetch: (request, env, ctx) => app.fetch(request, env, ctx),
 };
 
-const healthSystem = new OAuthProvider<Env>({
-  ...OAUTH_CORE,
-  apiRoute: MCP_API_ROUTE,
-  apiHandler: mcpApiHandler,
-  defaultHandler: honoHandler,
-});
+/**
+ * Built per request, not once at module scope: the OAuth provider's resource
+ * (see `worker/mcp/oauth-config.ts`) has to be derived from the request it is
+ * about to serve, and `env`/`request` are not available until then. Construction
+ * is synchronous config validation, not I/O, so this costs nothing meaningful.
+ */
+function healthSystemFor(request: Request): OAuthProvider<Env> {
+  return new OAuthProvider<Env>({
+    ...oauthCoreFor(resourceFor(request)),
+    apiRoute: MCP_API_ROUTE,
+    apiHandler: mcpApiHandler,
+    defaultHandler: honoHandler,
+  });
+}
 
 export default {
   fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    return healthSystem.fetch(request, env, ctx);
+    return healthSystemFor(request).fetch(request, env, ctx);
   },
 
   /**
