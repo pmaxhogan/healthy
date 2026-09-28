@@ -190,6 +190,28 @@ export const REFERENCE_FIELDS: ReadonlyMap<string, readonly ReferenceField[]> = 
     ],
   ],
   [
+    // A secure message (`worker/mcp/message-items.ts`). No FHIR resource is behind
+    // it; the tool hands the filter a synthetic source whose `sender` and
+    // `recipient[]` carry only the type of person each name belongs to.
+    "Communication",
+    [
+      {
+        normalized: ["from", "name"],
+        raw: ["sender"],
+        targets: ["Practitioner", "PractitionerRole", "Patient", "RelatedPerson", "Organization"],
+        name: true,
+      },
+      {
+        normalized: ["practitioners", ARRAY_SEGMENT, "name"],
+        raw: ["recipient", ARRAY_SEGMENT],
+        targets: VIEW_CLINICIAN_TARGETS,
+        name: true,
+      },
+      // A second-hand copy's owning organisation: goes when Organization is denied.
+      { normalized: ["organization"], raw: ["partOf"], targets: ["Organization"] },
+    ],
+  ],
+  [
     "Coverage",
     [
       {

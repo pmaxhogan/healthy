@@ -30,7 +30,7 @@
 import { z } from "zod";
 
 import { collectAppointments } from "../appointment-items.ts";
-import { WINDOW_ARGS, toolArgs } from "../args.ts";
+import { jqArg, toolArgs, windowArgs } from "../args.ts";
 import { deniedHealthSystems, effectiveLimit, selectHealthSystems } from "../collect.ts";
 import { buildCoverage, mergeCoverage } from "../coverage.ts";
 import { respond } from "../respond.ts";
@@ -87,7 +87,8 @@ function portalCoverage(healthSystems: readonly HealthSystemInfo[], now: number)
 }
 
 const APPOINTMENT_ARGS = toolArgs({
-  ...WINDOW_ARGS,
+  ...windowArgs("`start`"),
+  ...jqArg("get_appointments"),
   includePast: z
     .boolean()
     .optional()
@@ -108,9 +109,7 @@ export function registerAppointmentTools(server: McpServer, deps: ToolDeps): voi
         "the patient portal (`source: portal`). Pass `includePast: true` or a " +
         "`from` date to see past visits as well (then newest first). `coverage` " +
         "covers both sources -- the FHIR Encounter sync and the patient-portal " +
-        "connection -- so check it before concluding there are no visits. To " +
-        "keep only what you need, pass `jq`, e.g. " +
-        '`.[] | select(.start < "2026-12-01") | {start, source}`.',
+        "connection -- so check it before concluding there are no visits.",
       schema: APPOINTMENT_ARGS,
     },
     async (args, run) => {

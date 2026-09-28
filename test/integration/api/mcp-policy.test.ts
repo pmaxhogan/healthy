@@ -412,3 +412,76 @@ describe("POST /api/mcp/policy/preview", () => {
     expect(body.message).toContain('Did you mean "name"?');
   });
 });
+
+/** One stored conversation whose reply carries a stored PNG. */
+async function seedMessages(): Promise<void> {
+  const id = await seedHealthSystem();
+  const repos = testRepos();
+  const report = await repos.portalMessages.record(
+    id,
+    [
+      {
+        subject: "Invented subject",
+        folder: "conversations",
+        external: false,
+        practitioners: [{ name: "Nurse Example A" }],
+        messages: [
+          {
+            sent: "2026-05-01T10:00:00.000Z",
+            role: "practitioner",
+            body: "An invented reply with a photo.",
+            unread: false,
+            attachments: [
+              {
+                name: "invented.png",
+                extension: "PNG",
+                handle: { dcsId: "WP-invented", fileExtension: "PNG", organizationId: "" },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    { complete: true },
+  );
+  await repos.portalMessageAttachments.store(
+    id,
+    report.attachments[0]?.key ?? "",
+    { name: "invented.png", extension: "PNG", contentType: "image/png" },
+    new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+  );
+  await repos.portalMessages.markSync(id, { ok: true, complete: true, threads: 1, messages: 1 });
+}
+
+describe("the rule builder on the secure-message tools", () => {
+  it("reads get_message_thread's structure through the conversation get_messages lists", async () => {
+    await seedMessages();
+
+    const response = await owner().send("POST", "/api/mcp/policy/structure", {
+      tool: "get_message_thread",
+    });
+    const structure = await json<PolicyStructureDto>(response);
+
+    expect(response.status).toBe(200);
+    expect(structure.items).toBe(1);
+    const messages = structure.item.find((node) => node.name === "messages");
+    expect(messages?.array).toBe(true);
+    expect(JSON.stringify(structure)).not.toContain("invented reply");
+  });
+
+  it("previews a draft on an attachment's image through the attachment get_message_thread names", async () => {
+    await seedMessages();
+
+    const response = await owner().send("POST", "/api/mcp/policy/preview", {
+      tool: "get_message_attachment",
+      field: field(["image"], { tool: "get_message_attachment", resourceType: "Communication" }),
+    });
+    const preview = await json<PolicyPreviewDto>(response);
+    const attachment = entry(preview, "get_message_attachment");
+
+    expect(response.status).toBe(200);
+    expect(attachment).toMatchObject({ total: 1, affected: 1 });
+    expect(attachment?.sample?.before).toMatchObject({ image: { contentType: "image/png" } });
+    expect(attachment?.sample?.after).not.toHaveProperty("image");
+  });
+});

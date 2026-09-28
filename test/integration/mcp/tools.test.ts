@@ -374,6 +374,50 @@ describe("reading the real cache", () => {
   });
 });
 
+describe("get_sync_status over real fhir_sync_state rows", () => {
+  it("explains every recorded code, with coverage's status on each row", async () => {
+    const db = repos();
+    await db.fhirSyncState.record(world.seeded.healthSystemA, "Observation", {
+      ok: true,
+      warnings: [
+        { code: "4119", count: 4 },
+        { code: "59001", count: 7 },
+      ],
+    });
+    await db.fhirSyncState.record(world.seeded.healthSystemA, "Specimen", {
+      ok: false,
+      errorCode: "unsupported",
+    });
+    await db.fhirSyncState.record(world.seeded.healthSystemB, "Goal", {
+      ok: false,
+      errorCode: "upstream_error:4118",
+    });
+
+    const answer = await call(world.client, "get_sync_status", {
+      jq: '.[] | select(.kind == "resource_sync") | {resourceType, status, lastError, warnings}',
+    });
+    const byType = new Map(answer.items.map((item) => [item.resourceType, item]));
+
+    expect(byType.get("Observation")).toStrictEqual({
+      resourceType: "Observation",
+      status: "ok",
+      lastError: null,
+      warnings: [
+        { code: "4119", count: 4, meaning: expect.any(String), severity: "info" },
+        { code: "59001", count: 7, meaning: expect.any(String), severity: "unknown" },
+      ],
+    });
+    expect(byType.get("Specimen")).toMatchObject({
+      status: "unsupported",
+      lastError: { code: "unsupported", severity: "info" },
+    });
+    expect(byType.get("Goal")).toMatchObject({
+      status: "failed",
+      lastError: { code: "upstream_error:4118", severity: "error" },
+    });
+  });
+});
+
 describe("policy rows in D1", () => {
   it("hides a denied health system everywhere", async () => {
     await repos().mcpPolicy.add("health_system", world.seeded.healthSystemB, "test");
@@ -948,5 +992,149 @@ describe("get_document_text", () => {
       expect(answer.text).toContain("Binary");
       expect(answer.text).toContain("get_documents");
     });
+  });
+});
+
+describe("portal messages through the MCP", () => {
+  const shared = {
+    sent: "2026-04-10T15:00:00.000Z",
+    role: "practitioner" as const,
+    author: "Nurse Example A",
+    body: "An invented reply both portals show.",
+    attachments: [],
+  };
+  const thread = (external: boolean, extra: (typeof shared)[] = []) => ({
+    subject: "Invented subject",
+    folder: "conversations" as const,
+    external,
+    ...(external && { organization: NAME_A }),
+    practitioners: [{ name: "Nurse Example A" }],
+    messages: [shared, ...extra],
+  });
+
+  async function storeBoth(): Promise<void> {
+    const db = repos();
+    await db.portalMessages.record(world.seeded.healthSystemA, [thread(false)], {
+      complete: true,
+    });
+    await db.portalMessages.record(
+      world.seeded.healthSystemB,
+      [
+        thread(true),
+        {
+          ...thread(false),
+          subject: "Only at B",
+          messages: [
+            {
+              ...shared,
+              author: "Messaging System",
+              body: "An invented notice only B has.",
+              role: "system" as const,
+            },
+          ],
+        },
+      ],
+      { complete: true },
+    );
+    for (const id of [world.seeded.healthSystemA, world.seeded.healthSystemB]) {
+      await db.portalMessages.markSync(id, { ok: true, complete: true, threads: 1, messages: 1 });
+    }
+  }
+
+  it("answers a conversation two portals show once, from its own health system, after a real seal", async () => {
+    await storeBoth();
+
+    const answer = await call(world.client, "get_messages");
+
+    expect(answer.isError).toBe(false);
+    expect(answer.items).toHaveLength(2);
+    const reply = answer.items.find((item) => item.subject === "Invented subject");
+    expect(reply).toMatchObject({
+      kind: "message_thread",
+      healthSystem: NAME_A,
+      firstParty: true,
+      messageCount: 1,
+      lastMessage: expect.objectContaining({
+        direction: "to_patient",
+        preview: shared.body,
+        previewTruncated: false,
+      }),
+    });
+    const notice = answer.items.find((item) => item.subject === "Only at B");
+    expect(notice).toMatchObject({ healthSystem: NAME_B, firstParty: true });
+
+    const threadId = String(reply?.threadId);
+    const conversation = await call(world.client, "get_message_thread", { threadId });
+    expect(conversation.items).toHaveLength(1);
+    const messages = (conversation.items[0]?.messages ?? []) as Record<string, unknown>[];
+    expect(messages.map((message) => message.body)).toStrictEqual([shared.body]);
+  });
+
+  it("serves a stored attachment's image through get_message_attachment, after a real seal", async () => {
+    const db = repos();
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 7, 7]);
+    const report = await db.portalMessages.record(
+      world.seeded.healthSystemA,
+      [
+        {
+          ...thread(false),
+          messages: [
+            {
+              ...shared,
+              unread: false,
+              attachments: [
+                {
+                  name: "invented-photo",
+                  extension: "PNG",
+                  handle: { dcsId: "WP-invented", fileExtension: "PNG", organizationId: "" },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      { complete: true },
+    );
+    const key = report.attachments[0]?.key ?? "";
+    await db.portalMessageAttachments.store(
+      world.seeded.healthSystemA,
+      key,
+      { name: "invented-photo", extension: "PNG", contentType: "image/png" },
+      png,
+    );
+
+    const list = await call(world.client, "get_messages");
+    const threadId = String(list.items[0]?.threadId);
+    const detail = await call(world.client, "get_message_thread", { threadId });
+    const messages = (detail.items[0]?.messages ?? []) as {
+      attachments: Record<string, unknown>[];
+    }[];
+    const attachment = messages[0]?.attachments[0];
+    expect(attachment).toMatchObject({
+      name: "invented-photo",
+      status: "stored",
+      contentType: "image/png",
+      size: png.length,
+    });
+
+    const result = (await world.client.callTool({
+      name: "get_message_attachment",
+      arguments: { attachmentId: String(attachment?.id) },
+    })) as { content: { type: string; data?: string }[] };
+    expect(result.content.map((block) => block.type)).toStrictEqual(["text", "image"]);
+    expect(result.content[1]?.data).toBe("iVBORwcH");
+  });
+
+  it("withholds clinicians' names on the owner's field rule, and every message on a resource rule", async () => {
+    await storeBoth();
+    await repos().mcpPolicy.add("field", "Practitioner.name");
+
+    const named = await call(world.client, "get_messages");
+    expect(named.text).not.toContain("Nurse Example A");
+    expect(named.text).toContain(shared.body);
+
+    await repos().mcpPolicy.add("resource", "Communication");
+    const hidden = await call(world.client, "get_messages");
+    expect(hidden.items).toStrictEqual([]);
   });
 });

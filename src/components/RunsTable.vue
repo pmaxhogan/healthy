@@ -49,6 +49,7 @@ function counts(run: RunDto): string {
     s.resourcesCached > 0 ? `${String(s.resourcesCached)} cached` : "",
     s.portalVisits > 0 ? `${String(s.portalVisits)} portal` : "",
     s.portalSkipped > 0 ? `${String(s.portalSkipped)} portal skipped` : "",
+    s.portalMessages > 0 ? `${String(s.portalMessages)} messages` : "",
   ].filter(Boolean);
   return parts.length > 0 ? parts.join(" ") : "no changes";
 }

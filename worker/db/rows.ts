@@ -376,3 +376,31 @@ export interface PortalVisitRow {
   fetched_at: number;
   expires_at: number;
 }
+
+/** A `portal_messages` row's lifecycle: see `migrations/0013_portal_messages.sql`. */
+type PortalMessageState = "active" | "missing";
+
+export interface PortalMessageRow {
+  health_system_id: string;
+  /** Keyed blind of the health system and the message's content digest. */
+  message_key: string;
+  /** Keyed blind of the health system and the thread's content digest. */
+  thread_key: string;
+  /** The message and its thread, sealed against `portal_messages.payload_enc.<healthSystemId>:<message_key>`. */
+  payload_enc: string;
+  content_hash: string;
+  state: PortalMessageState;
+  /** When the portal's own organisation stopped listing it. Null while `active`. */
+  missing_since: number | null;
+  fetched_at: number;
+}
+
+export interface PortalMessageSyncRow {
+  health_system_id: string;
+  last_attempt_at: number;
+  last_ok_at: number | null;
+  last_error_code: string | null;
+  complete: 0 | 1;
+  threads: number;
+  messages: number;
+}

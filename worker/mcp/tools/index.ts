@@ -17,6 +17,7 @@ import { registerAppointmentTools } from "./appointments.ts";
 import { registerClinicalTools } from "./clinical.ts";
 import { registerDocumentTools } from "./documents.ts";
 import { registerHealthSystemTools } from "./health-systems.ts";
+import { registerMessageTools } from "./messages.ts";
 import { registerSummaryTool } from "./summary.ts";
 
 import type { ToolDeps } from "../deps.ts";
@@ -30,4 +31,5 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
   registerAppointmentTools(server, deps);
   registerClinicalTools(server, deps);
   registerDocumentTools(server, deps);
+  registerMessageTools(server, deps);
 }

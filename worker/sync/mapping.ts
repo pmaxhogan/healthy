@@ -15,14 +15,17 @@
  * offset is a 50-minute event -- which is what the owner's afternoon actually
  * costs.
  *
- * **The description carries no clock.** It ends with a fixed "Synced by Healthy ·
- * do not edit" footer and nothing that changes from run to run. An unchanged
- * event is never patched (that is what the fingerprint is for), so a "last
- * checked <time>" stamp would have shown the time of the first write for ever --
- * a claim of freshness that was not true. How recently a health system was synced
- * is shown in the admin UI, which knows. The whole description, footer included,
- * is fingerprinted: it is static, so nothing is patched until something real
- * changes.
+ * **The description carries no clock.** `model.description` is Healthy's half of
+ * the event description -- a `-------` rule, a fixed "Synced by Healthy · do not
+ * edit below the line" header, then the details (see `description.ts`, which
+ * also owns keeping the owner's own text above the rule) -- and nothing in it
+ * changes from run to run. An unchanged event is never patched (that is what the
+ * fingerprint is for), so a "last checked <time>" stamp would have shown the time
+ * of the first write for ever -- a claim of freshness that was not true. How
+ * recently a health system was synced is shown in the admin UI, which knows. The
+ * whole block, rule and header included, is fingerprinted: it is static, so
+ * nothing is patched until something real changes. The owner's text above the
+ * rule is not part of the model and never reaches the fingerprint.
  *
  * **A ghost is derived, not rebuilt.** `ghostModel` takes the active model and
  * prefixes, greys and de-blocks it, and its fingerprint is a hash of the active
@@ -44,6 +47,8 @@ import { blindEventKey } from "../db/blind.ts";
 import { AppError } from "../lib/errors.ts";
 import { addMinutes, formatInZone } from "../lib/time.ts";
 
+import { healthyBlock, linkify, VANISHED_PREFIX } from "./description.ts";
+
 import type { Blinder } from "../db/blind.ts";
 import type { HealthSystemConfig } from "../db/schemas.ts";
 import type { NormalizedAddress, NormalizedAppointmentView } from "../fhir/normalize/types.ts";
@@ -60,10 +65,7 @@ export const DEFAULT_DURATION_MIN = 30;
  */
 const OFF_SCHEDULE_STATUSES: ReadonlySet<string> = new Set(["cancelled", "entered-in-error"]);
 
-/** The fixed tail of every description. Quoted in tests; do not reword lightly. */
-const FOOTER = "Synced by Healthy · do not edit";
 const GHOST_TITLE_PREFIX = "Cancelled: ";
-const VANISHED_PREFIX = "No longer on the health system's schedule as of ";
 
 /**
  * Characters a title template uses to join two values.
@@ -112,11 +114,43 @@ export interface MappingSettings {
   defaultArrivalOffsetMin: number;
 }
 
+/**
+ * The connected portal account's endpoint, pared down to what a url needs.
+ *
+ * `worker/ehr/mychart/discovery.ts`'s `PortalEndpoint`, minus the sign-in
+ * fields nothing here touches. Absent means the health system has no portal
+ * account, or one that has never signed in successfully.
+ */
+export interface ConnectedPortal {
+  /** Origin only, e.g. `https://host.example`. Never a path. */
+  baseUrl: string;
+  /** One leading and one trailing slash. `/` when the app is root-mounted. */
+  mountPath: string;
+}
+
+/**
+ * A `ConnectedPortal` from a `portal_accounts` row's (already-opened) location
+ * columns, or null when the row itself is absent or has never discovered one.
+ */
+export function connectedPortalOf(
+  account: { base_url: string | null; mount_path: string | null } | null,
+): ConnectedPortal | null {
+  const baseUrl = account?.base_url ?? null;
+  const mountPath = account?.mount_path ?? null;
+  return baseUrl === null || mountPath === null ? null : { baseUrl, mountPath };
+}
+
 /** The health system fields the mapping reads, with its stored per-health system config. */
 interface MappingHealthSystem {
   id: string;
   displayName: string;
   portalUrl: string | null;
+  /**
+   * The connected portal account's endpoint, when one has ever signed in.
+   * `linkTargetFor` falls back to it -- specifically its visits list -- when
+   * `portalUrl` (the health system's own, owner-typed config field) is unset.
+   */
+  connectedPortal: ConnectedPortal | null;
   /** `health_systems.config_json`, already parsed. Snake_case, as stored. */
   config: HealthSystemConfig;
 }
@@ -306,9 +340,22 @@ function formatStamp(iso: string, timezone: string): string {
   return formatInZone(iso, timezone);
 }
 
-/** Drop empty entries and join what is left, so a missing field leaves no gap. */
+/**
+ * Drop empty entries and repeats, then join what is left, so a missing field leaves
+ * no gap. Repeats are common: a portal often names the department and the location
+ * identically, and the same line printed twice reads as a bug.
+ */
 function joinLines(lines: readonly (string | undefined)[]): string {
-  return lines.filter((line): line is string => line !== undefined && line !== "").join("\n");
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  for (const line of lines) {
+    if (line === undefined || line === "") continue;
+    const key = line.trim().replaceAll(/\s+/gu, " ").toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    kept.push(line);
+  }
+  return kept.join("\n");
 }
 
 function joinSections(sections: readonly string[]): string {
@@ -320,7 +367,36 @@ function joinInline(parts: readonly (string | undefined)[], separator: string): 
   return parts.filter((part): part is string => part !== undefined && part !== "").join(separator);
 }
 
-/** The description, minus the footer. */
+/**
+ * No stable per-visit deep link exists to find: a live capture of MyChart's own
+ * web client shows exactly one navigable URL for visits (the list page), and its
+ * "view visit details" panel is a client-side overlay, not a URL -- confirmed
+ * against Epic's own MyChart string tables, which name it as a view
+ * (`visits.visitdetails`) rather than a route. So the visit-type/status line
+ * links to the portal itself rather than to the one appointment.
+ *
+ * **Which portal url.** An explicit one from the health system's own config
+ * wins when the owner set it. Otherwise, the connected portal account's own
+ * visits list -- the same url for every login flavour, `custom_oidc` included:
+ * a `custom_oidc` deployment's separate "shell" app is a login screen only
+ * ("the shell holds the password ... the classic pages hold the visits",
+ * `worker/ehr/mychart/custom-oidc/bridge.ts`), and its own hand-off lands the
+ * *scraper's* session on the same classic mount `connectedPortal` names --
+ * which is also where the owner's own browser ends up once signed in, shell or
+ * not. Null (no link, plain text) only when neither is known.
+ */
+function linkTargetFor(healthSystem: MappingHealthSystem): string | null {
+  if (healthSystem.portalUrl !== null) return healthSystem.portalUrl;
+  const portal = healthSystem.connectedPortal;
+  return portal === null ? null : `${portal.baseUrl}${portal.mountPath}Visits`;
+}
+
+/** The visit-type/status line, as a link when a portal url could be found for it. */
+function linkedVisitLine(text: string, portalUrl: string | null): string {
+  return portalUrl !== null && text !== "" ? linkify(text, portalUrl) : text;
+}
+
+/** The appointment details: what goes below the rule and the header. */
 function descriptionBody(
   view: NormalizedAppointmentView,
   healthSystem: MappingHealthSystem,
@@ -333,14 +409,14 @@ function descriptionBody(
   ]);
   const who = joinLines([
     joinInline([view.practitioner, view.specialty], " — "),
-    joinInline([view.visitType, view.status], " · "),
+    linkedVisitLine(joinInline([view.visitType, view.status], " · "), linkTargetFor(healthSystem)),
   ]);
-  return joinSections([where, who, healthSystem.portalUrl ?? ""]);
+  return joinSections([where, who]);
 }
 
 /**
  * Everything the fingerprint covers, in a fixed order: every field written to
- * Google, the whole description included. Nothing in it moves between runs.
+ * Google, Healthy's whole description block included. Nothing in it moves between runs.
  */
 function fingerprintPayload(model: Omit<CalendarEventModel, "fingerprint">): string {
   return JSON.stringify([
@@ -411,7 +487,7 @@ export async function buildCalendarModel(
     encounterId: view.encounterId,
     healthSystem: healthSystem.id,
     title,
-    description: joinSections([descriptionBody(view, healthSystem), FOOTER]),
+    description: healthyBlock(descriptionBody(view, healthSystem)),
     ...(location !== undefined && { location }),
     start,
     end,

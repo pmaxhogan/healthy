@@ -41,6 +41,7 @@ const FINISHED: RunDto = {
     warningCodes: ["4119"],
     portalVisits: 0,
     portalSkipped: 0,
+    portalMessages: 0,
     portalErrors: [],
     filteredView: false,
     backedOff: false,

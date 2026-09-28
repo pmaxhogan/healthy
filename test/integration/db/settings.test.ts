@@ -228,7 +228,9 @@ describe("sealed settings", () => {
     // eslint-disable-next-line unicorn/prefer-iterator-to-array
     const dump = JSON.stringify([...stored.values()]);
     expect(dump).not.toContain("owner@");
-    expect(dump).not.toContain("GMT");
+    // The whole zone name, not "GMT": three letters turn up in random ciphertext
+    // often enough to fail CI now and then.
+    expect(dump).not.toContain("Etc/GMT-2");
     expect(dump).not.toContain("mail.example");
     expect(dump).not.toContain("examplepath");
 

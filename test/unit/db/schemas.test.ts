@@ -193,6 +193,7 @@ describe("runSummarySchema", () => {
       backedOff: false,
       portalVisits: 0,
       portalSkipped: 0,
+      portalMessages: 0,
       portalErrors: [],
     });
   });

@@ -10,41 +10,62 @@
 
 import { z } from "zod";
 
+import { JQ_EXAMPLES } from "./jq-examples.ts";
+import { isIsoDateOrInstant } from "./window.ts";
+
+import type { ToolName } from "./tool-names.ts";
+
 /** The longest jq program accepted, in characters. A bound on the program, not the data. */
 const JQ_MAX_LENGTH = 4096;
 
-/** An ISO-8601 date (`2026-01-31`) or instant (`2026-01-31T09:00:00Z`). */
-const instant = z
-  .string()
-  .min(4)
-  .refine((value) => !Number.isNaN(Date.parse(value)), {
-    message: "must be an ISO-8601 date or instant",
-  });
+/**
+ * An ISO-8601 date or instant, at any precision a caller is likely to write:
+ * `2026`, `2026-01`, `2026-01-31`, `2026-01-31T09:00`, `2026-01-31T09:00:00Z`,
+ * `2026-01-31T09:00:00.000+02:00`. Anything else is rejected rather than
+ * guessed at; `worker/mcp/window.ts` has the rules and what each form bounds.
+ */
+const instant = z.string().refine(isIsoDateOrInstant, {
+  message: "must be an ISO-8601 date (2026-01-31, 2026-01, 2026) or instant",
+});
 
 /**
- * The optional jq program every tool accepts -- including `get_document_text`,
- * which takes none of the other shared arguments.
- *
- * It runs in `respond()` (worker/mcp/respond.ts) on data the exposure policy has
- * already filtered, and before `limit`. The length ceiling bounds the caller's
- * program, not any data; worker/mcp/jq/engine.ts has the other bounds.
+ * What every tool's `jq` description says before that tool's own examples.
+ * One sentence: `MCP_INSTRUCTIONS` (worker/mcp/instructions.ts) explains the
+ * rest once for every tool.
  */
-export const JQ_ARGS = {
-  jq: z
-    .string()
-    .min(1)
-    .max(JQ_MAX_LENGTH)
-    .optional()
-    .describe(
-      "Optional jq program (real jq 1.8), run server-side on the result before it is " +
-        "returned. It runs on the `items` array; with `raw: true` each item also " +
-        "carries its FHIR resource under `raw`. Every value the program emits becomes " +
-        "one element of `items`, even a single one -- so `[.[] | select(...)]` (one " +
-        "output, an array) wraps that array as `items`' one element, while " +
-        "`.[] | select(...)` (a stream) puts one match per `items` element, which is " +
-        "almost always what you want. `limit` always applies to `items`. ISO dates " +
-        'compare correctly as strings. Example: `.[] | select(.date >= "2026-01-01")`.',
-    ),
+const JQ_SEMANTICS =
+  "Optional jq program (jq 1.8) run server-side on the `items` array, after the " +
+  "owner's exposure policy and before `limit`; each value it emits becomes one item, " +
+  "so stream with `.[] | ...` rather than wrapping the result in `[...]`. With " +
+  "`raw: true` each item carries its FHIR resource under `.raw`.";
+
+function jqSchema(description: string) {
+  return z.string().min(1).max(JQ_MAX_LENGTH).optional().describe(description);
+}
+
+/**
+ * The optional jq program, described with one tool's own examples from
+ * `JQ_EXAMPLES` (worker/mcp/jq-examples.ts). Spread it into the tool's schema
+ * shape -- `toolArgs({ ...jqArg("get_x"), ... })`, or into a strict object of
+ * the tool's own -- and it replaces the generic description `toolArgs` starts
+ * from.
+ *
+ * It runs in `respond()` (worker/mcp/respond.ts) on data the exposure policy
+ * has already filtered, and before `limit`. The length ceiling bounds the
+ * caller's program, not any data; worker/mcp/jq/engine.ts has the other bounds.
+ */
+export function jqArg(tool: ToolName) {
+  const examples = JQ_EXAMPLES[tool].map((example) => `\`${example}\``).join("; ");
+  return { jq: jqSchema(`${JQ_SEMANTICS} Examples for this tool: ${examples}.`) } as const;
+}
+
+/**
+ * The generic `jq` argument, for a schema built with `toolArgs` that has not
+ * spread its tool's {@link jqArg} over it. Every registered tool does; a test
+ * holds them to it.
+ */
+const JQ_ARGS = {
+  jq: jqSchema(`${JQ_SEMANTICS} Example: \`.[] | select(.date >= "2026-01-01")\`.`),
 } as const;
 
 /**
@@ -83,20 +104,50 @@ const SHARED_ARGS = {
   ...JQ_ARGS,
 } as const;
 
-/** A date window, on the tools that have one. */
-export const WINDOW_ARGS = {
-  from: instant.optional().describe("Only items on or after this date."),
-  to: instant.optional().describe("Only items on or before this date."),
-} as const;
+/**
+ * A date window, on the tools that have one, saying which of the item's fields
+ * it compares -- `field` is how that tool's description names it, e.g.
+ * "`start`" or "`effective` (else `issued`)".
+ *
+ * The rules, which `worker/mcp/window.ts` and `collect.ts`'s `inWindow` implement
+ * and docs/mcp.md repeats: both ends inclusive; a value without a time is a
+ * whole UTC period (`to: "2026-01-31"` runs to the end of that UTC day, `to:
+ * "2026-01"` to the end of January, `from` starts at the period's first
+ * instant); a time without an offset is UTC; an item missing the field falls
+ * back to when the health system last updated it, and an item with no usable
+ * date at all is left out of any windowed call.
+ */
+export function windowArgs(field: string) {
+  return {
+    from: instant
+      .optional()
+      .describe(
+        `Only items whose ${field} is on or after this, inclusive. A date ` +
+          "(`2026-01-31`, `2026-01`, `2026`) starts at the first instant of that UTC " +
+          "day, month or year; an instant (`2026-01-31T09:00:00Z`) is exact, and one " +
+          "without an offset is UTC.",
+      ),
+    to: instant
+      .optional()
+      .describe(
+        `Only items whose ${field} is on or before this, inclusive. A date runs through ` +
+          "the end of that UTC day, month or year (`2026-01-31` includes all of the 31st); " +
+          "an instant without an offset is UTC. Pass `+HH:MM` to mean a local day.",
+      ),
+  } as const;
+}
 
-/** Build a strict schema from the shared arguments plus a tool's own. */
+/**
+ * Build a strict schema from the shared arguments plus a tool's own. The tool
+ * spreads its {@link jqArg} into `shape` so its `jq` carries its own examples.
+ */
 export function toolArgs<Shape extends z.ZodRawShape>(shape: Shape) {
   return z.strictObject({ ...SHARED_ARGS, ...shape });
 }
 
 /** The strict schema for a tool that takes nothing but the shared arguments. */
-export function sharedOnlyArgs() {
-  return z.strictObject({ ...SHARED_ARGS });
+export function sharedOnlyArgs(tool: ToolName) {
+  return z.strictObject({ ...SHARED_ARGS, ...jqArg(tool) });
 }
 
 /** What every tool receives, whatever else it declares. */

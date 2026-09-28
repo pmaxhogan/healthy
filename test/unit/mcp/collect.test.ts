@@ -3,7 +3,8 @@
 
 import { describe, expect, it } from "vitest";
 
-import { effectiveLimit, selectHealthSystems } from "../../../worker/mcp/collect.ts";
+import { effectiveLimit, selectHealthSystems, withinWindow } from "../../../worker/mcp/collect.ts";
+import { isIsoDateOrInstant } from "../../../worker/mcp/window.ts";
 import { EMPTY_RULES, buildRules } from "../../../worker/policy/rules.ts";
 
 import type { HealthSystemInfo } from "../../../worker/mcp/deps.ts";
@@ -77,5 +78,79 @@ describe("effectiveLimit", () => {
     expect(effectiveLimit(0)).toBe(1);
     expect(effectiveLimit(-5)).toBe(1);
     expect(effectiveLimit(7.9)).toBe(7);
+  });
+});
+
+describe("isIsoDateOrInstant", () => {
+  it.each([
+    "2026",
+    "2026-01",
+    "2026-01-31",
+    "2026-01-31T09:00",
+    "2026-01-31T09:00:00",
+    "2026-01-31T09:00:00Z",
+    "2026-01-31T09:00:00.123Z",
+    "2026-01-31T09:00:00+02:00",
+    "2026-01-31T09:00:00.5-05:30",
+  ])("accepts %s", (value) => {
+    expect(isIsoDateOrInstant(value)).toBe(true);
+  });
+
+  it.each([
+    "",
+    "26",
+    "March 1, 2026",
+    "03/01/2026",
+    "2026-13",
+    "2026-01-31T",
+    "2026-01T09:00",
+    "2026-01-31T9:00",
+    "2026-01-31T09:00:00+0200",
+    "2026-01-31T09:00:00ZT",
+    "2026-01-31 09:00",
+  ])("rejects %j", (value) => {
+    expect(isIsoDateOrInstant(value)).toBe(false);
+  });
+});
+
+describe("withinWindow", () => {
+  it("is inclusive at both ends", () => {
+    const at = "2026-03-01T00:00:00.000Z";
+    expect(withinWindow(at, at, at)).toBe(true);
+    expect(withinWindow("2026-03-01T00:00:00.001Z", undefined, at)).toBe(false);
+  });
+
+  it("reads a date-only `to` as the whole UTC day, month or year", () => {
+    expect(withinWindow("2026-01-31T23:59:59.999Z", undefined, "2026-01-31")).toBe(true);
+    expect(withinWindow("2026-02-01T00:00:00.000Z", undefined, "2026-01-31")).toBe(false);
+    expect(withinWindow("2026-01-31T18:00:00Z", undefined, "2026-01")).toBe(true);
+    expect(withinWindow("2026-02-01T00:00:00Z", undefined, "2026-01")).toBe(false);
+    expect(withinWindow("2026-12-31T12:00:00Z", undefined, "2026")).toBe(true);
+    expect(withinWindow("2027-01-01T00:00:00Z", undefined, "2026")).toBe(false);
+    // February in a non-leap year still ends on the 28th.
+    expect(withinWindow("2027-02-28T23:00:00Z", undefined, "2027-02")).toBe(true);
+    expect(withinWindow("2027-03-01T00:00:00Z", undefined, "2027-02")).toBe(false);
+  });
+
+  it("reads a date-only `from` as the start of that UTC period", () => {
+    expect(withinWindow("2026-01-01T00:00:00Z", "2026", undefined)).toBe(true);
+    expect(withinWindow("2025-12-31T23:59:59Z", "2026", undefined)).toBe(false);
+    expect(withinWindow("2026-03-01T00:00:00Z", "2026-03", undefined)).toBe(true);
+    expect(withinWindow("2026-02-28T23:59:59Z", "2026-03-01", undefined)).toBe(false);
+  });
+
+  it("reads an instant without an offset as UTC, and honours an explicit one", () => {
+    expect(withinWindow("2026-03-01T09:00:00Z", "2026-03-01T09:00", undefined)).toBe(true);
+    expect(withinWindow("2026-03-01T08:59:59Z", "2026-03-01T09:00", undefined)).toBe(false);
+    // 23:00 at +02:00 is 21:00 UTC.
+    expect(withinWindow("2026-03-01T21:30:00Z", undefined, "2026-03-01T23:00:00+02:00")).toBe(
+      false,
+    );
+    expect(withinWindow("2026-03-01T20:30:00Z", undefined, "2026-03-01T23:00:00+02:00")).toBe(true);
+  });
+
+  it("keeps a dateless item only when there is no window", () => {
+    expect(withinWindow(undefined, undefined, undefined)).toBe(true);
+    expect(withinWindow(undefined, "2026", undefined)).toBe(false);
   });
 });

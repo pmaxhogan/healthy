@@ -31,12 +31,16 @@ import type {
   CallerIdentity,
   DocumentTextRequest,
   DocumentTextResult,
+  MessageAttachmentFile,
+  PortalMessageRecord,
+  PortalMessageSyncEntry,
   PortalVisitRecord,
   HealthSystemInfo,
   SyncStatusEntry,
   ToolDeps,
 } from "./deps.ts";
 import type { Repos } from "../db/index.ts";
+import type { StoredAttachment } from "../db/repos/portal-message-attachments.ts";
 import type { ConnectionRow, HealthSystemRow } from "../db/rows.ts";
 import type { Env } from "../env.ts";
 import type { Logger } from "../lib/log.ts";
@@ -61,6 +65,14 @@ interface CallCache {
   pools: Map<string, Promise<unknown[]>>;
   resources: Map<string, Promise<CachedRow[]>>;
   visits: Map<string, Promise<PortalVisitRecord[]>>;
+  messages: Map<string, Promise<LoadedMessages>>;
+  messageSync: Promise<PortalMessageSyncEntry[]> | null;
+}
+
+/** One health system's messages, and its attachments' storage keys by public id. */
+interface LoadedMessages {
+  records: PortalMessageRecord[];
+  keys: Map<string, string>;
 }
 
 function emptyCache(): CallCache {
@@ -73,6 +85,8 @@ function emptyCache(): CallCache {
     pools: new Map(),
     resources: new Map(),
     visits: new Map(),
+    messages: new Map(),
+    messageSync: null,
   };
 }
 
@@ -138,6 +152,60 @@ async function loadPortalVisits(
   }));
 }
 
+/** Where one attachment's file stands, from its row (or the lack of one). */
+function fileOf(
+  id: string,
+  row: StoredAttachment | undefined,
+  unread: boolean | undefined,
+): MessageAttachmentFile {
+  if (row === undefined) {
+    return { id, status: unread === true ? "waiting_until_read" : "not_fetched" };
+  }
+  if (row.state === "failed") {
+    return { id, status: "failed", ...(row.errorCode !== null && { errorCode: row.errorCode }) };
+  }
+  return {
+    id,
+    status: "stored",
+    ...(row.meta.contentType !== undefined && { contentType: row.meta.contentType }),
+    ...(row.meta.size !== undefined && { size: row.meta.size }),
+  };
+}
+
+/** One health system's stored secure messages, projected to what the tools read. */
+async function loadPortalMessages(repos: Repos, healthSystemId: string): Promise<LoadedMessages> {
+  const [rows, files] = await Promise.all([
+    repos.portalMessages.list(healthSystemId),
+    repos.portalMessageAttachments.list(healthSystemId),
+  ]);
+  const byKey = new Map(files.map((file) => [file.attachmentKey, file]));
+  const keys = new Map<string, string>();
+  const records = rows.map((row) => {
+    for (const ids of row.attachments) keys.set(ids.id, ids.key);
+    return {
+      threadId: row.threadId,
+      messageId: row.messageId,
+      fingerprint: row.fingerprint,
+      thread: row.thread,
+      message: row.message,
+      files: row.attachments.map((ids) => fileOf(ids.id, byKey.get(ids.key), row.message.unread)),
+      missing: row.missing,
+    };
+  });
+  return { records, keys };
+}
+
+async function loadMessageSync(repos: Repos): Promise<PortalMessageSyncEntry[]> {
+  const rows = await repos.portalMessages.listSync();
+  return rows.map((row) => ({
+    healthSystemId: row.healthSystemId,
+    lastAttemptAt: row.lastAttemptAt,
+    lastOkAt: row.lastOkAt,
+    lastErrorCode: row.lastErrorCode,
+    complete: row.complete,
+  }));
+}
+
 async function loadHealthSystems(repos: Repos): Promise<HealthSystemInfo[]> {
   const [rows, connections] = await Promise.all([
     repos.healthSystems.list(),
@@ -152,6 +220,15 @@ export function makeToolDeps(options: ToolDepsOptions): ToolDeps {
   const now = options.now ?? ((): number => nowSeconds());
   const repos = reposFor(options.env.DB, options.env, { log, now });
   let cache = emptyCache();
+
+  const loadedMessages = (healthSystemId: string): Promise<LoadedMessages> => {
+    let pending = cache.messages.get(healthSystemId);
+    if (pending === undefined) {
+      pending = loadPortalMessages(repos, healthSystemId);
+      cache.messages.set(healthSystemId, pending);
+    }
+    return pending;
+  };
 
   return {
     log,
@@ -204,6 +281,25 @@ export function makeToolDeps(options: ToolDepsOptions): ToolDeps {
         cache.visits.set(healthSystemId, pending);
       }
       return pending;
+    },
+
+    async portalMessages(healthSystemId: string): Promise<PortalMessageRecord[]> {
+      const loaded = await loadedMessages(healthSystemId);
+      return loaded.records;
+    },
+
+    async portalAttachmentContent(
+      healthSystemId: string,
+      attachmentId: string,
+    ): Promise<Uint8Array | null> {
+      const loaded = await loadedMessages(healthSystemId);
+      const key = loaded.keys.get(attachmentId);
+      return key === undefined ? null : repos.portalMessageAttachments.content(healthSystemId, key);
+    },
+
+    portalMessageSync(): Promise<PortalMessageSyncEntry[]> {
+      cache.messageSync ??= loadMessageSync(repos);
+      return cache.messageSync;
     },
 
     counts(): Promise<CacheCount[]> {

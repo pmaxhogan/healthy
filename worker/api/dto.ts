@@ -345,6 +345,7 @@ export function toRunSummaryDto(summary: DbRunSummary): RunSummaryDto {
     errors: [...summary.errors],
     portalVisits: summary.portalVisits,
     portalSkipped: summary.portalSkipped,
+    portalMessages: summary.portalMessages,
     portalErrors: [...summary.portalErrors],
   };
 }

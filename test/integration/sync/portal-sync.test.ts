@@ -58,11 +58,18 @@ import type { FhirServer, SeededHealthSystem, Upstreams } from "./helpers.ts";
 import type { Ctx } from "../../../worker/db/client.ts";
 import type { PortalAccountRow } from "../../../worker/db/rows.ts";
 import type { PortalVisit } from "../../../worker/ehr/mychart/index.ts";
+import type { PortalThread } from "../../../worker/ehr/mychart/index.ts";
 import type { FakePortal } from "../portal/helpers.ts";
 import type { RunSummary } from "@shared/types.ts";
 import type * as fhir4 from "fhir/r4";
 
 beforeEach(resetSyncDb);
+
+/** A copy, sorted. */
+function sorted(values: readonly string[]): string[] {
+  // eslint-disable-next-line unicorn/no-array-sort -- Array#toSorted is ES2023 and the integration project compiles against the Worker's ES2022 lib; this sorts a fresh copy.
+  return [...values].sort((a, b) => a.localeCompare(b));
+}
 
 const HOST = "fhir.a.example.test";
 /** An hour ahead of the fixed clock, so a visit is unambiguously upcoming. */
@@ -192,6 +199,32 @@ describe("portal visits on the calendar", () => {
     expect(
       fix.upstreams.calendar.byKey().get(await portalKey(fix.healthSystem, "csn-1"))?.summary,
     ).toBe("Annual physical · A. Example, MD");
+  });
+
+  it("keeps the owner's text above the rule through a patch and a ghost", async () => {
+    const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1" })] } });
+    await portalRun(fix);
+    const event = fix.upstreams.calendar.byKey().get(await portalKey(fix.healthSystem, "csn-1"));
+    if (event === undefined) throw new Error("csn-1 was not calendared");
+    const owner = "Owner note<br><br>";
+    event.description = `${owner}${String(event.description)}`;
+
+    // An edit above the rule alone costs no write.
+    const untouched = await portalRun(fix);
+    expect(untouched.eventsPatched).toBe(0);
+
+    fix.portal.visits = [portalVisit({ csn: "csn-1", visitType: "Annual physical" })];
+    const patched = await portalRun(fix);
+    expect(patched.eventsPatched).toBe(1);
+    expect(String(event.description).startsWith(`${owner}-------<br>Synced by Healthy`)).toBe(true);
+
+    fix.portal.visits = [portalVisit({ csn: "csn-1", status: "canceled" })];
+    const ghosted = await portalRun(fix);
+    expect(ghosted.eventsGhosted).toBe(1);
+    expect(String(event.description).startsWith(`${owner}-------<br>`)).toBe(true);
+    expect(String(event.description)).toContain("No longer on the health system");
+    const settled = await portalRun(fix);
+    expect(settled.eventsGhosted).toBe(0);
   });
 
   it("ghosts a visit the portal reports as canceled, with its own details", async () => {
@@ -1269,5 +1302,199 @@ describe("a session proven good minutes ago", () => {
     await seedPortalAccount(syncCtx(), healthSystem.healthSystemId, { active: false });
 
     await expect(recentSessionAge(syncCtx(), healthSystem.healthSystemId)).resolves.toBeNull();
+  });
+});
+
+/** A file's per-session handle, as the crawl hands it over. */
+function attachmentHandle(dcsId: string) {
+  return { dcsId, fileExtension: "PNG", organizationId: "" };
+}
+
+/** A conversation whose reply carries two fetchable files and a clinical reference. */
+function withAttachments(unread: boolean): PortalThread {
+  return {
+    subject: "Invented subject",
+    folder: "conversations",
+    external: false,
+    practitioners: [{ name: "Nurse Example A" }],
+    messages: [
+      { sent: "2026-05-01T10:00:00.000Z", role: "patient", body: "A question.", attachments: [] },
+      {
+        sent: "2026-05-01T12:00:00.000Z",
+        role: "practitioner",
+        body: "An invented answer with files.",
+        unread,
+        attachments: [
+          { name: "invented-a", extension: "PNG", handle: attachmentHandle("WP-a") },
+          { name: "invented-b", extension: "PNG", handle: attachmentHandle("WP-b") },
+          // A clinical reference: no file behind it, so nothing to fetch.
+          { name: "invented-reference" },
+        ],
+      },
+    ],
+  };
+}
+
+/** What the fake portal serves per `dcsId`. */
+function files(entries: [string, AppError | { contentType: string; bytes: Uint8Array }][]) {
+  return new Map(entries) as FakePortal["files"];
+}
+
+describe("portal secure messages", () => {
+  const THREAD = {
+    subject: "Invented subject",
+    folder: "conversations" as const,
+    external: false,
+    practitioners: [{ name: "Nurse Example A" }],
+    messages: [
+      {
+        sent: "2026-05-01T10:00:00.000Z",
+        role: "patient" as const,
+        body: "An invented question.",
+        attachments: [],
+      },
+      {
+        sent: "2026-05-01T12:00:00.000Z",
+        role: "practitioner" as const,
+        author: "Nurse Example A",
+        body: "An invented answer.",
+        attachments: [],
+      },
+    ],
+  };
+
+  it("reads the Message Center with the same session and stores every message", async () => {
+    const fix = await fixture({ portal: { threads: [THREAD] } });
+
+    const summary = await portalRun(fix);
+
+    expect(fix.portal.calls.loadMessages).toBe(1);
+    expect(summary.portalMessages).toBe(2);
+    expect(summary.portalErrors).toStrictEqual([]);
+    const repos = syncRepos(fix.ctx);
+    const stored = await repos.portalMessages.list(fix.healthSystem.healthSystemId);
+    expect(sorted(stored.map((row) => row.message.body))).toStrictEqual([
+      "An invented answer.",
+      "An invented question.",
+    ]);
+    expect(await repos.portalMessages.listSync()).toStrictEqual([
+      expect.objectContaining({
+        healthSystemId: fix.healthSystem.healthSystemId,
+        lastErrorCode: null,
+        complete: true,
+        threads: 1,
+        messages: 2,
+      }),
+    ]);
+  });
+
+  it("records a failed read without costing the visits, and never signs in for it", async () => {
+    const fix = await fixture({
+      portal: {
+        visits: [portalVisit({ csn: "csn-1" })],
+        messagesError: new AppError("portal_session_expired", "the session died mid-read"),
+      },
+    });
+
+    const summary = await portalRun(fix);
+
+    expect(summary.eventsInserted).toBe(1);
+    expect(summary.portalMessages).toBe(0);
+    expect(fix.portal.calls.logins).toBe(0);
+    const [sync] = await syncRepos(fix.ctx).portalMessages.listSync();
+    expect(sync).toMatchObject({ lastErrorCode: "portal_session_expired", lastOkAt: null });
+  });
+
+  describe("attachments", () => {
+    const FILE = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]);
+
+    it("fetches and seals every file the read listed, once, and never stores the handle", async () => {
+      const fix = await fixture({
+        portal: {
+          threads: [withAttachments(false)],
+          files: files([
+            ["WP-a", { contentType: "image/png", bytes: FILE }],
+            ["WP-b", new AppError("portal_parse_failed", "a page where the file should be")],
+          ]),
+        },
+      });
+
+      await portalRun(fix);
+      await portalRun(fix);
+
+      // WP-b failed on the first run and is not retried within the day; WP-a is stored.
+      expect(fix.portal.calls.attachments).toStrictEqual(["WP-a", "WP-b"]);
+      const repos = syncRepos(fix.ctx);
+      const id = fix.healthSystem.healthSystemId;
+      const rows = await repos.portalMessageAttachments.list(id);
+      expect(sorted(rows.map((row) => `${row.state}:${row.errorCode ?? ""}`))).toStrictEqual([
+        "failed:portal_parse_failed",
+        "stored:",
+      ]);
+      const stored = rows.find((row) => row.state === "stored");
+      expect(stored?.meta).toStrictEqual({
+        name: "invented-a",
+        extension: "PNG",
+        contentType: "image/png",
+        size: FILE.length,
+      });
+      expect([
+        ...((await repos.portalMessageAttachments.content(id, stored?.attachmentKey ?? "")) ?? []),
+      ]).toStrictEqual([...FILE]);
+      const messages = await repos.portalMessages.list(id);
+      expect(JSON.stringify(messages)).not.toContain("WP-a");
+    });
+
+    it("leaves a message the portal still marks unread alone until it has been read", async () => {
+      const fix = await fixture({
+        portal: {
+          threads: [withAttachments(true)],
+          files: files([
+            ["WP-a", { contentType: "image/png", bytes: FILE }],
+            ["WP-b", { contentType: "image/png", bytes: FILE }],
+          ]),
+        },
+      });
+
+      await portalRun(fix);
+      expect(fix.portal.calls.attachments).toStrictEqual([]);
+
+      fix.portal.threads = [withAttachments(false)];
+      await portalRun(fix);
+      expect(fix.portal.calls.attachments).toStrictEqual(["WP-a", "WP-b"]);
+    });
+
+    it("stops at an expired session without marking anything failed", async () => {
+      const fix = await fixture({
+        portal: {
+          threads: [withAttachments(false)],
+          files: files([["WP-a", new AppError("portal_session_expired", "gone")]]),
+        },
+      });
+
+      await portalRun(fix);
+
+      expect(fix.portal.calls.attachments).toStrictEqual(["WP-a"]);
+      const rows = await syncRepos(fix.ctx).portalMessageAttachments.list(
+        fix.healthSystem.healthSystemId,
+      );
+      expect(rows).toStrictEqual([]);
+      const [sync] = await syncRepos(fix.ctx).portalMessages.listSync();
+      expect(sync).toMatchObject({ lastErrorCode: null });
+    });
+  });
+
+  it("does not read messages at all when the session is dead and the run will not sign in", async () => {
+    const fix = await fixture({ portal: { alive: false, threads: [THREAD] } });
+
+    await runCalendarSync(fix.ctx, {
+      trigger: "manual",
+      portalOnly: true,
+      signInWaitSeconds: 0,
+      deps: { ...fix.upstreams.deps, portalAdapter: fix.portal.adapter },
+    });
+
+    expect(fix.portal.calls.loadMessages).toBe(0);
+    expect(fix.portal.calls.logins).toBe(0);
   });
 });

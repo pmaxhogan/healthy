@@ -85,6 +85,7 @@ export function emptySummary(): RunSummary {
     errors: [],
     portalVisits: 0,
     portalSkipped: 0,
+    portalMessages: 0,
     portalErrors: [],
   };
 }
@@ -179,6 +180,7 @@ function toStoredSummary(state: RunState): RunSummaryInput {
     backedOff: summary.backedOff,
     portalVisits: summary.portalVisits,
     portalSkipped: summary.portalSkipped,
+    portalMessages: summary.portalMessages,
     // Already bare codes: the portal pass never puts a health system id in here.
     portalErrors: [...summary.portalErrors],
   };

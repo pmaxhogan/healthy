@@ -291,6 +291,28 @@ describe("normalized output", () => {
 
     expect(answer.items.map((item) => item.id)).toStrictEqual(["enc-past"]);
   });
+
+  it("includes the whole last month of a year-month `to`", async () => {
+    const answer = await callTool(world.client, "get_encounters", {
+      from: "2026-03",
+      to: "2026-03",
+    });
+
+    expect(answer.items.map((item) => item.id)).toStrictEqual(["enc-past"]);
+  });
+
+  it("rejects a window that is not an ISO date or instant", async () => {
+    const answer = await callTool(world.client, "get_encounters", { from: "March 1, 2026" });
+
+    expect(answer.isError).toBe(true);
+    expect(answer.text).toContain("ISO-8601");
+  });
+
+  it("does not take a window on get_health_summary, which would ignore it", async () => {
+    const answer = await callTool(world.client, "get_health_summary", { from: "2026-01-01" });
+
+    expect(answer.isError).toBe(true);
+  });
 });
 
 describe("the sensitive default, through a tool", () => {
@@ -491,7 +513,76 @@ describe("get_sync_status", () => {
 
     expect(row?.resourceType).toBe("Condition");
     expect(row?.lastOk).toBe(true);
-    expect(row?.warnings).toStrictEqual([{ code: "4119", count: 1 }]);
+    expect(row?.status).toBe("ok");
+    expect(row?.lastError).toBeNull();
+    expect(row?.warnings).toStrictEqual([
+      {
+        code: "4119",
+        count: 1,
+        meaning: expect.stringContaining("complete medical record"),
+        severity: "info",
+      },
+    ]);
+  });
+
+  it("explains every recorded code, and says so when it cannot", async () => {
+    world.state.syncStatus = [
+      {
+        healthSystemId: HEALTH_SYSTEM_A,
+        resourceType: "Observation",
+        lastFullAt: NOW - 3600,
+        lastOk: true,
+        lastErrorCode: null,
+        warnings: [
+          { code: "59204", count: 2 },
+          { code: "99999", count: 1 },
+          { code: "category_rejected:encounter", count: 1 },
+        ],
+      },
+      {
+        healthSystemId: HEALTH_SYSTEM_A,
+        resourceType: "Specimen",
+        lastFullAt: null,
+        lastOk: false,
+        lastErrorCode: "unsupported",
+        warnings: [],
+      },
+      {
+        healthSystemId: HEALTH_SYSTEM_B,
+        resourceType: "Goal",
+        lastFullAt: NOW - 86_400,
+        lastOk: false,
+        lastErrorCode: "upstream_error:4118",
+        warnings: [],
+      },
+    ];
+
+    const answer = await callTool(world.client, "get_sync_status");
+    const rows = answer.items.filter((item) => item.kind === "resource_sync");
+    const byType = new Map(rows.map((row) => [row.resourceType, row]));
+
+    expect(byType.get("Observation")?.status).toBe("partial");
+    expect(
+      (byType.get("Observation")?.warnings as { code: string; severity: string }[]).map(
+        ({ code, severity }) => [code, severity],
+      ),
+    ).toStrictEqual([
+      ["59204", "info"],
+      ["99999", "unknown"],
+      ["category_rejected:encounter", "warning"],
+    ]);
+    expect(byType.get("Specimen")).toMatchObject({
+      status: "unsupported",
+      lastError: { code: "unsupported", severity: "info" },
+    });
+    expect(byType.get("Goal")).toMatchObject({
+      status: "failed",
+      lastError: {
+        code: "upstream_error:4118",
+        severity: "error",
+        meaning: expect.stringContaining("refused this app access"),
+      },
+    });
   });
 });
 

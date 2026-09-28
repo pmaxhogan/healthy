@@ -25,6 +25,8 @@ import { makeMcpAuditRepo } from "./repos/mcp-audit.ts";
 import { makeMcpPolicyRepo } from "./repos/mcp-policy.ts";
 import { makeOAuthStatesRepo } from "./repos/oauth-states.ts";
 import { makePortalAccountsRepo } from "./repos/portal-accounts.ts";
+import { makePortalMessageAttachmentsRepo } from "./repos/portal-message-attachments.ts";
+import { makePortalMessagesRepo } from "./repos/portal-messages.ts";
 import { makePortalVisitsRepo } from "./repos/portal-visits.ts";
 import { makeRunLogRepo } from "./repos/run-log.ts";
 
@@ -48,6 +50,8 @@ export function makeRepos(ctx: Ctx) {
     loginAttempts: makeLoginAttemptsRepo(ctx),
     portalAccounts: makePortalAccountsRepo(ctx),
     portalVisits: makePortalVisitsRepo(ctx),
+    portalMessages: makePortalMessagesRepo(ctx),
+    portalMessageAttachments: makePortalMessageAttachmentsRepo(ctx),
     mailInbox: makeMailInboxRepo(ctx),
   };
 }

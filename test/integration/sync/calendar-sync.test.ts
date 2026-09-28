@@ -246,7 +246,9 @@ describe("the second run", () => {
 
     const event = h.upstreams.calendar.byKey().get(await sk(`${h.healthSystemId}:enc-1`));
     const description = String(event?.description);
-    expect(description.endsWith("\n\nSynced by Healthy · do not edit")).toBe(true);
+    expect(
+      description.startsWith("-------\nSynced by Healthy · do not edit below the line\n"),
+    ).toBe(true);
     expect(description).not.toContain("last checked");
   });
 
@@ -315,6 +317,106 @@ describe("the second run", () => {
     expect(settled?.state).toBe("ghost");
     expect(settled?.ghosted_at).toBe(T0 + 3600);
     expect(settled?.fingerprint).toBe(ghosted?.fingerprint);
+  });
+});
+
+const RULE_AND_HEADER = "-------\nSynced by Healthy · do not edit below the line\n";
+
+/** Run once, let the owner change enc-1's description, and hand back the event. */
+async function editedBy(
+  edit: (description: string) => string,
+): Promise<{ h: Harness; event: Record<string, unknown>; block: string }> {
+  const h = await setup();
+  await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
+  const event = h.upstreams.calendar.byKey().get(await sk(`${h.healthSystemId}:enc-1`));
+  if (event === undefined) throw new Error("enc-1 was not calendared");
+  const block = String(event.description);
+  event.description = edit(block);
+  return { h, event, block };
+}
+
+/** Two more runs: the patch count they add, and what each one wrote. */
+async function twoRuns(h: Harness): Promise<{ first: number; second: number }> {
+  const before = h.upstreams.calendar.patches;
+  h.time.advance(3600);
+  await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
+  const afterFirst = h.upstreams.calendar.patches;
+  h.time.advance(3600);
+  await runCalendarSync(h.ctx, { deps: h.upstreams.deps });
+  return { first: afterFirst - before, second: h.upstreams.calendar.patches - afterFirst };
+}
+
+describe("the owner's edits to a description", () => {
+  it("leaves text above the rule alone, and writes nothing for it", async () => {
+    const { h, event, block } = await editedBy((block) => `Bring the referral.\n\n${block}`);
+
+    expect(await twoRuns(h)).toStrictEqual({ first: 0, second: 0 });
+    expect(event.description).toBe(`Bring the referral.\n\n${block}`);
+  });
+
+  it("keeps the owner's text byte for byte when the details change", async () => {
+    const owner = "Fasting from midnight.  \n\n";
+    const { h, event } = await editedBy((block) => `${owner}${block}`);
+    h.server.encounters = searchBundle([
+      encounter({ id: "enc-1", start: "2026-06-30T15:30:00Z" }),
+      encounter({ id: "enc-2", start: PAST, status: "finished" }),
+    ]);
+
+    expect(await twoRuns(h)).toStrictEqual({ first: 1, second: 0 });
+    expect(String(event.description).startsWith(`${owner}${RULE_AND_HEADER}`)).toBe(true);
+  });
+
+  it("overwrites an edit below the rule, once", async () => {
+    const { h, event, block } = await editedBy((block) => `${block}\nTyped below the rule`);
+
+    expect(await twoRuns(h)).toStrictEqual({ first: 1, second: 0 });
+    expect(event.description).toBe(block);
+  });
+
+  it("re-appends the block when the owner deleted the rule, once", async () => {
+    const { h, event, block } = await editedBy(() => "Only the owner's words now");
+
+    expect(await twoRuns(h)).toStrictEqual({ first: 1, second: 0 });
+    expect(event.description).toBe(`Only the owner's words now\n\n${block}`);
+  });
+
+  it("keeps the owner's HTML and writes the block to match it, once", async () => {
+    const owner = "<b>Parking</b> on level 3<br><br>";
+    const { h, event } = await editedBy(
+      (block) => `${owner}${block.replaceAll("\n", "<br>")}<br>tampered`,
+    );
+
+    expect(await twoRuns(h)).toStrictEqual({ first: 1, second: 0 });
+    const description = String(event.description);
+    expect(description.startsWith(`${owner}-------<br>Synced by Healthy`)).toBe(true);
+    expect(description).not.toContain("tampered");
+    expect(description).not.toContain("\n");
+  });
+
+  it("migrates a legacy description without duplicating it, keeping a note after it", async () => {
+    // What the pre-rule format left on the calendar: the details, then the footer.
+    const { h, event, block } = await editedBy(
+      (block) =>
+        `${block.slice(RULE_AND_HEADER.length)}\n\nSynced by Healthy · do not edit\n\nOwner's note`,
+    );
+    // And a stored fingerprint from before the format changed.
+    await env.DB.prepare("UPDATE calendar_events SET fingerprint = ?").bind("older").run();
+
+    expect(await twoRuns(h)).toStrictEqual({ first: 2, second: 0 });
+    expect(event.description).toBe(`Owner's note\n\n${block}`);
+    expect(String(event.description).split("Synced by Healthy")).toHaveLength(2);
+  });
+
+  it("keeps the owner's text above the rule when an appointment is ghosted", async () => {
+    const { h, event } = await editedBy((block) => `Owner note\n${block}`);
+    h.server.encounters = searchBundle([
+      encounter({ id: "enc-2", start: PAST, status: "finished" }),
+    ]);
+
+    expect(await twoRuns(h)).toStrictEqual({ first: 1, second: 0 });
+    const description = String(event.description);
+    expect(description.startsWith(`Owner note\n${RULE_AND_HEADER}`)).toBe(true);
+    expect(description).toContain("No longer on the health system's schedule as of");
   });
 });
 

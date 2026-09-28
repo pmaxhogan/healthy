@@ -23,11 +23,19 @@
  *   - A Google event whose key has no row *and* no candidate is an **orphan**. It
  *     is reported and left alone: it carries this app's marker, so something
  *     wrote it, and guessing at its content would be worse than counting it.
+ *   - An event is settled only when its fingerprint matches **and** its
+ *     description still carries Healthy's current block below the rule
+ *     (`carriesBlock`). The owner's text above the rule never costs a write; an
+ *     edit below it, or a deleted rule, is rewritten on the next run
+ *     (`description_drift`). Both halves read what `events.list` already
+ *     returned, so an unchanged event costs no Google call either way.
  *   - `suppressGhosting` exists for Epic 4119 -- the organisation admitted it
  *     filtered the patient-facing view. Partial results must never ghost real
  *     appointments, so absent candidates are skipped for that run while inserts
  *     and patches carry on.
  */
+
+import { carriesBlock } from "./description.ts";
 
 import type { CalendarEventRow } from "../db/rows.ts";
 import type { EventRecord } from "../google/types.ts";
@@ -51,6 +59,10 @@ export interface PlanCandidate {
   fingerprint: string;
   /** Fingerprint of the ghost variant, when one could be built. */
   ghostFingerprint: string | null;
+  /** Healthy's description block for the active model, or null with no model. */
+  description: string | null;
+  /** The ghost variant's block, when one could be built. */
+  ghostDescription: string | null;
   /** Cancelled or entered-in-error upstream. */
   offSchedule: boolean;
   /** Not in this run's search results at all. */
@@ -114,6 +126,14 @@ function eventFingerprintOf(event: EventRecord): string | null {
   return fingerprint === undefined || fingerprint === "" ? null : fingerprint;
 }
 
+/**
+ * True when the event's description carries this block below its rule, or when
+ * there is no block to compare (no model, so nothing could be written anyway).
+ */
+function described(event: EventRecord, block: string | null): boolean {
+  return block === null || carriesBlock(event.description, block);
+}
+
 function entry(
   key: string,
   action: PlanAction,
@@ -143,8 +163,14 @@ function decideGhost(
     return entry(candidate.key, "ghost-row-only", reason, { variant: "ghost" });
   }
   if (row.fingerprint === candidate.ghostFingerprint && row.state === "ghost") {
-    return entry(candidate.key, "unchanged", "already_ghost", {
-      googleEventId: row.google_event_id,
+    if (described(event, candidate.ghostDescription)) {
+      return entry(candidate.key, "unchanged", "already_ghost", {
+        googleEventId: row.google_event_id,
+        variant: "ghost",
+      });
+    }
+    return entry(candidate.key, "ghost", "description_drift", {
+      googleEventId: event.id,
       variant: "ghost",
     });
   }
@@ -182,9 +208,10 @@ function decideActive(
   const settled =
     row.fingerprint === candidate.fingerprint &&
     (googleFingerprint === null || googleFingerprint === candidate.fingerprint);
-  return settled
+  if (!settled) return entry(candidate.key, "patch", "changed", { googleEventId: event.id });
+  return described(event, candidate.description)
     ? entry(candidate.key, "unchanged", "fingerprint_match", { googleEventId: event.id })
-    : entry(candidate.key, "patch", "changed", { googleEventId: event.id });
+    : entry(candidate.key, "patch", "description_drift", { googleEventId: event.id });
 }
 
 /**

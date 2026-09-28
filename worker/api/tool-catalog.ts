@@ -104,6 +104,21 @@ export const TOOL_CATALOG: readonly McpToolInfoDto[] = [
     resourceTypes: ["DocumentReference", "Binary"],
   },
   {
+    name: "get_messages",
+    description: "Patient-portal secure messages, every folder, one item per conversation.",
+    resourceTypes: ["Communication"],
+  },
+  {
+    name: "get_message_thread",
+    description: "One patient-portal conversation, every message in full, in order.",
+    resourceTypes: ["Communication"],
+  },
+  {
+    name: "get_message_attachment",
+    description: "One secure message's attached file, as the portal pass stored it.",
+    resourceTypes: ["Communication"],
+  },
+  {
     name: "get_care_team",
     description: "Care team members and their roles.",
     resourceTypes: ["CareTeam", "Practitioner", "PractitionerRole"],
@@ -123,7 +138,9 @@ export const TOOL_CATALOG: readonly McpToolInfoDto[] = [
   {
     name: "get_service_requests",
     description: "Orders and referrals.",
-    resourceTypes: ["ServiceRequest", "Specimen"],
+    // Not Specimen: it is synced where a health system offers it (few do to
+    // patient apps), but no tool returns specimens.
+    resourceTypes: ["ServiceRequest"],
   },
   {
     name: "get_health_summary",

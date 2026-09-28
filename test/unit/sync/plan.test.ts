@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 
+import { healthyBlock } from "../../../worker/sync/description.ts";
 import { eventKeyOf, planChanges } from "../../../worker/sync/plan.ts";
 
 import type { CalendarEventRow } from "../../../worker/db/rows.ts";
@@ -13,6 +14,8 @@ import type { PlanCandidate } from "../../../worker/sync/plan.ts";
 const KEY = "prov-1:enc-1";
 const ACTIVE_FP = "fingerprint-active";
 const GHOST_FP = "fingerprint-ghost";
+const ACTIVE_BLOCK = healthyBlock("Office Visit · planned");
+const GHOST_BLOCK = `${ACTIVE_BLOCK}\n\nNo longer on the health system's schedule as of today.`;
 
 function row(overrides: Partial<CalendarEventRow> = {}): CalendarEventRow {
   return {
@@ -39,6 +42,7 @@ function event(overrides: Partial<EventRecord> = {}): EventRecord {
     id: "google-1",
     status: "confirmed",
     summary: "Office Visit",
+    description: `A note of the owner's\n\n${ACTIVE_BLOCK}`,
     start: { dateTime: "2026-10-01T15:30:00Z", timeZone: "UTC" },
     end: { dateTime: "2026-10-01T16:00:00Z", timeZone: "UTC" },
     colorId: null,
@@ -57,6 +61,8 @@ function candidate(overrides: Partial<PlanCandidate> = {}): PlanCandidate {
     key: KEY,
     fingerprint: ACTIVE_FP,
     ghostFingerprint: GHOST_FP,
+    description: ACTIVE_BLOCK,
+    ghostDescription: GHOST_BLOCK,
     offSchedule: false,
     absent: false,
     upcoming: true,
@@ -104,6 +110,33 @@ describe("a live appointment", () => {
     const entry = only([row()], [event()], [candidate()]);
 
     expect(entry).toMatchObject({ action: "unchanged", reason: "fingerprint_match" });
+  });
+
+  it("patches a settled event whose description lost the rule", () => {
+    // The owner typed over the whole description: the block has to come back.
+    const retyped = event({ description: "The owner's own words" });
+
+    expect(only([row()], [retyped], [candidate()])).toMatchObject({
+      action: "patch",
+      reason: "description_drift",
+      googleEventId: "google-1",
+    });
+  });
+
+  it("patches a settled event edited below the rule", () => {
+    const edited = event({ description: ACTIVE_BLOCK.replace("planned", "edited") });
+
+    expect(only([row()], [edited], [candidate()])).toMatchObject({
+      action: "patch",
+      reason: "description_drift",
+    });
+  });
+
+  it("patches a settled event with no description at all", () => {
+    expect(only([row()], [event({ description: null })], [candidate()])).toMatchObject({
+      action: "patch",
+      reason: "description_drift",
+    });
   });
 
   it("patches when the mapped fields moved", () => {
@@ -196,10 +229,22 @@ describe("a cancelled appointment", () => {
 
   it("settles after one ghosting pass", () => {
     const ghosted = row({ state: "ghost", ghosted_at: 1_781_000_000, fingerprint: GHOST_FP });
+    const ghostEvent = event({ description: GHOST_BLOCK });
 
-    expect(only([ghosted], [event()], [candidate({ offSchedule: true })])).toMatchObject({
+    expect(only([ghosted], [ghostEvent], [candidate({ offSchedule: true })])).toMatchObject({
       action: "unchanged",
       reason: "already_ghost",
+    });
+  });
+
+  it("re-ghosts a settled ghost whose description lost its block", () => {
+    const ghosted = row({ state: "ghost", ghosted_at: 1_781_000_000, fingerprint: GHOST_FP });
+    const retyped = event({ description: "The owner's own words" });
+
+    expect(only([ghosted], [retyped], [candidate({ offSchedule: true })])).toMatchObject({
+      action: "ghost",
+      reason: "description_drift",
+      googleEventId: "google-1",
     });
   });
 
