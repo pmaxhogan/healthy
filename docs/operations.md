@@ -139,8 +139,8 @@ after the change, every event inside the sync window is patched once and every
 existing ghost there is re-ghosted once, so the run's patched and ghosted
 counts are briefly high without anything having been cancelled. Events older
 than the window, and ghosts Healthy can no longer rebuild (the cached
-appointment has expired, or a portal visit that vanished), are not rewritten
-and keep the old layout.
+appointment has expired, or a portal visit vanished and its start has since
+passed), are not rewritten and keep the old layout.
 
 When the patient portal lists the visit first-hand, the visit-type line links
 to that visit's own page in the portal (`Visits/VisitDetails?csn=<the portal's
