@@ -277,25 +277,55 @@ describe("portal visits on the calendar", () => {
     ).toBe("Follow-up · A. Example, MD");
   });
 
-  it("ghosts the row, but not the calendar entry, when a future visit vanishes", async () => {
+  it("ghosts the calendar entry from the stored copy when a future visit vanishes", async () => {
     const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1" })] } });
     await portalRun(fix);
-    const patchesBefore = fix.upstreams.calendar.patches;
+    const key = await portalKey(fix.healthSystem, "csn-1");
 
     fix.portal.visits = [];
     const summary = await portalRun(fix);
 
     expect(summary.eventsGhosted).toBe(1);
-    const row = await syncRepos(fix.ctx).calendarEvents.getByKey(
-      await portalKey(fix.healthSystem, "csn-1"),
-    );
+    const row = await syncRepos(fix.ctx).calendarEvents.getByKey(key);
     expect(row?.state).toBe("ghost");
-    // The calendar is not re-rendered from a copy it did not just read: the row is
-    // marked and the entry the owner is looking at is left alone.
+    // A cancelled visit must not stay on the calendar looking live: grey, free,
+    // "Cancelled:", and its status line says so too.
+    const event = fix.upstreams.calendar.byKey().get(key);
+    expect(event?.summary).toBe("Cancelled: Follow-up · A. Example, MD");
+    expect(event?.transparency).toBe("transparent");
+    expect(event?.colorId).toBe("8");
+    expect(event?.description).toContain("canceled");
+    expect(event?.description).not.toContain("scheduled");
+    // A cancellation keeps its event: only a duplicate is ever deleted.
+    expect(fix.upstreams.calendar.events()).toHaveLength(1);
+
+    // Settled: the next run writes nothing.
+    const patchesBefore = fix.upstreams.calendar.patches;
+    const again = await portalRun(fix);
+    expect(again.eventsGhosted).toBe(0);
     expect(fix.upstreams.calendar.patches).toBe(patchesBefore);
-    expect(
-      fix.upstreams.calendar.byKey().get(await portalKey(fix.healthSystem, "csn-1"))?.summary,
-    ).toBe("Follow-up · A. Example, MD");
+  });
+
+  it("repairs a vanished visit an earlier build ghosted in the row only", async () => {
+    const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1" })] } });
+    await portalRun(fix);
+    const key = await portalKey(fix.healthSystem, "csn-1");
+    const repos = syncRepos(fix.ctx);
+    // What the earlier build left: the row a ghost with the active fingerprint,
+    // the event untouched.
+    await repos.calendarEvents.markGhost(key);
+    const before = await repos.calendarEvents.getByKey(key);
+
+    fix.portal.visits = [];
+    const summary = await portalRun(fix);
+
+    expect(summary.eventsGhosted).toBe(1);
+    const event = fix.upstreams.calendar.byKey().get(key);
+    expect(event?.summary).toBe("Cancelled: Follow-up · A. Example, MD");
+    expect(event?.transparency).toBe("transparent");
+    // The original disappearance is kept, not moved to this run.
+    const after = await repos.calendarEvents.getByKey(key);
+    expect(after?.ghosted_at).toBe(before?.ghosted_at);
   });
 
   it("leaves a visit alone once it is in the past and drops out of the list", async () => {

@@ -58,14 +58,14 @@
  * match on a shared department or location alone only stops a *new* copy being
  * inserted; an event already written for that visit is kept and maintained.
  *
- * **A canceled or no-show visit is ghosted with its own details.** Those are still
- * *in* the payload, so unlike a vanished one there is a model to render: the event
- * is patched to the grey, transparent, "Cancelled:" variant rather than merely
- * having its row marked. A vanished future visit gets the row-only ghost the diff
- * already has for that case, and the calendar entry is left alone rather than
- * rewritten from guesses. (`portal_visits` does keep the last payload now, for the
- * MCP -- see `recordVisits` -- but the calendar deliberately does not re-render a
- * ghost from a copy it did not just read.)
+ * **A canceled, no-show or vanished visit is ghosted with its own details.** The
+ * event is patched to the grey, transparent, "Cancelled:" variant rather than
+ * merely having its row marked. A canceled or no-show visit is still *in* the
+ * payload; a vanished future one is rendered from the last copy `portal_visits`
+ * kept of it (`vanishedMappings`), stamped `canceled`. Leaving its event alone
+ * would leave a cancelled appointment on the owner's calendar looking live. Only a
+ * row with no stored copy at all gets the row-only ghost, with the calendar entry
+ * left as it is rather than rewritten from guesses.
  *
  * Every visit this pass reads is also written to `portal_visits`, with the same
  * "missing only if still ahead" rule, because that table -- not the calendar -- is
@@ -119,7 +119,7 @@ import {
 import { titleDigest, titleDigestsFor, titledBody, titleSeeds } from "./titles.ts";
 
 import type { SyncDeps } from "./deps.ts";
-import type { CalendarMapping, ConnectedPortal, MappingSettings } from "./mapping.ts";
+import type { CalendarMapping, MappingInput, MappingSettings } from "./mapping.ts";
 import type { PlanCandidate, PlanEntry } from "./plan.ts";
 import type { Sighting } from "./portal-dedupe.ts";
 import type { Boilerplate } from "./portal-directions.ts";
@@ -129,6 +129,7 @@ import type { Blinder } from "../db/blind.ts";
 import type { Ctx } from "../db/client.ts";
 import type { Repos } from "../db/index.ts";
 import type { FetchableAttachment } from "../db/repos/portal-messages.ts";
+import type { StoredPortalVisit } from "../db/repos/portal-visits.ts";
 import type { CalendarEventRow, HealthSystemRow } from "../db/rows.ts";
 import type { PortalVisit } from "../ehr/mychart/index.ts";
 import type { CalendarClient } from "../google/calendar.ts";
@@ -535,13 +536,15 @@ async function syncPortalCalendar(
   // were stored in the first phase): see `portal-directions.ts`.
   const known = await repos.portalVisits.list(healthSystemId);
   const boilerplate = boilerplateOf(known.map((row) => row.visit));
-  const builds = await buildPortalCandidates(
-    input,
-    healthSystem,
-    visits,
-    portalAccount,
-    boilerplate,
-  );
+  const target: MappingInput["healthSystem"] = {
+    id: healthSystem.id,
+    displayName: healthSystem.display_name,
+    portalUrl: healthSystem.portal_url,
+    connectedPortal: portalAccount,
+    config: await repos.healthSystems.getConfig(healthSystem.id),
+  };
+  const builds = await buildPortalCandidates(input, healthSystem, visits, target, boilerplate);
+  const vanished = await vanishedMappings(input, known, target, boilerplate);
   const stored = await repos.calendarEvents.list({ healthSystemId, source: "portal" });
   // Narrowed to the window before the diff sees them, exactly as the FHIR pass
   // narrows its own: a row older than the window would be ghosted for being old.
@@ -553,6 +556,7 @@ async function syncPortalCalendar(
     input,
     builds,
     rows,
+    vanished,
   );
   // Portal keys only, not every key this health system owns: the FHIR pass's events
   // have no candidate here, and handing them to the diff would report each one as
@@ -726,12 +730,54 @@ async function ensureSession(
   return reopened.session;
 }
 
+/** One portal visit as the calendar event it would produce. */
+function portalMapping(
+  input: PortalPassInput,
+  target: MappingInput["healthSystem"],
+  visit: PortalVisit,
+  boilerplate: Boilerplate,
+): Promise<CalendarMapping> {
+  return buildCalendarModel(portalVisitView(target.id, visit, boilerplate), {
+    healthSystem: target,
+    settings: input.settings,
+    blinder: input.blinder,
+  });
+}
+
+/**
+ * The stored visits the portal stopped returning while they were still ahead,
+ * mapped from their last copy and keyed by event key -- what the ghost of a
+ * vanished visit is rendered from (see the module comment).
+ *
+ * The copy is stamped `canceled`: that is what its absence means, and what the
+ * MCP already reports for it, so the description's status line agrees with the
+ * "Cancelled:" title rather than still saying "scheduled". Never routed through
+ * the dedupe either: a visit the portal stopped listing is not a duplicate, and
+ * a duplicate's event is deleted.
+ */
+async function vanishedMappings(
+  input: PortalPassInput,
+  known: readonly StoredPortalVisit[],
+  target: MappingInput["healthSystem"],
+  boilerplate: Boilerplate,
+): Promise<Map<string, CalendarMapping>> {
+  const now = input.ctx.now();
+  const mappings = new Map<string, CalendarMapping>();
+  for (const stored of known) {
+    if (stored.state !== "missing" || fromIso(stored.visit.start) <= now) continue;
+    const visit: PortalVisit = { ...stored.visit, status: "canceled" };
+    const mapping = await portalMapping(input, target, visit, boilerplate);
+    mappings.set(mapping.model.key, mapping);
+  }
+  return mappings;
+}
+
 /** Map every visit, and decide which ones the FHIR pass has already covered. */
 async function buildPortalCandidates(
   input: PortalPassInput,
   healthSystem: HealthSystemRow,
   visits: readonly PortalVisit[],
-  portalAccount: ConnectedPortal | null,
+  target: MappingInput["healthSystem"],
   boilerplate: Boilerplate,
 ): Promise<PortalCandidateBuild[]> {
   const seen = input.fhirSeen.get(healthSystem.id);
@@ -751,22 +797,11 @@ async function buildPortalCandidates(
       .filter((start): start is number => start !== null && start >= input.windowStartSeconds),
   ];
 
-  const config = await input.repos.healthSystems.getConfig(healthSystem.id);
   const now = input.ctx.now();
   const others = await otherSightings(input, healthSystem.id, now);
   const builds: PortalCandidateBuild[] = [];
   for (const visit of visits) {
-    const mapping = await buildCalendarModel(portalVisitView(healthSystem.id, visit, boilerplate), {
-      healthSystem: {
-        id: healthSystem.id,
-        displayName: healthSystem.display_name,
-        portalUrl: healthSystem.portal_url,
-        connectedPortal: portalAccount,
-        config,
-      },
-      settings: input.settings,
-      blinder: input.blinder,
-    });
+    const mapping = await portalMapping(input, target, visit, boilerplate);
     const start = fromIso(mapping.model.start);
     const mine = portalSighting(healthSystem.id, visit, now, now);
     const sameHealthSystem =
@@ -842,6 +877,7 @@ async function portalPlanInputs(
   input: PortalPassInput,
   builds: readonly PortalCandidateBuild[],
   rows: readonly CalendarEventRow[],
+  vanished: ReadonlyMap<string, CalendarMapping>,
 ): Promise<{
   candidates: PlanCandidate[];
   models: Map<string, CalendarEventModel>;
@@ -899,6 +935,22 @@ async function portalPlanInputs(
       touched.push(row.event_key);
       continue;
     }
+    const mapping = vanished.get(row.event_key);
+    if (mapping !== undefined) {
+      // Ghosted on the calendar from the stored copy: grey, free, "Cancelled:".
+      candidates.push(
+        await portalCandidate(input, {
+          key: row.event_key,
+          mapping,
+          row,
+          offSchedule: true,
+          absent: true,
+          models,
+          ghosts,
+        }),
+      );
+      continue;
+    }
     candidates.push({
       key: row.event_key,
       fingerprint: "",
@@ -908,8 +960,8 @@ async function portalPlanInputs(
       offSchedule: true,
       absent: true,
       upcoming: true,
-      // The calendar is not re-rendered from `portal_visits`' last copy: the row is
-      // ghosted and the calendar entry left as it is.
+      // No stored copy to render a ghost from: the row is ghosted and the calendar
+      // entry left as it is, rather than rewritten from guesses.
       hasModel: false,
     });
   }
