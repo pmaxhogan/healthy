@@ -74,7 +74,7 @@ are largely in place; hardening and the first real deployment are ongoing.
   Storage:  D1 "healthy"      — health_systems, connections, FHIR cache, audit, run log, settings
             Workers KV "OAUTH_KV" — MCP OAuth client registrations and grants
   Cron:     hourly  "7 * * * *"   — token keepalive, then an Encounter-only appointment sync
-            daily   "23 6 * * *"  — full-scope FHIR refresh that repopulates the MCP cache
+            4 hours "23 2,6,10,14,18,22 * * *" — full-scope FHIR refresh that repopulates the MCP cache
             10 min  "*/10 * * * *" — patient-portal session keepalive (never signs in)
 ```
 

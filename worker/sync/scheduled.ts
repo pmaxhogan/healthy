@@ -8,10 +8,10 @@
  *     Google, then the Encounter-only calendar sync. The keepalive runs first on
  *     purpose: if a grant has died, the sync's own token calls would each discover
  *     it separately, and the alert is more useful before the sync than during it.
- *   - `23 6 * * *` — daily. The full-scope refresh of the MCP's read cache, then a
- *     calendar sync, because the refresh has just filled the cache the sync's
- *     reference resolution reads from and will therefore make almost no upstream
- *     requests. Expired cache rows and stale OAuth states are pruned at the end.
+ *   - `23 2,6,10,14,18,22 * * *` — every four hours. The full-scope refresh of
+ *     the MCP's read cache, then a calendar sync, because the refresh has just
+ *     filled the cache the sync's reference resolution reads from and will
+ *     therefore make almost no upstream requests. Expired cache rows and stale OAuth states are pruned at the end.
  *   - `CRON_PORTAL_KEEPALIVE` -- every ten minutes. The portal session keepalive: one
  *     signed-in page load per live portal session, so the portal's idle timeout
  *     (shorter than an hour) never sees an hour of silence. It never signs in;
@@ -44,8 +44,8 @@ import type { Env } from "../env.ts";
 
 /** The hourly appointment sync and token keepalive. */
 export const CRON_HOURLY = "7 * * * *";
-/** The daily full-scope refresh of the MCP read cache. */
-export const CRON_DAILY = "23 6 * * *";
+/** The four-hourly full-scope refresh of the MCP read cache. */
+export const CRON_FULL_REFRESH = "23 2,6,10,14,18,22 * * *";
 /** The portal session keepalive. See `portal-keepalive.ts`. */
 export const CRON_PORTAL_KEEPALIVE = "*/10 * * * *";
 
@@ -73,7 +73,7 @@ export async function handleScheduled(
         await runCalendarSync(ctx, { trigger: "calendar", deps });
         return;
       }
-      case CRON_DAILY: {
+      case CRON_FULL_REFRESH: {
         await runFullRefresh(ctx, { trigger: "full", deps });
         await runCalendarSync(ctx, { trigger: "calendar", deps });
         // Last, and after the work: pruning is housekeeping, and a failure here

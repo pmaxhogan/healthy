@@ -1,8 +1,8 @@
 /**
- * The daily full-scope refresh that fills the MCP's read cache.
+ * The four-hourly full-scope refresh that fills the MCP's read cache.
  *
- * Everything the owner's record contains, per health system, once a day, into
- * `fhir_cache` with an eight-day TTL -- a day longer than a week so a single
+ * Everything the owner's record contains, per health system, every four hours,
+ * into `fhir_cache` with an eight-day TTL -- a day longer than a week so a single
  * missed night never empties the cache the MCP serves from.
  *
  * Isolation is per (health system, resource type), one level finer than the calendar

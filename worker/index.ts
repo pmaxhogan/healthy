@@ -95,7 +95,7 @@ export default {
   /**
    * Both cron expressions land here and the sync engine dispatches on the string:
    * `7 * * * *` is the hourly appointment sync plus the token keepalive, and
-   * `23 6 * * *` is the daily full-scope refresh of the MCP read cache. UTC, both
+   * `23 2,6,10,14,18,22 * * *` is the four-hourly full-scope refresh of the MCP read cache. UTC, both
    * of them -- never translated to local time in a comment, because that would
    * leak the timezone.
    */

@@ -16,7 +16,7 @@ deployment owner's timezone in a public repository.
   keepalive runs first on purpose: if a grant has died, the sync's own
   token calls would each rediscover that separately and less usefully than
   one clear keepalive failure.
-- **Daily, `23 6 * * *`.** Runs the full-scope FHIR refresh that
+- **Every four hours, `23 2,6,10,14,18,22 * * *`.** Runs the full-scope FHIR refresh that
   repopulates the cache the MCP reads from (every resource type, for every
   connected health system), then a calendar sync — cheap immediately afterward,
   since the refresh just filled the cache the sync's reference resolution

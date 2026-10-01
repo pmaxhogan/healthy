@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { AppError } from "../../../worker/lib/errors.ts";
 import { refreshConnectionToken, runTokenKeepalive } from "../../../worker/sync/keepalive.ts";
-import { CRON_DAILY, CRON_HOURLY, handleScheduled } from "../../../worker/sync/scheduled.ts";
+import { CRON_FULL_REFRESH, CRON_HOURLY, handleScheduled } from "../../../worker/sync/scheduled.ts";
 
 import {
   clock,
@@ -99,7 +99,7 @@ describe("handleScheduled", () => {
     const h = await setup();
     const context = executionContext();
 
-    await handleScheduled(syncEnv(), CRON_DAILY, context.ectx, h.upstreams.deps);
+    await handleScheduled(syncEnv(), CRON_FULL_REFRESH, context.ectx, h.upstreams.deps);
 
     const runs = await syncRepos(h.ctx).runLog.listRecent();
     expect(runs.map((run) => run.kind)).toStrictEqual(["calendar", "full"]);
