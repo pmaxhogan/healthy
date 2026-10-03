@@ -17,6 +17,7 @@ import {
   DEFAULT_DURATION_MIN,
   arrivalOffsetFor,
   buildCalendarModel,
+  connectedPortalOf,
   eventKey,
   formatApptTime,
   ghostModel,
@@ -34,6 +35,11 @@ import type {
 const HEALTH_SYSTEM_ID = "prov-1";
 const START = "2026-10-01T15:30:00Z";
 const PORTAL = "https://portal.example.test/mychart";
+const MODMED_PORTAL: ConnectedPortal = {
+  baseUrl: "https://practice.example.test",
+  mountPath: "/patient-portal/",
+  vendor: "modmed",
+};
 const CONNECTED_PORTAL: ConnectedPortal = {
   baseUrl: "https://connected.example.test",
   mountPath: "/mychart/",
@@ -343,6 +349,26 @@ describe("location", () => {
     expect(model.location).toBe("Video visit");
   });
 
+  it("points a ModMed video visit at the portal's video-visits page", async () => {
+    const { model } = await buildCalendarModel(
+      view({ telehealth: true }),
+      input({ portalUrl: null, connectedPortal: MODMED_PORTAL }),
+    );
+
+    expect(model.location).toBe(
+      "Video visit · https://practice.example.test/patient-portal/appointments/video-visits",
+    );
+  });
+
+  it("gives a ModMed in-person visit the clinic and address, like any other", async () => {
+    const { model } = await buildCalendarModel(
+      view(),
+      input({ portalUrl: null, connectedPortal: MODMED_PORTAL }),
+    );
+
+    expect(model.location).toBe("Clinic Building A, 1 Test Way, Testville, TS, 00001");
+  });
+
   it("omits the field entirely when there is nothing to say", async () => {
     const { model } = await buildCalendarModel(view({ location: undefined }), input());
 
@@ -393,6 +419,18 @@ describe("description", () => {
         '<a href="https://connected.example.test/mychart/Visits">Office Visit · planned</a>',
       ),
     ).toBe(true);
+  });
+
+  it("links a ModMed visit to the portal's upcoming list, which has no per-visit page", async () => {
+    const { model } = await buildCalendarModel(
+      view({ detailCsn: "90001" }),
+      input({ portalUrl: null, connectedPortal: MODMED_PORTAL }),
+    );
+
+    expect(model.description).toContain(
+      '<a href="https://practice.example.test/patient-portal/appointments/upcoming-visits">',
+    );
+    expect(model.description).not.toContain("VisitDetails");
   });
 
   it("prefers an explicit portal url over the connected portal account", async () => {
@@ -677,5 +715,34 @@ describe("the visit details link, directions and instructions", () => {
 
     expect(same.model.fingerprint).toBe(one.model.fingerprint);
     expect(other.model.fingerprint).not.toBe(one.model.fingerprint);
+  });
+});
+
+describe("connectedPortalOf", () => {
+  const location = { base_url: "https://practice.example.test", mount_path: "/patient-portal/" };
+
+  it("marks a ModMed account from its stored discovery result", () => {
+    expect(
+      connectedPortalOf({ ...location, endpoint_json: JSON.stringify({ portal: "modmed" }) }),
+    ).toStrictEqual({
+      baseUrl: location.base_url,
+      mountPath: location.mount_path,
+      vendor: "modmed",
+    });
+  });
+
+  it("reads anything else, including no or unreadable discovery, as MyChart", () => {
+    const mychart = { baseUrl: location.base_url, mountPath: location.mount_path };
+    expect(connectedPortalOf({ ...location, endpoint_json: null })).toStrictEqual(mychart);
+    expect(connectedPortalOf({ ...location, endpoint_json: "{not json" })).toStrictEqual(mychart);
+    expect(connectedPortalOf({ ...location, endpoint_json: '{"flavor":"classic"}' })).toStrictEqual(
+      mychart,
+    );
+    expect(connectedPortalOf(location)).toStrictEqual(mychart);
+  });
+
+  it("is null without a location", () => {
+    expect(connectedPortalOf(null)).toBeNull();
+    expect(connectedPortalOf({ base_url: null, mount_path: "/x/" })).toBeNull();
   });
 });

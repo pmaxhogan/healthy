@@ -44,6 +44,7 @@
  */
 
 import { blindEventKey } from "../db/blind.ts";
+import { MODMED_PAGES } from "../ehr/modmed/wire.ts";
 import { AppError } from "../lib/errors.ts";
 import { addMinutes, formatInZone } from "../lib/time.ts";
 
@@ -126,6 +127,26 @@ export interface ConnectedPortal {
   baseUrl: string;
   /** One leading and one trailing slash. `/` when the app is root-mounted. */
   mountPath: string;
+  /**
+   * Which vendor's pages to link to. Absent means MyChart, which is what every
+   * account stored before a second vendor existed is.
+   */
+  vendor?: "modmed";
+}
+
+/** Whether a stored discovery result names the ModMed vendor. Never throws. */
+function isModMedEndpointJson(json: string | null | undefined): boolean {
+  if (json === null || json === undefined) return false;
+  try {
+    const parsed: unknown = JSON.parse(json);
+    return (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      (parsed as { portal?: unknown }).portal === "modmed"
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -133,11 +154,18 @@ export interface ConnectedPortal {
  * columns, or null when the row itself is absent or has never discovered one.
  */
 export function connectedPortalOf(
-  account: { base_url: string | null; mount_path: string | null } | null,
+  account: {
+    base_url: string | null;
+    mount_path: string | null;
+    endpoint_json?: string | null;
+  } | null,
 ): ConnectedPortal | null {
   const baseUrl = account?.base_url ?? null;
   const mountPath = account?.mount_path ?? null;
-  return baseUrl === null || mountPath === null ? null : { baseUrl, mountPath };
+  if (baseUrl === null || mountPath === null) return null;
+  return isModMedEndpointJson(account?.endpoint_json)
+    ? { baseUrl, mountPath, vendor: "modmed" }
+    : { baseUrl, mountPath };
 }
 
 /** The health system fields the mapping reads, with its stored per-health system config. */
@@ -392,12 +420,31 @@ function joinInline(parts: readonly (string | undefined)[], separator: string): 
  */
 function linkTargetFor(healthSystem: MappingHealthSystem, detailCsn?: string): string | null {
   const portal = healthSystem.connectedPortal;
+  if (portal?.vendor === "modmed") {
+    // ModMed has no page per appointment: its upcoming list is the page.
+    return healthSystem.portalUrl ?? `${portal.baseUrl}${portal.mountPath}${MODMED_PAGES.upcoming}`;
+  }
   if (portal !== null && detailCsn !== undefined && detailCsn !== "") {
     const token = encodeURIComponent(detailCsn);
     return `${portal.baseUrl}${portal.mountPath}Visits/VisitDetails?csn=${token}`;
   }
   if (healthSystem.portalUrl !== null) return healthSystem.portalUrl;
   return portal === null ? null : `${portal.baseUrl}${portal.mountPath}Visits`;
+}
+
+/**
+ * Where a video visit is joined from, for the event's location.
+ *
+ * The owner's own portal url when set. Otherwise a ModMed portal's video-visits
+ * page, which is where its join button appears once the practice opens the
+ * meeting; a MyChart video visit keeps saying just "Video visit", as it always has.
+ */
+function videoLinkFor(healthSystem: MappingHealthSystem): string | null {
+  if (healthSystem.portalUrl !== null) return healthSystem.portalUrl;
+  const portal = healthSystem.connectedPortal;
+  return portal?.vendor === "modmed"
+    ? `${portal.baseUrl}${portal.mountPath}${MODMED_PAGES.videoVisits}`
+    : null;
 }
 
 /** A labelled free-text section: the label on its own line, then the text. */
@@ -505,7 +552,7 @@ export async function buildCalendarModel(
   // already says.
   const title = offsetMin > 0 ? `${baseTitle} (appt ${apptTime})` : baseTitle;
 
-  const location = locationText(view, healthSystem.portalUrl);
+  const location = locationText(view, videoLinkFor(healthSystem));
   const colorId = healthSystem.config.color_id ?? settings.defaultColorId ?? undefined;
   const draft: Omit<CalendarEventModel, "fingerprint"> = {
     key: await blindEventKey(input.blinder, eventKey(healthSystem.id, view.encounterId)),

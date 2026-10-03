@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   canonicalZone,
+  isVideoReason,
   parseAppointment,
   parseAppointmentDate,
   parseAppointments,
@@ -104,5 +105,30 @@ describe("parseAppointment", () => {
       noopLogger,
     );
     expect(visits.map((visit) => visit.csn)).toEqual(["90001"]);
+  });
+});
+
+describe("isVideoReason", () => {
+  it.each([
+    "Video visit",
+    "VIRTUAL follow-up",
+    "Telehealth consult",
+    "Tele-medicine",
+    "telemed check",
+    "E-Visit",
+  ])("reads %s as a video visit", (reason) => {
+    expect(isVideoReason(reason)).toBe(true);
+  });
+
+  it.each(["Skin check", "Follow up", "Televised", undefined])(
+    "reads %s as in person",
+    (reason) => {
+      expect(isVideoReason(reason)).toBe(false);
+    },
+  );
+
+  it("maps a video reason onto the visit", () => {
+    expect(parseAppointment(appointmentRow({ reason: "Video Visit" }), "UTC")?.isVideo).toBe(true);
+    expect(parseAppointment(appointmentRow(), "UTC")?.isVideo).toBe(false);
   });
 });

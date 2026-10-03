@@ -33,6 +33,16 @@ export const PORTAL_APP_PATH = "/patient-portal/";
  */
 export const REDIRECT_QUERY = "initialLogin";
 
+/**
+ * The portal app's own pages, relative to its mount. There is no page per
+ * appointment: the upcoming list is the page, and a video visit is joined from
+ * the video-visits page once the practice has opened the meeting.
+ */
+export const MODMED_PAGES = {
+  upcoming: "appointments/upcoming-visits",
+  videoVisits: "appointments/video-visits",
+} as const;
+
 /** Upcoming appointments. JSON array body; paging in the response headers. */
 export const UPCOMING_PATH = "/ema/ws/v3/patientPortal/appointments/upcoming";
 

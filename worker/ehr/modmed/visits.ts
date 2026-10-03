@@ -141,6 +141,23 @@ function phoneOf(facility: Json | undefined): string | undefined {
   return undefined;
 }
 
+/**
+ * Whether an appointment's reason says it is a video visit.
+ *
+ * The only signal there is. The patient API's appointment projection is fixed
+ * (`id`, `appointmentDate`, `timeZone`, `reason`, `physician`, `facility`,
+ * `visit`); a selector naming any telehealth-ish field is silently ignored, and
+ * the app's own video page is a separate screen that lists a meeting only once
+ * the practice has opened it (`/ema/ws/v3/meeting/available`), not a property
+ * of a booked appointment. So a booking is a video visit when the practice
+ * booked it under a reason that says so.
+ */
+const VIDEO_REASON = /\b(?:video|virtual|tele-?health|tele-?medicine|telemed|e-?visit)\b/iu;
+
+export function isVideoReason(reason: string | undefined): boolean {
+  return reason !== undefined && VIDEO_REASON.test(reason);
+}
+
 /** One row, or null when it carries no usable id or instant. */
 export function parseAppointment(row: unknown, fallbackTimeZone: string): PortalVisit | null {
   if (!isRecord(row)) return null;
@@ -172,8 +189,7 @@ export function parseAppointment(row: unknown, fallbackTimeZone: string): Portal
     ...(facilityName !== undefined && { department: facilityName, locationName: facilityName }),
     ...(address !== undefined && { address }),
     ...(phone !== undefined && { phone }),
-    // The portal says nothing about video visits on the list row.
-    isVideo: false,
+    isVideo: isVideoReason(visitType),
     status: child(row, "visit") === undefined ? "scheduled" : "arrived",
     ...(departmentId !== undefined && { departmentId }),
     ...(practitionerId !== undefined && { practitionerId }),
