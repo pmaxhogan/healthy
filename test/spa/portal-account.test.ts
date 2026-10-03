@@ -365,12 +365,32 @@ describe("PortalAccountCard: credentials", () => {
     });
   });
 
-  it("omits baseUrl from the payload when it is left blank", async () => {
-    const { wrapper, api } = await mountLoaded({ get: () => portalAccount({ baseUrl: null }) });
+  it("requires the portal URL until a portal has been saved, as the server does", async () => {
+    // A first save without one is refused by `PUT .../portal`, so the card must
+    // not offer Save until it is filled -- it is not optional.
+    const { wrapper } = await mountLoaded({ get: () => portalAccount({ baseUrl: null }) });
+    const saveButton = () => wrapper.findAll("button").find((b) => b.text() === "Save");
+    const input = wrapper.find('input[type="url"]');
+
+    expect(input.attributes("placeholder")).toContain("required");
+    expect(input.attributes("required")).toBeDefined();
+    await fillLogin(wrapper);
+    expect(saveButton()?.attributes("disabled")).toBeDefined();
+
+    await input.setValue("https://portal.example.test");
+    expect(saveButton()?.attributes("disabled")).toBeUndefined();
+  });
+
+  it("lets a stored portal's URL be left blank, and then omits it from the payload", async () => {
+    const { wrapper, api } = await mountLoaded({
+      get: () => portalAccount({ baseUrl: "https://portal.saved.test" }),
+    });
+    const input = wrapper.find('input[type="url"]');
+    expect(input.attributes("required")).toBeUndefined();
+    await input.setValue("");
 
     await fillLogin(wrapper);
     await click(wrapper, "Save");
-    await click(wrapper, "Confirm and save");
 
     expect(Object.keys(putBody(api)).toSorted((a, b) => a.localeCompare(b))).toEqual([
       "confirmedOrigin",
@@ -382,13 +402,14 @@ describe("PortalAccountCard: credentials", () => {
   it("includes mfaContact in the payload when filled, and omits it when blank", async () => {
     const { wrapper, api } = await mountLoaded({ get: () => portalAccount({ baseUrl: null }) });
 
-    await fillLogin(wrapper, { mfaContact: "owner@example.test" });
+    await fillLogin(wrapper, { baseUrl: DISCOVERED.origin, mfaContact: "owner@example.test" });
     await click(wrapper, "Save");
     await click(wrapper, "Confirm and save");
 
     expect(putBody(api)).toEqual({
       username: "alice",
       password: "hunter2",
+      baseUrl: DISCOVERED.origin,
       confirmedOrigin: DISCOVERED.origin,
       mfaContact: "owner@example.test",
     });
@@ -401,13 +422,14 @@ describe("PortalAccountCard: credentials", () => {
 
     expect(wrapper.text()).toContain("Sender of your verification-code emails");
 
-    await fillLogin(wrapper, { otpSenderDomain: "mail.example.test" });
+    await fillLogin(wrapper, { baseUrl: DISCOVERED.origin, otpSenderDomain: "mail.example.test" });
     await click(wrapper, "Save");
     await click(wrapper, "Confirm and save");
 
     expect(putBody(api)).toEqual({
       username: "alice",
       password: "hunter2",
+      baseUrl: DISCOVERED.origin,
       confirmedOrigin: DISCOVERED.origin,
       otpSenderDomain: "mail.example.test",
     });
@@ -428,7 +450,7 @@ describe("PortalAccountCard: credentials", () => {
   it("omits mfaContact from the payload when it is left blank", async () => {
     const { wrapper, api } = await mountLoaded({ get: () => portalAccount({ baseUrl: null }) });
 
-    await fillLogin(wrapper);
+    await fillLogin(wrapper, { baseUrl: DISCOVERED.origin });
     await click(wrapper, "Save");
     await click(wrapper, "Confirm and save");
 

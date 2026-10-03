@@ -118,7 +118,19 @@ const phaseLine = computed<string | null>(() => {
   return PHASE_TEXT[eff.phase] ?? null;
 });
 
-const canSave = computed(() => draft.username.trim() !== "" && draft.password !== "");
+/**
+ * Whether a portal address is already stored. Until it is, the server needs one
+ * to find the portal (`PUT .../portal` refuses a first save without `baseUrl`),
+ * so the field is required; afterwards a blank field keeps the stored one.
+ */
+const hasStoredPortal = computed(() => (portal.account.data.value?.baseUrl ?? null) !== null);
+
+const canSave = computed(
+  () =>
+    draft.username.trim() !== "" &&
+    draft.password !== "" &&
+    (hasStoredPortal.value || draft.baseUrl.trim() !== ""),
+);
 
 /**
  * What `POST .../portal/discover` last reported, waiting for the owner's Confirm.
@@ -293,7 +305,15 @@ async function onRemove(): Promise<void> {
       <div class="fields two">
         <label class="field">
           Portal base URL
-          <input v-model="draft.baseUrl" type="url" autocomplete="off" placeholder="optional" />
+          <input
+            v-model="draft.baseUrl"
+            type="url"
+            autocomplete="off"
+            :required="!hasStoredPortal"
+            :placeholder="
+              hasStoredPortal ? 'blank keeps the saved portal' : 'required, e.g. https://…'
+            "
+          />
         </label>
         <label class="field">
           Username
