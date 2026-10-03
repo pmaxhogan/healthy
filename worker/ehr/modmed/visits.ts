@@ -213,6 +213,9 @@ export function parseAppointments(
   return visits;
 }
 
+/** Marks a past-list id (a visit), so it can never equal an appointment id. */
+const PAST_VISIT_PREFIX = "visit:";
+
 /**
  * One row of the *past* list, which is a different record: a visit, not an
  * appointment. `visitId`, `visitDate` (same `+0000` form), `primaryProvider` (a
@@ -221,9 +224,12 @@ export function parseAppointments(
  */
 function parsePastVisit(row: unknown, fallbackTimeZone: string): PortalVisit | null {
   if (!isRecord(row)) return null;
-  const id = idOf(row, "visitId");
+  const visitId = idOf(row, "visitId");
   const start = parseAppointmentDate(field(row, "visitDate"));
-  if (id === undefined || start === null) return null;
+  if (visitId === undefined || start === null) return null;
+  // A visit id and an appointment id are different number spaces that may well
+  // overlap, and both become `csn`: the prefix keeps them from colliding.
+  const id = `${PAST_VISIT_PREFIX}${visitId}`;
   const facility = child(row, "facility");
   const zoneCandidates = [canonicalZone(text(facility, "timeZone")), fallbackTimeZone];
   const timeZone = zoneCandidates.find(knownZone) ?? "UTC";

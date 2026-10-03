@@ -15,7 +15,7 @@
  * caller to seal, because the caller is the only layer with storage.
  */
 
-import { AppError } from "../../lib/errors.ts";
+import { AppError, isAppError } from "../../lib/errors.ts";
 import { createModMedAdapter, isModMedEndpoint } from "../modmed/index.ts";
 
 import { createMyChartClient } from "./client.ts";
@@ -181,11 +181,14 @@ export function createPortalAdapter(): PortalAdapter {
     async discover(input, deps) {
       try {
         return await modmed.discover(input, deps);
-      } catch {
-        // Any failure of ModMed's probe is "not ModMed, as far as can be told":
-        // a MyChart host answers an unknown path with a 404, a WAF page or a
-        // dropped connection depending on its front door, and none of those
-        // says anything about MyChart itself. Its own discovery decides.
+      } catch (error) {
+        // A bot wall is the answer for the host, whoever runs it: probing on
+        // with MyChart's candidates would only knock on it more times.
+        if (isAppError(error) && error.code === "portal_bot_blocked") throw error;
+        // Any other failure of ModMed's probe is "not ModMed, as far as can be
+        // told": a MyChart host answers an unknown path with a 404, an error
+        // page or a dropped connection depending on its front door, and none
+        // of those says anything about MyChart itself. Its own discovery decides.
         return mychart.discover(input, deps);
       }
     },

@@ -35,11 +35,12 @@
  */
 
 import { AppError } from "../../lib/errors.ts";
+import { dateInZone, startOfDayInZone, toIso } from "../../lib/time.ts";
 import { createPkce, randomState } from "../pkce.ts";
 
 import { fetchAuthData } from "./discovery.ts";
 import { apiGet, apiGetFile, signInRequest, tokenRequest } from "./http.ts";
-import { conversationsOf, threadsOf } from "./messages.ts";
+import { messagesOf } from "./messages.ts";
 import { parseAppointments, parsePastVisits } from "./visits.ts";
 import {
   INBOX_PATH,
@@ -138,6 +139,14 @@ function stringField(record: Record<string, unknown>, key: string): string | nul
   return typeof value === "string" && value !== "" ? value : null;
 }
 
+/** A non-negative integer response header, or null when absent or not one. */
+function headerCount(headers: Headers, name: string): number | null {
+  const raw = headers.get(name);
+  if (raw === null || raw.trim() === "") return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
 /** Classify a Keycloak page the credential POST stopped on. Always throws. */
 function failFromLoginPage(html: string): never {
   if (matchesAny(html, KEYCLOAK_MARKERS.codeChallenge)) {
@@ -163,6 +172,8 @@ function failFromLoginPage(html: string): never {
 export function createModMedClient(deps: ModMedClientDeps): PortalClient {
   const { endpoint, jar, logger } = deps;
   const http = { fetchImpl: deps.fetchImpl, jar };
+  /** Every sign-in request, the password POST above all, must stay on this origin. */
+  const idpOrigin = new URL(endpoint.authServerUrl).origin;
 
   function storeTokens(response: Record<string, unknown>): void {
     const access = stringField(response, "access_token");
@@ -226,7 +237,9 @@ export function createModMedClient(deps: ModMedClientDeps): PortalClient {
       );
       storeTokens(response);
     } catch (error) {
-      clearTokens();
+      // Only a grant the identity provider refused is gone for good. A network
+      // blip or a 5xx keeps the pair, so the next try can still refresh it.
+      if (error instanceof AppError && error.code === "portal_session_expired") clearTokens();
       throw error;
     }
     logger.info("portal.modmed.token_refreshed", {});
@@ -281,9 +294,10 @@ export function createModMedClient(deps: ModMedClientDeps): PortalClient {
     path: string,
     params: Record<string, string>,
     label: string,
-  ): Promise<{ rows: unknown[]; pages: number }> {
+  ): Promise<{ rows: unknown[]; pages: number; short: boolean }> {
     const rows: unknown[] = [];
     let pages = 0;
+    let total: number | null = null;
     for (let page = 1; ; page += 1) {
       pages += 1;
       const response = await get(
@@ -301,26 +315,47 @@ export function createModMedClient(deps: ModMedClientDeps): PortalClient {
         });
       }
       rows.push(...(response.json as unknown[]));
-      const total = Number(response.headers.get(PAGING.countHeader));
-      const done = Number.isFinite(total) && total >= 0 && rows.length >= total;
-      // Stop on the reported total, or -- when the header is missing -- on a
-      // short or empty page. An empty page always ends the loop, so a server
-      // that over-reports its total cannot spin it.
-      if (done || response.json.length === 0 || response.json.length < PAGE_SIZE) break;
+      // An empty page always ends the read, so a server that over-reports its
+      // total cannot spin the loop.
+      if (response.json.length === 0) break;
+      total = headerCount(response.headers, PAGING.countHeader);
+      if (total !== null) {
+        // The total is the authority: a short page only means the server pages
+        // smaller than asked, so keep going until the rows add up.
+        if (rows.length >= total) break;
+        continue;
+      }
+      // No total: a page shorter than the size the server says it used is the last.
+      const size = headerCount(response.headers, PAGING.pageSizeHeader) ?? PAGE_SIZE;
+      if (response.json.length < size) break;
+    }
+    const short = total !== null && rows.length < total;
+    if (short) {
+      logger.warn("portal.modmed.list_short", { endpoint: label, rows: rows.length, total });
     }
     logger.info("portal.modmed.list", { endpoint: label, rows: rows.length, pages });
-    return { rows, pages };
+    return { rows, pages, short };
   }
 
-  /** The start of today in `timeZone`, written the way the app writes it. */
+  /**
+   * The `from` bound for the upcoming list: the start of today in `timeZone`.
+   *
+   * The app writes the local date with a `Z` (`2026-10-03T00:00:00.000Z`),
+   * which is only the instant of local midnight in UTC itself. How the server
+   * reads it is not known, so this sends whichever is *earlier* of that string
+   * and the true instant of local midnight: east of UTC the true instant is the
+   * earlier one, and the app's form would drop this morning's visits; west of
+   * UTC the app's form is earlier and costs at most a few hours of yesterday,
+   * which the calendar already holds. Never later than local midnight, so no
+   * visit today is ever cut off.
+   */
   function startOfToday(timeZone: string): string {
-    const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(new Date(deps.now() * 1000));
-    return `${parts}T00:00:00.000Z`;
+    const nowIso = toIso(deps.now());
+    const appForm = `${dateInZone(nowIso, timeZone)}T00:00:00.000Z`;
+    const trueMidnight = startOfDayInZone(nowIso, timeZone);
+    return Date.parse(trueMidnight) < Date.parse(appForm)
+      ? new Date(Date.parse(trueMidnight)).toISOString()
+      : appForm;
   }
 
   /**
@@ -332,7 +367,11 @@ export function createModMedClient(deps: ModMedClientDeps): PortalClient {
     authorizeUrl: string,
     credentials: PortalCredentials,
   ): Promise<string> {
-    let landed = await signInRequest(http, { url: authorizeUrl, endpoint: "authorize" });
+    let landed = await signInRequest(http, {
+      url: authorizeUrl,
+      endpoint: "authorize",
+      home: idpOrigin,
+    });
     if (landed.leftTo !== null) return landed.leftTo;
     if (!hasInput(landed.body, LOGIN.passwordField)) {
       const action = formAction(landed.body);
@@ -344,6 +383,7 @@ export function createModMedClient(deps: ModMedClientDeps): PortalClient {
           [LOGIN.switchToUsernameField]: LOGIN.switchToUsernameValue,
         },
         endpoint: "username-form",
+        home: idpOrigin,
       });
       if (landed.leftTo !== null) return landed.leftTo;
     }
@@ -359,6 +399,7 @@ export function createModMedClient(deps: ModMedClientDeps): PortalClient {
         [LOGIN.passwordField]: credentials.password,
       },
       endpoint: "credentials",
+      home: idpOrigin,
     });
     if (posted.leftTo === null) failFromLoginPage(posted.body);
     return posted.leftTo;
@@ -478,12 +519,15 @@ export function createModMedClient(deps: ModMedClientDeps): PortalClient {
       // Both folders, every page. Read-only: see `messages.ts`.
       const inbox = await readPages(INBOX_PATH, { selector: INBOX_SELECTOR }, "inbox");
       const sent = await readPages(SENT_PATH, { selector: SENT_SELECTOR }, "sent");
+      const parsed = messagesOf(inbox.rows, sent.rows);
+      if (parsed.undated > 0) {
+        logger.warn("portal.modmed.messages_undated", { undated: parsed.undated });
+      }
       return {
-        threads: conversationsOf([
-          ...threadsOf(inbox.rows, "inbox"),
-          ...threadsOf(sent.rows, "sent"),
-        ]),
-        complete: true,
+        threads: parsed.threads,
+        // Incomplete when a row could not be read or a list came up short of its
+        // own count: the caller must not read an absence as a deletion then.
+        complete: parsed.undated === 0 && !inbox.short && !sent.short,
         pages: inbox.pages + sent.pages,
       };
     },

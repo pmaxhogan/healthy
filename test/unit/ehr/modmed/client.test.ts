@@ -36,6 +36,8 @@ import type { AppError } from "../../../../worker/lib/errors.ts";
 
 const T0 = 1_790_000_000;
 const now = (): number => T0;
+/** 2026-09-22T12:00:00Z, for the `from` tests. */
+const noon = (): number => 1_790_078_400;
 const CREDENTIALS = { username: "owner-login", password: "owner-password" };
 const AUTH_DATA_URL = `${PORTAL}/ema/ws/v3/auth/data/patient`;
 const UPCOMING_URL = `${PORTAL}/ema/ws/v3/patientPortal/appointments/upcoming`;
@@ -162,7 +164,7 @@ describe("login", () => {
     const credentialPost = formOf(posts[1]!.init);
     expect(credentialPost.get("username")).toBe("owner-login");
     expect(credentialPost.get("password")).toBe("owner-password");
-    expect(credentialPost.get("firm")).toBe("example-practice.modmedapp.com");
+    expect(credentialPost.get("firm")).toBe("example-practice.example.test");
     // The password went to the identity provider and nowhere else.
     expect(
       stub.calls.filter((call) => formOf(call.init).has("password")).map((call) => call.url.origin),
@@ -275,7 +277,7 @@ describe("reading appointments", () => {
     for (const call of stub.calls) {
       expect(new Headers(call.init.headers).get("authorization")).toBe("Bearer synthetic-access-0");
       expect(call.url.searchParams.get("selector")).toContain("physician(fullNameComplete)");
-      expect(call.url.searchParams.get("from")).toMatch(/^\d{4}-\d{2}-\d{2}T00:00:00\.000Z$/u);
+      expect(call.url.searchParams.get("from")).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:00:00\.000Z$/u);
     }
   });
 
@@ -308,7 +310,7 @@ describe("reading appointments", () => {
     ]);
     const [visit] = await client(stub.fetchImpl, now, signedInJar(now)).loadPast("Europe/Lisbon");
     expect(visit).toMatchObject({
-      csn: "70001",
+      csn: "visit:70001",
       status: "completed",
       practitioner: "Pat Example, MD",
     });
@@ -448,7 +450,10 @@ describe("reading secure messages", () => {
 
   it("reads both folders to the end, joins replies, and never writes", async () => {
     const inbox = Array.from({ length: 51 }, (_, index) =>
-      inboxRow({ id: 7000 + index, subject: `Notice ${String(index)}` }),
+      inboxRow({
+        id: 7000 + index,
+        subject: index === 3 ? "RE: Notice 3" : `Notice ${String(index)}`,
+      }),
     );
     const stub = router([
       {
@@ -502,5 +507,140 @@ describe("reading secure messages", () => {
     expect(new Headers(stub.calls[0]?.init.headers).get("authorization")).toBe(
       "Bearer synthetic-access-0",
     );
+  });
+});
+
+describe("review fixes", () => {
+  it("refuses to post the password to a form that points off the identity provider", async () => {
+    const offsite = USERNAME_PAGE.replace(
+      /action="[^"]+"/u,
+      'action="https://collector.example.test/login"',
+    );
+    const routes = signInRoutes();
+    // The second login-actions answer (after "Login with Username") is the
+    // tampered form; the routes' own handler answers the first.
+    const tampered = routes.map((route) =>
+      route.match === ACTION ? { ...route, respond: () => html(offsite) } : route,
+    );
+    const stub = router([
+      ...tampered.filter((route) => route.match !== ACTION),
+      {
+        method: "POST",
+        match: ACTION,
+        respond: () => html(offsite),
+      },
+    ]);
+    await expect(client(stub.fetchImpl).login(CREDENTIALS)).rejects.toMatchObject({
+      code: "portal_redirected_offsite",
+    });
+    expect(stub.calls.some((call) => formOf(call.init).has("password"))).toBe(false);
+    expect(stub.calls.some((call) => call.url.origin === "https://collector.example.test")).toBe(
+      false,
+    );
+  });
+
+  it("keeps reading when the server pages smaller than asked, until the count", async () => {
+    const rows = Array.from({ length: 60 }, (_, index) => appointmentRow({ id: 2000 + index }));
+    const stub = router([
+      {
+        method: "GET",
+        match: UPCOMING_URL,
+        respond: ({ url }) => {
+          // Asked for 50, the server caps every page at 20 and says so.
+          const page = Number(url.searchParams.get("paging.pageNumber"));
+          return json(rows.slice((page - 1) * 20, page * 20), {
+            count: "60",
+            pagesize: "20",
+            pagenumber: String(page),
+          });
+        },
+      },
+    ]);
+    const visits = await client(stub.fetchImpl, now, signedInJar(now)).loadUpcoming("UTC");
+    expect(visits).toHaveLength(60);
+    expect(stub.calls).toHaveLength(3);
+  });
+
+  it("uses the echoed page size as the short-page signal when there is no count", async () => {
+    const rows = Array.from({ length: 30 }, (_, index) => appointmentRow({ id: 3000 + index }));
+    const stub = router([
+      {
+        method: "GET",
+        match: UPCOMING_URL,
+        respond: ({ url }) => {
+          const page = Number(url.searchParams.get("paging.pageNumber"));
+          return json(rows.slice((page - 1) * 20, page * 20), { pagesize: "20" });
+        },
+      },
+    ]);
+    const visits = await client(stub.fetchImpl, now, signedInJar(now)).loadUpcoming("UTC");
+    expect(visits).toHaveLength(30);
+    expect(stub.calls).toHaveLength(2);
+  });
+
+  it("reports messages incomplete when a list ends short of its own count", async () => {
+    const stub = router([
+      {
+        method: "GET",
+        match: `${PORTAL}/ema/ws/v3/intramail/inbox`,
+        respond: ({ url }) =>
+          json(url.searchParams.get("paging.pageNumber") === "1" ? [inboxRow()] : [], {
+            count: "5",
+          }),
+      },
+      {
+        method: "GET",
+        match: `${PORTAL}/ema/ws/v3/intramail/sent`,
+        respond: () => json([], { count: "0" }),
+      },
+    ]);
+    const result = await client(stub.fetchImpl, now, signedInJar(now)).loadMessages();
+    expect(result.complete).toBe(false);
+    expect(result.threads).toHaveLength(1);
+  });
+
+  it("keeps the token pair when a refresh fails for any reason but a refused grant", async () => {
+    const stub = router([
+      {
+        method: "POST",
+        match: `${OIDC}/token`,
+        respond: () => new Response("down", { status: 503 }),
+      },
+    ]);
+    const jar = signedInJar(now, 0);
+    await expect(client(stub.fetchImpl, now, jar).loadUpcoming("UTC")).rejects.toMatchObject({
+      code: "portal_unreachable",
+    });
+    expect(jar.getExtra(TOKEN_EXTRAS.refreshToken)).toBe("synthetic-refresh-0");
+  });
+
+  it.each([
+    // East of UTC: the true instant of local midnight is earlier than the app's form.
+    ["Asia/Tokyo", "2026-09-21T15:00:00.000Z"],
+    // West of UTC: the app's local-date form is the earlier one.
+    ["America/Denver", "2026-09-22T00:00:00.000Z"],
+    ["UTC", "2026-09-22T00:00:00.000Z"],
+  ])("never sends a from later than local midnight in %s", async (zone, from) => {
+    const stub = router([
+      { method: "GET", match: UPCOMING_URL, respond: () => json([], { count: "0" }) },
+    ]);
+    const jar = new CookieJar({ now: noon });
+    jar.setExtra(TOKEN_EXTRAS.accessToken, "synthetic-access-0");
+    jar.setExtra(TOKEN_EXTRAS.accessExpiresAt, String(noon() + 600));
+    await client(stub.fetchImpl, noon, jar).loadUpcoming(zone);
+    expect(stub.calls[0]?.url.searchParams.get("from")).toBe(from);
+  });
+
+  it("stops discovery at a bot wall instead of probing on with MyChart's candidates", async () => {
+    const stub = router([
+      { method: "GET", match: AUTH_DATA_URL, respond: () => new Response("", { status: 403 }) },
+    ]);
+    await expect(
+      createPortalAdapter().discover(
+        { baseUrl: PORTAL },
+        { fetchImpl: stub.fetchImpl, logger: noopLogger, now: () => T0 },
+      ),
+    ).rejects.toMatchObject({ code: "portal_bot_blocked" });
+    expect(stub.calls).toHaveLength(1);
   });
 });

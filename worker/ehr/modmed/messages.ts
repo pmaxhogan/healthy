@@ -16,13 +16,27 @@
  *
  * ### Shape
  *
- * ModMed messages are not threaded by the API: each is its own row, and the
- * `messageLinks` it carries were empty in every row seen live, a reply included.
- * What does tie a reply to its message is the subject -- the practice's answer
- * comes back as `RE: <the owner's subject>` -- so messages from both folders
- * whose subjects match once reply/forward prefixes are stripped are one
- * conversation, oldest first (`conversationsOf`). A message with no subject
- * stands alone. Drafts are skipped: they are not messages
+ * ModMed messages are not threaded by the API: each is its own row. Two things
+ * can tie a reply to the message it answers, and `messagesOf` uses them in
+ * this order:
+ *
+ *  1. `messageLinks`, when a row carries any: the ids it names are joined to it.
+ *     (Empty on every row seen live, a reply included, so this is read
+ *     defensively: a number, a string, or an object with an id field.)
+ *  2. Otherwise the subject. The practice's answer comes back as
+ *     `RE: <the owner's subject>`, so a row whose subject carries a reply or
+ *     forward prefix is joined to the latest *earlier* message from the *other*
+ *     folder with the same subject once prefixes are stripped, sent within
+ *     `REPLY_WINDOW_DAYS` before it. Nothing else is joined: two unrelated
+ *     messages that happen to share a subject stay two conversations.
+ *
+ * A conversation's stored identity is its subject and first message
+ * (`worker/db/repos/portal-messages.ts`). That is as stable as the lists are:
+ * if the owner's original ages out of the sent folder while the reply is still
+ * in the inbox, the reply is no longer joined to it and is stored as a
+ * conversation of its own -- the original stays stored under the old one. The
+ * API offers nothing more permanent to key on, so this is a known limit, not a
+ * silent loss: every message is still stored exactly once. Drafts are skipped: they are not messages
  * anyone sent. Recipients are never kept -- a patient recipient is the owner,
  * named in full -- except a staff group's name on a sent message, which is the
  * care team it went to.
@@ -151,11 +165,48 @@ function recipientsOf(row: Json): { name: string }[] {
 
 /** One list row as a one-message conversation, or null for a draft or an unusable row. */
 export function threadOf(row: unknown, folder: "inbox" | "sent"): PortalThread | null {
-  if (!isRecord(row) || field(row, "isDraft") === true) return null;
+  return isRecord(row) ? (itemOf(row, folder)?.thread ?? null) : null;
+}
+
+/** One parsed row, with what threading needs to know about it. */
+interface Item {
+  thread: PortalThread;
+  folder: "inbox" | "sent";
+  id: string | undefined;
+  links: string[];
+  sentMs: number;
+  key: string;
+  isReply: boolean;
+}
+
+/** Ids named in a row's `messageLinks`, whatever shape an entry takes. */
+function linksOf(row: Json): string[] {
+  const links = field(row, "messageLinks");
+  if (!Array.isArray(links)) return [];
+  const ids: string[] = [];
+  for (const link of links) {
+    if (typeof link === "number" || typeof link === "string") {
+      ids.push(String(link));
+      continue;
+    }
+    if (!isRecord(link)) continue;
+    const id =
+      idOf(link, "linkedMessageId") ??
+      idOf(link, "messageId") ??
+      idOf(link, "relatedMessageId") ??
+      idOf(link, "id");
+    if (id !== undefined) ids.push(id);
+  }
+  return ids;
+}
+
+const REPLY_PREFIX = /^\s*(?:re|fw|fwd)\s*:/iu;
+
+function itemOf(row: Json, folder: "inbox" | "sent"): Item | null {
+  if (field(row, "isDraft") === true) return null;
   const sent = isoOf(field(row, "received")) ?? isoOf(field(row, "dateCreated"));
   if (sent === null) return null;
-  const authorType = text(row, "authorType");
-  const role = roleOf(authorType);
+  const role = roleOf(text(row, "authorType"));
   const author = text(row, "authorName");
   const rawBody = field(row, "messageBody");
   const unread = unreadOf(row, folder);
@@ -168,24 +219,139 @@ export function threadOf(row: unknown, folder: "inbox" | "sent"): PortalThread |
     ...(unread !== undefined && { unread }),
   };
   const fromStaff = role === "practitioner" && author !== undefined ? [{ name: author }] : [];
-  const practitioners = folder === "sent" ? recipientsOf(row) : fromStaff;
+  const subject = text(row, "subject") ?? "";
   return {
-    subject: text(row, "subject") ?? "",
-    folder: "conversations",
-    external: false,
-    practitioners,
-    messages: [message],
+    thread: {
+      subject,
+      folder: "conversations",
+      external: false,
+      practitioners: folder === "sent" ? recipientsOf(row) : fromStaff,
+      messages: [message],
+    },
+    folder,
+    id: idOf(row),
+    links: linksOf(row),
+    sentMs: Date.parse(sent),
+    key: conversationKey(subject),
+    isReply: REPLY_PREFIX.test(subject),
   };
 }
 
-/** Every usable row of one folder, drafts and unusable rows skipped. */
-export function threadsOf(rows: readonly unknown[], folder: "inbox" | "sent"): PortalThread[] {
-  const threads: PortalThread[] = [];
+/** Rows parsed, and how many were dropped for want of a usable date. */
+function parseRows(
+  rows: readonly unknown[],
+  folder: "inbox" | "sent",
+): { items: Item[]; undated: number } {
+  const items: Item[] = [];
+  let undated = 0;
   for (const row of rows) {
-    const thread = threadOf(row, folder);
-    if (thread !== null) threads.push(thread);
+    if (!isRecord(row) || field(row, "isDraft") === true) continue;
+    const item = itemOf(row, folder);
+    if (item === null) undated += 1;
+    else items.push(item);
   }
-  return threads;
+  return { items, undated };
+}
+
+/** Every usable row of one folder as one-message threads. Not joined: see `messagesOf`. */
+export function threadsOf(rows: readonly unknown[], folder: "inbox" | "sent"): PortalThread[] {
+  return parseRows(rows, folder).items.map((item) => item.thread);
+}
+
+/** How far back a subject-matched reply may reach for the message it answers. */
+const REPLY_WINDOW_DAYS = 60;
+
+/** Union-find over item indexes, for joining replies to what they answer. */
+function makeGroups(size: number): {
+  join: (a: number, b: number) => void;
+  root: (a: number) => number;
+} {
+  const parent = Array.from({ length: size }, (_, index) => index);
+  const root = (a: number): number => {
+    let node = a;
+    while (parent[node] !== node) node = parent[node] ?? node;
+    return node;
+  };
+  return {
+    root,
+    join: (a, b) => {
+      const ra = root(a);
+      const rb = root(b);
+      if (ra !== rb) parent[rb] = ra;
+    },
+  };
+}
+
+/** The earlier message from the other folder a subject-only reply answers, if any. */
+function answeredBy(items: readonly Item[], reply: Item): number | undefined {
+  if (!reply.isReply || reply.key === "") return undefined;
+  const window = REPLY_WINDOW_DAYS * 86_400_000;
+  let best: number | undefined;
+  let bestMs = -Infinity;
+  for (const [index, candidate] of items.entries()) {
+    const eligible =
+      candidate !== reply && candidate.folder !== reply.folder && candidate.key === reply.key;
+    const gap = reply.sentMs - candidate.sentMs;
+    if (!eligible || gap <= 0 || gap > window || candidate.sentMs <= bestMs) continue;
+    best = index;
+    bestMs = candidate.sentMs;
+  }
+  return best;
+}
+
+export interface ParsedMessages {
+  threads: PortalThread[];
+  /** Rows dropped because no usable date could be read from them. */
+  undated: number;
+}
+
+/** Join every item to what its links or its reply subject name. */
+function joinReplies(items: readonly Item[], groups: ReturnType<typeof makeGroups>): void {
+  const byId = new Map<string, number>();
+  for (const [index, item] of items.entries()) {
+    if (item.id !== undefined) byId.set(`${item.folder}:${item.id}`, index);
+  }
+  for (const [index, item] of items.entries()) {
+    const targets =
+      item.links.length > 0 ? linkedIndexes(item.links, byId) : [answeredBy(items, item)];
+    for (const target of targets) if (target !== undefined) groups.join(target, index);
+  }
+}
+
+/** The items a row's `messageLinks` name, by id, in either folder. */
+function linkedIndexes(
+  links: readonly string[],
+  byId: ReadonlyMap<string, number>,
+): (number | undefined)[] {
+  return links.map((link) => byId.get(`inbox:${link}`) ?? byId.get(`sent:${link}`));
+}
+
+/**
+ * Both folders' rows as conversations: replies joined to what they answer (see
+ * the module comment), messages oldest first, conversations in the order they
+ * started.
+ */
+export function messagesOf(
+  inboxRows: readonly unknown[],
+  sentRows: readonly unknown[],
+): ParsedMessages {
+  const inbox = parseRows(inboxRows, "inbox");
+  const sent = parseRows(sentRows, "sent");
+  const items = [...inbox.items, ...sent.items];
+  const groups = makeGroups(items.length);
+  joinReplies(items, groups);
+  const grouped = new Map<number, PortalThread[]>();
+  for (const [index, item] of items.entries()) {
+    const root = groups.root(index);
+    const group = grouped.get(root);
+    if (group === undefined) grouped.set(root, [item.thread]);
+    else group.push(item.thread);
+  }
+  const threads = Array.from(grouped.values(), (group) => mergeGroup(group));
+  return {
+    threads: byFirstSent(threads, (thread) => thread.messages[0]?.sent ?? ""),
+    undated: inbox.undated + sent.undated,
+  };
 }
 
 /** A sorted copy, oldest first, by an ISO instant. */
@@ -217,38 +383,17 @@ export function conversationKey(subject: string): string {
 }
 
 /**
- * Merge one-message threads that belong to one conversation (see the module
- * comment): messages oldest first, the subject the opening message's, and the
- * care team every message named. Threads keep the order their first message
- * arrived in.
+ * One conversation from the one-message threads that make it up: messages
+ * oldest first, the subject the opening message's, and the care team every
+ * message named, in the order the conversation reached them.
  */
-export function conversationsOf(threads: readonly PortalThread[]): PortalThread[] {
-  const byKey = new Map<string, PortalThread[]>();
-  const alone: PortalThread[] = [];
-  for (const thread of threads) {
-    const key = conversationKey(thread.subject);
-    if (key === "") {
-      alone.push(thread);
-      continue;
-    }
-    const group = byKey.get(key);
-    if (group === undefined) byKey.set(key, [thread]);
-    else group.push(thread);
-  }
-  const merged: PortalThread[] = [...alone];
-  for (const group of byKey.values()) {
-    const messages = byFirstSent(
-      group.flatMap((thread) => thread.messages),
-      (m) => m.sent,
-    );
-    const first = messages[0];
-    const opening = group.find((thread) => first !== undefined && thread.messages.includes(first));
-    if (opening === undefined) continue;
-    // In the order the conversation reached them.
-    const practitioners = uniquePractitioners(
-      byFirstSent(group, (thread) => thread.messages[0]?.sent ?? ""),
-    );
-    merged.push({ ...opening, practitioners, messages });
-  }
-  return byFirstSent(merged, (thread) => thread.messages[0]?.sent ?? "");
+function mergeGroup(group: readonly PortalThread[]): PortalThread {
+  const ordered = byFirstSent(group, (thread) => thread.messages[0]?.sent ?? "");
+  const opening = ordered[0];
+  if (opening === undefined) throw new Error("an empty conversation group");
+  const messages = byFirstSent(
+    ordered.flatMap((thread) => thread.messages),
+    (message) => message.sent,
+  );
+  return { ...opening, practitioners: uniquePractitioners(ordered), messages };
 }

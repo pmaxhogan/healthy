@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   conversationKey,
-  conversationsOf,
+  messagesOf,
   threadOf,
   threadsOf,
 } from "../../../../worker/ehr/modmed/messages.ts";
@@ -68,33 +68,76 @@ describe("threadOf", () => {
   });
 });
 
-describe("conversationsOf", () => {
+describe("messagesOf", () => {
   it("joins a reply to the message it answers, oldest first, by subject", () => {
-    const merged = conversationsOf([
-      ...threadsOf([inboxRow()], "inbox"),
-      ...threadsOf([sentRow()], "sent"),
-    ]);
-    expect(merged).toHaveLength(1);
-    expect(merged[0]?.subject).toBe("Question about my results");
-    expect(merged[0]?.messages.map((message) => message.role)).toStrictEqual([
+    const { threads, undated } = messagesOf([inboxRow()], [sentRow()]);
+    expect(undated).toBe(0);
+    expect(threads).toHaveLength(1);
+    expect(threads[0]?.subject).toBe("Question about my results");
+    expect(threads[0]?.messages.map((message) => message.role)).toStrictEqual([
       "patient",
       "practitioner",
     ]);
-    expect(merged[0]?.practitioners).toStrictEqual([
+    expect(threads[0]?.practitioners).toStrictEqual([
       { name: "Example Clinic Nurses" },
       { name: "Example Nurse" },
     ]);
   });
 
   it("keeps different subjects, and subjectless messages, apart", () => {
-    const merged = conversationsOf([
-      ...threadsOf(
-        [inboxRow({ subject: "Appointment reminder" }), inboxRow({ subject: "", id: 2 })],
-        "inbox",
-      ),
-      ...threadsOf([sentRow()], "sent"),
-    ]);
-    expect(merged).toHaveLength(3);
+    const { threads } = messagesOf(
+      [inboxRow({ subject: "Appointment reminder" }), inboxRow({ subject: "", id: 2 })],
+      [sentRow()],
+    );
+    expect(threads).toHaveLength(3);
+  });
+
+  it("does not join same-subject messages that are not a reply to one another", () => {
+    // Two notices from the practice with one subject, and an owner's message
+    // that shares it: no "RE:", so nothing is a reply to anything.
+    const { threads } = messagesOf(
+      [
+        inboxRow({ id: 1, subject: "Office closure" }),
+        inboxRow({ id: 2, subject: "Office closure", received: "2026-09-05T15:00:00.000+0000" }),
+      ],
+      [sentRow({ subject: "Office closure" })],
+    );
+    expect(threads).toHaveLength(3);
+  });
+
+  it("joins a reply only to an earlier message from the other folder, within the window", () => {
+    const late = messagesOf(
+      [inboxRow({ received: "2026-12-30T15:00:00.000+0000" })],
+      [sentRow({ received: "2026-09-01T12:00:00.000+0000" })],
+    );
+    expect(late.threads).toHaveLength(2);
+    const before = messagesOf(
+      [inboxRow({ received: "2026-08-01T15:00:00.000+0000" })],
+      [sentRow()],
+    );
+    expect(before.threads).toHaveLength(2);
+    // Two replies in the inbox never join each other, only the sent original.
+    const two = messagesOf([inboxRow({ id: 1 }), inboxRow({ id: 2 })], [sentRow()]);
+    expect(two.threads).toHaveLength(1);
+    expect(two.threads[0]?.messages).toHaveLength(3);
+  });
+
+  it("prefers messageLinks over the subject when a row carries them", () => {
+    const { threads } = messagesOf(
+      [inboxRow({ subject: "Something else entirely", messageLinks: [{ messageId: 6000 }] })],
+      [sentRow()],
+    );
+    expect(threads).toHaveLength(1);
+    expect(threads[0]?.messages).toHaveLength(2);
+  });
+
+  it("counts a row dropped for an unreadable date", () => {
+    const { threads, undated } = messagesOf(
+      [inboxRow({ received: "yesterday", dateCreated: undefined })],
+      [sentRow()],
+    );
+    expect(undated).toBe(1);
+    expect(threads).toHaveLength(1);
   });
 
   it("normalises reply and forward prefixes, case and spacing", () => {

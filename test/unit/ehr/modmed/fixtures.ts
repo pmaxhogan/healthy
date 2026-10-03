@@ -4,7 +4,7 @@
 
 import type { ModMedEndpoint } from "../../../../worker/ehr/modmed/index.ts";
 
-export const PORTAL = "https://example-practice.modmedapp.com";
+export const PORTAL = "https://example-practice.example.test";
 export const SSO = "https://sso.example.test/auth";
 const REALM = "ExampleRealm";
 export const CLIENT_ID = "portal-app";
@@ -42,7 +42,7 @@ const ACTION_2 = `${SSO}/realms/${REALM}/login-actions/authenticate?session_code
 
 /** The default identity form: name and date of birth, plus "Login with Username". */
 export const IDENTITY_PAGE = `<html><body><form id="patient-login-form" action="${ACTION_1}" method="post">
-<input id="firm" type="hidden" name="firm" value="example-practice.modmedapp.com" />
+<input id="firm" type="hidden" name="firm" value="example-practice.example.test" />
 <input type="text" id="userFirstName" name="userFirstName" />
 <input type="text" id="userLastName" name="userLastName" />
 <input type="text" id="userDateOfBirth" name="userDateOfBirth" />
@@ -52,7 +52,7 @@ export const IDENTITY_PAGE = `<html><body><form id="patient-login-form" action="
 
 /** The username/password form. */
 export const USERNAME_PAGE = `<html><body><form id="patient-login-form" action="${ACTION_2}" method="post">
-<input id="firm" type="hidden" name="firm" value="example-practice.modmedapp.com" />
+<input id="firm" type="hidden" name="firm" value="example-practice.example.test" />
 <input type="text" id="username" name="username" value="" />
 <input type="password" id="password" name="password" />
 <button type="submit">Log In</button>

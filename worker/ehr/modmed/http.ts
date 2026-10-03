@@ -76,14 +76,6 @@ async function send(
   }
 }
 
-/**
- * One sign-in request on the identity provider's origin, redirects followed by
- * hand while they stay there.
- *
- * `form` is urlencoded into the body of a POST; absent means a GET with no body.
- * A 302/303 continues as a GET without the body; a cross-origin hop of any kind
- * stops and is reported in `leftTo`.
- */
 function requireHttps(url: URL, endpoint: string): void {
   if (url.protocol !== "https:") {
     throw new AppError("portal_insecure_redirect", "the sign-in left https", { endpoint });
@@ -118,11 +110,38 @@ function redirectTarget(response: Response, url: string): URL | null {
   return !isRedirect || location === null || location === "" ? null : new URL(location, url);
 }
 
+/**
+ * One sign-in request on the identity provider's origin, redirects followed by
+ * hand while they stay there.
+ *
+ * `form` is urlencoded into the body of a POST; absent means a GET with no body.
+ * A 302/303 continues as a GET without the body; a cross-origin hop of any kind
+ * stops and is reported in `leftTo`.
+ */
 export async function signInRequest(
   deps: ModMedHttpDeps,
-  request: { url: string; form?: Record<string, string>; endpoint: string },
+  request: {
+    url: string;
+    form?: Record<string, string>;
+    endpoint: string;
+    /**
+     * The identity provider's origin, which the request must start on. A form
+     * whose action points anywhere else is refused before anything is sent,
+     * so a password can only ever be POSTed to the provider the owner confirmed.
+     */
+    home: string;
+  },
 ): Promise<SignInResponse> {
-  const home = origin(request.url);
+  const home = request.home;
+  if (origin(request.url) !== home) {
+    throw new AppError(
+      "portal_redirected_offsite",
+      "the sign-in form points off the identity provider",
+      {
+        endpoint: request.endpoint,
+      },
+    );
+  }
   let url = request.url;
   let form = request.form;
   for (let hops = 0; hops <= MAX_REDIRECTS; hops += 1) {
