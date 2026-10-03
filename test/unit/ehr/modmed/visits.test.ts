@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canonicalZone,
   parseAppointment,
   parseAppointmentDate,
   parseAppointments,
@@ -35,7 +36,8 @@ describe("parseAppointment", () => {
       csn: "90001",
       // 15:30 UTC in March, before US DST starts on the 14th: MST, -07:00.
       start: "2027-03-10T08:30:00-07:00",
-      timeZone: "US/Mountain",
+      // The row says `US/Mountain`; the visit carries the canonical name.
+      timeZone: "America/Denver",
       visitType: "Skin check",
       practitioner: "Pat Example, MD",
       department: "Example Clinic North",
@@ -52,9 +54,31 @@ describe("parseAppointment", () => {
   it("prefers the facility's zone over the practice's, then the row's, then the fallback", () => {
     const row = appointmentRow();
     (row.facility as Record<string, unknown>).timeZone = undefined;
-    expect(parseAppointment(row, "Europe/Lisbon")?.timeZone).toBe("US/Pacific");
+    expect(parseAppointment(row, "Europe/Lisbon")?.timeZone).toBe("America/Los_Angeles");
     row.timeZone = "Not/AZone";
     expect(parseAppointment(row, "Europe/Lisbon")?.timeZone).toBe("Europe/Lisbon");
+  });
+
+  it("passes a zone that is already canonical through untouched", () => {
+    const row = appointmentRow();
+    (row.facility as Record<string, unknown>).timeZone = "Europe/Lisbon";
+    expect(parseAppointment(row, "UTC")?.timeZone).toBe("Europe/Lisbon");
+  });
+
+  it.each([
+    ["US/Eastern", "America/New_York"],
+    ["US/Central", "America/Chicago"],
+    ["US/Mountain", "America/Denver"],
+    ["US/Arizona", "America/Phoenix"],
+    ["US/Pacific", "America/Los_Angeles"],
+    ["US/Hawaii", "Pacific/Honolulu"],
+  ])("normalises the legacy %s link to %s", (alias, canonical) => {
+    expect(canonicalZone(alias)).toBe(canonical);
+    // The canonical name and the link agree on the instant's local reading.
+    const at = Date.UTC(2027, 6, 1, 12);
+    const local = (zone: string) =>
+      new Intl.DateTimeFormat("en-US", { timeZone: zone, timeStyle: "short" }).format(at);
+    expect(local(canonical)).toBe(local(alias));
   });
 
   it("calls a checked-in appointment arrived", () => {

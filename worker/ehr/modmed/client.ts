@@ -243,11 +243,13 @@ export function createModMedClient(deps: ModMedClientDeps): PortalClient {
         endpoint: label,
       });
     } catch (error) {
-      // The API answers a token it does not accept with a 500, not a 401. So a
-      // 500 gets one retry on a freshly refreshed token: a refresh the identity
-      // provider refuses turns it into `portal_session_expired` (sign in again),
-      // and a second 500 on a good token really is the portal being down.
-      if (!(error instanceof AppError) || error.details?.status !== 500) throw error;
+      // The API never answers a rejected token with a 401: a token it cannot
+      // parse is a 500 and one whose signature fails is a 403, both as an HTML
+      // error page. So either gets one retry on a freshly refreshed token. A
+      // refresh the identity provider refuses becomes `portal_session_expired`
+      // (sign in again); the same answer on a good token keeps its own code.
+      const status = error instanceof AppError ? error.details?.status : undefined;
+      if (status !== 500 && status !== 403) throw error;
       jar.setExtra(TOKEN_EXTRAS.accessExpiresAt, "0");
       return apiGet(http, {
         url: url.href,
@@ -475,6 +477,8 @@ export function createModMedClient(deps: ModMedClientDeps): PortalClient {
           {
             selector: "reason",
             where: "",
+            // Required: the list answers a 500 without it.
+            from: startOfToday("UTC"),
             [PAGING.pageSizeParam]: "1",
             [PAGING.pageNumberParam]: "1",
           },

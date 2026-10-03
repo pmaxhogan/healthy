@@ -80,6 +80,35 @@ export function parseAppointmentDate(value: unknown): number | null {
   return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
 }
 
+/**
+ * The canonical IANA name for the legacy `US/*` links ModMed reports.
+ *
+ * `US/Central` and friends are backward-compatibility links in the tz database:
+ * every runtime here resolves them, but they are deprecated, and a zone stored
+ * on a visit (and served over MCP) should be the name everything else uses.
+ * The whole `US/*` family, so nothing about which one a practice uses is
+ * special-cased.
+ */
+const US_LINKS: ReadonlyMap<string, string> = new Map([
+  ["US/Alaska", "America/Anchorage"],
+  ["US/Aleutian", "America/Adak"],
+  ["US/Arizona", "America/Phoenix"],
+  ["US/Central", "America/Chicago"],
+  ["US/East-Indiana", "America/Indiana/Indianapolis"],
+  ["US/Eastern", "America/New_York"],
+  ["US/Hawaii", "Pacific/Honolulu"],
+  ["US/Indiana-Starke", "America/Indiana/Knox"],
+  ["US/Michigan", "America/Detroit"],
+  ["US/Mountain", "America/Denver"],
+  ["US/Pacific", "America/Los_Angeles"],
+  ["US/Samoa", "Pacific/Pago_Pago"],
+]);
+
+/** `zone`, with a legacy `US/*` link replaced by its canonical name. */
+export function canonicalZone(zone: string | undefined): string | undefined {
+  return zone === undefined ? undefined : (US_LINKS.get(zone) ?? zone);
+}
+
 /** Whether `zone` is an IANA zone this runtime knows. */
 function knownZone(zone: string | undefined): zone is string {
   if (zone === undefined) return false;
@@ -120,7 +149,11 @@ export function parseAppointment(row: unknown, fallbackTimeZone: string): Portal
   if (id === undefined || start === null) return null;
   const facility = child(row, "facility");
   const physician = child(row, "physician");
-  const zoneCandidates = [text(facility, "timeZone"), text(row, "timeZone"), fallbackTimeZone];
+  const zoneCandidates = [
+    canonicalZone(text(facility, "timeZone")),
+    canonicalZone(text(row, "timeZone")),
+    fallbackTimeZone,
+  ];
   const timeZone = zoneCandidates.find(knownZone) ?? "UTC";
   const visitType = text(row, "reason") ?? "Appointment";
   const practitioner =
@@ -176,7 +209,7 @@ function parsePastVisit(row: unknown, fallbackTimeZone: string): PortalVisit | n
   const start = parseAppointmentDate(field(row, "visitDate"));
   if (id === undefined || start === null) return null;
   const facility = child(row, "facility");
-  const zoneCandidates = [text(facility, "timeZone"), fallbackTimeZone];
+  const zoneCandidates = [canonicalZone(text(facility, "timeZone")), fallbackTimeZone];
   const timeZone = zoneCandidates.find(knownZone) ?? "UTC";
   const practitioner = text(row, "primaryProvider");
   const facilityName = text(facility, "name");

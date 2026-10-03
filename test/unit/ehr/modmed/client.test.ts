@@ -397,16 +397,45 @@ describe("reading appointments", () => {
       true,
     );
     expect(stub.calls[0]?.url.searchParams.get("paging.pageSize")).toBe("1");
+    // The list answers a 500 without `from`, so the probe always sends one.
+    expect(stub.calls[0]?.url.searchParams.get("from")).toMatch(/T00:00:00\.000Z$/u);
   });
 
-  it("calls a 403 a bot block, not a dead session", async () => {
+  it("retries a 403 on a refreshed token, and keeps the code when the retry is refused too", async () => {
+    let gets = 0;
     const stub = router([
-      { method: "GET", match: UPCOMING_URL, respond: () => new Response("", { status: 403 }) },
+      { method: "POST", match: `${OIDC}/token`, respond: () => json(tokenResponse()) },
+      {
+        method: "GET",
+        match: UPCOMING_URL,
+        respond: () => {
+          gets += 1;
+          return new Response("<html>denied</html>", { status: 403 });
+        },
+      },
     ]);
     await expect(
       client(stub.fetchImpl, now, signedInJar(now)).isSessionAlive(),
-    ).rejects.toMatchObject({
-      code: "portal_bot_blocked",
-    });
+    ).rejects.toMatchObject({ code: "portal_bot_blocked" });
+    expect(gets).toBe(2);
+    expect(stub.calls.filter((call) => call.method === "POST")).toHaveLength(1);
+  });
+
+  it("reads a 403 whose refresh is refused as a dead session", async () => {
+    const stub = router([
+      {
+        method: "POST",
+        match: `${OIDC}/token`,
+        respond: () => json({ error: "invalid_grant" }, {}, 400),
+      },
+      {
+        method: "GET",
+        match: UPCOMING_URL,
+        respond: () => new Response("<html>denied</html>", { status: 403 }),
+      },
+    ]);
+    await expect(client(stub.fetchImpl, now, signedInJar(now)).isSessionAlive()).resolves.toBe(
+      false,
+    );
   });
 });
