@@ -247,7 +247,7 @@ describe("the second run", () => {
     const event = h.upstreams.calendar.byKey().get(await sk(`${h.healthSystemId}:enc-1`));
     const description = String(event?.description);
     expect(
-      description.startsWith("-------\nSynced by Healthy · do not edit below the line\n"),
+      description.startsWith("-------<br>Synced by Healthy · do not edit below the line<br>"),
     ).toBe(true);
     expect(description).not.toContain("last checked");
   });
@@ -320,7 +320,9 @@ describe("the second run", () => {
   });
 });
 
-const RULE_AND_HEADER = "-------\nSynced by Healthy · do not edit below the line\n";
+// The setup's health system has a portal url, so every block carries a link
+// and is written as HTML throughout (see `worker/sync/description.ts`).
+const RULE_AND_HEADER = "-------<br>Synced by Healthy · do not edit below the line<br>";
 
 /** Run once, let the owner change enc-1's description, and hand back the event. */
 async function editedBy(
@@ -348,14 +350,23 @@ async function twoRuns(h: Harness): Promise<{ first: number; second: number }> {
 
 describe("the owner's edits to a description", () => {
   it("leaves text above the rule alone, and writes nothing for it", async () => {
-    const { h, event, block } = await editedBy((block) => `Bring the referral.\n\n${block}`);
+    // What Google's editor saves when the owner types above an HTML description.
+    const { h, event, block } = await editedBy((block) => `Bring the referral.<br><br>${block}`);
 
     expect(await twoRuns(h)).toStrictEqual({ first: 0, second: 0 });
-    expect(event.description).toBe(`Bring the referral.\n\n${block}`);
+    expect(event.description).toBe(`Bring the referral.<br><br>${block}`);
+  });
+
+  it("converts plain owner text above a linked block to matching HTML, once", async () => {
+    // Plain newlines next to HTML would collapse onto one line in a strict client.
+    const { h, event, block } = await editedBy((block) => `Bring the referral.\nAnd ID.\n${block}`);
+
+    expect(await twoRuns(h)).toStrictEqual({ first: 1, second: 0 });
+    expect(event.description).toBe(`Bring the referral.<br>And ID.<br>${block}`);
   });
 
   it("keeps the owner's text byte for byte when the details change", async () => {
-    const owner = "Fasting from midnight.  \n\n";
+    const owner = "Fasting from midnight.&nbsp; <br><br>";
     const { h, event } = await editedBy((block) => `${owner}${block}`);
     h.server.encounters = searchBundle([
       encounter({ id: "enc-1", start: "2026-06-30T15:30:00Z" }),
@@ -377,7 +388,7 @@ describe("the owner's edits to a description", () => {
     const { h, event, block } = await editedBy(() => "Only the owner's words now");
 
     expect(await twoRuns(h)).toStrictEqual({ first: 1, second: 0 });
-    expect(event.description).toBe(`Only the owner's words now\n\n${block}`);
+    expect(event.description).toBe(`Only the owner's words now<br><br>${block}`);
   });
 
   it("keeps the owner's HTML and writes the block to match it, once", async () => {
@@ -397,25 +408,25 @@ describe("the owner's edits to a description", () => {
     // What the pre-rule format left on the calendar: the details, then the footer.
     const { h, event, block } = await editedBy(
       (block) =>
-        `${block.slice(RULE_AND_HEADER.length)}\n\nSynced by Healthy · do not edit\n\nOwner's note`,
+        `${block.slice(RULE_AND_HEADER.length).replaceAll("<br>", "\n")}\n\nSynced by Healthy · do not edit\n\nOwner's note`,
     );
     // And a stored fingerprint from before the format changed.
     await env.DB.prepare("UPDATE calendar_events SET fingerprint = ?").bind("older").run();
 
     expect(await twoRuns(h)).toStrictEqual({ first: 2, second: 0 });
-    expect(event.description).toBe(`Owner's note\n\n${block}`);
+    expect(event.description).toBe(`Owner's note<br><br>${block}`);
     expect(String(event.description).split("Synced by Healthy")).toHaveLength(2);
   });
 
   it("keeps the owner's text above the rule when an appointment is ghosted", async () => {
-    const { h, event } = await editedBy((block) => `Owner note\n${block}`);
+    const { h, event } = await editedBy((block) => `Owner note<br>${block}`);
     h.server.encounters = searchBundle([
       encounter({ id: "enc-2", start: PAST, status: "finished" }),
     ]);
 
     expect(await twoRuns(h)).toStrictEqual({ first: 1, second: 0 });
     const description = String(event.description);
-    expect(description.startsWith(`Owner note\n${RULE_AND_HEADER}`)).toBe(true);
+    expect(description.startsWith(`Owner note<br>${RULE_AND_HEADER}`)).toBe(true);
     expect(description).toContain("No longer on the health system's schedule as of");
   });
 });

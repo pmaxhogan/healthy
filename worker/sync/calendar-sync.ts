@@ -894,7 +894,10 @@ async function writeInsert(
 ): Promise<void> {
   const model = models.get(entry.key);
   if (model === undefined) return;
-  const created = await run.calendar.insertEvent(run.calendarId, buildEventBody(model));
+  const created = await run.calendar.insertEvent(
+    run.calendarId,
+    buildEventBody(model, mergeDescription(null, model.description)),
+  );
   await persistRow(run, healthSystemId, entry.key, created.id, model, {
     titleDigest: await titleDigest(run.blinder, healthSystemId, model.title),
   });
@@ -923,7 +926,10 @@ async function writePatch(
     // The event went away between the list and the patch. Re-inserting is the
     // same decision the plan would have made had it known -- and a new event
     // carries Healthy's title, whatever the old one said.
-    const created = await run.calendar.insertEvent(run.calendarId, buildEventBody(model));
+    const created = await run.calendar.insertEvent(
+      run.calendarId,
+      buildEventBody(model, mergeDescription(null, model.description)),
+    );
     await persistRow(run, healthSystemId, entry.key, created.id, model, {
       restore,
       titleDigest: written,

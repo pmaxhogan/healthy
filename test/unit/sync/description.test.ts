@@ -155,15 +155,49 @@ describe("linkify", () => {
 
 describe("a link inside the block", () => {
   it("stays a real anchor under plain owner text, alongside literal & and <", () => {
-    // Mirrors a live rehearsal: raw "&"/"<" in the owner's own plain text render
-    // as literal characters right next to a working link, with no other markup.
+    // The owner's plain text is carried over as HTML that renders the same, so a
+    // raw "&"/"<" still shows as a literal character next to a working link.
     const owner = "Bring card & ID <3\n\n";
 
     const merged = mergeDescription(`${owner}${LINKED_BLOCK}`, LINKED_BLOCK);
 
-    expect(merged).toBe(`${owner}${LINKED_BLOCK}`);
+    expect(merged.startsWith("Bring card &amp; ID &lt;3<br><br>-------<br>")).toBe(true);
     expect(merged).toContain(LINK);
     expect(carriesBlock(merged, LINKED_BLOCK)).toBe(true);
+  });
+
+  it("is written as HTML throughout, with no bare newline a strict client would collapse", () => {
+    // Business Calendar renders a description holding any markup as HTML, where
+    // "\n" is just a space: a linked block joined with "\n" showed on one line.
+    for (const current of [null, "Owner wrote this", "Line one\nLine two\n", `Note\n${BLOCK}`]) {
+      const merged = mergeDescription(current, LINKED_BLOCK);
+      expect(merged).not.toContain("\n");
+      expect(merged).toContain("-------<br>Synced by Healthy · do not edit below the line<br>");
+      expect(merged).toContain(LINK);
+    }
+    expect(
+      mergeDescription("Line one\nLine two\n", LINKED_BLOCK).startsWith(
+        "Line one<br>Line two<br>-------<br>",
+      ),
+    ).toBe(true);
+  });
+
+  it("rewrites a linked description written the old way, once", () => {
+    // What every linked event carried before: the block joined with "\n".
+    const old = LINKED_BLOCK;
+    const oldUnderNote = `Note\n\n${LINKED_BLOCK}`;
+
+    for (const current of [old, oldUnderNote]) {
+      expect(carriesBlock(current, LINKED_BLOCK)).toBe(false);
+      const fixed = mergeDescription(current, LINKED_BLOCK);
+      expect(carriesBlock(fixed, LINKED_BLOCK)).toBe(true);
+      expect(mergeDescription(fixed, LINKED_BLOCK)).toBe(fixed);
+    }
+  });
+
+  it("leaves a block with no link as plain text", () => {
+    expect(mergeDescription(null, BLOCK)).toBe(BLOCK);
+    expect(carriesBlock(BLOCK, BLOCK)).toBe(true);
   });
 
   it("survives escaping when the owner's part is HTML, instead of becoming visible markup", () => {

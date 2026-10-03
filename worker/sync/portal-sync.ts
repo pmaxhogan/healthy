@@ -1067,7 +1067,10 @@ async function applyPortalEntry(
     case "insert": {
       const model = models.get(entry.key);
       if (model === undefined) return;
-      const created = await input.calendar.insertEvent(input.calendarId, buildEventBody(model));
+      const created = await input.calendar.insertEvent(
+        input.calendarId,
+        buildEventBody(model, mergeDescription(null, model.description)),
+      );
       await persistPortalRow(input, healthSystemId, entry.key, created.id, model, {
         titleDigest: await titleDigest(input.blinder, healthSystemId, model.title),
       });
@@ -1137,7 +1140,10 @@ async function patchPortal(
   if (patched === null) {
     // It went away between the listing and the patch; inserting is what the plan
     // would have decided had it known. A new event carries Healthy's title.
-    const created = await input.calendar.insertEvent(input.calendarId, buildEventBody(model));
+    const created = await input.calendar.insertEvent(
+      input.calendarId,
+      buildEventBody(model, mergeDescription(null, model.description)),
+    );
     await persistPortalRow(input, healthSystemId, entry.key, created.id, model, {
       restore,
       titleDigest: written,

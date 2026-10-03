@@ -268,9 +268,10 @@ function toEventRecord(value: unknown): EventRecord | null {
  *   - `extendedProperties.private.healthy: "1"` -- the invariant that makes an
  *     event ours. Without it the sync can neither find nor touch the event.
  *
- * `description` defaults to the model's own, which is Healthy's block alone --
- * right for an insert. A patch passes the block merged into the event's current
- * description (`mergeDescription`), so the owner's text above the rule survives.
+ * `description` defaults to the model's own, which is Healthy's block alone, as
+ * plain text. Every sync write passes it through `mergeDescription` instead --
+ * an insert with no current description, a patch with the event's -- so a block
+ * carrying a link is written as HTML and the owner's text above the rule survives.
  */
 export function buildEventBody(
   model: CalendarEventModel,

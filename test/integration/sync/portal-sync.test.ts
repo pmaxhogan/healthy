@@ -1685,8 +1685,8 @@ describe("a visit's details page", () => {
     const event4 = await eventOf(fix, "csn-1");
     const text = String(event4.description);
     const header = text.indexOf("Synced by Healthy");
-    const directions = text.indexOf("Directions:\nSuite 200, second floor.");
-    const instructions = text.indexOf("Visit instructions:\nBring a list of your medicines.");
+    const directions = text.indexOf("Directions:<br>Suite 200, second floor.");
+    const instructions = text.indexOf("Visit instructions:<br>Bring a list of your medicines.");
     const clinic = text.indexOf("Example Clinic");
     expect(header).toBeGreaterThanOrEqual(0);
     expect(directions).toBeGreaterThan(header);
@@ -1732,7 +1732,7 @@ describe("a visit's details page", () => {
 
     const event5 = await eventOf(fix, "csn-1");
     const first = String(event5.description);
-    expect(first).toContain("Directions:\nTower A, suite 1.");
+    expect(first).toContain("Directions:<br>Tower A, suite 1.");
     expect(first).not.toContain(boiler);
     // Repeated, but only ever under one department: real directions, kept.
     const event6 = await eventOf(fix, "csn-2");
@@ -1784,6 +1784,6 @@ describe("a visit's details page", () => {
       .byKey()
       .get(await sk(`${fix.healthSystem.healthSystemId}:enc-1`));
     expect(String(event?.description)).toContain("VisitDetails?csn=csn-1");
-    expect(String(event?.description)).toContain("Directions:\nSuite 200.");
+    expect(String(event?.description)).toContain("Directions:<br>Suite 200.");
   });
 });

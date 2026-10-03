@@ -59,6 +59,16 @@
  * as literal angle brackets. Anything else that merely looks like a tag --
  * including a stray `<` in upstream data -- is escaped like any other
  * character, exactly as it always was.
+ *
+ * **A block with a link is always written as HTML.** One `<a>` makes the whole
+ * description HTML to any client that renders it as such, and HTML ignores `\n`:
+ * Business Calendar showed every synced event's details run together on one line
+ * while Google's own UI, which is lenient, did not. So when the block carries
+ * markup it is joined with `<br>`, and plain owner text above it is converted
+ * the same way (escaped, `\n` as `<br>`) -- the one case where the owner's bytes
+ * change, and only into markup that renders exactly as the plain text did. A
+ * description written the old way (a linked block joined with `\n`) does not
+ * read as settled, so it is rewritten once.
  */
 
 /** The line that separates the owner's text from Healthy's. Exactly this. */
@@ -255,9 +265,9 @@ function htmlBlock(block: string): string {
   return out;
 }
 
-/** The block in the same flavour as the owner's text above it. */
-function blockFor(owner: string, block: string): string {
-  return looksLikeHtml(owner) ? htmlBlock(block) : block;
+/** Plain owner text as HTML that renders the same: escaped, newlines as `<br>`. */
+function plainToHtml(text: string): string {
+  return escapeHtml(text).replaceAll("\n", "<br>");
 }
 
 /** True when HTML text already ends a line, so the block can follow it directly. */
@@ -269,10 +279,20 @@ function endsHtmlLine(text: string): boolean {
   return tag !== null && BREAK_TAGS.has(tag.name);
 }
 
-/** The owner's text with the block appended below it, a blank line between. */
-function appendBlock(owner: string, block: string): string {
-  if (!looksLikeHtml(owner)) return `${owner}${owner.endsWith("\n") ? "" : "\n\n"}${block}`;
-  return `${owner}${endsHtmlLine(owner) ? "" : "<br><br>"}${htmlBlock(block)}`;
+/**
+ * The owner's text and the block, joined in one flavour: HTML when either half
+ * already is -- the owner's because Google made it so, the block's because it
+ * carries a link -- and plain text only when both are. `blankLine` puts an
+ * empty line between them unless the owner's text already ends one.
+ */
+function joinHalves(owner: string, block: string, blankLine: boolean): string {
+  if (!looksLikeHtml(owner) && !looksLikeHtml(block)) {
+    const gap = !blankLine || owner.endsWith("\n") ? "" : "\n\n";
+    return `${owner}${gap}${block}`;
+  }
+  const html = looksLikeHtml(owner) ? owner : plainToHtml(owner);
+  const gap = !blankLine || endsHtmlLine(html) ? "" : "<br><br>";
+  return `${html}${gap}${htmlBlock(block)}`;
 }
 
 /**
@@ -310,15 +330,13 @@ function legacyRemainder(text: string): string | null {
  */
 export function mergeDescription(current: string | null, block: string): string {
   const text = current ?? "";
-  if (text.trim() === "") return block;
+  if (text.trim() === "") return joinHalves("", block, false);
   const rule = findRule(text);
-  if (rule !== null) {
-    const owner = text.slice(0, rule.cut);
-    return `${owner}${blockFor(owner, block)}`;
-  }
+  if (rule !== null) return joinHalves(text.slice(0, rule.cut), block, false);
   const legacy = legacyRemainder(text);
   const owner = legacy ?? text;
-  return plainText(owner.replaceAll("\n", " ")) === "" ? block : appendBlock(owner, block);
+  const blank = plainText(owner.replaceAll("\n", " ")) === "";
+  return joinHalves(blank ? "" : owner, block, !blank);
 }
 
 /**
@@ -329,6 +347,15 @@ export function carriesBlock(current: string | null, block: string): boolean {
   if (current === null) return false;
   const rule = findRule(current);
   if (rule === null) return false;
+  // A linked block must be HTML throughout (see the module comment). One written
+  // the old way -- joined with `\n`, or under plain owner text still using `\n` --
+  // reads the same here but renders on one line in a strict client, so it is not
+  // settled. The owner's own HTML is never judged: it is kept verbatim.
+  if (looksLikeHtml(block)) {
+    const owner = current.slice(0, rule.cut);
+    if (current.slice(rule.cut).includes("\n")) return false;
+    if (!looksLikeHtml(owner) && owner.includes("\n")) return false;
+  }
   const have = visibleLines(current.slice(rule.cut));
   const want = visibleLines(block);
   return have.length === want.length && have.every((line, index) => line === want.at(index));
