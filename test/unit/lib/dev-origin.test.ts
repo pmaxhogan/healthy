@@ -50,6 +50,30 @@ describe("toDevOrigin", () => {
     await expect(served.text()).resolves.toBe("password=x");
   });
 
+  it("puts a rewritten Origin and Referer back on loopback, and leaves any other alone", () => {
+    const routed = "https://routed.example.test".replace("https:", "http:");
+    const served = toDevOrigin(
+      wranglerDevRequest("/auth/login", {
+        method: "POST",
+        headers: { origin: routed, referer: `${routed}/auth/login?next=%2F` },
+        body: "password=x",
+      }),
+      { DEV_MODE: "true" },
+    );
+    expect(served.headers.get("origin")).toBe("http://localhost:8787");
+    expect(served.headers.get("referer")).toBe("http://localhost:8787/auth/login?next=%2F");
+
+    const foreign = toDevOrigin(
+      wranglerDevRequest("/auth/login", {
+        method: "POST",
+        headers: { origin: "https://elsewhere.example.test" },
+        body: "password=x",
+      }),
+      { DEV_MODE: "true" },
+    );
+    expect(foreign.headers.get("origin")).toBe("https://elsewhere.example.test");
+  });
+
   it("changes nothing outside development", () => {
     const request = wranglerDevRequest();
     expect(toDevOrigin(request, { DEV_MODE: "false" })).toBe(request);

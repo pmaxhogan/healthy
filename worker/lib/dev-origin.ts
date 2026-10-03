@@ -49,9 +49,19 @@ export function toDevOrigin(request: Request, env: DevEnv): Request {
   if (url.protocol !== "http:" || LOOPBACK_HOSTS.has(url.hostname)) return request;
   const origin = devOrigin(env);
   if (origin === null) return request;
+  const routed = url.origin;
   url.protocol = origin.protocol;
   url.host = origin.host;
   const headers = new Headers(request.headers);
   headers.set("host", origin.host);
+  // `wrangler dev` rewrites a browser's `Origin` and `Referer` the same way it
+  // rewrites the URL, so the same-origin proof (`worker/auth/csrf.ts`) would
+  // compare a routed Origin against a loopback URL. Put them back too.
+  const sentOrigin = headers.get("origin");
+  if (sentOrigin === routed) headers.set("origin", origin.origin);
+  const referer = headers.get("referer");
+  if (referer?.startsWith(`${routed}/`) === true) {
+    headers.set("referer", `${origin.origin}${referer.slice(routed.length)}`);
+  }
   return new Request(url.href, new Request(request, { headers }));
 }
