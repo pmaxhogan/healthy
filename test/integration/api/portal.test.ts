@@ -838,3 +838,101 @@ describe("DELETE /api/health-systems/:id/portal", () => {
     expect(dto.state).toBe("none");
   });
 });
+
+const SIGN_IN = "https://sso.example.test";
+const MOVED_SIGN_IN = "https://sso-moved.example.test";
+
+/** A practice whose sign-in document names `signIn` as its identity provider. */
+function practiceAt(signIn: string): ReturnType<typeof stubFetch> {
+  return stubFetch([
+    {
+      match: "/ema/ws/v3/auth/data/patient",
+      body: {
+        ssoEnabled: true,
+        stateless: true,
+        keycloakConfig: {
+          authServerUrl: `${signIn}/auth`,
+          realm: "ExampleRealm",
+          clientId: "portal-app",
+        },
+      },
+    },
+  ]);
+}
+
+function save(healthSystemId: string, extra: Record<string, unknown> = {}) {
+  return owner().send("PUT", `/api/health-systems/${healthSystemId}/portal`, {
+    confirmedOrigin: PORTAL_ORIGIN,
+    username: PORTAL_USERNAME,
+    password: PORTAL_PASSWORD,
+    ...extra,
+  });
+}
+
+describe("a ModMed portal's identity provider", () => {
+  it("is reported by discovery, beside the portal's own origin", async () => {
+    usePorts({ ...idlePorts(), fetch: practiceAt(SIGN_IN).fetchImpl });
+    const healthSystemId = await seedHealthSystem();
+
+    const response = await owner().send(
+      "POST",
+      `/api/health-systems/${healthSystemId}/portal/discover`,
+      { baseUrl: PORTAL_ORIGIN },
+    );
+
+    expect(await json<PortalDiscoveryDto>(response)).toStrictEqual({
+      origin: PORTAL_ORIGIN,
+      mountPath: "/patient-portal/",
+      flavor: "modmed",
+      signInOrigin: SIGN_IN,
+    });
+  });
+
+  it("has to be echoed back before a password is stored against it", async () => {
+    usePorts({ ...idlePorts(), fetch: practiceAt(SIGN_IN).fetchImpl });
+    const healthSystemId = await seedHealthSystem();
+
+    const unconfirmed = await save(healthSystemId, { baseUrl: PORTAL_ORIGIN });
+    expect(unconfirmed.status).toBe(400);
+    const body = await json<ApiError>(unconfirmed);
+    expect(body.error).toBe("portal_origin_unconfirmed");
+    expect(body.details?.signInOrigin).toBe(SIGN_IN);
+    expect(await testRepos().portalAccounts.get(healthSystemId)).toBeNull();
+
+    const confirmed = await save(healthSystemId, {
+      baseUrl: PORTAL_ORIGIN,
+      confirmedSignInOrigin: SIGN_IN,
+    });
+    expect(confirmed.status).toBe(200);
+  });
+
+  it("is re-probed on a password change, so a moved provider is caught and recoverable", async () => {
+    usePorts({ ...idlePorts(), fetch: practiceAt(SIGN_IN).fetchImpl });
+    const healthSystemId = await seedHealthSystem();
+    const first = await save(healthSystemId, {
+      baseUrl: PORTAL_ORIGIN,
+      confirmedSignInOrigin: SIGN_IN,
+    });
+    expect(first.status).toBe(200);
+
+    // Same provider: a password change needs nothing more.
+    const same = await save(healthSystemId);
+    expect(same.status).toBe(200);
+
+    // The practice now signs in elsewhere: the plain password change is refused
+    // and names the new provider, and confirming that one stores it.
+    usePorts({ ...idlePorts(), fetch: practiceAt(MOVED_SIGN_IN).fetchImpl });
+    const refused = await save(healthSystemId);
+    expect(refused.status).toBe(400);
+    const body = await json<ApiError>(refused);
+    expect(body.error).toBe("portal_origin_unconfirmed");
+    expect(body.details?.signInOrigin).toBe(MOVED_SIGN_IN);
+
+    const recovered = await save(healthSystemId, { confirmedSignInOrigin: MOVED_SIGN_IN });
+    expect(recovered.status).toBe(200);
+    const endpoint = await testRepos().portalAccounts.getEndpoint(healthSystemId);
+    expect((endpoint as { authServerUrl?: string } | null)?.authServerUrl).toBe(
+      `${MOVED_SIGN_IN}/auth`,
+    );
+  });
+});

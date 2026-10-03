@@ -8,9 +8,10 @@
  * with `portal_parse_failed` so the caller can try the next vendor.
  *
  * What is stored is the *identity provider* as well as the origin. The owner
- * confirms the origin before a password is ever sealed against it; the
- * identity provider is where that password is actually POSTed, so it is part of
- * what was confirmed. The client re-reads the document on every sign-in and
+ * confirms both before a password is ever sealed against them: the admin card
+ * shows the provider's origin on the confirm line and the save echoes it back
+ * (`worker/api/routes/portal.ts`), because that is where the password is
+ * actually POSTed. The client re-reads the document on every sign-in and
  * refuses to send the password anywhere other than the identity provider
  * recorded here (`portal_origin_unconfirmed`), so a practice that moves its
  * sign-in elsewhere needs the owner to look again rather than silently

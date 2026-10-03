@@ -659,6 +659,14 @@ export interface PutPortalAccountRequest {
    * this one.
    */
   confirmedOrigin: string;
+  /**
+   * The `signInOrigin` discovery reported, echoed back by the owner, for a
+   * portal that signs in on a separate identity provider. When omitted, the
+   * provider already stored for this account is what the fresh probe has to
+   * match; a mismatch is `portal_origin_unconfirmed`, and the owner confirms the
+   * new one through discovery.
+   */
+  confirmedSignInOrigin?: string | undefined;
 }
 
 /**
@@ -687,6 +695,12 @@ export interface PortalDiscoveryDto {
   origin: string;
   mountPath: string;
   flavor: string;
+  /**
+   * Where the password is actually POSTed, when that is not `origin` itself:
+   * a ModMed practice signs in on a separate identity provider. Shown to the
+   * owner beside `origin` and echoed back as `confirmedSignInOrigin`.
+   */
+  signInOrigin?: string | undefined;
 }
 
 /**

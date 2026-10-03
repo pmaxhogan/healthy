@@ -35,12 +35,13 @@ const EPIC_CONSENT_NOTE =
 /**
  * The word the card adds to a portal subject's name.
  *
- * "Reconnect <name> MyChart to Healthy" rather than "Reconnect <name> to
- * Healthy", because the owner will eventually have a card of each kind for the
- * same health system and they are fixed in completely different places -- one is
- * an OAuth consent screen, the other a password and an emailed code.
+ * "Reconnect <name> patient portal to Healthy" rather than "Reconnect <name>
+ * to Healthy", because the owner will eventually have a card of each kind for
+ * the same health system and they are fixed in completely different places --
+ * one is an OAuth consent screen, the other the portal login. Vendor-neutral:
+ * the portal may be MyChart or ModMed.
  */
-const PORTAL_LABEL = "MyChart";
+const PORTAL_LABEL = "patient portal";
 
 function clamp(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
@@ -75,7 +76,7 @@ function stepsFor(input: BuildReconnectCardInput): string {
   if (input.kind === "portal") {
     return [
       open,
-      `2. In the MyChart portal card, re-enter the portal password, save it, then press "Sign in now" and leave it to pick up the emailed code.`,
+      `2. In the Patient portal card, re-enter the portal password and save it (confirming any new address it shows), then press "Sign in now"; if the portal emails a code, leave it to pick that up.`,
       settles,
     ].join("\n");
   }

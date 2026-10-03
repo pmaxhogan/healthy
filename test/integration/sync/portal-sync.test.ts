@@ -1092,7 +1092,9 @@ describe("portal sessions", () => {
 
     // The card names the portal, not the FHIR connection, and links to /health systems.
     expect(upstreams.trelloCards).toHaveLength(1);
-    expect(upstreams.trelloCards[0]?.name).toBe("Reconnect A Example Health MyChart to Healthy");
+    expect(upstreams.trelloCards[0]?.name).toBe(
+      "Reconnect A Example Health patient portal to Healthy",
+    );
     expect(upstreams.trelloCards[0]?.desc).toContain("/health-systems");
     const alert = await syncRepos(ctx).alerts.getOpen(`portal:${healthSystem.healthSystemId}`);
     expect(alert).not.toBeNull();

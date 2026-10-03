@@ -281,6 +281,71 @@ describe("PortalAccountCard: credentials", () => {
     expect(putBody(api).confirmedOrigin).toBe("https://real.example.test");
   });
 
+  it("shows a separate sign-in server and echoes it back on Confirm", async () => {
+    const { wrapper, api } = await mountLoaded({
+      get: () => portalAccount({ baseUrl: null }),
+      discover: () =>
+        fakeResponse({
+          body: {
+            origin: "https://practice.example.test",
+            mountPath: "/patient-portal/",
+            flavor: "modmed",
+            signInOrigin: "https://sso.example.test",
+          },
+        }),
+    });
+
+    await fillLogin(wrapper, { baseUrl: "https://practice.example.test" });
+    await click(wrapper, "Save");
+    expect(wrapper.text()).toContain("signs in at");
+    expect(wrapper.text()).toContain("https://sso.example.test");
+    await click(wrapper, "Confirm and save");
+
+    expect(putBody(api)).toMatchObject({
+      confirmedOrigin: "https://practice.example.test",
+      confirmedSignInOrigin: "https://sso.example.test",
+    });
+  });
+
+  it("turns a refused password change into a fresh confirm when the portal has moved", async () => {
+    let puts = 0;
+    const { wrapper, api } = await mountLoaded({
+      get: () => portalAccount({ baseUrl: "https://practice.example.test" }),
+      put: () => {
+        puts += 1;
+        return fakeResponse(
+          puts === 1
+            ? {
+                status: 400,
+                body: { error: "portal_origin_unconfirmed", message: "moved" },
+              }
+            : { body: portalAccount() },
+        );
+      },
+      discover: () =>
+        fakeResponse({
+          body: {
+            origin: "https://practice.example.test",
+            mountPath: "/patient-portal/",
+            flavor: "modmed",
+            signInOrigin: "https://sso-moved.example.test",
+          },
+        }),
+    });
+
+    await fillLogin(wrapper);
+    await click(wrapper, "Save");
+    // Not a dead end: the new sign-in server is on screen to confirm.
+    expect(api.calls.some((call) => call.url === `${PORTAL_PATH}/discover`)).toBe(true);
+    expect(wrapper.text()).toContain("https://sso-moved.example.test");
+    await click(wrapper, "Confirm and save");
+    const puts2 = api.calls.filter((call) => call.url === PORTAL_PATH && call.method === "PUT");
+    expect(puts2).toHaveLength(2);
+    expect(JSON.parse(puts2[1]?.body ?? "null")).toMatchObject({
+      confirmedSignInOrigin: "https://sso-moved.example.test",
+    });
+  });
+
   it("skips the probe and saves straight away when only the password is changing", async () => {
     const { wrapper, api } = await mountLoaded({
       get: () => portalAccount({ baseUrl: "https://portal.saved.test" }),

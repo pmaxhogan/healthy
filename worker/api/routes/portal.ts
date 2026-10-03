@@ -218,12 +218,53 @@ function mountHintFor(input: {
 
 /** What `POST .../portal/discover` answers, and what `PUT` has to agree with. */
 function toDiscoveryDto(endpoint: AnyPortalEndpoint): PortalDiscoveryDto {
+  const signInOrigin = signInOriginOf(endpoint);
   return {
     origin: endpoint.baseUrl,
     mountPath: endpoint.mountPath,
     // Absent means the classic pages -- see `PortalEndpoint.flavor`.
     flavor: endpoint.flavor ?? "classic",
+    ...(signInOrigin !== null && { signInOrigin }),
   };
+}
+
+/**
+ * Refuse an identity provider the owner has not seen: it has to be the one they
+ * just confirmed or, when they confirmed none, the one already stored for this
+ * account. A portal that signs in on its own origin has none and always passes.
+ */
+function requireConfirmedSignIn(
+  endpoint: AnyPortalEndpoint,
+  confirmedSignInOrigin: string | undefined,
+  storedSignIn: string | null,
+): void {
+  const freshSignIn = signInOriginOf(endpoint);
+  if (freshSignIn === null) return;
+  const expected =
+    confirmedSignInOrigin === undefined ? storedSignIn : originOf(confirmedSignInOrigin);
+  if (freshSignIn === expected) return;
+  throw new AppError(
+    "portal_origin_unconfirmed",
+    "the portal signs in somewhere that was not confirmed; review it and save again",
+    { landedOrigin: endpoint.baseUrl, signInOrigin: freshSignIn },
+  );
+}
+
+/**
+ * The origin a stored or discovered endpoint POSTs the password to, when that is
+ * a separate identity provider (ModMed's Keycloak); null when it is the portal
+ * origin itself. Read loosely, because a stored endpoint is the adapter's own
+ * JSON.
+ */
+function signInOriginOf(endpoint: unknown): string | null {
+  if (typeof endpoint !== "object" || endpoint === null) return null;
+  const record = endpoint as { portal?: unknown; authServerUrl?: unknown };
+  if (record.portal !== "modmed" || typeof record.authServerUrl !== "string") return null;
+  try {
+    return new URL(record.authServerUrl).origin;
+  } catch {
+    return null;
+  }
 }
 
 portalRouter.get("/:id/portal", async (c) => {
@@ -271,19 +312,26 @@ portalRouter.put("/:id/portal", async (c) => {
 
   const known = stored?.base_url ?? null;
   const confirmed = originOf(body.confirmedOrigin);
+  const storedEndpoint = await api.repos.portalAccounts.getEndpoint(row.id);
+  const storedSignIn = signInOriginOf(storedEndpoint);
   // Already stored, already confirmed once, and the whole discovery result is
-  // there: this is a password change, not a move.
-  const unchanged = confirmed === known && (stored?.endpoint_json ?? null) !== null;
+  // there: this is a password change, not a move. Except where the password goes
+  // to a separate identity provider: that can move without the portal moving,
+  // so it is re-probed on every save -- which is also what lets "save again"
+  // recover from a `portal_origin_unconfirmed` at sign-in.
+  const unchanged =
+    confirmed === known && (stored?.endpoint_json ?? null) !== null && storedSignIn === null;
   if (!unchanged) {
-    if (body.baseUrl === undefined) {
+    const baseUrl = body.baseUrl ?? (confirmed === known ? known : undefined);
+    if (baseUrl === undefined) {
       throw new AppError("bad_request", "baseUrl is required until the portal has been found once");
     }
     const hint = mountHintFor({
-      baseUrl: body.baseUrl,
+      baseUrl,
       ...(body.mountHint !== undefined && { mountHint: body.mountHint }),
     });
     const endpoint = await probeEndpoint(api, {
-      baseUrl: originOf(body.baseUrl),
+      baseUrl: originOf(baseUrl),
       ...(hint !== undefined && { mountHint: hint }),
     });
     if (endpoint.baseUrl !== confirmed) {
@@ -293,6 +341,7 @@ portalRouter.put("/:id/portal", async (c) => {
         { landedOrigin: endpoint.baseUrl },
       );
     }
+    requireConfirmedSignIn(endpoint, body.confirmedSignInOrigin, storedSignIn);
     await api.repos.portalAccounts.setEndpoint(row.id, {
       baseUrl: endpoint.baseUrl,
       mountPath: endpoint.mountPath,

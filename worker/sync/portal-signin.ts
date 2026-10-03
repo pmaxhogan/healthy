@@ -138,6 +138,10 @@ const ALERTING_CODES: ReadonlySet<string> = new Set([
   // A portal that signs in with a password alone asked for a one-time code.
   // Nothing unattended can answer it, and retrying hourly only repeats it.
   "portal_code_challenge",
+  // The portal now signs in somewhere the owner never confirmed. Nothing is
+  // sent there, and nothing unattended can fix it: the owner has to look at the
+  // new address on the Health systems page and save again.
+  "portal_origin_unconfirmed",
   // Not a portal failure at all, but the one state the owner has to be told about
   // out of band: the sync has given up for the day and will not try again until
   // the counter rolls over, so nothing else would surface it before tomorrow.

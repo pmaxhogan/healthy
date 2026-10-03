@@ -12,7 +12,7 @@
 
 import { computed, reactive, ref, watch } from "vue";
 
-import { codeMessage } from "../api/client.ts";
+import { ApiRequestError, codeMessage } from "../api/client.ts";
 import { endpoints, isPortalSignInInProgress } from "../api/endpoints.ts";
 import { relativeTime } from "../lib/format.ts";
 import { toastSuccess } from "../lib/toasts.ts";
@@ -159,7 +159,21 @@ async function onSave(): Promise<void> {
   const known = portal.account.data.value?.baseUrl ?? null;
   const sameAsStored = known !== null && (typed === "" || originOf(typed) === known);
   if (sameAsStored) {
-    await save.run(() => submit(known));
+    await save.run(async () => {
+      try {
+        await submit(known);
+      } catch (error) {
+        // The portal, or the server it signs in on, has moved since it was
+        // confirmed. Show where it is now instead of failing: the owner confirms
+        // it exactly as on a first save.
+        if (!(error instanceof ApiRequestError) || error.code !== "portal_origin_unconfirmed") {
+          throw error;
+        }
+        discovered.value = await endpoints.discoverPortal(props.healthSystemId, {
+          baseUrl: typed === "" ? known : typed,
+        });
+      }
+    });
     return;
   }
   await save.run(async () => {
@@ -171,11 +185,12 @@ async function onSave(): Promise<void> {
 async function onConfirm(): Promise<void> {
   const origin = discovered.value?.origin;
   if (origin === undefined) return;
-  await confirmSave.run(() => submit(origin));
+  const signInOrigin = discovered.value?.signInOrigin;
+  await confirmSave.run(() => submit(origin, signInOrigin));
 }
 
 /** The PUT itself, against an origin the owner has confirmed. */
-async function submit(confirmedOrigin: string): Promise<void> {
+async function submit(confirmedOrigin: string, confirmedSignInOrigin?: string): Promise<void> {
   const baseUrl = draft.baseUrl.trim();
   const mfaContact = draft.mfaContact.trim();
   const otpSenderDomain = draft.otpSenderDomain.trim();
@@ -183,6 +198,7 @@ async function submit(confirmedOrigin: string): Promise<void> {
     username: draft.username,
     password: draft.password,
     confirmedOrigin,
+    ...(confirmedSignInOrigin !== undefined && { confirmedSignInOrigin }),
     ...(baseUrl !== "" && { baseUrl }),
     ...(mfaContact !== "" && { mfaContact }),
     ...(otpSenderDomain !== "" && { otpSenderDomain }),
@@ -314,7 +330,12 @@ async function onRemove(): Promise<void> {
         </label>
       </div>
 
-      <p v-if="discovered" class="muted confirm-line">
+      <p v-if="discovered && discovered.signInOrigin" class="muted confirm-line">
+        Portal found at <strong>{{ discovered.origin }}</strong> ({{ discovered.flavor }}). It signs
+        in at <strong>{{ discovered.signInOrigin }}</strong
+        >, and your password will be sent there — confirm to store it.
+      </p>
+      <p v-else-if="discovered" class="muted confirm-line">
         Portal found at <strong>{{ discovered.origin }}</strong> ({{ discovered.flavor }}). Your
         password will be sent there — confirm to store it.
       </p>

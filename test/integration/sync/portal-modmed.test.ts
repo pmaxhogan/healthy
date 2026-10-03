@@ -262,4 +262,37 @@ describe("a ModMed portal on the calendar", () => {
     );
     expect(writes).toStrictEqual([]);
   });
+
+  it("refuses to sign in once the practice names another identity provider, and says so on a card", async () => {
+    const ctx = syncCtx({ trello: true });
+    const healthSystem = await seedConnectedHealthSystem(ctx, { host: HOST });
+    await seedGoogle(ctx);
+    await seedSettings(ctx);
+    await seed(ctx, healthSystem.healthSystemId);
+    const upstreams = stubUpstreams({ [HOST]: fhirServer({ patientId: healthSystem.patientId }) });
+    const moved = authData();
+    (moved as { keycloakConfig: { authServerUrl: string } }).keycloakConfig.authServerUrl =
+      "https://elsewhere.example.test/auth";
+    const portal = router([
+      {
+        method: "GET",
+        match: `${PORTAL}/ema/ws/v3/auth/data/patient`,
+        respond: () => json(moved),
+      },
+    ]);
+    const fetchImpl = routed(portal.fetchImpl, upstreams.deps.fetchImpl!);
+
+    const summary = await runCalendarSync(ctx, {
+      trigger: "manual",
+      portalOnly: true,
+      deps: { ...upstreams.deps, fetchImpl, sleep: () => Promise.resolve() },
+    });
+
+    expect(summary.portalErrors).toContain("portal_origin_unconfirmed");
+    expect(portal.calls.some((call) => call.method === "POST")).toBe(false);
+    const row = await makeRepos(ctx).portalAccounts.get(healthSystem.healthSystemId);
+    expect(row?.session_state).toBe("needs_reauth");
+    expect(upstreams.trelloCards).toHaveLength(1);
+    expect(upstreams.trelloCards[0]?.name).toContain("patient portal");
+  });
 });

@@ -357,11 +357,16 @@ history in CI.
 ## Known limits
 
 - A ModMed portal is signed in to with the owner's username and password, posted
-  to the OpenID Connect provider the practice's own sign-in document names. That
-  provider is recorded at discovery and confirmed by the owner together with the
-  origin; every later sign-in re-reads the document and refuses
-  (`portal_origin_unconfirmed`) if it names anywhere else, so a practice that
-  moves its sign-in cannot silently relocate the password. The resulting access
+  to the OpenID Connect provider the practice's own sign-in document names. The
+  admin card's confirm step shows that provider's origin beside the portal's,
+  and the save has to echo it back: the server re-probes on every save and
+  refuses (`portal_origin_unconfirmed`) a provider that is neither the one just
+  confirmed nor the one already stored. Every sign-in re-reads the document and
+  refuses the same way if it names anywhere else -- which raises the reconnect
+  card -- and every form POST of the sign-in, the password's above all, must
+  target that provider's origin or it is not sent (`portal_redirected_offsite`).
+  A practice that moves its sign-in therefore cannot silently relocate the
+  password. The resulting access
   and refresh tokens sit in the sealed cookie jar and are as sensitive as the
   password for their (short) lifetime. The portal's own "am I signed in" endpoint
   answers `true` to any bearer token, so it is never used as proof of a session.

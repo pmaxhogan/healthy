@@ -71,7 +71,7 @@ describe("a verification code that never arrives", () => {
 
     expect(fix.upstreams.trelloCards).toHaveLength(1);
     expect(fix.upstreams.trelloCards[0]?.name).toBe(
-      "Reconnect A Example Health MyChart to Healthy",
+      "Reconnect A Example Health patient portal to Healthy",
     );
     expect(fix.upstreams.trelloCards[0]?.desc).toContain("portal_2fa_required");
     expect(await syncRepos(fix.ctx).alerts.getOpen(`portal:${fix.healthSystemId}`)).not.toBeNull();

@@ -216,7 +216,7 @@ const CODE_MESSAGES: Record<string, string> = {
   portal_insecure_redirect:
     "That address (or something it redirected to) is not https. A portal password is never sent over an unencrypted connection.",
   portal_origin_unconfirmed:
-    "The portal is no longer at the address you confirmed. Review where it is now and save again.",
+    "The portal (or the server it signs in on) is no longer at the address you confirmed. Save the portal login again to review where it is now; your password is not sent anywhere new until you confirm.",
 };
 
 /**

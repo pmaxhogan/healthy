@@ -215,9 +215,11 @@ Then, in the admin UI: add your health systems and connect each one
 
 Two portal vendors are supported: Epic's MyChart and ModMed's patient portal.
 Which one a URL is, is worked out when it is saved, not chosen. A ModMed portal
-signs in with a username and password alone (its OpenID Connect provider is
-recorded and confirmed along with the origin, and the password is only ever
-sent there); its session is a short-lived token pair kept in the sealed jar and
+signs in with a username and password alone. Its password goes to a separate
+OpenID Connect provider, which the confirm step shows beside the portal's own
+origin and which the save echoes back; every sign-in posts the password there
+and nowhere else, and refuses if the practice now names a different one -- the
+next save shows the new address to confirm; its session is a short-lived token pair kept in the sealed jar and
 refreshed by the ten-minute keepalive. If one ever asks for a one-time code,
 the sync stops and opens the reconnect card rather than retrying. Its secure
 messages (inbox and sent) are read with the same token, read-only -- nothing is

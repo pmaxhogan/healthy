@@ -274,6 +274,8 @@ export const portalAccountSchema: z.ZodType<PutPortalAccountRequest> = z.strictO
   // Required, and an https URL like `baseUrl`: the handler keeps its origin and
   // refuses to seal a credential unless discovery lands on exactly that.
   confirmedOrigin: httpsUrl,
+  // Optional: only a portal with a separate identity provider has one to echo.
+  confirmedSignInOrigin: httpsUrl.optional(),
 });
 
 /** `POST /api/health-systems/:id/portal/discover`. Probe only -- nothing is stored. */
