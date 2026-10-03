@@ -23,8 +23,10 @@ import {
   authData,
   found,
   html,
+  inboxRow,
   json,
   router,
+  sentRow,
   tokenResponse,
   urlOf,
 } from "../../unit/ehr/modmed/fixtures.ts";
@@ -84,6 +86,24 @@ function practice(rows: () => unknown[]) {
         const all = rows();
         return json(all, { count: String(all.length), pagenumber: "1", pagesize: "50" });
       },
+    },
+    {
+      method: "GET",
+      match: `${PORTAL}/ema/ws/v3/intramail/inbox`,
+      respond: () => json([inboxRow()], { count: "1" }),
+    },
+    {
+      method: "GET",
+      match: `${PORTAL}/ema/ws/v3/intramail/sent`,
+      respond: () => json([sentRow()], { count: "1" }),
+    },
+    {
+      method: "GET",
+      match: `${PORTAL}/ema/ws/v3/documents/FILE_ATTACHMENT/801/inline`,
+      respond: () =>
+        new Response(new Uint8Array([37, 80, 68, 70]), {
+          headers: { "content-type": "application/pdf" },
+        }),
     },
   ]);
 }
@@ -202,5 +222,44 @@ describe("a ModMed portal on the calendar", () => {
     expect(summary.portalVisits).toBe(1);
     expect(summary.eventsInserted).toBe(1);
     expect(upstreams.calendar.byKey().has(await sk(`${healthSystem.id}:csn:5151`))).toBe(true);
+  });
+
+  it("stores the secure messages and their attachment, without writing to the portal", async () => {
+    const ctx = syncCtx();
+    const healthSystem = await seedConnectedHealthSystem(ctx, { host: HOST });
+    await seedGoogle(ctx);
+    await seedSettings(ctx);
+    await seed(ctx, healthSystem.healthSystemId);
+    const upstreams = stubUpstreams({ [HOST]: fhirServer({ patientId: healthSystem.patientId }) });
+    const portal = practice(() => []);
+    const fetchImpl = routed(portal.fetchImpl, upstreams.deps.fetchImpl!);
+
+    const summary = await runCalendarSync(ctx, {
+      trigger: "manual",
+      portalOnly: true,
+      deps: { ...upstreams.deps, fetchImpl, sleep: () => Promise.resolve() },
+    });
+
+    expect(summary.portalErrors).toStrictEqual([]);
+    expect(summary.portalMessages).toBe(2);
+    const repos = makeRepos(ctx);
+    const stored = await repos.portalMessages.list(healthSystem.healthSystemId);
+    expect(new Set(stored.map((row) => row.message.role))).toStrictEqual(
+      new Set(["patient", "practitioner"]),
+    );
+    expect(await repos.portalMessages.listSync()).toStrictEqual([
+      expect.objectContaining({ complete: true, threads: 1, messages: 2, lastErrorCode: null }),
+    ]);
+    const attachments = await repos.portalMessageAttachments.list(healthSystem.healthSystemId);
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0]).toMatchObject({
+      state: "stored",
+      meta: expect.objectContaining({ contentType: "application/pdf" }) as unknown,
+    });
+    // Nothing but reads, and the sign-in's own form posts, ever reached the portal.
+    const writes = portal.calls.filter(
+      (call) => call.method !== "GET" && call.url.origin === PORTAL,
+    );
+    expect(writes).toStrictEqual([]);
   });
 });

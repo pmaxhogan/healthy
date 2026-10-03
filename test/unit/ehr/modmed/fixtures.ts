@@ -199,3 +199,52 @@ export function html(body: string, headers: Record<string, string> = {}): Respon
 export function found(location: string, headers: Record<string, string> = {}): Response {
   return new Response(null, { status: 302, headers: { location, ...headers } });
 }
+
+/** An inbox row: a practice reply, read, with one attachment. Every value invented. */
+export function inboxRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    cc: [],
+    hasFileAttachments: true,
+    currentRecipientFlags: {
+      messageFlagged: false,
+      messageRead: true,
+      recipientId: 31,
+      messageArchived: false,
+    },
+    messageBody: "<p>Thanks for writing.</p><p>Your results look <b>normal</b>.</p>",
+    subject: "RE: Question about my results",
+    authorType: "STAFF",
+    isDraft: false,
+    fileAttachments: [{ id: 801, fileName: "results-letter.pdf", formattedFileSize: "12 KB" }],
+    received: "2026-09-02T15:00:00.000+0000",
+    authorId: 77,
+    priority: "NORMAL",
+    dateCreated: "2026-09-02T14:59:00.000+0000",
+    messageLinks: [],
+    authorName: "Example Nurse",
+    to: [{ firstName: "Test", lastName: "Patient", id: 5, type: "PATIENT" }],
+    id: 6001,
+    ...overrides,
+  };
+}
+
+/** A sent row: the owner's own message to a care-team group. */
+export function sentRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    cc: [],
+    hasFileAttachments: false,
+    messageBody: "Could you explain my results?",
+    subject: "Question about my results",
+    authorType: "PATIENT",
+    isDraft: false,
+    fileAttachments: [],
+    received: "2026-09-01T12:00:00.000+0000",
+    authorId: 5,
+    priority: "NORMAL",
+    dateCreated: "2026-09-01T12:00:00.000+0000",
+    authorName: "Test Patient",
+    to: [{ groupName: "Example Clinic Nurses", id: 9, type: "GROUP" }],
+    id: 6000,
+    ...overrides,
+  };
+}

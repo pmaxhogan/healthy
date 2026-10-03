@@ -206,6 +206,45 @@ export interface ApiResponse {
   headers: Headers;
 }
 
+export interface ApiFile {
+  contentType: string;
+  bytes: Uint8Array;
+}
+
+/** GET one file with the bearer token. Same status rules as `apiGet`. */
+export async function apiGetFile(
+  deps: Pick<ModMedHttpDeps, "fetchImpl">,
+  request: { url: string; accessToken: string; endpoint: string },
+): Promise<ApiFile> {
+  if (new URL(request.url).protocol !== "https:") {
+    throw new AppError("portal_insecure_redirect", "the portal API is not https", {
+      endpoint: request.endpoint,
+    });
+  }
+  const response = await send(deps, request.url, {
+    method: "GET",
+    headers: { ...BROWSER_HEADERS, accept: "*/*", authorization: `Bearer ${request.accessToken}` },
+    redirect: "manual",
+  });
+  if (response.status === 401) {
+    await response.body?.cancel();
+    throw new AppError("portal_session_expired", "the portal rejected the token", {
+      endpoint: request.endpoint,
+    });
+  }
+  refuseBlocked(response.status, request.endpoint);
+  if (response.status !== 200) {
+    await response.body?.cancel();
+    throw new AppError("portal_parse_failed", "the portal answered unexpectedly", {
+      endpoint: request.endpoint,
+      status: response.status,
+    });
+  }
+  const declared = response.headers.get("content-type")?.split(";", 1)[0]?.trim() ?? "";
+  const contentType = declared === "" ? "application/octet-stream" : declared;
+  return { contentType, bytes: new Uint8Array(await response.arrayBuffer()) };
+}
+
 /** GET one API path with the bearer token. 401 is `portal_session_expired`. */
 export async function apiGet(
   deps: Pick<ModMedHttpDeps, "fetchImpl">,

@@ -24,9 +24,11 @@ import {
   authData,
   found,
   html,
+  inboxRow,
   json,
   pastRow,
   router,
+  sentRow,
   tokenResponse,
 } from "./fixtures.ts";
 
@@ -436,6 +438,69 @@ describe("reading appointments", () => {
     ]);
     await expect(client(stub.fetchImpl, now, signedInJar(now)).isSessionAlive()).resolves.toBe(
       false,
+    );
+  });
+});
+
+describe("reading secure messages", () => {
+  const INBOX_URL = `${PORTAL}/ema/ws/v3/intramail/inbox`;
+  const SENT_URL = `${PORTAL}/ema/ws/v3/intramail/sent`;
+
+  it("reads both folders to the end, joins replies, and never writes", async () => {
+    const inbox = Array.from({ length: 51 }, (_, index) =>
+      inboxRow({ id: 7000 + index, subject: `Notice ${String(index)}` }),
+    );
+    const stub = router([
+      {
+        method: "GET",
+        match: INBOX_URL,
+        respond: ({ url }) => {
+          const page = Number(url.searchParams.get("paging.pageNumber"));
+          const size = Number(url.searchParams.get("paging.pageSize"));
+          return json(inbox.slice((page - 1) * size, page * size), { count: "51" });
+        },
+      },
+      {
+        method: "GET",
+        match: SENT_URL,
+        respond: () => json([sentRow({ subject: "Notice 3" })], { count: "1" }),
+      },
+    ]);
+    const result = await client(stub.fetchImpl, now, signedInJar(now)).loadMessages();
+
+    expect(result.complete).toBe(true);
+    expect(result.pages).toBe(3);
+    // 51 inbox messages, one of which the sent message started: 51 conversations.
+    expect(result.threads).toHaveLength(51);
+    expect(result.threads.flatMap((thread) => thread.messages)).toHaveLength(52);
+    expect(stub.calls.every((call) => call.method === "GET")).toBe(true);
+    expect(stub.calls.some((call) => call.url.pathname.includes("/flags"))).toBe(false);
+    const selector = stub.calls[0]?.url.searchParams.get("selector") ?? "";
+    expect(selector).toContain("messageBody");
+    expect(selector).toContain("fileAttachments");
+  });
+
+  it("downloads an attachment by its id, with the bearer token", async () => {
+    const stub = router([
+      {
+        method: "GET",
+        match: `${PORTAL}/ema/ws/v3/documents/FILE_ATTACHMENT/801/inline`,
+        respond: () =>
+          new Response(new Uint8Array([37, 80, 68, 70]), {
+            status: 200,
+            headers: { "content-type": "application/pdf;charset=UTF-8" },
+          }),
+      },
+    ]);
+    const file = await client(stub.fetchImpl, now, signedInJar(now)).loadMessageAttachment({
+      dcsId: "801",
+      fileExtension: "PDF",
+      organizationId: "",
+    });
+    expect(file.contentType).toBe("application/pdf");
+    expect([...file.bytes]).toStrictEqual([37, 80, 68, 70]);
+    expect(new Headers(stub.calls[0]?.init.headers).get("authorization")).toBe(
+      "Bearer synthetic-access-0",
     );
   });
 });

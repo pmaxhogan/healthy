@@ -38,9 +38,12 @@ import { AppError } from "../../lib/errors.ts";
 import { createPkce, randomState } from "../pkce.ts";
 
 import { fetchAuthData } from "./discovery.ts";
-import { apiGet, signInRequest, tokenRequest } from "./http.ts";
+import { apiGet, apiGetFile, signInRequest, tokenRequest } from "./http.ts";
+import { conversationsOf, threadsOf } from "./messages.ts";
 import { parseAppointments, parsePastVisits } from "./visits.ts";
 import {
+  INBOX_PATH,
+  INBOX_SELECTOR,
   KEYCLOAK_MARKERS,
   LOGIN,
   PAGE_SIZE,
@@ -48,8 +51,11 @@ import {
   PAST_PATH,
   PAST_SELECTOR,
   REDIRECT_QUERY,
+  SENT_PATH,
+  SENT_SELECTOR,
   TOKEN_EXTRAS,
   TOKEN_REFRESH_MARGIN_SECONDS,
+  attachmentPath,
   UPCOMING_PATH,
   UPCOMING_SELECTOR,
 } from "./wire.ts";
@@ -233,30 +239,31 @@ export function createModMedClient(deps: ModMedClientDeps): PortalClient {
     return fresh;
   }
 
-  async function get(path: string, params: Record<string, string>, label: string) {
-    const url = new URL(path, endpoint.baseUrl);
-    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+  /**
+   * Run an authenticated call, once more on a refreshed token if the first try
+   * is refused. The API never answers a rejected token with a 401: one it cannot
+   * parse is a 500 and one whose signature fails is a 403, both as an HTML error
+   * page. A refresh the identity provider refuses becomes
+   * `portal_session_expired` (sign in again); the same answer on a good token
+   * keeps its own code.
+   */
+  async function withFreshToken<T>(call: (accessToken: string) => Promise<T>): Promise<T> {
     try {
-      return await apiGet(http, {
-        url: url.href,
-        accessToken: await ensureAccessToken(),
-        endpoint: label,
-      });
+      return await call(await ensureAccessToken());
     } catch (error) {
-      // The API never answers a rejected token with a 401: a token it cannot
-      // parse is a 500 and one whose signature fails is a 403, both as an HTML
-      // error page. So either gets one retry on a freshly refreshed token. A
-      // refresh the identity provider refuses becomes `portal_session_expired`
-      // (sign in again); the same answer on a good token keeps its own code.
       const status = error instanceof AppError ? error.details?.status : undefined;
       if (status !== 500 && status !== 403) throw error;
       jar.setExtra(TOKEN_EXTRAS.accessExpiresAt, "0");
-      return apiGet(http, {
-        url: url.href,
-        accessToken: await ensureAccessToken(),
-        endpoint: label,
-      });
+      return call(await ensureAccessToken());
     }
+  }
+
+  async function get(path: string, params: Record<string, string>, label: string) {
+    const url = new URL(path, endpoint.baseUrl);
+    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+    return withFreshToken((accessToken) =>
+      apiGet(http, { url: url.href, accessToken, endpoint: label }),
+    );
   }
 
   /** Every page of a list endpoint, to the end. No cap. */
@@ -265,8 +272,20 @@ export function createModMedClient(deps: ModMedClientDeps): PortalClient {
     params: Record<string, string>,
     label: string,
   ): Promise<unknown[]> {
+    const { rows } = await readPages(path, params, label);
+    return rows;
+  }
+
+  /** `readAll`, plus how many pages it took. */
+  async function readPages(
+    path: string,
+    params: Record<string, string>,
+    label: string,
+  ): Promise<{ rows: unknown[]; pages: number }> {
     const rows: unknown[] = [];
+    let pages = 0;
     for (let page = 1; ; page += 1) {
+      pages += 1;
       const response = await get(
         path,
         {
@@ -289,8 +308,8 @@ export function createModMedClient(deps: ModMedClientDeps): PortalClient {
       // that over-reports its total cannot spin it.
       if (done || response.json.length === 0 || response.json.length < PAGE_SIZE) break;
     }
-    logger.info("portal.modmed.list", { endpoint: label, rows: rows.length });
-    return rows;
+    logger.info("portal.modmed.list", { endpoint: label, rows: rows.length, pages });
+    return { rows, pages };
   }
 
   /** The start of today in `timeZone`, written the way the app writes it. */
@@ -455,14 +474,23 @@ export function createModMedClient(deps: ModMedClientDeps): PortalClient {
       // keeps nothing it had and fetches nothing it cannot.
       return Promise.resolve({ waitlist: null });
     },
-    loadMessages() {
-      // Not read yet. `complete: false` tells the caller its absence is not a
-      // deletion, so nothing stored is pruned on the strength of it.
-      return Promise.resolve({ threads: [], complete: false, pages: 0 });
+    async loadMessages() {
+      // Both folders, every page. Read-only: see `messages.ts`.
+      const inbox = await readPages(INBOX_PATH, { selector: INBOX_SELECTOR }, "inbox");
+      const sent = await readPages(SENT_PATH, { selector: SENT_SELECTOR }, "sent");
+      return {
+        threads: conversationsOf([
+          ...threadsOf(inbox.rows, "inbox"),
+          ...threadsOf(sent.rows, "sent"),
+        ]),
+        complete: true,
+        pages: inbox.pages + sent.pages,
+      };
     },
-    loadMessageAttachment() {
-      return Promise.reject(
-        new AppError("portal_parse_failed", "this portal's messages are not read yet"),
+    async loadMessageAttachment(handle) {
+      const url = new URL(attachmentPath(handle.dcsId), endpoint.baseUrl).href;
+      return withFreshToken((accessToken) =>
+        apiGetFile(http, { url, accessToken, endpoint: "attachment" }),
       );
     },
     async isSessionAlive(): Promise<boolean> {

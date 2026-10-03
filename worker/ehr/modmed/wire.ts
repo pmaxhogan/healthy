@@ -67,6 +67,24 @@ export const PAST_SELECTOR =
  */
 export const PAGE_SIZE = 50;
 
+/** Secure messages ("intramail"): the inbox and the sent folder. Paged like the visits. */
+export const INBOX_PATH = "/ema/ws/v3/intramail/inbox";
+export const SENT_PATH = "/ema/ws/v3/intramail/sent";
+
+/**
+ * The app's own selectors for the two lists, which expand the body, the
+ * attachments and the owner's read flags into each row.
+ */
+export const INBOX_SELECTOR =
+  "to(locations),cc(locations),messageLinks,fileAttachments(formattedFileSize),messageBody,received,dateCreated";
+export const SENT_SELECTOR =
+  "to(locations),cc(locations),fileAttachments(formattedFileSize),messageBody,received,dateCreated";
+
+/** One message attachment's file, by its id. What the app's own viewer loads. */
+export function attachmentPath(attachmentId: string): string {
+  return `/ema/ws/v3/documents/FILE_ATTACHMENT/${encodeURIComponent(attachmentId)}/inline`;
+}
+
 /** Request parameter names for paging (`paging.*`) and the response headers that answer. */
 export const PAGING = {
   pageSizeParam: "paging.pageSize",

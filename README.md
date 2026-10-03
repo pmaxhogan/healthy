@@ -219,7 +219,10 @@ signs in with a username and password alone (its OpenID Connect provider is
 recorded and confirmed along with the origin, and the password is only ever
 sent there); its session is a short-lived token pair kept in the sealed jar and
 refreshed by the ten-minute keepalive. If one ever asks for a one-time code,
-the sync stops and opens the reconnect card rather than retrying.
+the sync stops and opens the reconnect card rather than retrying. Its secure
+messages (inbox and sent) are read with the same token, read-only -- nothing is
+ever marked read -- and a practice's `RE:` reply is joined to the message it
+answers.
 
 For a health system that also has a patient portal, the **Health systems** page
 shows a **Patient portal** card under that health system: a portal login URL
