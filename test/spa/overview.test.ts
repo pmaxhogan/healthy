@@ -49,6 +49,8 @@ describe("OverviewView", () => {
     const second = wrapper.findAll(".cards > .card")[1];
     expect(second?.text()).toContain("sandbox");
     expect(second?.text()).toContain("No client secret set yet");
+    expect(second?.find(".chip.danger").text()).toBe("no client secret");
+    expect(wrapper.findAll(".cards > .card")[0]?.find(".chip.danger").exists()).toBe(false);
   });
 
   it("points Reconnect at the path the DTO supplies", async () => {

@@ -28,6 +28,7 @@ const href = computed(() => reconnectHref(props.healthSystem));
       <h3>{{ healthSystem.displayName }}</h3>
       <span v-if="healthSystem.environment === 'sandbox'" class="chip env">sandbox</span>
       <StatusPill :status="status" />
+      <span v-if="!healthSystem.hasClientSecret" class="chip danger">no client secret</span>
     </div>
 
     <dl class="facts">
@@ -52,7 +53,7 @@ const href = computed(() => reconnectHref(props.healthSystem));
     </dl>
 
     <p v-if="healthSystem.config.enabled === false" class="muted">Sync is switched off.</p>
-    <p v-else-if="!healthSystem.hasClientSecret" class="muted">
+    <p v-else-if="!healthSystem.hasClientSecret" class="danger-text">
       No client secret set yet — connecting will fail until one is.
     </p>
 

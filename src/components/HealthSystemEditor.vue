@@ -148,6 +148,10 @@ async function onRemove(): Promise<void> {
       <h3>{{ healthSystem.displayName }}</h3>
       <span v-if="healthSystem.environment === 'sandbox'" class="chip">sandbox</span>
       <StatusPill :status="status" />
+      <span v-if="!healthSystem.hasClientSecret" class="chip danger" role="alert">
+        No {{ healthSystem.environment === "sandbox" ? "sandbox" : "production" }} client secret —
+        Connect will fail until one is set
+      </span>
       <span v-if="healthSystem.connection?.lastErrorCode" class="chip danger-text">
         {{ humanizeCode(healthSystem.connection.lastErrorCode) }}
       </span>

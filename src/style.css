@@ -310,6 +310,14 @@ button.small {
   color: var(--text-dim);
 }
 
+/* An error chip. Its own rule because `.chip` comes after `.danger-text` and
+   would otherwise win the colour. */
+.chip.danger,
+.chip.danger-text {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 code,
 pre {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;

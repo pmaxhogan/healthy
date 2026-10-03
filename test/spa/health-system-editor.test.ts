@@ -138,6 +138,19 @@ describe("HealthSystemEditor", () => {
     );
   });
 
+  it("flags a health system with no client secret as an error next to its name", () => {
+    const missing = mountEditor(healthSystem({ hasClientSecret: false })).find(".chip.danger");
+    expect(missing.exists()).toBe(true);
+    expect(missing.attributes("role")).toBe("alert");
+    expect(missing.text()).toContain("No production client secret");
+    expect(mountEditor().find(".chip.danger").exists()).toBe(false);
+  });
+
+  it("names the sandbox secret for a sandbox health system", () => {
+    const dto = healthSystem({ hasClientSecret: false, environment: "sandbox" });
+    expect(mountEditor(dto).find(".chip.danger").text()).toContain("No sandbox client secret");
+  });
+
   it("posts a new client secret to its own endpoint", async () => {
     const wrapper = mountEditor();
     await wrapper
