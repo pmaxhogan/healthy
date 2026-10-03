@@ -28,6 +28,7 @@ export type ErrorCode =
   | "portal_2fa_rejected" // the code was wrong, stale, or already used
   | "portal_locked" // the portal locked or disabled the account
   | "portal_captcha_required" // the portal wants a captcha solved before another attempt
+  | "portal_code_challenge" // a portal whose login normally needs no code asked for one
   | "portal_bot_blocked" // 403/429 or a challenge page: a WAF, not a credential problem
   | "portal_session_expired" // an authenticated call bounced to the login page
   | "portal_parse_failed" // the response was not the shape this client can read
@@ -77,6 +78,10 @@ const STATUS: Record<ErrorCode, number> = {
   // Same rationale as portal_locked: a script cannot solve it, only the owner
   // signing in once themselves can.
   portal_captcha_required: 409,
+  // Same again: a portal this app signs in to unattended, with no code, asked
+  // for one. Only the owner can see why (a new security setting, a flagged
+  // device), so the sync stops and says so.
+  portal_code_challenge: 409,
   portal_bot_blocked: 503,
   portal_session_expired: 409,
   portal_parse_failed: 502,

@@ -63,7 +63,7 @@ import { isHttpsUrl } from "@shared/url.ts";
 
 import { makeRepos } from "../db/index.ts";
 import { getSetting } from "../db/settings.ts";
-import { CookieJar, createMyChartAdapter } from "../ehr/mychart/index.ts";
+import { CookieJar, createPortalAdapter } from "../ehr/mychart/index.ts";
 import { AppError, isAppError } from "../lib/errors.ts";
 import { errorFields } from "../lib/log.ts";
 import { parseAllowlistCsv } from "../mail/classify.ts";
@@ -135,6 +135,9 @@ const ALERTING_CODES: ReadonlySet<string> = new Set([
   // A script cannot solve a captcha; only the owner signing in once themselves
   // can, so this is the same "stop and tell the owner" shape as a lockout.
   "portal_captcha_required",
+  // A portal that signs in with a password alone asked for a one-time code.
+  // Nothing unattended can answer it, and retrying hourly only repeats it.
+  "portal_code_challenge",
   // Not a portal failure at all, but the one state the owner has to be told about
   // out of band: the sync has given up for the day and will not try again until
   // the counter rolls over, so nothing else would surface it before tomorrow.
@@ -211,7 +214,7 @@ export async function openPortalSession(
     serialisedJar === null
       ? new CookieJar({ now: ctx.now })
       : CookieJar.deserialise(serialisedJar, { now: ctx.now });
-  const adapter = deps.deps.portalAdapter ?? createMyChartAdapter();
+  const adapter = deps.deps.portalAdapter ?? createPortalAdapter();
   const stored = await repos.portalAccounts.getEndpoint(healthSystemId);
   // The adapter's own discovery result, passed back unread where there is one. It
   // carries more than the two columns -- which login strategy this deployment

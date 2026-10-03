@@ -211,10 +211,18 @@ Then, in the admin UI: add your health systems and connect each one
 ([docs/setup-google.md](docs/setup-google.md)), and wire up Trello alerts
 ([docs/setup-trello.md](docs/setup-trello.md)).
 
-### MyChart portal (optional)
+### Patient portal (optional)
+
+Two portal vendors are supported: Epic's MyChart and ModMed's patient portal.
+Which one a URL is, is worked out when it is saved, not chosen. A ModMed portal
+signs in with a username and password alone (its OpenID Connect provider is
+recorded and confirmed along with the origin, and the password is only ever
+sent there); its session is a short-lived token pair kept in the sealed jar and
+refreshed by the ten-minute keepalive. If one ever asks for a one-time code,
+the sync stops and opens the reconnect card rather than retrying.
 
 For a health system that also has a patient portal, the **Health systems** page
-shows a **MyChart portal** card under that health system: a portal login URL
+shows a **Patient portal** card under that health system: a portal login URL
 (prefilled when one is already known), a username, a password and, optionally,
 an email address to send verification codes to when it differs from the login
 and the domain those codes arrive from — most deployments never need either of

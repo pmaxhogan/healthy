@@ -47,11 +47,13 @@ function deps(stub: PortalFetchStub): PortalAdapterDeps {
 }
 
 describe("portalAdapterFor", () => {
-  it("resolves the one portal vendor there is", () => {
+  it("resolves each portal vendor there is", () => {
     const adapter: PortalAdapter = portalAdapterFor("mychart");
 
     expect(adapter.portal).toBe("mychart");
+    expect(portalAdapterFor("modmed").portal).toBe("modmed");
     expect(isPortalVendor("mychart")).toBe(true);
+    expect(isPortalVendor("modmed")).toBe(true);
   });
 
   it("refuses an unknown vendor with bad_request rather than undefined", () => {
@@ -77,7 +79,8 @@ describe("the adapter's two jobs", () => {
     const adapter = createMyChartAdapter();
 
     const input: PortalDiscoveryInput = { baseUrl: HOST };
-    const endpoint: PortalEndpoint = await adapter.discover(input, deps(stub));
+    // The MyChart adapter only ever discovers a MyChart endpoint.
+    const endpoint = (await adapter.discover(input, deps(stub))) as PortalEndpoint;
     const usernameField: UsernameField = endpoint.usernameField;
     expect(usernameField).toBe("LoginIdentifier");
     expect(endpoint.mountPath).toBe(MOUNT);

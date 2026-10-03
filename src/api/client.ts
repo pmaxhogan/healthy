@@ -195,6 +195,8 @@ const CODE_MESSAGES: Record<string, string> = {
     "The portal has locked or disabled this account. Sign in on the portal's own site to clear it, then try again here.",
   portal_captcha_required:
     "The portal is asking for a captcha. Sign in once yourself in a browser, then try again.",
+  portal_code_challenge:
+    "The portal asked for a one-time code, which it normally does not. Sign in once yourself on the portal's own site to see why, then try again here.",
   portal_bot_blocked: "The portal blocked this as automated traffic. Try again later.",
   portal_session_expired: "The portal signed this session out. Sign in again.",
   portal_parse_failed:
@@ -207,7 +209,8 @@ const CODE_MESSAGES: Record<string, string> = {
     "The portal signed the session out, and the hourly sync will not email you any more codes on its own today. Press Sign in now when you are ready for the code.",
   portal_signin_deferred:
     "The portal signed the session out. The hourly sync is holding off signing in again, to space out emailed codes or to keep the day's last attempts for you; Sign in now does it immediately.",
-  portal_discovery_failed: "Could not find MyChart at that address. Check the URL and try again.",
+  portal_discovery_failed:
+    "Could not find a patient portal at that address. Check the URL and try again.",
   portal_redirected_offsite:
     "That address sent us to a different site. Check where it went, and paste that address instead if you recognise it.",
   portal_insecure_redirect:

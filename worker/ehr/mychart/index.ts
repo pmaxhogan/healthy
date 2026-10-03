@@ -16,6 +16,7 @@
  */
 
 import { AppError } from "../../lib/errors.ts";
+import { createModMedAdapter, isModMedEndpoint } from "../modmed/index.ts";
 
 import { createMyChartClient } from "./client.ts";
 import { createCustomOidcClient } from "./custom-oidc/client.ts";
@@ -26,6 +27,7 @@ import type { CookieJar } from "./cookie-jar.ts";
 import type { PortalCustomSettings } from "./custom-oidc/client.ts";
 import type { PortalEndpoint } from "./discovery.ts";
 import type { Logger } from "../../lib/log.ts";
+import type { ModMedEndpoint } from "../modmed/index.ts";
 
 export type { PortalClient, PortalCredentials, SecondaryValidation } from "./client.ts";
 export type { PortalCustomSettings } from "./custom-oidc/client.ts";
@@ -42,8 +44,15 @@ export type {
 export type { PortalFlavor, PortalVisitStatus, UsernameField } from "./wire.ts";
 export { CookieJar } from "./cookie-jar.ts";
 
-/** Which patient portal. One entry for now; the point is that there is a key. */
-export type PortalVendor = "mychart";
+/** Which patient portal. */
+export type PortalVendor = "mychart" | "modmed";
+
+/**
+ * Any vendor's stored discovery result. A ModMed one says so with
+ * `portal: "modmed"`; a MyChart one predates the field and carries none, so
+ * absent means MyChart.
+ */
+export type AnyPortalEndpoint = PortalEndpoint | ModMedEndpoint;
 
 /** Everything an adapter needs from the outside world. */
 export interface PortalAdapterDeps {
@@ -81,7 +90,7 @@ export interface PortalAdapter {
    * Throws `portal_parse_failed` when nothing recognisable answered, and
    * `portal_bot_blocked` / `portal_unreachable` when the host will not talk.
    */
-  discover(input: PortalDiscoveryInput, deps: PortalAdapterDeps): Promise<PortalEndpoint>;
+  discover(input: PortalDiscoveryInput, deps: PortalAdapterDeps): Promise<AnyPortalEndpoint>;
   /**
    * A client pointed at one instance, sharing one jar.
    *
@@ -89,7 +98,7 @@ export interface PortalAdapter {
    * seal whatever it holds afterwards, whether the call succeeded or not -- a
    * failed sign-in still leaves cookies worth keeping.
    */
-  client(endpoint: PortalEndpoint, jar: CookieJar, deps: PortalAdapterDeps): PortalClient;
+  client(endpoint: AnyPortalEndpoint, jar: CookieJar, deps: PortalAdapterDeps): PortalClient;
 }
 
 /** Not exported: the map below is the only thing that holds one. */
@@ -107,6 +116,9 @@ export function createMyChartAdapter(): PortalAdapter {
       });
     },
     client(endpoint, jar, deps) {
+      if (isModMedEndpoint(endpoint)) {
+        throw new AppError("portal_discovery_failed", "not a MyChart portal endpoint");
+      }
       const common = {
         endpoint,
         jar,
@@ -134,6 +146,7 @@ export function createMyChartAdapter(): PortalAdapter {
  */
 const PORTAL_ADAPTERS: Record<PortalVendor, PortalAdapterFactory> = {
   mychart: createMyChartAdapter,
+  modmed: createModMedAdapter,
 };
 
 /** Narrow a string read out of D1 or a request body to a known portal vendor. */
@@ -148,4 +161,38 @@ export function portalAdapterFor(vendor: string): PortalAdapter {
   }
   // `isPortalVendor` above is the guard: `vendor` is a key of this const map.
   return PORTAL_ADAPTERS[vendor]();
+}
+
+/**
+ * The adapter every caller uses unless a test injects one: it works out the
+ * vendor itself.
+ *
+ * Discovery asks ModMed first because ModMed's probe is one specific JSON
+ * document that nothing else serves; when it is not there, MyChart's own
+ * discovery runs and its answer (found, or the reason not) is the result.
+ * A client is built by the vendor the stored endpoint names.
+ */
+export function createPortalAdapter(): PortalAdapter {
+  const modmed = createModMedAdapter();
+  const mychart = createMyChartAdapter();
+  return {
+    // Reported only for logging; the real vendor is per endpoint.
+    portal: "mychart",
+    async discover(input, deps) {
+      try {
+        return await modmed.discover(input, deps);
+      } catch {
+        // Any failure of ModMed's probe is "not ModMed, as far as can be told":
+        // a MyChart host answers an unknown path with a 404, a WAF page or a
+        // dropped connection depending on its front door, and none of those
+        // says anything about MyChart itself. Its own discovery decides.
+        return mychart.discover(input, deps);
+      }
+    },
+    client(endpoint, jar, deps) {
+      return isModMedEndpoint(endpoint)
+        ? modmed.client(endpoint, jar, deps)
+        : mychart.client(endpoint, jar, deps);
+    },
+  };
 }

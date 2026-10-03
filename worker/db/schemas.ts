@@ -260,6 +260,8 @@ export const portalEndpointSchema = z.looseObject({
   mountPath: z.string().min(1),
   /** `custom_oidc` only, and just as credential-bearing as `baseUrl`. */
   authBaseUrl: httpsOrigin.optional(),
+  /** ModMed only: the identity provider the password is POSTed to. Same rule. */
+  authServerUrl: httpsOrigin.optional(),
 });
 
 export type StoredPortalEndpoint = z.infer<typeof portalEndpointSchema>;

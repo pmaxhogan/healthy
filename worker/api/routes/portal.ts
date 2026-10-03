@@ -49,7 +49,7 @@
 import { Hono } from "hono";
 
 import { getSetting } from "../../db/settings.ts";
-import { portalAdapterFor } from "../../ehr/mychart/index.ts";
+import { createPortalAdapter } from "../../ehr/mychart/index.ts";
 import { AppError, isAppError } from "../../lib/errors.ts";
 import { makeLogger } from "../../lib/log.ts";
 import { nowSeconds } from "../../lib/time.ts";
@@ -61,16 +61,13 @@ import { isLiveHealthSystem } from "./health-systems.ts";
 
 import type { AppHonoEnv } from "../../auth/gate.ts";
 import type { HealthSystemRow } from "../../db/rows.ts";
-import type { PortalEndpoint } from "../../ehr/mychart/index.ts";
+import type { AnyPortalEndpoint } from "../../ehr/mychart/index.ts";
 import type { ApiContext } from "../http.ts";
 import type {
   PortalAccountDto,
   PortalAccountStatusDto,
   PortalDiscoveryDto,
 } from "@shared/types.ts";
-
-/** The only portal vendor today. `worker/ehr/mychart/index.ts` holds the map. */
-const PORTAL_VENDOR = "mychart";
 
 export const portalRouter = new Hono<AppHonoEnv>();
 
@@ -188,8 +185,9 @@ function mountHintFromPath(url: string): string | undefined {
 async function probeEndpoint(
   api: ApiContext,
   input: { baseUrl: string; mountHint?: string | undefined },
-): Promise<PortalEndpoint> {
-  const adapter = portalAdapterFor(PORTAL_VENDOR);
+): Promise<AnyPortalEndpoint> {
+  // Works out the vendor itself: ModMed first, then MyChart.
+  const adapter = createPortalAdapter();
   try {
     return await adapter.discover(input, {
       fetchImpl: api.ports.fetch,
@@ -219,7 +217,7 @@ function mountHintFor(input: {
 }
 
 /** What `POST .../portal/discover` answers, and what `PUT` has to agree with. */
-function toDiscoveryDto(endpoint: PortalEndpoint): PortalDiscoveryDto {
+function toDiscoveryDto(endpoint: AnyPortalEndpoint): PortalDiscoveryDto {
   return {
     origin: endpoint.baseUrl,
     mountPath: endpoint.mountPath,

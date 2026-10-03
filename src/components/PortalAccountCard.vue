@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// The MyChart portal login for one health system: save it, start a sign-in, watch it
+// The patient-portal login (MyChart or ModMed) for one health system: save it, start a sign-in, watch it
 // through the emailed-code round trip, sync on demand, or tear it down.
 //
 // Embedded inside HealthSystemEditor rather than owning its own page: the portal
@@ -260,7 +260,7 @@ async function onRemove(): Promise<void> {
 <template>
   <div class="portal">
     <div class="row">
-      <h4>MyChart portal</h4>
+      <h4>Patient portal</h4>
       <span class="chip" :class="{ 'danger-text': state === 'needs_reauth' }">
         {{ badgeLabel }}
       </span>

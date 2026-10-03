@@ -659,7 +659,7 @@ describe("portal error codes: human messages", () => {
     ["portal_parse_failed", "not in a shape"],
     ["portal_unreachable", "could not be reached"],
     ["portal_attempts_exhausted", "Too many sign-in attempts"],
-    ["portal_discovery_failed", "Could not find MyChart"],
+    ["portal_discovery_failed", "Could not find a patient portal"],
     ["portal_redirected_offsite", "different site"],
     ["portal_insecure_redirect", "not https"],
     ["portal_origin_unconfirmed", "no longer at the address you confirmed"],
