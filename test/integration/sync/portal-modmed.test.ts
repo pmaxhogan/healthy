@@ -88,6 +88,16 @@ function practice(rows: () => unknown[]) {
   ]);
 }
 
+/** The practice and its identity provider go to `portal`; everything else to the stubs. */
+function routed(portal: typeof fetch, fallback: typeof fetch): typeof fetch {
+  return (input, init) => {
+    const url = new URL(urlOf(input));
+    return url.origin === PORTAL || url.origin === new URL(SSO).origin
+      ? portal(input, init)
+      : fallback(input, init);
+  };
+}
+
 async function seed(ctx: Ctx, healthSystemId: string): Promise<void> {
   const repos = makeRepos(ctx);
   await repos.portalAccounts.setEndpoint(healthSystemId, {
@@ -117,13 +127,7 @@ describe("a ModMed portal on the calendar", () => {
         appointmentDate: new Date((T0 + 4 * 86_400) * 1000).toISOString().replace("Z", "+0000"),
       }),
     ]);
-    const fallback = upstreams.deps.fetchImpl!;
-    const fetchImpl: typeof fetch = (input, init) => {
-      const url = new URL(urlOf(input));
-      return url.origin === PORTAL || url.origin === new URL(SSO).origin
-        ? portal.fetchImpl(input, init)
-        : fallback(input, init);
-    };
+    const fetchImpl = routed(portal.fetchImpl, upstreams.deps.fetchImpl!);
 
     const summary = await runCalendarSync(ctx, {
       trigger: "manual",
@@ -166,5 +170,37 @@ describe("a ModMed portal on the calendar", () => {
         ),
       ),
     ).toHaveLength(1);
+  });
+
+  it("calendars a portal-only health system, whose FHIR side never connected", async () => {
+    const ctx = syncCtx();
+    const healthSystem = await makeRepos(ctx).healthSystems.create({
+      vendor: "epic",
+      displayName: "Portal Only Example",
+      fhirBaseUrl: "https://fhir.portal-only.example.test/r4",
+      portalUrl: null,
+      environment: "prod",
+    });
+    await seedGoogle(ctx);
+    await seedSettings(ctx);
+    await seed(ctx, healthSystem.id);
+    const upstreams = stubUpstreams({});
+    const portal = practice(() => [
+      appointmentRow({
+        id: 5151,
+        appointmentDate: new Date((T0 + 2 * 86_400) * 1000).toISOString().replace("Z", "+0000"),
+      }),
+    ]);
+    const fetchImpl = routed(portal.fetchImpl, upstreams.deps.fetchImpl!);
+
+    const summary = await runCalendarSync(ctx, {
+      trigger: "manual",
+      deps: { ...upstreams.deps, fetchImpl, sleep: () => Promise.resolve() },
+    });
+
+    expect(summary.healthSystems).toBe(0);
+    expect(summary.portalVisits).toBe(1);
+    expect(summary.eventsInserted).toBe(1);
+    expect(upstreams.calendar.byKey().has(await sk(`${healthSystem.id}:csn:5151`))).toBe(true);
   });
 });

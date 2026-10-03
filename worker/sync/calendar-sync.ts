@@ -227,7 +227,11 @@ async function syncAllHealthSystems(
 ): Promise<void> {
   const targets = await syncTargets(repos, options.healthSystemIds);
   state.summary.healthSystems = targets.length;
-  if (targets.length === 0) {
+  // A health system can be portal-only (its FHIR side never connected), so an
+  // empty FHIR target list is only "nothing to do" when no portal is signed in
+  // either; otherwise the portal pass below still has visits to calendar.
+  const activePortals = targets.length === 0 ? await repos.portalAccounts.listActive() : [];
+  if (targets.length === 0 && activePortals.length === 0) {
     ctx.log.info("sync.no_targets");
     return;
   }
