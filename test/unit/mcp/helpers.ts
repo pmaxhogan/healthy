@@ -52,6 +52,7 @@ function healthSystem(id: string, displayName: string): HealthSystemInfo {
     lastFullRefreshAt: NOW - 86_400,
     lastErrorCode: null,
     needsReauthSince: null,
+    portal: { state: "active", lastOkAt: NOW - 3600, lastErrorCode: null, needsReauthSince: null },
   };
 }
 

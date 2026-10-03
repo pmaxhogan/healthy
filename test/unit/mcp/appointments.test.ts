@@ -32,7 +32,7 @@ import {
 
 import type { FakeState } from "./helpers.ts";
 import type { PortalVisit } from "../../../worker/ehr/mychart/index.ts";
-import type { PortalVisitRecord } from "../../../worker/mcp/deps.ts";
+import type { HealthSystemInfo, PortalVisitRecord } from "../../../worker/mcp/deps.ts";
 import type { PolicyRuleInput } from "../../../worker/policy/rules.ts";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
@@ -625,6 +625,20 @@ describe("a health_system deny rule reaches another organisation's copy (securit
   });
 });
 
+/** The PortalVisit coverage entry for health system A, after `portal` and `status` are applied. */
+async function portalEntryFor(overrides: Partial<HealthSystemInfo>) {
+  world.state.healthSystems = world.state.healthSystems.map((healthSystem) =>
+    healthSystem.id === HEALTH_SYSTEM_A ? { ...healthSystem, ...overrides } : healthSystem,
+  );
+  const answer = await callTool(world.client, "get_appointments");
+  return {
+    entry: answer.coverage?.find(
+      (entry) => entry.healthSystemId === HEALTH_SYSTEM_A && entry.resourceType === "PortalVisit",
+    ),
+    warnings: answer.warnings,
+  };
+}
+
 describe("coverage", () => {
   it("covers Encounter (the FHIR sync) and PortalVisit (the portal connection) per health system", async () => {
     const answer = await callTool(world.client, "get_appointments");
@@ -637,24 +651,60 @@ describe("coverage", () => {
     expect(types).toStrictEqual(new Set(["Encounter", "PortalVisit"]));
   });
 
-  it("reports the portal connection as failed when the health system needs reauth", async () => {
-    world.state.healthSystems = world.state.healthSystems.map((healthSystem) =>
-      healthSystem.id === HEALTH_SYSTEM_A
-        ? {
-            ...healthSystem,
-            status: "needs_reauth",
-            needsReauthSince: NOW - 3600,
-            lastErrorCode: "needs_reauth",
-          }
-        : healthSystem,
-    );
+  it("reports the portal as failed when the portal session needs re-authorising", async () => {
+    const { entry } = await portalEntryFor({
+      portal: {
+        state: "needs_reauth",
+        lastOkAt: NOW - 86_400,
+        lastErrorCode: "portal_login_failed",
+        needsReauthSince: NOW - 3600,
+      },
+    });
+    expect(entry).toMatchObject({ status: "failed", errorCode: "portal_login_failed" });
+  });
 
-    const answer = await callTool(world.client, "get_appointments");
+  it("reports a healthy portal as ok on a portal-only health system with no FHIR connection", async () => {
+    // The production bug: FHIR `not_connected` made the portal look failed
+    // although its visits were synced and present.
+    const { entry, warnings } = await portalEntryFor({
+      status: "not_connected",
+      lastSyncAt: null,
+      lastErrorCode: null,
+      portal: { state: "active", lastOkAt: NOW - 600, lastErrorCode: null, needsReauthSince: null },
+    });
+    expect(entry).toMatchObject({ status: "ok" });
+    expect(warnings.some((warning) => warning.startsWith("sync_failed:PortalVisit"))).toBe(false);
+  });
 
-    const portal = answer.coverage?.find(
-      (entry) => entry.healthSystemId === HEALTH_SYSTEM_A && entry.resourceType === "PortalVisit",
-    );
-    expect(portal).toMatchObject({ status: "failed", errorCode: "needs_reauth" });
+  it("keeps the portal ok when only the FHIR grant needs re-authorising", async () => {
+    const { entry } = await portalEntryFor({
+      status: "needs_reauth",
+      needsReauthSince: NOW - 3600,
+      lastErrorCode: "needs_reauth",
+    });
+    expect(entry).toMatchObject({ status: "ok" });
+  });
+
+  it("reports a portal that has not answered for hours as stale, and one never read as never", async () => {
+    const stale = await portalEntryFor({
+      portal: {
+        state: "active",
+        lastOkAt: NOW - 8 * 3600,
+        lastErrorCode: null,
+        needsReauthSince: null,
+      },
+    });
+    expect(stale.entry).toMatchObject({ status: "stale", ageHours: 8 });
+    const never = await portalEntryFor({
+      portal: { state: "none", lastOkAt: null, lastErrorCode: null, needsReauthSince: null },
+    });
+    expect(never.entry).toMatchObject({ status: "never" });
+  });
+
+  it("calls the portal unsupported for a health system with no portal account", async () => {
+    const { entry, warnings } = await portalEntryFor({ portal: null });
+    expect(entry).toMatchObject({ status: "unsupported" });
+    expect(warnings.some((warning) => warning.includes("PortalVisit"))).toBe(false);
   });
 
   it("drops the synthetic PortalVisit row along with Encounter when Encounter is denied", async () => {

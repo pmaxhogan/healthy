@@ -682,6 +682,45 @@ describe("portal visits through the MCP", () => {
   });
 });
 
+describe("PortalVisit coverage from the portal account in D1", () => {
+  it("reports a signed-in portal as ok on a health system with no FHIR connection", async () => {
+    // The seeded health systems have no FHIR connection at all, like a
+    // portal-only practice. A has a signed-in portal account; B has none.
+    const db = repos();
+    await storeSevenMonths(world.seeded.healthSystemA);
+    await db.portalAccounts.setEndpoint(world.seeded.healthSystemA, {
+      baseUrl: "https://portal.a.example.test",
+      mountPath: "/patient-portal/",
+      endpoint: { baseUrl: "https://portal.a.example.test", mountPath: "/patient-portal/" },
+    });
+    await db.portalAccounts.setCredentials(world.seeded.healthSystemA, {
+      username: "portal-user",
+      password: "portal-password",
+    });
+    await db.portalAccounts.markActive(world.seeded.healthSystemA);
+
+    const answer = await call(world.client, "get_appointments");
+    const envelope = parseEnvelope(answer.text) as {
+      coverage?: { healthSystemId: string; resourceType: string; status: string }[];
+      warnings?: string[];
+    };
+    const portal = (id: string) =>
+      envelope.coverage?.find(
+        (entry) => entry.healthSystemId === id && entry.resourceType === "PortalVisit",
+      )?.status;
+
+    expect(portal(world.seeded.healthSystemA)).toBe("ok");
+    expect(portal(world.seeded.healthSystemB)).toBe("unsupported");
+    expect(envelope.warnings?.some((warning) => warning.includes("PortalVisit"))).toBe(false);
+
+    const listed = await call(world.client, "list_health_systems");
+    expect(listed.items).toMatchObject([
+      { healthSystem: NAME_A, status: "not_connected", portalState: "active" },
+      { healthSystem: NAME_B, status: "not_connected", portalState: "no_portal" },
+    ]);
+  });
+});
+
 describe("no cap on how much comes back", () => {
   it("returns more than 200 cached resources when the caller passes no limit", async () => {
     const day = 24 * 3600 * 1000;

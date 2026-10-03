@@ -41,6 +41,23 @@ export interface HealthSystemInfo {
   lastFullRefreshAt: number | null;
   lastErrorCode: string | null;
   needsReauthSince: number | null;
+  /**
+   * The patient-portal account, when the health system has one. Its health is its
+   * own: a portal-only health system has no FHIR connection at all (`status` is
+   * `not_connected`) while its portal syncs fine, and a FHIR connection that needs
+   * re-authorising says nothing about the portal session.
+   */
+  portal: PortalAccountInfo | null;
+}
+
+/** A health system's patient-portal account, as the coverage and status tools read it. */
+export interface PortalAccountInfo {
+  /** `portal_accounts.session_state`. */
+  state: "none" | "active" | "needs_reauth";
+  /** Unix seconds the portal last answered a signed-in read (or a sign-in completed). */
+  lastOkAt: number | null;
+  lastErrorCode: string | null;
+  needsReauthSince: number | null;
 }
 
 /** One row out of the FHIR read cache, with just the metadata a tool uses. */

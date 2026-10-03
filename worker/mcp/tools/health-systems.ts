@@ -40,6 +40,11 @@ function healthSystemItem(healthSystem: HealthSystemInfo): Record<string, unknow
     lastFullRefreshAt: iso(healthSystem.lastFullRefreshAt),
     lastErrorCode: healthSystem.lastErrorCode,
     needsReauthSince: iso(healthSystem.needsReauthSince),
+    // The FHIR connection above and the patient portal are separate: a
+    // portal-only health system is `not_connected` on FHIR while its portal syncs.
+    portalState: healthSystem.portal?.state ?? "no_portal",
+    portalLastOkAt: iso(healthSystem.portal?.lastOkAt ?? null),
+    portalLastErrorCode: healthSystem.portal?.lastErrorCode ?? null,
   };
 }
 

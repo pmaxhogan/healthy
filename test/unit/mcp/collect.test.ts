@@ -21,6 +21,7 @@ function healthSystem(id: string, displayName: string): HealthSystemInfo {
     lastFullRefreshAt: null,
     lastErrorCode: null,
     needsReauthSince: null,
+    portal: null,
   };
 }
 

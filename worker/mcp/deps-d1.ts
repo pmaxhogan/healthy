@@ -41,7 +41,7 @@ import type {
 } from "./deps.ts";
 import type { Repos } from "../db/index.ts";
 import type { StoredAttachment } from "../db/repos/portal-message-attachments.ts";
-import type { ConnectionRow, HealthSystemRow } from "../db/rows.ts";
+import type { ConnectionRow, HealthSystemRow, PortalAccountRow } from "../db/rows.ts";
 import type { Env } from "../env.ts";
 import type { Logger } from "../lib/log.ts";
 import type { PolicyRules } from "../policy/rules.ts";
@@ -93,6 +93,7 @@ function emptyCache(): CallCache {
 function healthSystemInfo(
   row: HealthSystemRow,
   connection: ConnectionRow | undefined,
+  portal: PortalAccountRow | undefined,
 ): HealthSystemInfo {
   const config = parseJsonColumn(
     healthSystemConfigSchema,
@@ -110,6 +111,15 @@ function healthSystemInfo(
     lastFullRefreshAt: connection?.last_full_refresh_at ?? null,
     lastErrorCode: connection?.last_error_code ?? null,
     needsReauthSince: connection?.needs_reauth_since ?? null,
+    portal:
+      portal === undefined
+        ? null
+        : {
+            state: portal.session_state,
+            lastOkAt: portal.last_ok_at,
+            lastErrorCode: portal.last_error_code,
+            needsReauthSince: portal.needs_reauth_since,
+          },
   };
 }
 
@@ -207,12 +217,14 @@ async function loadMessageSync(repos: Repos): Promise<PortalMessageSyncEntry[]> 
 }
 
 async function loadHealthSystems(repos: Repos): Promise<HealthSystemInfo[]> {
-  const [rows, connections] = await Promise.all([
+  const [rows, connections, portals] = await Promise.all([
     repos.healthSystems.list(),
     repos.connections.list(),
+    repos.portalAccounts.list(),
   ]);
   const byHealthSystem = new Map(connections.map((row) => [row.health_system_id, row]));
-  return rows.map((row) => healthSystemInfo(row, byHealthSystem.get(row.id)));
+  const portalBy = new Map(portals.map((row) => [row.health_system_id, row]));
+  return rows.map((row) => healthSystemInfo(row, byHealthSystem.get(row.id), portalBy.get(row.id)));
 }
 
 export function makeToolDeps(options: ToolDepsOptions): ToolDeps {

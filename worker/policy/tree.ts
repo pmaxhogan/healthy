@@ -1595,6 +1595,9 @@ const HEALTH_SYSTEM_ROW = {
   lastFullRefreshAt: "string",
   lastErrorCode: "string",
   needsReauthSince: "string",
+  portalState: ["string", "Patient-portal session: active, needs_reauth, none or no_portal"],
+  portalLastOkAt: ["string", "When the patient portal last answered"],
+  portalLastErrorCode: "string",
 } as const;
 
 const RESOURCE_SYNC_ROW = {

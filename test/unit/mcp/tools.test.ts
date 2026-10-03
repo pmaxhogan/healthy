@@ -155,6 +155,30 @@ describe("health system selection", () => {
     expect(answer.items.map((item) => item.healthSystem)).toStrictEqual([NAME_A, NAME_B]);
   });
 
+  it("shows the patient portal's state beside the FHIR connection's", async () => {
+    world.state.healthSystems = world.state.healthSystems.map((healthSystem) =>
+      healthSystem.id === HEALTH_SYSTEM_B
+        ? { ...healthSystem, status: "not_connected", portal: null }
+        : healthSystem,
+    );
+    const answer = await callTool(world.client, "list_health_systems");
+
+    expect(answer.items).toMatchObject([
+      {
+        healthSystem: NAME_A,
+        status: "connected",
+        portalState: "active",
+        portalLastErrorCode: null,
+      },
+      {
+        healthSystem: NAME_B,
+        status: "not_connected",
+        portalState: "no_portal",
+        portalLastOkAt: null,
+      },
+    ]);
+  });
+
   it("narrows by health system id", async () => {
     const answer = await callTool(world.client, "get_conditions", {
       healthSystems: [HEALTH_SYSTEM_B],

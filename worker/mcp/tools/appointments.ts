@@ -37,53 +37,53 @@ import { respond } from "../respond.ts";
 
 import { readTool } from "./register.ts";
 
-import type { CoverageEntry, CoverageStatus } from "../coverage.ts";
-import type { HealthSystemInfo, ToolDeps } from "../deps.ts";
+import type { CoverageEntry } from "../coverage.ts";
+import type { HealthSystemInfo, PortalAccountInfo, ToolDeps } from "../deps.ts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-/** How long since the hourly calendar sync last touched a health system before its
- * portal-derived visits are called `stale` rather than `ok`. The sync runs hourly;
- * six gives it several missed runs of slack before flagging anything. */
+/** How long since the portal last answered a signed-in read before its visits are
+ * called `stale` rather than `ok`. The sync runs hourly and the keepalive every
+ * ten minutes; six hours gives several missed runs of slack before flagging. */
 const PORTAL_STALE_AFTER_SECONDS = 6 * 60 * 60;
 
 /**
  * A synthetic coverage entry per health system for the portal half of
  * `get_appointments`: upcoming visits come only from the patient portal (see
- * `worker/mcp/appointment-items.ts`), and the portal pass shares the same
- * hourly-cadence connection the FHIR calendar sync uses, so that connection's
- * own status (`worker/mcp/deps.ts`'s `HealthSystemInfo`) is the best signal this
- * layer has for whether upcoming visits are current. It is a coarser signal
- * than `fhir_sync_state` -- there is no per-resource-type sync state for a
- * portal visit -- so it is reported under a resource type of its own,
- * `PortalVisit`, rather than folded into `Encounter`.
+ * `worker/mcp/appointment-items.ts`), so the portal account's own state
+ * (`HealthSystemInfo.portal`: signed in or not, when it last answered, its last
+ * error) is what says whether they are current. A health system with no portal
+ * account reports `unsupported`. It is reported under a resource type of its
+ * own, `PortalVisit`, rather than folded into `Encounter`.
  */
 function portalCoverage(healthSystems: readonly HealthSystemInfo[], now: number): CoverageEntry[] {
-  return healthSystems.map((healthSystem) => {
-    const base = {
-      healthSystemId: healthSystem.id,
-      healthSystem: healthSystem.displayName,
-      resourceType: "PortalVisit",
-    };
-    if (healthSystem.status !== "connected" || healthSystem.needsReauthSince !== null) {
-      const status: CoverageStatus = "failed";
-      return {
-        ...base,
-        status,
-        ...(healthSystem.lastErrorCode !== null && { errorCode: healthSystem.lastErrorCode }),
-      };
-    }
-    if (healthSystem.lastSyncAt === null) {
-      const status: CoverageStatus = "never";
-      return { ...base, status };
-    }
-    const ageSeconds = now - healthSystem.lastSyncAt;
-    if (ageSeconds > PORTAL_STALE_AFTER_SECONDS) {
-      const status: CoverageStatus = "stale";
-      return { ...base, status, ageHours: Math.floor(ageSeconds / 3600) };
-    }
-    const status: CoverageStatus = "ok";
-    return { ...base, status };
-  });
+  return healthSystems.map((healthSystem) => ({
+    healthSystemId: healthSystem.id,
+    healthSystem: healthSystem.displayName,
+    resourceType: "PortalVisit",
+    ...portalCoverageOf(healthSystem.portal, now),
+  }));
+}
+
+/**
+ * One health system's portal coverage, from the portal account's own state.
+ *
+ * Never from the FHIR connection: a portal-only health system has none, and a
+ * FHIR grant that needs re-authorising says nothing about the portal session.
+ */
+function portalCoverageOf(
+  portal: PortalAccountInfo | null,
+  now: number,
+): Pick<CoverageEntry, "status" | "errorCode" | "ageHours"> {
+  // No portal account: this health system's visits come from FHIR alone.
+  if (portal === null) return { status: "unsupported" };
+  const errorCode = portal.lastErrorCode === null ? {} : { errorCode: portal.lastErrorCode };
+  if (portal.state === "needs_reauth") return { status: "failed", ...errorCode };
+  // Credentials saved but never signed in, or signed in but never read yet.
+  if (portal.state === "none" || portal.lastOkAt === null) return { status: "never", ...errorCode };
+  const ageSeconds = now - portal.lastOkAt;
+  return ageSeconds > PORTAL_STALE_AFTER_SECONDS
+    ? { status: "stale", ageHours: Math.floor(ageSeconds / 3600) }
+    : { status: "ok" };
 }
 
 const APPOINTMENT_ARGS = toolArgs({
