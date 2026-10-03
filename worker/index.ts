@@ -34,6 +34,7 @@
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 
 import { app } from "./app.ts";
+import { toDevOrigin } from "./lib/dev-origin.ts";
 import { handleInboundEmail } from "./mail/handler.ts";
 import { MCP_API_ROUTE, oauthCoreFor, resourceFor } from "./mcp/oauth-config.ts";
 import { HealthyMcp } from "./mcp/server.ts";
@@ -89,7 +90,9 @@ function oauthProviderFor(request: Request): OAuthProvider<Env> {
 
 export default {
   fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    return oauthProviderFor(request).fetch(request, env, ctx);
+    // A no-op outside `wrangler dev`: see `worker/lib/dev-origin.ts`.
+    const served = toDevOrigin(request, env);
+    return oauthProviderFor(served).fetch(served, env, ctx);
   },
 
   /**

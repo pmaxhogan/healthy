@@ -45,6 +45,8 @@ export interface Env {
    * check -- and nothing else -- so the password gate still applies.
    */
   DEV_MODE: string;
+  /** Local development only: the loopback origin `wrangler dev` serves on. See `lib/dev-origin.ts`. */
+  DEV_ORIGIN?: string;
 
   // --- Secrets (`wrangler secret put`, or .dev.vars locally) ---------------
   /** Cloudflare Access team domain, e.g. "<team>.cloudflareaccess.com". */

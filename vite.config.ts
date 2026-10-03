@@ -13,6 +13,13 @@ import { defineConfig } from "vite";
 // script and CSS straight into the HTML with no /assets/* files of its own --
 // see that file's comment for why a shared multi-entry build cannot do this.
 // `npm run build` runs both configs in sequence.
+/**
+ * Where `npm run dev:worker` listens. Overridable for a second checkout running
+ * its own Worker on another port; set `DEV_ORIGIN` in that checkout's `.dev.vars`
+ * to the same origin (see `worker/lib/dev-origin.ts`).
+ */
+const WORKER_ORIGIN = process.env.HEALTHY_DEV_WORKER ?? "http://localhost:8787";
+
 export default defineConfig({
   plugins: [vue()],
   resolve: {
@@ -33,13 +40,13 @@ export default defineConfig({
     // owns to `npm run dev:worker`, so the auth gates and the OAuth callbacks
     // behave the same locally as in production.
     proxy: {
-      "/api": "http://localhost:8787",
-      "/auth": "http://localhost:8787",
+      "/api": WORKER_ORIGIN,
+      "/auth": WORKER_ORIGIN,
       // The OAuth starts, callbacks and reconnect links are full page navigations
       // the SPA hands off to the Worker; without them proxied, every Connect
       // button in `npm run dev` would 404 against Vite. The reconnect route lives
       // under /oauth too, so this one entry covers all of them.
-      "/oauth": "http://localhost:8787",
+      "/oauth": WORKER_ORIGIN,
     },
   },
 });

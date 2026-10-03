@@ -277,6 +277,13 @@ npm run check         # lint, typecheck, knip, test, build -- what CI runs
 npm run fix           # eslint --fix + prettier --write
 ```
 
+Locally, `wrangler dev` presents every request as plain http on the routed
+custom domain; with `DEV_MODE=true` in `.dev.vars` the Worker puts it back on
+`http://localhost:8787` before anything reads it (`worker/lib/dev-origin.ts`),
+which is what lets the OAuth provider start at all. To run a second Worker on
+another port, set `DEV_ORIGIN=http://localhost:<port>` in that checkout's
+`.dev.vars` and start Vite with `HEALTHY_DEV_WORKER` set to the same origin.
+
 `npm run check` is the only gate that matters: it is what CI runs, what the
 pre-push hook runs, and what Workers Builds runs before deploying. See
 [docs/development.md](docs/development.md) for the rest.
