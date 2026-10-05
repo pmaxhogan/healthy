@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2026-09-24T23:56:17.598Z",
+  "generatedAt": "2026-10-05T18:29:12.619Z",
   "source": "https://open.epic.com/Endpoints/Brands",
-  "count": 771,
+  "count": 773,
   "brands": [
     {
       "id": "c5f287a7-e01d-4745-a773-ce0d41710e55",
@@ -47,14 +47,6 @@
       "id": "34c5e440-4af4-44e8-a17e-98c8bc9a3cd1",
       "name": "Adapt Integrated Health Care",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MYCHARTADAPTIHC/api/FHIR/R4"
-    },
-    {
-      "id": "a1d3c763-ebee-4b40-95b9-9c862375c897",
-      "name": "Advance Community Health",
-      "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MYCHARTADVANCECH/api/FHIR/R4",
-      "locations": [
-        "Raleigh, NC"
-      ]
     },
     {
       "id": "8e01fff4-722f-4cf0-8b6c-1d789a7f33d3",
@@ -262,6 +254,14 @@
       ]
     },
     {
+      "id": "a1d3c763-ebee-4b40-95b9-9c862375c897",
+      "name": "Amplify Health",
+      "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MYCHARTADVANCECH/api/FHIR/R4",
+      "locations": [
+        "Raleigh, NC"
+      ]
+    },
+    {
       "id": "61259356-535b-4060-afd3-0eff674c696b",
       "name": "AnMed Health",
       "fhirBaseUrl": "https://epicproxy.et0971.epichosted.com/FHIRProxy/api/FHIR/R4",
@@ -326,6 +326,24 @@
         "FONTANA, CA",
         "Barstow, CA",
         "Yucca Valley, CA"
+      ]
+    },
+    {
+      "id": "4ef25aad-f45a-4d68-87fd-f31f44a91b62",
+      "name": "Articularis",
+      "fhirBaseUrl": "https://epicproxy.et4006.epichosted.com/FHIRProxyPRD/api/FHIR/R4",
+      "locations": [
+        "Columbia, SC",
+        "GREENWOOD, SC",
+        "Simpsonville, SC",
+        "SUMMERVILLE, SC",
+        "Mt Pleasant, SC"
+      ],
+      "aliases": [
+        "Northwest Orthopaedic Specialists",
+        "Rebound Orthopedic and Neurosurgery",
+        "Reno Orthopedic Center",
+        "The Center"
       ]
     },
     {
@@ -542,7 +560,7 @@
       "name": "Bailey Medical Center",
       "fhirBaseUrl": "https://epicproxy.ardenthealth.com/fhir/BMC/api/FHIR/R4",
       "locations": [
-        "Tulsa, OK",
+        "TULSA, OK",
         "OWASSO, OK"
       ]
     },
@@ -984,8 +1002,8 @@
       "name": "BSA",
       "fhirBaseUrl": "https://epicproxy.ardenthealth.com/fhir/BSA/api/FHIR/R4",
       "locations": [
-        "Amarillo, TX",
-        "AMARILLO, TX"
+        "AMARILLO, TX",
+        "Amarillo, TX"
       ]
     },
     {
@@ -1515,6 +1533,11 @@
       ]
     },
     {
+      "id": "8c458f7c-f076-4cbb-8957-d0977cd18dde",
+      "name": "Children's Minnesota",
+      "fhirBaseUrl": "https://epicproxy.et1444.epichosted.com/APIPROXYPRD/HOME/api/FHIR/R4"
+    },
+    {
       "id": "952334e3-5dc7-4e5f-8cb4-071c315a70bc",
       "name": "Children's Nebraska",
       "fhirBaseUrl": "https://EPROXY1.chsomaha.org/FHIRPROXY/api/FHIR/R4",
@@ -1572,6 +1595,18 @@
         "Chalfont, PA",
         "Bethlehem, PA",
         "Philadelphia, PA"
+      ]
+    },
+    {
+      "id": "db8c5bc8-5c92-4d5e-af4b-c63fc7a91179",
+      "name": "ChristianaCare",
+      "fhirBaseUrl": "https://epicproxy.et1461.epichosted.com/FHIRProxyPRD/MYCHART/api/FHIR/R4",
+      "locations": [
+        "Wilmington, DE",
+        "North East, MD",
+        "Middltown, DE",
+        "Aston, PA",
+        "New Castle, DE"
       ]
     },
     {
@@ -1823,11 +1858,11 @@
       "name": "Community Health of South Florida",
       "fhirBaseUrl": "https://epicproxy.et1256.epichosted.com/FHIRProxy/api/FHIR/R4",
       "locations": [
+        "Waterford, MI",
         "CLEARWATER, FL",
         "TAMPA, FL",
         "Missoula, MT",
-        "Houston, TX",
-        "Miami, FL"
+        "Houston, TX"
       ],
       "aliases": [
         "Broward Community and Family Health Centers",
@@ -1957,6 +1992,7 @@
         "Madison Ridgeland Medical Clinic",
         "MEA Medical Clinic",
         "Neighborhood Health Clinic",
+        "North Sunflower Medical Center",
         "Our Lady of the Lake LSU",
         "Southwest Mississippi Regional Medical Center",
         "The Baton Rouge Clinic",
@@ -2549,7 +2585,10 @@
       "name": "Fairview Range",
       "fhirBaseUrl": "https://sfd.fairview.org/FHIR/Range/api/FHIR/R4",
       "locations": [
-        "Hibbing, MN"
+        "MOUNTAIN IRON, MN",
+        "Hibbing, MN",
+        "HIBBING, MN",
+        "NASHWAUK, MN"
       ]
     },
     {
@@ -4425,11 +4464,11 @@
       "name": "Monument Health",
       "fhirBaseUrl": "https://ehrmobile.monument.health/interconnect-prd-fhir/api/FHIR/R4",
       "locations": [
+        "Rapid City, SD",
         "RAPID CITY, SD",
         "NEWCASTLE, WY",
         "SPEARFISH, SD",
-        "UPTON, WY",
-        "BUFFALO, SD"
+        "UPTON, WY"
       ]
     },
     {
@@ -4993,8 +5032,7 @@
         "OKEMAH, OK",
         "STILLWATER, OK",
         "TULSA, OK",
-        "MUSKOGEE, OK",
-        "Tulsa, OK"
+        "MUSKOGEE, OK"
       ]
     },
     {
@@ -5166,6 +5204,21 @@
         "LAURINBURG, NC",
         "BELMONT, NC",
         "MATTHEWS, NC"
+      ]
+    },
+    {
+      "id": "d3150bba-ca64-4eeb-ac86-3c10290f30f0",
+      "name": "Orthopaedic & Spine Center of the Rockies",
+      "fhirBaseUrl": "https://ss.uch.edu/FHIRProxy/api/FHIR/R4",
+      "locations": [
+        "FORT COLLINS, CO",
+        "VAIL, CO",
+        "GLENWOOD SPRINGS, CO"
+      ],
+      "aliases": [
+        "UCHealth Affiliated Clinics and Hospitals MyChart",
+        "Vail Health",
+        "Valley View Hospital"
       ]
     },
     {
@@ -5665,7 +5718,7 @@
         "Covenant Health",
         "Community Memorial Healthcare",
         "Columbia Gorge Family Medicine",
-        "Credena Health",
+        "Credena Health, Pharmacy Home Delivery",
         "Curry Health Network",
         "Fairchild Medical Center",
         "Family Medical Group",
@@ -6257,6 +6310,11 @@
       ]
     },
     {
+      "id": "ff69eebd-2fa5-42df-98e4-ede01c791227",
+      "name": "Sarasota Memorial Health MyChart",
+      "fhirBaseUrl": "https://epicproxy.et1465.epichosted.com/APIProxyPRD/HOME/api/FHIR/R4"
+    },
+    {
       "id": "68c6c469-0873-42c6-ab4c-974a4c525591",
       "name": "Sawtooth Mountain Clinic",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/SMC/api/FHIR/R4",
@@ -6377,13 +6435,16 @@
     {
       "id": "628c78f7-4491-4326-9b86-41dbc3850db6",
       "name": "SGMC",
-      "fhirBaseUrl": "https://epicproxy.et1024.epichosted.com/FHIRProxy/PARENT/api/FHIR/R4",
+      "fhirBaseUrl": "https://epicproxy.et1024.epichosted.com/FHIRProxy/api/FHIR/R4",
       "locations": [
         "Valdosta, GA",
         "Hahira, GA",
         "VALDOSTA, GA",
         "Nashville, GA",
         "Lake Park, GA"
+      ],
+      "aliases": [
+        "Wiregrass Student Health Clinic"
       ]
     },
     {
@@ -7059,24 +7120,6 @@
       ]
     },
     {
-      "id": "9ba7a5fd-7ed8-4bbe-af9b-fe62fb28ff68",
-      "name": "The Center",
-      "fhirBaseUrl": "https://epicproxy.et4006.epichosted.com/FHIRProxyPRD/api/FHIR/R4",
-      "locations": [
-        "John Day, OR",
-        "BEND, OR",
-        "Bend, OR",
-        "La Pine, OR",
-        "POST FALLS, ID"
-      ],
-      "aliases": [
-        "Articularis",
-        "Northwest Orthopaedic Specialists",
-        "Rebound Orthopedic and Neurosurgery",
-        "Reno Orthopedic Center"
-      ]
-    },
-    {
       "id": "55109b1a-3932-4e65-aec2-87d69e68ddec",
       "name": "The Centers",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MYCHARTCHS/api/FHIR/R4",
@@ -7420,26 +7463,9 @@
       "locations": [
         "THORNTON, CO",
         "COLORADO SPRINGS, CO",
-        "FORT COLLINS, CO",
-        "WALSENBURG, CO",
-        "HIGHLANDS RANCH, CO"
-      ]
-    },
-    {
-      "id": "e1a9a64b-e623-4ab3-8208-84cb19c3d745",
-      "name": "UCHealth Affiliated Clinics and Hospitals MyChart",
-      "fhirBaseUrl": "https://ss.uch.edu/FHIRProxy/api/FHIR/R4",
-      "locations": [
         "DENVER, CO",
-        "GUNNISON, CO",
         "FORT COLLINS, CO",
-        "LITTLETON, CO",
-        "GILLETTE, WY"
-      ],
-      "aliases": [
-        "Orthopaedic & Spine Center of the Rockies",
-        "Vail Health",
-        "Valley View Hospital"
+        "WALSENBURG, CO"
       ]
     },
     {
@@ -7851,7 +7877,11 @@
       "name": "University of Minnesota Physicians",
       "fhirBaseUrl": "https://sfd.fairview.org/FHIR/UMP/api/FHIR/R4",
       "locations": [
-        "Minneapolis, MN"
+        "Minneapolis, MN",
+        "Wyoming, MN",
+        "MINNEAPOLIS, MN",
+        "Edina, MN",
+        "SAINT LOUIS PARK, MN"
       ]
     },
     {
@@ -8495,11 +8525,6 @@
       "locations": [
         "Winters, CA"
       ]
-    },
-    {
-      "id": "cdf7dc62-e4b8-482a-ac72-ff69975f736f",
-      "name": "Wiregrass Student Health Clinic",
-      "fhirBaseUrl": "https://epicproxy.et1024.epichosted.com/FHIRProxy/api/FHIR/R4"
     },
     {
       "id": "46930ef8-ab6d-4dec-90bf-2fad96030aea",
