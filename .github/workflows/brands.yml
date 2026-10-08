@@ -5,6 +5,16 @@ on:
     # Mondays 09:17 UTC
     - cron: "17 9 * * 1"
   workflow_dispatch: {}
+  # main requires PRs to be up to date before merging, and nothing rebases the
+  # refresh PR when another PR lands first (Dependabot only rebases its own),
+  # so it would sit "behind" until next week. A push to main re-runs this job
+  # -- only while a refresh PR is open -- to rebuild the PR on the new main.
+  push:
+    branches: [main]
+
+concurrency:
+  group: brands-refresh
+  cancel-in-progress: false
 
 # main requires 4 status checks (check, gitleaks, codeql, dependency-review)
 # plus a CodeQL code scanning result for the commit, so a push authenticated
@@ -30,7 +40,26 @@ permissions:
   pull-requests: write
 
 jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - name: Run unless this is a push with no refresh PR open
+        id: gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "push" ] ||
+            [ -n "$(gh pr list --repo "$GITHUB_REPOSITORY" --head chore/brands-refresh --base main --state open --json number --jq '.[0].number // empty')" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
   refresh:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -55,6 +84,16 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # main already matches upstream, so an open refresh PR has nothing left
+      # to merge; left alone it would sit "behind" forever.
+      - name: Close a refresh PR that is no longer needed
+        if: steps.diff.outputs.changed == 'false'
+        run: |
+          existing=$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh pr close "$existing" --delete-branch --comment "main already matches the Epic brands index."
           fi
 
       - name: Push refresh branch
