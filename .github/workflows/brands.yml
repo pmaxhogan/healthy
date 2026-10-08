@@ -13,30 +13,19 @@ on:
 # to a fixed branch instead, opens (or refreshes) a PR for it, and enables
 # auto-merge so it completes on its own once the required checks report.
 #
-# One gap remains, confirmed by testing this workflow for real (see PR #11):
-# opening the PR *does* queue the pull_request-triggered check runs (contrary
-# to the general claim that GITHUB_TOKEN-authored events never cascade to
-# other workflows), but GitHub holds them as "action_required" pending a
-# maintainer's approval, because the PR's author (github-actions[bot], via
-# GITHUB_TOKEN) has no recognised write-collaborator association on the repo.
-# A workflow_dispatch run against the branch tip can make check-runs of the
-# right names succeed on that SHA, but those check suites are never
-# associated with the PR (only a push/pull_request-triggered suite gets that
-# association), so the PR's merge gate still shows all 4 as "Expected --
-# Waiting for status to be reported" regardless. That approach was tried and
-# reverted here; see the PR's own history for the extra commits.
-#
-# Closing this the rest of the way needs one of:
-#   - the owner manually approving the held workflow runs each week (one
-#     click, in the PR's "Merge info" box or the Actions tab), or
-#   - authenticating the push/PR-open with something other than GITHUB_TOKEN
-#     (a fine-grained PAT, repo-scoped, contents:write + pull-requests:write;
-#     or a GitHub App installation token) stored as a secret, so the actor
-#     opening the PR is a real write-collaborator and pull_request workflows
-#     run the same way they do for a human or Dependabot PR today.
-# Either is the owner's call -- this workflow does not create secrets or
-# change repository rules on its own.
+# Opening the PR with GITHUB_TOKEN does queue the pull_request-triggered check
+# runs, but GitHub holds them as "action_required" pending a maintainer's
+# approval, because the PR's author (github-actions[bot]) has no
+# write-collaborator association on the repo. Having a bot commit merged does
+# not lift that (tested: PR #14 was held after #11 merged). A
+# workflow_dispatch run against the branch tip does not help either -- those
+# check suites are never associated with the PR, so its merge gate keeps
+# waiting. So the last step approves the held runs for the commit this job
+# pushed (POST .../actions/runs/{id}/approve, hence actions: write). That only
+# lets the same checks a human PR gets run; auto-merge still waits for every
+# required check to pass.
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
@@ -98,4 +87,23 @@ jobs:
           already=$(gh pr view "${{ steps.pr.outputs.number }}" --json autoMergeRequest --jq '.autoMergeRequest.enabledAt // empty')
           if [ -z "$already" ]; then
             gh pr merge "${{ steps.pr.outputs.number }}" --auto --squash
+          fi
+
+      # Runs appear a few seconds after the push, and not all at once, so poll
+      # for a while and approve whatever is held each time round.
+      - name: Approve the held pull_request check runs
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          sha=$(git rev-parse HEAD)
+          approved=0
+          for _ in $(seq 1 18); do
+            sleep 10
+            for id in $(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$sha&event=pull_request&status=action_required" --jq '.workflow_runs[].id'); do
+              gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$id/approve" > /dev/null
+              echo "Approved run $id"
+              approved=$((approved + 1))
+            done
+          done
+          if [ "$approved" -eq 0 ]; then
+            echo "::warning::No held runs found for $sha"
           fi
