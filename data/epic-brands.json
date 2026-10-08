@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2026-10-05T18:29:12.619Z",
+  "generatedAt": "2026-10-08T20:13:25.492Z",
   "source": "https://open.epic.com/Endpoints/Brands",
-  "count": 773,
+  "count": 772,
   "brands": [
     {
       "id": "c5f287a7-e01d-4745-a773-ce0d41710e55",
@@ -4614,9 +4614,9 @@
       "locations": [
         "GOODYEAR, AZ",
         "MARANA, AZ",
+        "MESA, AZ",
         "Peoria, AZ",
-        "Surprise, AZ",
-        "SAN TAN VALLEY, AZ"
+        "Surprise, AZ"
       ]
     },
     {
@@ -4636,6 +4636,18 @@
         "Karu Medical Associates",
         "Mackinac Straits Health System",
         "Nimkee"
+      ]
+    },
+    {
+      "id": "2aa70a71-917d-42f7-836d-1c1bb0b93bf8",
+      "name": "MyUPMC",
+      "fhirBaseUrl": "https://epicent-prd-rp.upmc.com/PRD-OAUTH2/api/FHIR/R4",
+      "locations": [
+        "Elizabeth, PA",
+        "Pleasant Hills, PA",
+        "Harrisburg, PA",
+        "Bedford, PA",
+        "PITTSBURGH, PA"
       ]
     },
     {
@@ -7556,6 +7568,7 @@
         "Van Buren County Hospital",
         "Veterans Memorial Hospital",
         "Washington County Hospital and Clinics",
+        "Waverly Health Center",
         "Winneshiek Medical Center"
       ]
     },
@@ -7968,30 +7981,6 @@
         "Charlottesville, VA",
         "Nellysford, VA",
         "FREDERICKSBURG, VA"
-      ]
-    },
-    {
-      "id": "ed8e5e27-4661-4484-8480-9b3c89be03ec",
-      "name": "UPMC",
-      "fhirBaseUrl": "https://epic-fhir-prd.upmc.com/FHIR-PRD/api/FHIR/R4",
-      "locations": [
-        "HUNTINGDON, PA",
-        "MC KEES ROC*, PA",
-        "Altoona, PA",
-        "WEXFORD, PA",
-        "HAMBURG, NY"
-      ]
-    },
-    {
-      "id": "2aa70a71-917d-42f7-836d-1c1bb0b93bf8",
-      "name": "UPMC Patient Portal",
-      "fhirBaseUrl": "https://epicent-prd-rp.upmc.com/PRD-OAUTH2/api/FHIR/R4",
-      "locations": [
-        "Elizabeth, PA",
-        "Pleasant Hills, PA",
-        "Harrisburg, PA",
-        "Bedford, PA",
-        "PITTSBURGH, PA"
       ]
     },
     {
