@@ -101,13 +101,34 @@ npm run epic-org-secret -- --org <organisation id> --env nonprod   # non-product
 ```
 
 `<organisation id>` is the number the developer portal shows for that
-organisation. Supply the printed value as the client secret when you enable
-the organisation, and enter the same id as the health system's **Epic
-organisation id** in the admin UI. The Worker recomputes the secret whenever it
-needs it, so nothing per organisation is stored, each organisation and
-environment still gets a different secret as Epic asks, and an organisation can
-be enabled long before you ever connect to it. A secret pasted into the admin UI
-still takes precedence, so organisations registered the other way keep working.
+organisation. Register the printed value as the organisation's client secret,
+and enter the same id as the health system's **Epic organisation id** in the
+admin UI. The Worker recomputes the secret whenever it needs it, so nothing per
+organisation is stored, each organisation and environment still gets a different
+secret as Epic asks, and an organisation can be enabled long before you ever
+connect to it. A secret pasted into the admin UI still takes precedence, so
+organisations registered the other way keep working.
+
+Three things about the developer portal's form, as observed when this was
+written **(verify)**:
+
+- An organisation has to be activated for non-production before the portal
+  will let you activate it for production, so both secrets are needed even if
+  you only ever use production.
+- The portal sends Epic a hash of the secret, never the secret itself, so a
+  value you lose cannot be recovered from Epic -- which is the reason to derive
+  it.
+- The dialog only offers **Get Secret**, which fills in a random value; there
+  is no field to type your own into. The value lives in the page's own model
+  until you press Activate, so supplying yours means setting it there from the
+  browser console, with the dialog open on **Other -> Client Secret**:
+
+  ```js
+  // "NonProdAuthData" for non-production, "ProdAuthData" for production
+  ko.dataFor(document.querySelector("#EnableKeysModal .modal-body"))
+    .NonProdAuthData()
+    .PendingClientSecret("<printed value>");
+  ```
 
 The key is permanent — see [docs/operations.md](operations.md).
 
