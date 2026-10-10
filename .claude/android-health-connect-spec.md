@@ -89,7 +89,7 @@ is delivered.
     root-directory setting (`npm run check` and `npm run deploy` at the repo
     root fan into `worker/`). Then the Workers Builds repoint is optional and
     the only required dashboard change is the Access bypass entry for
-    `/ingest/*`. If the executing session repoints anyway, do it after wave 0
+    `/ingest/health-connect`. If the executing session repoints anyway, do it after wave 0
     is green on `main`, never before.
 
 ### Worker architecture
@@ -387,9 +387,10 @@ Use `git mv` so history follows. Checklist of everything path-dependent:
 - `README.md`, `docs/development.md` layout table, `CLAUDE.md` paths
   (`worker/**` vs `src/**` rule, `.local/`, `scripts/slim-brands.mjs`),
   `SECURITY.md` path mentions, `CONTRIBUTING.md`.
-- `.dev.vars` is gitignored and local: tell the owner (push) that it must be
-  moved into `worker/` by hand, or copy it yourself since `.local/` style
-  files are not in the repo.
+- `.dev.vars` is gitignored and local. This worktree has no `.dev.vars` and
+  no `.local/`; both exist only in the main checkout. Copy `.dev.vars` into
+  `worker/` (read it from the main checkout; never edit anything there) before
+  the first `wrangler dev`.
 
 Gate: `npm run check` green at root; `npm run dev:worker` serves `/health`;
 push to `main`; Workers Builds green; production `/health` returns `{"ok":true}`
@@ -609,9 +610,9 @@ Implement all eleven tools per audit section 8.2 against the sealed store:
   caller-liftable exception and always says `truncated`.
 - **Naming.** "health system", never "provider"; "device" or "phone" for the
   companion source; "practitioner" for clinicians.
-- **Conventional commits**, body explains why. End commit messages with
-  `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>` only if the
-  executing harness's own attribution rule says so; otherwise follow its rule.
+- **Conventional commits**, body explains why. Attribution trailers follow
+  the executing harness's own rule; never put a model identifier in a commit,
+  comment or tracked file.
 
 ## 7. Standing answers and memory to record (do it in wave 4, not before)
 
@@ -662,9 +663,8 @@ monorepo, device tokens, sealed hour chunks), and an update to
   modmed-fhir-app") is working in the main checkout.
 - Owner's phone: Pixel 8, Android 17 (API 37), Health Connect module
   2026.09.03, reachable over wireless adb from this PC (`adb devices` lists
-  it; a Quest 3 is also attached, ignore it). Health Connect writers present
-  include the wearable's app and the BP cuff's app; the audit's open question
-  about the doubled BP readings is answered by `dataOrigin` once data flows.
+  it; a second, unrelated device is also attached, ignore it). Health Connect
+  writers are identified by `dataOrigin` once data flows.
 - This PC: Android SDK at `%LOCALAPPDATA%\Android\Sdk` with platforms 28, 33,
   34, 35, 36, 36.1, build-tools up to 37.0.0, emulator, system images for 34
   and 37; no `cmdline-tools`; JDK 21 (`C:\Program Files\Java\jdk-21`); adb on
