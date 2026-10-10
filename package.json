@@ -34,6 +34,7 @@
     "set-password": "tsx scripts/set-password.ts",
     "gen-data-key": "tsx scripts/gen-data-key.ts",
     "set-health-system-secret": "tsx scripts/set-health-system-secret.ts",
+    "epic-org-secret": "tsx scripts/epic-org-secret.ts",
     "set-portal-credentials": "tsx scripts/set-portal-credentials.ts",
     "record-fixtures": "tsx scripts/record-fixtures.ts",
     "prepare": "lefthook install && wrangler types"

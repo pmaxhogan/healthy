@@ -387,6 +387,23 @@ describe("GET /oauth/callback", () => {
     expect(await testRepos().connections.getForHealthSystem(id)).toBeNull();
   });
 
+  it("connects with a derived secret when the organisation id is known and none is stored", async () => {
+    const id = await seedHealthSystem({ epicOrgId: "99001" });
+    const stub = stubEpic();
+    usePorts({ fetch: stub.fetchImpl });
+    recordingSync();
+    const state = await startFlow(id);
+
+    const response = await call(`/oauth/callback?code=auth-code&state=${state}`, {
+      headers: { cookie: owner().cookie },
+    });
+
+    expect(response.status).toBe(302);
+    expect(stub.requests.some((request) => request.method === "POST")).toBe(true);
+    const connection = await testRepos().connections.getForHealthSystem(id);
+    expect(connection?.status).toBe("connected");
+  });
+
   it("clears a prior needs_reauth state rather than only overwriting the tokens", async () => {
     const id = await seedHealthSystem({ clientSecret: SECRET });
     const repos = testRepos();

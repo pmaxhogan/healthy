@@ -61,6 +61,8 @@ const TEST_SECRETS: Record<string, string> = {
   GOOGLE_CLIENT_SECRET: "test-client-secret",
   EPIC_CLIENT_ID_PROD: "test-epic-prod",
   EPIC_CLIENT_ID_NONPROD: "test-epic-nonprod",
+  // Generated for the same reason DATA_KEY is.
+  EPIC_ORG_SECRET_KEY: randomBytes(32).toString("base64"),
   TRELLO_KEY: "test-key",
   TRELLO_TOKEN: "test-token",
   TRELLO_MUST_LIST_ID: "test-must-list",

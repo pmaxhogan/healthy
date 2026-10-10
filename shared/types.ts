@@ -24,9 +24,14 @@ export interface HealthSystemConfig {
   arrivalOffsetsByVisitType?: Record<string, number>;
   /** Short org label used by {orgShort}. */
   orgShort?: string;
+  /** The organisation's id in Epic's developer portal; lets the client secret be derived. */
+  epicOrgId?: string;
   /** Sync on/off without removing the connection. */
   enabled?: boolean;
 }
+
+/** Where a health system's client secret comes from: pasted in, derived from its organisation id, or nowhere yet. */
+export type ClientSecretSource = "stored" | "derived" | "none";
 
 export interface HealthSystemDto {
   id: string;
@@ -37,6 +42,7 @@ export interface HealthSystemDto {
   portalUrl: string | null;
   environment: HealthSystemEnvironment;
   hasClientSecret: boolean;
+  clientSecretSource: ClientSecretSource;
   config: HealthSystemConfig;
   connection: ConnectionDto | null;
   createdAt: string;

@@ -26,11 +26,13 @@ import { AppError } from "../../lib/errors.ts";
 import { newId } from "../../lib/ids.ts";
 import { all, one, run } from "../client.ts";
 import { aadFor, open, sealShort } from "../crypto.ts";
+import { deriveOrgClientSecret } from "../org-secret.ts";
 import { parseJsonColumn, healthSystemConfigSchema } from "../schemas.ts";
 
 import type { Ctx } from "../client.ts";
 import type { HealthSystemDbRow, HealthSystemEnvironment, HealthSystemRow } from "../rows.ts";
 import type { HealthSystemConfig, HealthSystemConfigInput } from "../schemas.ts";
+import type { ClientSecretSource } from "@shared/types.ts";
 
 interface CreateHealthSystem {
   vendor: string;
@@ -242,24 +244,49 @@ export function makeHealthSystemsRepo(ctx: Ctx) {
       );
     },
 
-    /** The decrypted secret, or null when the health system has none yet. */
+    /**
+     * The client secret: the stored one, else the one derived from the
+     * organisation id in the config, else null.
+     *
+     * A stored secret always wins, so an organisation registered before
+     * derivation existed (or with a secret Epic generated) keeps working.
+     */
     async getClientSecret(id: string): Promise<string | null> {
       const row = await require_(id);
-      return row.client_secret_enc === null
+      if (row.client_secret_enc !== null) {
+        return open(ctx.env, row.client_secret_enc, secretAad(id));
+      }
+      const orgId = derivableOrgId(ctx, configOf(row));
+      return orgId === null
         ? null
-        : open(ctx.env, row.client_secret_enc, secretAad(id));
+        : deriveOrgClientSecret(ctx.env.EPIC_ORG_SECRET_KEY ?? "", row.environment, orgId);
+    },
+
+    /** Where `getClientSecret` would get this row's secret from, without computing it. */
+    clientSecretSource(row: HealthSystemRow): ClientSecretSource {
+      if (row.client_secret_enc !== null) return "stored";
+      return derivableOrgId(ctx, configOf(row)) === null ? "none" : "derived";
     },
 
     /** The parsed per-health system overrides, defaults applied. */
     async getConfig(id: string): Promise<HealthSystemConfig> {
-      const row = await require_(id);
-      return parseJsonColumn(
-        healthSystemConfigSchema,
-        row.config_json,
-        `health_systems.config_json.${id}`,
-      );
+      return configOf(await require_(id));
     },
   };
+}
+
+function configOf(row: HealthSystemRow): HealthSystemConfig {
+  return parseJsonColumn(
+    healthSystemConfigSchema,
+    row.config_json,
+    `health_systems.config_json.${row.id}`,
+  );
+}
+
+/** The organisation id a secret can be derived for, or null when either half is missing. */
+function derivableOrgId(ctx: Ctx, config: HealthSystemConfig): string | null {
+  const key = ctx.env.EPIC_ORG_SECRET_KEY;
+  return key === undefined || key === "" ? null : (config.epic_org_id ?? null);
 }
 
 /** `row` with the identity columns of an already-opened copy of it. */

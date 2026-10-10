@@ -43,6 +43,7 @@ const displayName = ref("");
 const environment = ref<HealthSystemEnvironment>("prod");
 const clientSecret = ref("");
 const portalUrl = ref("");
+const epicOrgId = ref("");
 
 const manualFhirBaseUrl = ref("");
 const manualUrlTouched = ref(false);
@@ -122,6 +123,7 @@ function reset(): void {
   displayName.value = "";
   environment.value = "prod";
   clientSecret.value = "";
+  epicOrgId.value = "";
   portalUrl.value = "";
   manualFhirBaseUrl.value = "";
   manualUrlTouched.value = false;
@@ -143,6 +145,7 @@ async function submitBrand(): Promise<void> {
   const name = displayName.value.trim() || brand.name;
   const secret = clientSecret.value;
   const portal = portalUrl.value.trim();
+  const orgId = epicOrgId.value.trim();
 
   await create.run(async () => {
     const healthSystem = await endpoints.createHealthSystem({
@@ -151,6 +154,7 @@ async function submitBrand(): Promise<void> {
       environment: environment.value,
       ...(portal !== "" && { portalUrl: portal }),
       ...(secret !== "" && { clientSecret: secret }),
+      ...(orgId !== "" && { config: { epicOrgId: orgId } }),
     });
     toastSuccess(`${name} added. Connect it to finish.`);
     emit("created", { id: healthSystem.id, displayName: healthSystem.displayName });
@@ -172,6 +176,7 @@ async function submitManual(): Promise<void> {
   const url = manualFhirBaseUrl.value.trim();
   const secret = clientSecret.value;
   const portal = portalUrl.value.trim();
+  const orgId = epicOrgId.value.trim();
 
   await create.run(async () => {
     const healthSystem = await endpoints.createHealthSystem({
@@ -180,6 +185,7 @@ async function submitManual(): Promise<void> {
       environment: environment.value,
       ...(portal !== "" && { portalUrl: portal }),
       ...(secret !== "" && { clientSecret: secret }),
+      ...(orgId !== "" && { config: { epicOrgId: orgId } }),
     });
     toastSuccess(`${name} added. Connect it to finish.`);
     emit("created", { id: healthSystem.id, displayName: healthSystem.displayName });
@@ -258,6 +264,10 @@ async function submitManual(): Promise<void> {
             Patient portal URL <span class="muted">optional</span>
             <input v-model="portalUrl" type="url" autocomplete="off" />
           </label>
+          <label class="field">
+            Epic organisation id <span class="muted">optional, derives the client secret</span>
+            <input v-model="epicOrgId" autocomplete="off" inputmode="numeric" />
+          </label>
         </div>
 
         <div class="row">
@@ -303,6 +313,10 @@ async function submitManual(): Promise<void> {
         <label class="field">
           Patient portal URL <span class="muted">optional</span>
           <input v-model="portalUrl" type="url" autocomplete="off" />
+        </label>
+        <label class="field">
+          Epic organisation id <span class="muted">optional, derives the client secret</span>
+          <input v-model="epicOrgId" autocomplete="off" inputmode="numeric" />
         </label>
       </div>
 

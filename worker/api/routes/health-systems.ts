@@ -61,7 +61,12 @@ async function projectHealthSystem(
     api.repos.healthSystems.getConfig(row.id),
     api.repos.connections.getForHealthSystem(row.id),
   ]);
-  return toHealthSystemDto({ row, config, connection });
+  return toHealthSystemDto({
+    row,
+    config,
+    connection,
+    clientSecretSource: api.repos.healthSystems.clientSecretSource(row),
+  });
 }
 
 /**

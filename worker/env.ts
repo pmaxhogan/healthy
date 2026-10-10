@@ -67,6 +67,11 @@ export interface Env {
   /** Epic app client ids, one per Epic environment. */
   EPIC_CLIENT_ID_PROD?: string;
   EPIC_CLIENT_ID_NONPROD?: string;
+  /**
+   * base64 of 32 random bytes: the HMAC key per-organisation Epic client secrets
+   * are derived from. Never rotate it -- see `db/org-secret.ts`.
+   */
+  EPIC_ORG_SECRET_KEY?: string;
   /** Trello REST credentials and the two list ids used for re-auth cards. */
   TRELLO_KEY?: string;
   TRELLO_TOKEN?: string;

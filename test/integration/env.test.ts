@@ -57,6 +57,10 @@ describe("the integration environment", () => {
     expect(atob(String(key))).toHaveLength(32);
   });
 
+  it("binds a throwaway EPIC_ORG_SECRET_KEY the same way", () => {
+    expect(atob(String(secrets.EPIC_ORG_SECRET_KEY))).toHaveLength(32);
+  });
+
   it("does not relax the Access gate for the whole runtime", () => {
     // DEV_MODE mirrors wrangler.jsonc. A suite that needs the gate relaxed passes
     // its own env to `app.fetch`; nothing gets it for free.

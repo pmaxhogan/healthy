@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { deriveOrgClientSecret } from "../../../worker/db/org-secret.ts";
 import { AppError } from "../../../worker/lib/errors.ts";
 
 import { OTHER_DATA_KEY, T0, clock, column, rawColumn, resetDb, testRepos } from "./helpers.ts";
@@ -82,6 +83,62 @@ describe("the health system client secret", () => {
     await repos.healthSystems.setClientSecret(healthSystem.id, "rotated-secret");
 
     expect(await repos.healthSystems.getClientSecret(healthSystem.id)).toBe("rotated-secret");
+  });
+
+  it("is derived from the organisation id when none is stored", async () => {
+    const keyBytes = crypto.getRandomValues(new Uint8Array(32));
+    const orgSecretKey = btoa(String.fromCodePoint(...keyBytes));
+    const repos = testRepos({ orgSecretKey });
+    const create = (environment: "prod" | "sandbox", orgId: string) =>
+      repos.healthSystems.create({
+        vendor: "epic",
+        displayName: "Example Health",
+        fhirBaseUrl: "https://fhir.example.test/R4",
+        environment,
+        config: { epic_org_id: orgId },
+      });
+    const prod = await create("prod", "99001");
+    const sameOrgAgain = await create("prod", "99001");
+    const nonprod = await create("sandbox", "99001");
+    const otherOrg = await create("prod", "99002");
+
+    const secret = await repos.healthSystems.getClientSecret(prod.id);
+
+    expect(secret).toBe(await deriveOrgClientSecret(orgSecretKey, "prod", "99001"));
+    // The organisation and environment decide it, not this app's row id.
+    expect(await repos.healthSystems.getClientSecret(sameOrgAgain.id)).toBe(secret);
+    expect(await repos.healthSystems.getClientSecret(nonprod.id)).not.toBe(secret);
+    expect(await repos.healthSystems.getClientSecret(otherOrg.id)).not.toBe(secret);
+    expect(repos.healthSystems.clientSecretSource(prod)).toBe("derived");
+    // Nothing was written: the column stays empty.
+    expect(await rawColumn("health_systems", "client_secret_enc", "id = ?", prod.id)).toBeNull();
+  });
+
+  it("prefers a stored secret over the derived one", async () => {
+    const repos = testRepos();
+    const healthSystem = await repos.healthSystems.create({
+      vendor: "epic",
+      displayName: "Example Health",
+      fhirBaseUrl: "https://fhir.example.test/R4",
+      clientSecret: "pasted-in-secret",
+      config: { epic_org_id: "99001" },
+    });
+
+    expect(await repos.healthSystems.getClientSecret(healthSystem.id)).toBe("pasted-in-secret");
+    expect(repos.healthSystems.clientSecretSource(healthSystem)).toBe("stored");
+  });
+
+  it("derives nothing without the derivation key", async () => {
+    const repos = testRepos({ orgSecretKey: "" });
+    const healthSystem = await repos.healthSystems.create({
+      vendor: "epic",
+      displayName: "Example Health",
+      fhirBaseUrl: "https://fhir.example.test/R4",
+      config: { epic_org_id: "99001" },
+    });
+
+    expect(await repos.healthSystems.getClientSecret(healthSystem.id)).toBeNull();
+    expect(repos.healthSystems.clientSecretSource(healthSystem)).toBe("none");
   });
 
   it("cannot be opened with a different DATA_KEY", async () => {

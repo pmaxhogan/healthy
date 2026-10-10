@@ -89,6 +89,28 @@ organisation and per environment (production vs. non-production). Request a
 secret only for the organisation(s) you actually intend to connect; nothing
 else needs enabling.
 
+#### Derived secrets
+
+You do not have to keep a secret per organisation. Mint a derivation key once
+(`npm run epic-org-secret -- --gen-key --put`, and copy it into `.dev.vars`),
+then for any organisation:
+
+```sh
+npm run epic-org-secret -- --org <organisation id>                 # production
+npm run epic-org-secret -- --org <organisation id> --env nonprod   # non-production
+```
+
+`<organisation id>` is the number the developer portal shows for that
+organisation. Supply the printed value as the client secret when you enable
+the organisation, and enter the same id as the health system's **Epic
+organisation id** in the admin UI. The Worker recomputes the secret whenever it
+needs it, so nothing per organisation is stored, each organisation and
+environment still gets a different secret as Epic asks, and an organisation can
+be enabled long before you ever connect to it. A secret pasted into the admin UI
+still takes precedence, so organisations registered the other way keep working.
+
+The key is permanent — see [docs/operations.md](operations.md).
+
 Propagation is not instant: expect on the order of an hour for a sandbox
 change to take effect, and considerably longer — up to roughly two days —
 for a newly Ready-for-Production app to appear at a given organisation once
@@ -110,7 +132,9 @@ Once the app is registered (sandbox is enough to start):
    that point rather than silently stored.
 3. Choose the **environment**: `sandbox` while testing, `prod` for a real
    organisation.
-4. Save, then open the health system and set its **client secret** — the one
+4. Save, then open the health system and either fill in its **Epic
+   organisation id** (if you registered a derived secret for it) or set its
+   **client secret** — the one
    provisioned for your app at that organisation in the previous section.
    This is write-only: once saved, the admin UI never displays it again. With
    no live browser session against that environment, `npm run

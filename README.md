@@ -136,22 +136,23 @@ None of these live in the repository. Set them with
 `wrangler secret put <NAME>`, or in a gitignored `.dev.vars` for local
 development (one `NAME=value` line each).
 
-| Secret                    | Where the value comes from                                                                               |
-| ------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `CF_ACCESS_TEAM_DOMAIN`   | Your Access team domain (`<team>.cloudflareaccess.com`). [setup-cloudflare.md](docs/setup-cloudflare.md) |
-| `CF_ACCESS_AUD`           | The Access application's Audience (AUD) tag. [setup-cloudflare.md](docs/setup-cloudflare.md)             |
-| `CF_ACCESS_ALLOWED_EMAIL` | The one identity allowed through — checked in the Worker, not just Access.                               |
-| `PASSWORD_HASH`           | `npm run set-password` (prompts for a password, uploads the hash).                                       |
-| `SESSION_SECRET`          | Any long random string, e.g. `openssl rand -base64 32`.                                                  |
-| `DATA_KEY`                | `npm run gen-data-key -- --put` (mints and uploads the AES-GCM key).                                     |
-| `GOOGLE_CLIENT_ID`        | The OAuth client from [setup-google.md](docs/setup-google.md).                                           |
-| `GOOGLE_CLIENT_SECRET`    | The OAuth client from [setup-google.md](docs/setup-google.md).                                           |
-| `EPIC_CLIENT_ID_PROD`     | Your app's production client id. [setup-epic.md](docs/setup-epic.md)                                     |
-| `EPIC_CLIENT_ID_NONPROD`  | Your app's sandbox client id. [setup-epic.md](docs/setup-epic.md)                                        |
-| `TRELLO_KEY`              | Trello API key. [setup-trello.md](docs/setup-trello.md)                                                  |
-| `TRELLO_TOKEN`            | Trello API token. [setup-trello.md](docs/setup-trello.md)                                                |
-| `TRELLO_MUST_LIST_ID`     | The Trello list new alert cards open in. [setup-trello.md](docs/setup-trello.md)                         |
-| `TRELLO_DONE_LIST_ID`     | The Trello list resolved alert cards move to. [setup-trello.md](docs/setup-trello.md)                    |
+| Secret                    | Where the value comes from                                                                                       |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `CF_ACCESS_TEAM_DOMAIN`   | Your Access team domain (`<team>.cloudflareaccess.com`). [setup-cloudflare.md](docs/setup-cloudflare.md)         |
+| `CF_ACCESS_AUD`           | The Access application's Audience (AUD) tag. [setup-cloudflare.md](docs/setup-cloudflare.md)                     |
+| `CF_ACCESS_ALLOWED_EMAIL` | The one identity allowed through — checked in the Worker, not just Access.                                       |
+| `PASSWORD_HASH`           | `npm run set-password` (prompts for a password, uploads the hash).                                               |
+| `SESSION_SECRET`          | Any long random string, e.g. `openssl rand -base64 32`.                                                          |
+| `DATA_KEY`                | `npm run gen-data-key -- --put` (mints and uploads the AES-GCM key).                                             |
+| `GOOGLE_CLIENT_ID`        | The OAuth client from [setup-google.md](docs/setup-google.md).                                                   |
+| `GOOGLE_CLIENT_SECRET`    | The OAuth client from [setup-google.md](docs/setup-google.md).                                                   |
+| `EPIC_CLIENT_ID_PROD`     | Your app's production client id. [setup-epic.md](docs/setup-epic.md)                                             |
+| `EPIC_CLIENT_ID_NONPROD`  | Your app's sandbox client id. [setup-epic.md](docs/setup-epic.md)                                                |
+| `EPIC_ORG_SECRET_KEY`     | Optional. The key per-organisation client secrets are derived from. `npm run epic-org-secret -- --gen-key --put` |
+| `TRELLO_KEY`              | Trello API key. [setup-trello.md](docs/setup-trello.md)                                                          |
+| `TRELLO_TOKEN`            | Trello API token. [setup-trello.md](docs/setup-trello.md)                                                        |
+| `TRELLO_MUST_LIST_ID`     | The Trello list new alert cards open in. [setup-trello.md](docs/setup-trello.md)                                 |
+| `TRELLO_DONE_LIST_ID`     | The Trello list resolved alert cards move to. [setup-trello.md](docs/setup-trello.md)                            |
 
 Per-organisation Epic client secrets are **not** Worker secrets: they are
 entered in the admin UI and stored encrypted in D1, one per health system,
@@ -162,6 +163,11 @@ exactly as the Worker does and writes it with `wrangler d1 execute`. The
 secret is read from the `HEALTH_SYSTEM_CLIENT_SECRET` environment variable, or
 from stdin if that is unset, so it is never a command-line argument or in
 shell history, and the command never prints it back.
+
+A health system that names its **Epic organisation id** needs no stored secret
+at all: with `EPIC_ORG_SECRET_KEY` set, the Worker derives one from the key, the
+environment and that id. `npm run epic-org-secret -- --org <id>` prints the same
+value to register with Epic. A stored secret, where there is one, always wins.
 
 A patient-portal login, where one is configured, is stored the same way and for
 the same reasons: sealed in D1 per organisation, never a Worker secret, and

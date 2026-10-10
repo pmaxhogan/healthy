@@ -64,6 +64,7 @@ const overrides: Partial<Env> = {
   GOOGLE_CLIENT_SECRET: "test-google-client-secret",
   EPIC_CLIENT_ID_NONPROD: "test-epic-nonprod-client-id",
   EPIC_CLIENT_ID_PROD: "test-epic-prod-client-id",
+  EPIC_ORG_SECRET_KEY: randomDataKey(),
   TRELLO_KEY: "test-trello-key",
   TRELLO_TOKEN: "test-trello-token",
   TRELLO_MUST_LIST_ID: "must-list",
@@ -265,7 +266,7 @@ async function resetDb(): Promise<void> {
 export const TEST_FHIR_BASE = "https://fhir.example.test/R4";
 
 export async function seedHealthSystem(
-  options: { clientSecret?: string; displayName?: string } = {},
+  options: { clientSecret?: string; displayName?: string; epicOrgId?: string } = {},
 ): Promise<string> {
   const repos = testRepos();
   const healthSystem = await repos.healthSystems.create({
@@ -275,6 +276,7 @@ export async function seedHealthSystem(
     portalUrl: "https://portal.example.test",
     environment: "sandbox",
     ...(options.clientSecret !== undefined && { clientSecret: options.clientSecret }),
+    ...(options.epicOrgId !== undefined && { config: { epic_org_id: options.epicOrgId } }),
   });
   return healthSystem.id;
 }

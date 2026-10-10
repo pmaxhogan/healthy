@@ -155,6 +155,7 @@ export function healthSystem(overrides: Partial<HealthSystemDto> = {}): HealthSy
     portalUrl: "https://portal.example.test",
     environment: "prod",
     hasClientSecret: true,
+    clientSecretSource: "stored",
     config: { titleTemplate: "{visitType} · {practitioner}", enabled: true },
     connection: connection(),
     createdAt: "2026-09-01T00:00:00.000Z",
@@ -292,6 +293,7 @@ export function overview(overrides: Partial<OverviewDto> = {}): OverviewDto {
         displayName: "Second Example Clinic",
         environment: "sandbox",
         hasClientSecret: false,
+        clientSecretSource: "none",
         connection: connection({
           id: "conn-2",
           healthSystemId: "prov-2",

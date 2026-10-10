@@ -133,13 +133,37 @@ describe("HealthSystemEditor", () => {
 
   it("reports whether a client secret is on file", () => {
     expect(mountEditor().text()).toContain("secret set");
-    expect(mountEditor(healthSystem({ hasClientSecret: false })).text()).toContain(
-      "no client secret",
-    );
+    expect(
+      mountEditor(healthSystem({ hasClientSecret: false, clientSecretSource: "none" })).text(),
+    ).toContain("no client secret");
+  });
+
+  it("says when the secret is derived rather than stored, and offers to set one", () => {
+    const wrapper = mountEditor(healthSystem({ clientSecretSource: "derived" }));
+
+    expect(wrapper.text()).toContain("secret derived");
+    expect(wrapper.find(".chip.danger").exists()).toBe(false);
+    expect(wrapper.findAll("button").some((b) => b.text() === "Set secret")).toBe(true);
+  });
+
+  it("sends the Epic organisation id with the config, and omits it when blank", async () => {
+    await save(mountEditor(healthSystem({ config: { epicOrgId: "99001", enabled: true } })));
+    const first = (lastMutation(api)?.body as { config: Record<string, unknown> }).config;
+    expect(first.epicOrgId).toBe("99001");
+
+    api = installFakeApi({
+      "/api/health-systems*": () => fakeResponse({ body: healthSystem() }),
+      "/api/health-systems/prov-1/portal": () => fakeResponse({ body: portalAccount() }),
+    });
+    await save(mountEditor(healthSystem({ config: { enabled: true } })));
+    const second = (lastMutation(api)?.body as { config: Record<string, unknown> }).config;
+    expect(second).not.toHaveProperty("epicOrgId");
   });
 
   it("flags a health system with no client secret as an error next to its name", () => {
-    const missing = mountEditor(healthSystem({ hasClientSecret: false })).find(".chip.danger");
+    const missing = mountEditor(
+      healthSystem({ hasClientSecret: false, clientSecretSource: "none" }),
+    ).find(".chip.danger");
     expect(missing.exists()).toBe(true);
     expect(missing.attributes("role")).toBe("alert");
     expect(missing.text()).toContain("No production client secret");
@@ -147,7 +171,11 @@ describe("HealthSystemEditor", () => {
   });
 
   it("names the sandbox secret for a sandbox health system", () => {
-    const dto = healthSystem({ hasClientSecret: false, environment: "sandbox" });
+    const dto = healthSystem({
+      hasClientSecret: false,
+      clientSecretSource: "none",
+      environment: "sandbox",
+    });
     expect(mountEditor(dto).find(".chip.danger").text()).toContain("No sandbox client secret");
   });
 

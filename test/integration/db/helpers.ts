@@ -46,11 +46,15 @@ export function blindKey(logicalKey: string, dataKey = TEST_DATA_KEY): Promise<s
 /** An arbitrary fixed instant: 2026-01-01T00:00:00Z, in unix seconds. */
 export const T0 = 1_767_225_600;
 
-function testEnv(dataKey = TEST_DATA_KEY): Env {
+function testEnv(dataKey = TEST_DATA_KEY, orgSecretKey?: string): Env {
   // `Cloudflare.Env` types HEALTHY_MCP as DurableObjectNamespace<HealthyMcp>,
   // which is narrower than the hand-written Env's plain DurableObjectNamespace.
   // That one difference is all the cast covers.
-  return { ...env, DATA_KEY: dataKey } as unknown as Env;
+  return {
+    ...env,
+    DATA_KEY: dataKey,
+    ...(orgSecretKey !== undefined && { EPIC_ORG_SECRET_KEY: orgSecretKey }),
+  } as unknown as Env;
 }
 
 /** A clock the test moves by hand, so TTLs and windows need no real waiting. */
@@ -68,13 +72,15 @@ export interface TestOptions {
   now?: () => number;
   log?: Logger;
   dataKey?: string;
+  /** Overrides the derivation key; "" stands for a deployment without one. */
+  orgSecretKey?: string;
 }
 
 export function testCtx(options: TestOptions = {}): Ctx {
   const base = { now: options.now ?? ((): number => T0) };
   return makeCtx(
     env.DB,
-    testEnv(options.dataKey),
+    testEnv(options.dataKey, options.orgSecretKey),
     options.log ? { ...base, log: options.log } : base,
   );
 }

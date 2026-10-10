@@ -212,6 +212,12 @@ put SESSION_SECRET`. This invalidates every existing session cookie; you
   already-sealed column unreadable. In practice, rotating it means
   re-authorising every Epic and Google connection from scratch and letting
   the FHIR cache repopulate — there is no in-place re-encryption path.
+- **`EPIC_ORG_SECRET_KEY`** — **do not rotate it.** Epic keeps a hash of
+  every client secret derived from it, so a new key disables the app at every
+  organisation that was registered with a derived secret until each is
+  re-registered in the developer portal. `npm run epic-org-secret -- --gen-key
+--put` refuses to overwrite an existing one. Keep a copy outside Cloudflare:
+  a Worker secret cannot be read back.
 - **A per-organisation Epic client secret** — set or rotate it from the
   health system's page in the admin UI (`POST /api/health-systems/:id/secret`), or, with
   no live browser session against that environment, `npm run

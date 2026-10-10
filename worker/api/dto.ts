@@ -38,6 +38,7 @@ import type {
   Settings,
 } from "../db/schemas.ts";
 import type {
+  ClientSecretSource,
   AlertDto,
   ConnectionDto,
   GoogleAccountDto,
@@ -128,6 +129,7 @@ export function toHealthSystemConfigDto(config: DbHealthSystemConfig): HealthSys
   if (config.color_id !== undefined) dto.colorId = config.color_id;
   if (config.arrival_offset_min !== undefined) dto.arrivalOffsetMin = config.arrival_offset_min;
   if (config.org_short !== undefined) dto.orgShort = config.org_short;
+  if (config.epic_org_id !== undefined) dto.epicOrgId = config.epic_org_id;
   return dto;
 }
 
@@ -143,6 +145,7 @@ export function fromHealthSystemConfigDto(
     input.arrival_offsets_by_visit_type = { ...config.arrivalOffsetsByVisitType };
   }
   if (config.orgShort !== undefined) input.org_short = config.orgShort;
+  if (config.epicOrgId !== undefined) input.epic_org_id = config.epicOrgId;
   if (config.enabled !== undefined) input.enabled = config.enabled;
   return input;
 }
@@ -181,6 +184,7 @@ export interface HealthSystemProjection {
   row: HealthSystemRow;
   config: DbHealthSystemConfig;
   connection: ConnectionRow | null;
+  clientSecretSource: ClientSecretSource;
 }
 
 /** A health system row (plus its parsed config and connection) -> `HealthSystemDto`. */
@@ -195,7 +199,8 @@ export function toHealthSystemDto(input: HealthSystemProjection): HealthSystemDt
     environment: input.row.environment,
     // The boolean, never the ciphertext: the admin UI only has to know whether
     // the per-organisation secret still needs to be pasted in.
-    hasClientSecret: input.row.client_secret_enc !== null,
+    hasClientSecret: input.clientSecretSource !== "none",
+    clientSecretSource: input.clientSecretSource,
     config: toHealthSystemConfigDto(input.config),
     connection: input.connection === null ? null : toConnectionDto(input.connection),
     createdAt: toIso(input.row.created_at),

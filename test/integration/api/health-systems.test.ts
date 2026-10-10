@@ -285,6 +285,35 @@ describe("GET and PATCH /api/health systems/:id", () => {
     expect(dto.config.enabled).toBe(false);
   });
 
+  it("counts the secret as set once the Epic organisation id is, without storing one", async () => {
+    const id = await seedHealthSystem();
+
+    const dto = await json<HealthSystemDto>(
+      await owner().send("PATCH", `/api/health-systems/${id}`, {
+        config: { epicOrgId: "99001" },
+      }),
+    );
+
+    expect(dto.config.epicOrgId).toBe("99001");
+    expect(dto.hasClientSecret).toBe(true);
+    expect(dto.clientSecretSource).toBe("derived");
+    // Replacing the config without the id takes the derived secret away again.
+    const cleared = await json<HealthSystemDto>(
+      await owner().send("PATCH", `/api/health-systems/${id}`, { config: {} }),
+    );
+    expect(cleared.clientSecretSource).toBe("none");
+  });
+
+  it("refuses an organisation id that is not one", async () => {
+    const id = await seedHealthSystem();
+
+    const response = await owner().send("PATCH", `/api/health-systems/${id}`, {
+      config: { epicOrgId: "12 3" },
+    });
+
+    expect(response.status).toBe(400);
+  });
+
   it("clears the portal URL with an explicit null", async () => {
     const id = await seedHealthSystem();
 

@@ -113,6 +113,7 @@ npx wrangler secret put GOOGLE_CLIENT_ID
 npx wrangler secret put GOOGLE_CLIENT_SECRET
 npx wrangler secret put EPIC_CLIENT_ID_PROD
 npx wrangler secret put EPIC_CLIENT_ID_NONPROD
+npm run epic-org-secret -- --gen-key --put   # optional: derived per-organisation secrets
 npx wrangler secret put TRELLO_KEY
 npx wrangler secret put TRELLO_TOKEN
 npx wrangler secret put TRELLO_MUST_LIST_ID

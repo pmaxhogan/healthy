@@ -34,6 +34,7 @@ const emit = defineEmits<{ changed: []; removed: [] }>();
 interface Draft {
   displayName: string;
   orgShort: string;
+  epicOrgId: string;
   portalUrl: string;
   titleTemplate: string;
   colorId: string | null;
@@ -46,6 +47,7 @@ function draftFrom(healthSystem: HealthSystemDto): Draft {
   return {
     displayName: healthSystem.displayName,
     orgShort: healthSystem.config.orgShort ?? "",
+    epicOrgId: healthSystem.config.epicOrgId ?? "",
     portalUrl: healthSystem.portalUrl ?? "",
     titleTemplate: healthSystem.config.titleTemplate ?? "",
     colorId: healthSystem.config.colorId ?? null,
@@ -76,6 +78,12 @@ watch(
 
 const status = computed(() => props.healthSystem.connection?.status ?? "disconnected");
 const href = computed(() => reconnectHref(props.healthSystem));
+const secretLabel = computed(
+  () =>
+    ({ stored: "secret set", derived: "secret derived", none: "no client secret" })[
+      props.healthSystem.clientSecretSource
+    ],
+);
 const effectiveTemplate = computed(() =>
   draft.titleTemplate === ""
     ? props.settings.defaultTitleTemplate || DEFAULT_TITLE_TEMPLATE
@@ -85,6 +93,7 @@ const effectiveTemplate = computed(() =>
 async function onSave(): Promise<void> {
   const template = draft.titleTemplate.trim();
   const orgShort = draft.orgShort.trim();
+  const epicOrgId = draft.epicOrgId.trim();
   const portal = draft.portalUrl.trim();
   const ok = await save.run(async () => {
     await endpoints.updateHealthSystem(props.healthSystem.id, {
@@ -99,6 +108,7 @@ async function onSave(): Promise<void> {
         enabled: draft.enabled,
         ...(template !== "" && { titleTemplate: template }),
         ...(orgShort !== "" && { orgShort }),
+        ...(epicOrgId !== "" && { epicOrgId }),
         ...(draft.colorId !== null && { colorId: draft.colorId }),
         ...(draft.arrivalOffsetMin !== null && { arrivalOffsetMin: draft.arrivalOffsetMin }),
       },
@@ -160,7 +170,7 @@ async function onRemove(): Promise<void> {
     <p class="muted">
       Last sync {{ relativeTime(healthSystem.connection?.lastSyncAt) }} · token
       {{ relativeTime(healthSystem.connection?.accessExpiresAt) }} ·
-      {{ healthSystem.hasClientSecret ? "secret set" : "no client secret" }}
+      {{ secretLabel }}
     </p>
 
     <div class="fields two">
@@ -171,6 +181,15 @@ async function onRemove(): Promise<void> {
       <label class="field">
         Short label — <code>{orgShort}</code>
         <input v-model="draft.orgShort" autocomplete="off" />
+      </label>
+      <label class="field">
+        Epic organisation id
+        <input
+          v-model="draft.epicOrgId"
+          autocomplete="off"
+          inputmode="numeric"
+          placeholder="optional — derives the client secret"
+        />
       </label>
       <label class="field">
         Patient portal URL
@@ -234,7 +253,7 @@ async function onRemove(): Promise<void> {
         Full refresh
       </button>
       <button class="small" @click="showSecret = !showSecret">
-        {{ healthSystem.hasClientSecret ? "Replace secret" : "Set secret" }}
+        {{ healthSystem.clientSecretSource === "stored" ? "Replace secret" : "Set secret" }}
       </button>
       <button class="small danger spacer" @click="confirming = true">Remove</button>
     </div>

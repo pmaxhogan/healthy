@@ -130,7 +130,12 @@ describe("toHealthSystemDto", () => {
   const config = healthSystemConfigSchema.parse(JSON.parse(healthSystemRow.config_json));
 
   it("reports that a client secret is set without carrying it", () => {
-    const dto = toHealthSystemDto({ row: healthSystemRow, config, connection: connectionRow });
+    const dto = toHealthSystemDto({
+      row: healthSystemRow,
+      config,
+      connection: connectionRow,
+      clientSecretSource: "stored",
+    });
 
     expect(dto.hasClientSecret).toBe(true);
     assertNoSecrets(dto);
@@ -141,14 +146,32 @@ describe("toHealthSystemDto", () => {
       row: { ...healthSystemRow, client_secret_enc: null },
       config,
       connection: null,
+      clientSecretSource: "none",
     });
 
     expect(dto.hasClientSecret).toBe(false);
     expect(dto.connection).toBeNull();
   });
 
+  it("counts a derivable secret as set, and says which kind it is", () => {
+    const dto = toHealthSystemDto({
+      row: { ...healthSystemRow, client_secret_enc: null },
+      config,
+      connection: null,
+      clientSecretSource: "derived",
+    });
+
+    expect(dto.hasClientSecret).toBe(true);
+    expect(dto.clientSecretSource).toBe("derived");
+  });
+
   it("does not carry config_json, only the parsed camelCase config", () => {
-    const dto = toHealthSystemDto({ row: healthSystemRow, config, connection: null });
+    const dto = toHealthSystemDto({
+      row: healthSystemRow,
+      config,
+      connection: null,
+      clientSecretSource: "stored",
+    });
 
     expect(JSON.stringify(dto)).not.toContain("config_json");
     expect(JSON.stringify(dto)).not.toContain("title_template");
@@ -164,6 +187,7 @@ describe("the health system config mapping", () => {
       arrival_offset_min: 15,
       arrival_offsets_by_visit_type: { "new patient": 30 },
       org_short: "EX",
+      epic_org_id: "99001",
       enabled: false,
     });
 
@@ -174,6 +198,7 @@ describe("the health system config mapping", () => {
       arrivalOffsetMin: 15,
       arrivalOffsetsByVisitType: { "new patient": 30 },
       orgShort: "EX",
+      epicOrgId: "99001",
       enabled: false,
     });
 

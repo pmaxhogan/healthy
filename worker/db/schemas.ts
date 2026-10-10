@@ -22,6 +22,8 @@ import { isHttpsUrl } from "@shared/url.ts";
 import { AppError } from "../lib/errors.ts";
 import { DEFAULT_MAIL_SENDER_ALLOWLIST_CSV } from "../mail/classify.ts";
 
+import { ORG_ID_PATTERN } from "./org-secret.ts";
+
 /** Parse one JSON column, reporting where the bad value came from. */
 export function parseJsonColumn<T>(schema: z.ZodType<T>, value: string, what: string): T {
   let decoded: unknown;
@@ -167,6 +169,11 @@ export const healthSystemConfigSchema = z.object({
   arrival_offsets_by_visit_type: z.record(z.string(), offsetMinutes).default({}),
   /** Short label for the org, used in title templates. */
   org_short: z.string().min(1).optional(),
+  /**
+   * The organisation's id in Epic's developer portal. With it, and no stored
+   * secret, the client secret is derived (see `org-secret.ts`).
+   */
+  epic_org_id: z.string().regex(ORG_ID_PATTERN).optional(),
   enabled: z.boolean().default(true),
 });
 

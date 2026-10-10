@@ -15,6 +15,8 @@ import { z } from "zod";
 import { MAX_PATH_LENGTH } from "@shared/policy-path.ts";
 import { isHttpsUrl } from "@shared/url.ts";
 
+import { ORG_ID_PATTERN } from "../db/org-secret.ts";
+
 import type {
   PortalDiscoverRequest,
   PutPortalAccountRequest,
@@ -121,6 +123,7 @@ const healthSystemConfigSchema = z.strictObject({
   arrivalOffsetMin: offsetMinutes.optional(),
   arrivalOffsetsByVisitType: z.record(z.string().min(1).max(200), offsetMinutes).optional(),
   orgShort: z.string().min(1).max(60).optional(),
+  epicOrgId: z.string().regex(ORG_ID_PATTERN).optional(),
   enabled: z.boolean().optional(),
 });
 
