@@ -22,6 +22,8 @@ import type {
   DeviceCoverageRowDto,
   DeviceDto,
   DeviceIngestLogDto,
+  DeviceIngestLogState,
+  DeviceIngestSummaryDto,
   CreateHealthSystemRequest,
   GoogleAccountDto,
   MailInboxEntryDto,
@@ -95,8 +97,20 @@ export const endpoints = {
     api.post(`/api/phone/devices/${encodeURIComponent(id)}/retry-failed`),
   deviceCoverage: (id: string, signal?: AbortSignal): Promise<DeviceCoverageRowDto[]> =>
     api.get(`/api/phone/devices/${encodeURIComponent(id)}/coverage`, signal),
-  deviceIngestLog: (id: string, signal?: AbortSignal): Promise<DeviceIngestLogDto[]> =>
-    api.get(`/api/phone/devices/${encodeURIComponent(id)}/ingest-log`, signal),
+  /** The newest `limit` batches, of one state when `state` is given. The Worker refuses a limit over 500. */
+  deviceIngestLog: (
+    id: string,
+    query: { limit: number; state: DeviceIngestLogState | null },
+    signal?: AbortSignal,
+  ): Promise<DeviceIngestLogDto[]> => {
+    const state = query.state === null ? "" : `&state=${query.state}`;
+    return api.get(
+      `/api/phone/devices/${encodeURIComponent(id)}/ingest-log?limit=${String(query.limit)}${state}`,
+      signal,
+    );
+  },
+  deviceIngestSummary: (id: string, signal?: AbortSignal): Promise<DeviceIngestSummaryDto> =>
+    api.get(`/api/phone/devices/${encodeURIComponent(id)}/ingest-summary`, signal),
 
   healthSystems: (signal?: AbortSignal): Promise<HealthSystemDto[]> =>
     api.get("/api/health-systems", signal),
