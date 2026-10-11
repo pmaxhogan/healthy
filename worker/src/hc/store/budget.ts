@@ -57,6 +57,12 @@ export class Meter {
     return this.queries;
   }
 
+  /** The fraction of the statement budget not yet counted: 1 for a fresh meter, 0 once it is spent. */
+  get unspent(): number {
+    const { maxQueries } = this.budget;
+    return maxQueries > 0 ? Math.max(0, 1 - this.queries / maxQueries) : 0;
+  }
+
   /** Units of work finished so far. */
   get unitsDone(): number {
     return this.units;

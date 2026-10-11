@@ -4,13 +4,19 @@
  * mark into the row it asks for:
  *
  *   hr        the per-minute heart-rate row of an hour a series spilled into
- *   day       one type's day rollups, from its hour rollups
+ *   day       one type's day rollups for a UTC day, from its hour rollups
  *   sleep     one night's summary, from the session and what was measured
  *   exercise  one session's summary, likewise
  *
  * Each row is written, and its mark deleted, in one `db.batch`. A slice that
  * is cut off leaves the mark, and the row is built again: every build reads
  * the store as it is, so building twice is harmless.
+ *
+ * `day` marks are settled a run at a time -- up to `DAY_RUN` consecutive UTC
+ * days of one type, their hour rollups read once, every local day they fall on
+ * written and all their marks cleared in the one transaction. A UTC day falls
+ * on two local days in any zone off UTC and its neighbour shares one of them,
+ * so a run builds each local day once where single marks would build it twice.
  *
  * ### Days and the configured zone
  *
@@ -58,6 +64,7 @@ import {
   parkMarkStatements,
 } from "./dirty.ts";
 import {
+  DAY_HOURS,
   DAY_MARK_KEY_SQL,
   HOUR_MS,
   TYPE_EXERCISE_SESSION,
@@ -65,11 +72,11 @@ import {
   TYPE_SLEEP_SESSION,
   compareText,
   dayMarkKey,
+  dayRuns,
   hourOf,
   hrMarkKey,
   keyId,
   listOf,
-  parseDayMarkKey,
   parseHrMarkKey,
   sortedBy,
 } from "./keys.ts";
@@ -80,7 +87,7 @@ import { openJson, payloadAad, permanentStoreCode, sealJson } from "./sealed.ts"
 import type { Meter } from "./budget.ts";
 import type { StoredChunk } from "./chunks.ts";
 import type { DirtyRow } from "./dirty.ts";
-import type { ChunkKey } from "./keys.ts";
+import type { ChunkKey, DayRun } from "./keys.ts";
 import type { Ctx } from "../../db/client.ts";
 import type { BucketRollup } from "../rollup/types.ts";
 import type { HcRecord } from "../wire.ts";
@@ -131,6 +138,22 @@ const DIRTY_PAGE = 100;
  */
 const MARK_COST = 16;
 
+const DAY_MS = DAY_HOURS * HOUR_MS;
+/**
+ * UTC days of one type settled as one unit. A week: its eight or nine local
+ * days are one read of hour rollups (a few hundred small rows) and one
+ * transaction of a few dozen statements, and only the two days at its ends can
+ * be built again by a neighbouring run.
+ */
+const DAY_RUN = 7;
+/**
+ * Statements one run may cost, as an estimate: the read and the statement that
+ * clears the marks, then for each local day -- one more than the run has UTC
+ * days, in any zone off UTC -- a row per origin (taken as two) and the delete
+ * of the origins that left.
+ */
+const runCost = (run: DayRun): number => 2 + (run.days + 1) * 3;
+
 interface Rebuild {
   ctx: Ctx;
   deviceId: string;
@@ -166,16 +189,16 @@ async function rezone(job: Rebuild): Promise<boolean> {
     if (stale === null) return true;
     if (!meter.mayStart(MARK_COST)) return false;
 
-    // Every UTC hour the type has data in is marked; which days those are is
-    // settled when each mark is rebuilt. In one transaction with the delete, so
-    // the old rows only go once their replacements are asked for.
+    // Every UTC day the type has data in is marked; which local days those are
+    // is settled when each mark is rebuilt. In one transaction with the delete,
+    // so the old rows only go once their replacements are asked for.
     const statements = [
       ctx.db
         .prepare(
           `INSERT INTO hc_dirty (device_id, kind, key, marked_at)
            SELECT device_id, 'day', ${DAY_MARK_KEY_SQL}, ?
              FROM hc_rollup_hour WHERE device_id = ? AND record_type = ?
-            GROUP BY hour_utc
+            GROUP BY hour_utc / ${String(DAY_HOURS)}
            ON CONFLICT (device_id, kind, key) DO UPDATE SET marked_at = excluded.marked_at`,
         )
         .bind(ctx.now(), deviceId, stale.record_type),
@@ -234,20 +257,16 @@ function addChunk(parts: DayParts, chunk: StoredChunk, startMs: number, endMs: n
   if (inDay.length > 0) addPart(parts, chunk.key.originHash, rollupBucket(chunk.key.type, inDay));
 }
 
-/**
- * A day's parts the cheap way: hours wholly inside the day from their rollup,
- * and an hour the day's edge cuts through recounted from its chunk (see the
- * module comment).
- */
-async function dayFromRollups(
+/** One type's hour rollups for the UTC hours that `[startMs, endMs)` touches, every origin. */
+async function hourRollups(
   job: Rebuild,
   type: string,
   startMs: number,
   endMs: number,
-): Promise<DayParts> {
+): Promise<HourRow[]> {
   const { ctx, deviceId, meter } = job;
   meter.spend();
-  const rows = await all<HourRow>(
+  return all<HourRow>(
     ctx.db
       .prepare(
         `SELECT origin_hash, hour_utc, payload_enc FROM hc_rollup_hour
@@ -256,10 +275,27 @@ async function dayFromRollups(
       )
       .bind(deviceId, type, hourOf(startMs), Math.ceil(endMs / HOUR_MS)),
   );
+}
+
+/**
+ * A day's parts the cheap way: hours wholly inside the day from their rollup,
+ * and an hour the day's edge cuts through recounted from its chunk (see the
+ * module comment). `rows` are the type's hour rollups, already read, for a span
+ * that covers the day; the ones outside it are passed over.
+ */
+async function dayFromRollups(
+  job: Rebuild,
+  type: string,
+  startMs: number,
+  endMs: number,
+  rows: readonly HourRow[],
+): Promise<DayParts> {
+  const { ctx, deviceId, meter } = job;
   const parts: DayParts = new Map();
   const cut: ChunkKey[] = [];
   for (const row of rows) {
     const hourStart = row.hour_utc * HOUR_MS;
+    if (hourStart + HOUR_MS <= startMs || hourStart >= endMs) continue;
     if (hourStart >= startMs && hourStart + HOUR_MS <= endMs) {
       const aad = payloadAad("hc_rollup_hour", deviceId, type, row.origin_hash, row.hour_utc);
       addPart(parts, row.origin_hash, (await openJson(ctx, row.payload_enc, aad)) as BucketRollup);
@@ -301,18 +337,36 @@ async function dayFromChunks(
   return { parts, repairs };
 }
 
-/** The statements that make one type's rows for one local day agree with the store. */
+/**
+ * The statement that removes a day's rows for the origins that no longer have
+ * anything on it. Bound: device, type, day, and the origins that do, as a JSON
+ * array.
+ *
+ * `INDEXED BY`: the day is not next in the primary key (the origin is), so left
+ * to itself the planner walks every day the type has ever had and tests each.
+ * Once per day rebuilt, that is every stored day read again for each of them.
+ * The range index goes straight to the one day.
+ */
+export const PRUNE_DAY_SQL = `DELETE FROM hc_rollup_day INDEXED BY hc_rollup_day_range
+  WHERE device_id = ? AND record_type = ? AND day = ?
+    AND origin_hash NOT IN (SELECT value FROM json_each(?))`;
+
+/**
+ * The statements that make one type's rows for one local day agree with the
+ * store. `rows`: see `dayFromRollups`.
+ */
 async function dayStatements(
   job: Rebuild,
   type: string,
   day: string,
+  rows: readonly HourRow[],
 ): Promise<D1PreparedStatement[]> {
   const { ctx, deviceId } = job;
   const { startMs, endMs } = dayBoundsMs(day, job.zone);
   let parts: DayParts;
   const statements: D1PreparedStatement[] = [];
   try {
-    parts = await dayFromRollups(job, type, startMs, endMs);
+    parts = await dayFromRollups(job, type, startMs, endMs, rows);
   } catch (error) {
     const errorCode = permanentStoreCode(error);
     if (errorCode === null) throw error;
@@ -342,41 +396,82 @@ async function dayStatements(
   }
   // An origin with nothing left on the day loses its row.
   const kept = JSON.stringify(listOf(parts.keys()));
-  statements.push(
-    ctx.db
-      .prepare(
-        `DELETE FROM hc_rollup_day
-          WHERE device_id = ? AND record_type = ? AND day = ?
-            AND origin_hash NOT IN (SELECT value FROM json_each(?))`,
-      )
-      .bind(deviceId, type, day, kept),
-  );
+  statements.push(ctx.db.prepare(PRUNE_DAY_SQL).bind(deviceId, type, day, kept));
   return statements;
 }
 
 /**
- * A `day` mark names a type and a UTC hour. The local day that hour falls on
- * -- two days, where the zone's midnight cuts the hour -- is rebuilt, in the
- * zone configured now. Every other mark the rebuild has just answered is
- * cleared with it: the marks of the hours wholly inside a rebuilt day, so a
- * day touched in twenty hours is built once and not twenty times.
+ * The statements that settle a run of `day` marks: every local day the run's
+ * UTC days fall on -- in the zone configured now -- rebuilt for the type, and
+ * the mark of each of those UTC days cleared. Each hour of the run lies inside
+ * one of the days rebuilt, so the marks are answered whole; a neighbouring run
+ * that shares the local day at either end will build that one day again, which
+ * is only work.
  */
-async function rebuildDay(job: Rebuild, key: string): Promise<D1PreparedStatement[]> {
-  const parsed = parseDayMarkKey(key);
-  if (parsed === null) return [];
-  const { type, hourUtc } = parsed;
-  const days = daysTouched(hourUtc * HOUR_MS, (hourUtc + 1) * HOUR_MS, job.zone);
+async function rebuildDayRun(job: Rebuild, run: DayRun): Promise<D1PreparedStatement[]> {
+  const { type } = run;
+  const startMs = run.firstDay * DAY_MS;
+  const days = daysTouched(startMs, startMs + run.days * DAY_MS, job.zone);
+  const bounds = days.map((day) => dayBoundsMs(day, job.zone));
+  const rows = await hourRollups(
+    job,
+    type,
+    Math.min(...bounds.map((bound) => bound.startMs)),
+    Math.max(...bounds.map((bound) => bound.endMs)),
+  );
   const statements: D1PreparedStatement[] = [];
+  for (const day of days) statements.push(...(await dayStatements(job, type, day, rows)));
   const answered: string[] = [];
-  for (const day of days) {
-    statements.push(...(await dayStatements(job, type, day)));
-    const { startMs, endMs } = dayBoundsMs(day, job.zone);
-    for (let hour = Math.ceil(startMs / HOUR_MS); (hour + 1) * HOUR_MS <= endMs; hour += 1) {
-      answered.push(dayMarkKey(type, hour));
-    }
+  for (let day = run.firstDay; day < run.firstDay + run.days; day += 1) {
+    answered.push(dayMarkKey(type, day * DAY_HOURS));
   }
   statements.push(clearKeysStatement(job.ctx, job.deviceId, "day", answered));
   return statements;
+}
+
+/**
+ * The transactions that settle a run: one that rebuilds it, or -- when a chunk
+ * one of its days has to be built from will not open -- one per UTC day, with
+ * the day that cannot be built parked (see `settleMark`) and the others built.
+ */
+async function settleDayRun(job: Rebuild, run: DayRun): Promise<D1PreparedStatement[][]> {
+  const { ctx, deviceId } = job;
+  try {
+    return [await rebuildDayRun(job, run)];
+  } catch (error) {
+    const errorCode = permanentStoreCode(error);
+    if (errorCode === null) throw error;
+    if (run.days === 1) {
+      ctx.log.error("hc.mark_parked", { deviceId, kind: "day", errorCode });
+      const mark = { kind: "day", key: dayMarkKey(run.type, run.firstDay * DAY_HOURS) };
+      return [parkMarkStatements(ctx, deviceId, mark)];
+    }
+    const batches: D1PreparedStatement[][] = [];
+    for (let day = run.firstDay + run.days - 1; day >= run.firstDay; day -= 1) {
+      batches.push(...(await settleDayRun(job, { type: run.type, firstDay: day, days: 1 })));
+    }
+    return batches;
+  }
+}
+
+/** Settle a page of `day` marks, a run at a time. False when the budget ran out. */
+async function settleDays(job: Rebuild, marks: readonly DirtyRow[]): Promise<boolean> {
+  const { runs, unreadable } = dayRuns(
+    marks.map((mark) => mark.key),
+    DAY_RUN,
+  );
+  if (unreadable.length > 0) {
+    // Keys no version of this code writes. Cleared, not guessed at.
+    await commit(job, [clearKeysStatement(job.ctx, job.deviceId, "day", unreadable)]);
+    job.meter.done();
+  }
+  for (const run of runs) {
+    if (!job.meter.mayStart(runCost(run))) return false;
+    const batches = await settleDayRun(job, run);
+    for (const statements of batches) await commit(job, statements);
+    job.meter.done();
+  }
+  return true;
 }
 
 /**
@@ -619,9 +714,6 @@ async function rebuildMark(job: Rebuild, mark: DirtyRow): Promise<D1PreparedStat
     case "hr": {
       return rebuildHr(job, mark.key);
     }
-    case "day": {
-      return rebuildDay(job, mark.key);
-    }
     case "sleep": {
       return rebuildSleep(job, mark.key);
     }
@@ -679,16 +771,15 @@ export async function parkFirstMark(
 /**
  * Settle the marks of one page, in order. False when the budget ran out.
  *
- * Stops after a `day` mark: its rebuild clears the other marks it answered, so
- * the rest of the page may be stale, and the caller fetches again rather than
- * build a day twice.
+ * A page is all of one kind (`nextDirty`), and a page of `day` marks is
+ * settled in runs rather than mark by mark.
  */
 async function settlePage(job: Rebuild, marks: readonly DirtyRow[]): Promise<boolean> {
+  if (marks[0]?.kind === "day") return settleDays(job, marks);
   for (const mark of marks) {
     if (!job.meter.mayStart(MARK_COST)) return false;
     await commit(job, await settleMark(job, mark));
     job.meter.done();
-    if (mark.kind === "day") return true;
   }
   return true;
 }
@@ -717,8 +808,7 @@ export async function rebuildSlice(
   if (knownDigest !== job.digest && !(await rezone(job))) return { tzDigest: null, more: true };
 
   for (;;) {
-    meter.spend();
-    const marks = await nextDirty(ctx, deviceId, DIRTY_PAGE);
+    const marks = await nextDirty(ctx, deviceId, DIRTY_PAGE, meter);
     if (marks.length === 0) return { tzDigest: job.digest, more: false };
     if (!(await settlePage(job, marks))) return { tzDigest: job.digest, more: true };
   }

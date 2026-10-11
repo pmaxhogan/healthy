@@ -1039,6 +1039,57 @@ describe("a record that moves to another chunk", () => {
     expect(await stored(deviceId)).toStrictEqual(["a:150"]);
     expect(await count("hc_chunks", deviceId)).toBe(1);
   });
+
+  // A page's chunks are read together, before any of them is written. These
+  // two batches make one group's write change a chunk another group of the
+  // same page was shown: what was read ahead must not be used after that.
+  it("leaves a chunk that the same batch has just written another record to", async () => {
+    const deviceId = await seedDevice(repos);
+    await enqueue(repos, deviceId, {
+      batchId: "batch-0001",
+      upserts: [steps("a", T, 100), steps("b", T + HOUR_MS, 200)],
+    });
+    await drain(ctx, deviceId);
+    // The first hour gains `c`, then the second hour takes `a` out of it.
+    await enqueue(repos, deviceId, {
+      batchId: "batch-0002",
+      upserts: [
+        steps("c", T + MINUTE_MS, 300),
+        steps("a", T + HOUR_MS + MINUTE_MS, 150, { lastModified: 3000 }),
+      ],
+    });
+
+    await drain(ctx, deviceId);
+
+    expect(await stored(deviceId)).toStrictEqual(["c:300", "b:200", "a:150"]);
+    expect(await count("hc_record_index", deviceId)).toBe(3);
+    const sync = await syncRows(deviceId);
+    expect(sync.Steps?.record_count).toBe(3);
+  });
+
+  it("is gone from the chunk it left when the same batch then writes to that chunk", async () => {
+    const deviceId = await seedDevice(repos);
+    await enqueue(repos, deviceId, {
+      batchId: "batch-0001",
+      upserts: [steps("a", T + HOUR_MS, 100), steps("b", T + HOUR_MS + MINUTE_MS, 200)],
+    });
+    await drain(ctx, deviceId);
+    // The first hour takes `a` out of the second, then the second gains `d`.
+    await enqueue(repos, deviceId, {
+      batchId: "batch-0002",
+      upserts: [
+        steps("a", T, 150, { lastModified: 3000 }),
+        steps("d", T + HOUR_MS + 2 * MINUTE_MS, 400),
+      ],
+    });
+
+    await drain(ctx, deviceId);
+
+    expect(await stored(deviceId)).toStrictEqual(["a:150", "b:200", "d:400"]);
+    expect(await count("hc_record_index", deviceId)).toBe(3);
+    const sync = await syncRows(deviceId);
+    expect(sync.Steps?.record_count).toBe(3);
+  });
 });
 
 describe("sync state after a slice that died", () => {

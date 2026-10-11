@@ -333,8 +333,9 @@ rollup, heart-rate minutes and index rows, in one transaction; a record whose ed
 moved it to another hour is taken out of the old chunk in the same transaction that
 puts it in the new one, so it is in exactly one place; and an hour with more records
 than one database value can hold is split across several rows, never cut short.
-While a backfill is still arriving, each applied batch is followed by a fifth of a
-slice of rebuilding, so daily rollups, nights and sessions start to appear before
+While a backfill is still arriving, each applied batch is followed by a share of a
+slice spent rebuilding (a fifth, rising to a half as the list of pending rebuilds
+grows), so daily rollups, nights and sessions start to appear before
 the last batch has landed, and the rest are rebuilt once the queue is empty. A
 rollup row that no longer opens is rebuilt from the stored records (logged as
 `hc.rollup_repaired` or `hc.hr_minute_repaired`). A rollup or summary whose source

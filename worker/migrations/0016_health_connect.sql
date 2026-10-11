@@ -134,12 +134,25 @@ CREATE TABLE hc_chunks (
   CHECK (part >= 0)
 ) WITHOUT ROWID;
 CREATE INDEX hc_chunks_range ON hc_chunks (device_id, record_type, hour_utc);
--- Only the chunks holding a record that runs past its own hour: what a range
--- read needs to find a night of sleep that started before the window, without
--- walking every earlier chunk of the type. Partial, so it stays tiny -- nearly
--- every chunk ends inside its hour and is not in it.
+-- Only the chunks holding a record that runs PAST the end of its own hour: what
+-- a range read needs to find a night of sleep that started before the window,
+-- without walking every earlier chunk of the type.
+--
+-- Strictly past (`>`), on purpose. A record that ends exactly on the hour
+-- boundary -- the last minute of a wearable's contiguous heart-rate series, an
+-- hourly total -- is NOT in it: a record is the half-open interval
+-- [start, end), so one that ends where the next hour starts has nothing in that
+-- hour, and such records are most of what some apps write. With `>=` every one
+-- of their chunks would be in the index, and a read of an old hour would pass
+-- over an entry for every chunk stored after it. Partial and strict, it holds
+-- only what really overruns, which is a few per cent of the chunks.
+--
+-- The one thing a boundary-ending record can still put in the next hour is a
+-- heart-rate SAMPLE stamped exactly on the boundary. That is found by reading
+-- the previous hour's chunk by primary key, not through this index
+-- (worker/src/hc/store/chunks.ts).
 CREATE INDEX hc_chunks_spill ON hc_chunks (device_id, record_type, origin_hash, max_end_ms)
-  WHERE max_end_ms >= (hour_utc + 1) * 3600000;
+  WHERE max_end_ms > (hour_utc + 1) * 3600000;
 
 -- Record id -> the chunk that holds it. Health Connect reports a deletion as an
 -- id and nothing else, and an edit may move a record to another hour; both
@@ -227,12 +240,14 @@ CREATE TABLE hc_exercise_session (
 ) WITHOUT ROWID;
 CREATE INDEX hc_exercise_session_range ON hc_exercise_session (device_id, start_ms);
 
--- The rebuild work list. Applying a batch marks what it touched -- a local day,
--- a sleep night, an exercise session -- and the runner rebuilds each once the
--- queue is empty, so a month of backfill rebuilds a day once, not per batch.
--- `kind` and `key` are this app's own vocabulary: a kind names what to rebuild,
--- and a key is a UTC hour with a type, an origin blind with an hour, or a
--- blinded record id. A mark whose source will not open is kept under a
+-- The rebuild work list. Applying a batch marks what it touched -- a day, a
+-- sleep night, an exercise session -- and the runner rebuilds each from the
+-- store as it then is, so a month of backfill rebuilds a day once, not per
+-- batch. `kind` and `key` are this app's own vocabulary: a kind names what to
+-- rebuild, and a key is a UTC day with a type (`d<UTC day>|<type>`: one mark a
+-- type and day however many hours of it were written, resolved to local days
+-- in the zone configured when it is rebuilt), an origin blind with a UTC hour,
+-- or a blinded record id. A mark whose source will not open is kept under a
 -- `parked:` kind rather than retried for ever.
 CREATE TABLE hc_dirty (
   device_id TEXT NOT NULL REFERENCES devices (id) ON DELETE CASCADE,

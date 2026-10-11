@@ -20,7 +20,8 @@
  *
  *   - Each chunk is written with its hour rollup, its heart-rate minutes, its
  *     index rows and its dirty marks in ONE `db.batch`, which D1 runs as a
- *     transaction. A chunk and the index never disagree.
+ *     transaction. A chunk and the index never disagree. (The mark of a day
+ *     this batch has already marked is not written again: see `BatchRun`.)
  *   - A write is by record id and keeps the copy with the greater
  *     `lastModified`, so applying the same records again changes nothing; and
  *     an unchanged chunk is recognised by its digest and not rewritten.
@@ -48,7 +49,7 @@
  */
 
 import { blindHcOrigin, blindHcRecordId, blinderFor } from "../db/blind.ts";
-import { batch as runBatch, one } from "../db/client.ts";
+import { batch as runBatch, one, chunk as pages } from "../db/client.ts";
 import { makeHcIngestQueueRepo } from "../db/repos/hc-ingest-queue.ts";
 import { openParkedAlert, resolveParkedAlert } from "../sync/alerts.ts";
 
@@ -56,7 +57,7 @@ import { unpackJson } from "./codec.ts";
 import { hrHoursTouched } from "./rollup/hr-minute.ts";
 import { DEFAULT_SLICE_BUDGET, Meter } from "./store/budget.ts";
 import { chunkStatements, hrMinuteStatement, hrSpillIn, readChunks } from "./store/chunks.ts";
-import { markSessionsStatement, markStatements } from "./store/dirty.ts";
+import { dirtyBacklog, markSessionsStatement, markStatements } from "./store/dirty.ts";
 import {
   HOUR_MS,
   TYPE_EXERCISE_SESSION,
@@ -177,6 +178,8 @@ const DEPENDANT_SPAN_MAX_MS = 48 * HOUR_MS;
 /** Deletes looked up per query, and upsert groups per index lookup. */
 const DELETE_PAGE = 500;
 const GROUP_PAGE = 20;
+/** Chunks read ahead in one statement: a page of groups, or as many of a page of deletes. */
+const READ_AHEAD = GROUP_PAGE;
 /** Records whose index rows one lookup page fetches before a page is cut. */
 const GROUP_PAGE_RECORDS = 3000;
 /**
@@ -199,6 +202,21 @@ interface BatchRun {
   startedMs: number;
   /** The alert channel's seam: see `runHcSlice`. */
   deps: SyncDeps | undefined;
+  /**
+   * The `day` marks this batch is known to have written, by key: `Head.marked`.
+   * A day is two dozen chunks, and each of them would write the same mark.
+   *
+   * Leaving one out is safe because nothing can have cleared it in between.
+   * Marks are cleared only by the rebuild, and the rebuild runs only when no
+   * batch is part way through: after a batch has been applied, or with the
+   * queue empty (`workSlice`). The set lives no longer than the batch is the
+   * head -- it hangs off the parsed head, which is dropped when the batch is
+   * applied, set aside, or a slice throws -- and a slice that starts without
+   * it simply writes the marks again.
+   */
+  marked: Set<string>;
+  /** Day marks in the statements now being built: `marked` once they are committed. */
+  pending: string[];
 }
 
 /** The stable code for a failure that retrying cannot fix, or null. */
@@ -229,9 +247,15 @@ async function marksFor(
   touched: readonly HcRecord[],
 ): Promise<DirtyMark[]> {
   // Every record of a chunk starts in the chunk's hour, so one mark covers
-  // them. It names the hour, not a day: the day is the rebuild's to decide, in
-  // the zone configured when it runs.
-  const marks: DirtyMark[] = touched.length > 0 ? [["day", dayMarkKey(key.type, key.hourUtc)]] : [];
+  // them. It names the UTC day of that hour, not a calendar day: which days
+  // those are is the rebuild's to decide, in the zone configured when it runs.
+  const marks: DirtyMark[] = [];
+  const day = dayMarkKey(key.type, key.hourUtc);
+  // Not again, if this batch has written it: see `BatchRun.marked`.
+  if (touched.length > 0 && !job.marked.has(day) && !job.pending.includes(day)) {
+    marks.push(["day", day]);
+    job.pending.push(day);
+  }
 
   if (key.type === TYPE_HEART_RATE) {
     const timed = samplesInInterval(touched).records;
@@ -314,6 +338,56 @@ async function commit(job: BatchRun, statements: D1PreparedStatement[]): Promise
   if (statements.length === 0) return;
   job.meter.spend(statements.length);
   await runBatch(job.ctx.db, statements);
+  // Only now are the day marks among them in the table.
+  for (const day of job.pending) job.marked.add(day);
+  job.pending = [];
+}
+
+/**
+ * Chunks read ahead of the groups that need them, a page in one statement, so
+ * that applying a page is not a read per chunk.
+ *
+ * A chunk is only ever taken from here while it is `fresh`: read, and not
+ * written since. One group's transaction can rewrite a chunk a later group of
+ * the same page also needs -- a record that moved hours leaves the chunk it
+ * was in -- so everything a transaction may have touched is forgotten, and is
+ * read again by whoever asks next.
+ */
+class HeldChunks {
+  private readonly chunks = new Map<string, StoredChunk>();
+  private readonly fresh = new Set<string>();
+
+  constructor(private readonly job: BatchRun) {}
+
+  /** The chunks at `keys` that exist, by `keyId`: from memory where fresh, read where not. */
+  async read(keys: readonly ChunkKey[]): Promise<Map<string, StoredChunk>> {
+    const { ctx, deviceId, meter } = this.job;
+    const missing = new Map<string, ChunkKey>();
+    for (const key of keys) if (!this.fresh.has(keyId(key))) missing.set(keyId(key), key);
+    if (missing.size > 0) {
+      const read = await readChunks(ctx, deviceId, listOf(missing.values()), meter);
+      for (const id of missing.keys()) {
+        const stored = read.get(id);
+        if (stored === undefined) this.chunks.delete(id);
+        else this.chunks.set(id, stored);
+        this.fresh.add(id);
+      }
+    }
+    const found = new Map<string, StoredChunk>();
+    for (const key of keys) {
+      const stored = this.chunks.get(keyId(key));
+      if (stored !== undefined) found.set(keyId(key), stored);
+    }
+    return found;
+  }
+
+  /** These chunks may just have been written: what is held of them is no longer the truth. */
+  forget(keys: readonly ChunkKey[]): void {
+    for (const key of keys) {
+      this.fresh.delete(keyId(key));
+      this.chunks.delete(keyId(key));
+    }
+  }
 }
 
 /** Note a type whose stored count may have gone down. A tombstone of an id never seen has none. */
@@ -360,11 +434,16 @@ function slotsOf(
   return listOf(byChunk.values());
 }
 
-/** Take one chunk's deleted records out and tombstone their ids, in one transaction. */
-async function deleteSlot(job: BatchRun, slot: DeleteSlot): Promise<void> {
-  const { ctx, deviceId, meter, cursor } = job;
-  const chunks = await readChunks(ctx, deviceId, [slot.key], meter);
-  const stored = chunks.get(keyId(slot.key));
+/**
+ * Take one chunk's deleted records out and tombstone their ids, in one
+ * transaction. `stored` is the chunk as it is now, if there is one.
+ */
+async function deleteSlot(
+  job: BatchRun,
+  slot: DeleteSlot,
+  stored: StoredChunk | undefined,
+): Promise<void> {
+  const { ctx, deviceId, cursor } = job;
   const statements: D1PreparedStatement[] = [];
   if (stored !== undefined) {
     const { records, removed } = removeFromChunk(stored.records, slot.ids);
@@ -395,10 +474,18 @@ async function deletePage(job: BatchRun, page: readonly string[]): Promise<boole
   const unknown = every.filter((blind) => !index.has(blind));
   if (unknown.length > 0) await commit(job, [unknownTombstoneStatement(ctx, deviceId, unknown)]);
 
-  for (const slot of slotsOf(blinds, index)) {
+  // A slot's transaction rewrites its own chunk and no other, so the chunks of
+  // several slots can be read together before any of them is written.
+  const paged = pages(slotsOf(blinds, index), READ_AHEAD);
+  for (const slots of paged) {
     if (!meter.mayStart(CHUNK_COST)) return false;
-    await deleteSlot(job, slot);
-    meter.done();
+    const keys = slots.map((slot) => slot.key);
+    const chunks = await readChunks(ctx, deviceId, keys, meter);
+    for (const slot of slots) {
+      if (!meter.mayStart(CHUNK_COST)) return false;
+      await deleteSlot(job, slot, chunks.get(keyId(slot.key)));
+      meter.done();
+    }
   }
   return true;
 }
@@ -510,21 +597,34 @@ async function sourceStatements(
   return statements;
 }
 
-/** Apply one group: its chunk, the chunks its records left, and the index, in one transaction. */
-async function applyGroup(job: BatchRun, work: GroupJob): Promise<void> {
-  const { ctx, deviceId, meter, cursor } = job;
-  const { group, key } = work;
+/** The chunks a group's records are leaving, by `keyId`: see `movedFrom`. */
+function sourcesOf(work: GroupJob): Map<string, ChunkKey> {
   const sources = new Map<string, ChunkKey>();
+  for (const record of work.group.records) {
+    const from = movedFrom(work, record);
+    if (from !== null) sources.set(keyId(from), from);
+  }
+  return sources;
+}
+
+/** Every chunk a group reads, and may write: its own, and the ones its records are leaving. */
+function chunksOf(work: GroupJob): ChunkKey[] {
+  return [work.key, ...sourcesOf(work).values()];
+}
+
+/** Apply one group: its chunk, the chunks its records left, and the index, in one transaction. */
+async function applyGroup(job: BatchRun, work: GroupJob, held: HeldChunks): Promise<void> {
+  const { ctx, deviceId, cursor } = job;
+  const { group, key } = work;
   for (const record of group.records) {
     const entry = work.entryOf(record);
     // Anywhere else the index has seen this id -- live or tombstoned -- is a
     // type whose count this batch may have lowered, on this slice or on one
     // that died after doing it. See `deletePage`.
     if (entry !== undefined && !sameKey(entry.key, key)) noteShrunk(cursor, entry.key.type);
-    const from = movedFrom(work, record);
-    if (from !== null) sources.set(keyId(from), from);
   }
-  const chunks = await readChunks(ctx, deviceId, [key, ...sources.values()], meter);
+  const touching = chunksOf(work);
+  const chunks = await held.read(touching);
   const { incoming, leaving } = planGroup(work, chunks);
   const moved = await sourceStatements(job, chunks, leaving);
 
@@ -545,6 +645,9 @@ async function applyGroup(job: BatchRun, work: GroupJob): Promise<void> {
   if (unindexed.length > 0) {
     statements.push(indexUpsertStatement(ctx, deviceId, key, unindexed));
   }
+  // Forgotten before the write, not after: if it fails part way, what is held
+  // must not be taken for what is stored.
+  held.forget(touching);
   await commit(job, statements);
   cursor.applied += merged.accepted.length;
   if (key.type === TYPE_HEART_RATE) {
@@ -573,11 +676,19 @@ async function applyUpserts(job: BatchRun, groups: readonly UpsertGroup[]): Prom
     const index = await lookupIndex(ctx, deviceId, listOf(blinds.values()), meter);
     const entryOf = (record: HcRecord): IndexEntry | undefined => index.get(blindOf(record));
 
+    const jobs: GroupJob[] = [];
     for (const group of page) {
-      if (!meter.mayStart(CHUNK_COST)) return false;
       const originHash = await originHashOf(group.origin);
       const key: ChunkKey = { type: group.type, originHash, hourUtc: group.hourUtc };
-      await applyGroup(job, { group, key, entryOf, blindOf });
+      jobs.push({ group, key, entryOf, blindOf });
+    }
+    // Every chunk the page will read, in one statement (a second only when
+    // records are moving between chunks): see `HeldChunks`.
+    const held = new HeldChunks(job);
+    await held.read(jobs.flatMap((work) => chunksOf(work)));
+    for (const work of jobs) {
+      if (!meter.mayStart(CHUNK_COST)) return false;
+      await applyGroup(job, work, held);
       cursor.offset += 1;
       meter.done();
     }
@@ -593,6 +704,8 @@ async function applyUpserts(job: BatchRun, groups: readonly UpsertGroup[]): Prom
 interface Head {
   queued: QueuedBatch;
   batch: ParsedBatch;
+  /** The `day` marks the apply of this batch has written so far: see `BatchRun.marked`. */
+  marked: Set<string>;
 }
 
 /**
@@ -721,7 +834,7 @@ async function openHead(
     await failBatch(ctx, deviceId, queued.batchId, "batch_mismatch", null, deps);
     return "failed";
   }
-  return { queued, batch };
+  return { queued, batch, marked: new Set() };
 }
 
 /** Counts, arrival times and the phone's report; then the batch leaves the queue. */
@@ -799,6 +912,8 @@ async function applyHead(
     cursor,
     startedMs,
     deps,
+    marked: head.marked,
+    pending: [],
   };
   meter.spend();
 
@@ -899,14 +1014,36 @@ export async function runHcSlice(
  *
  * The rebuild proper runs when the queue is empty, and during a backfill of
  * hours it never is: every rollup and summary would wait for the last batch.
- * So each applied batch is followed by this fraction of a slice on the dirty
- * list -- a fifth, about 130 statements: a handful of nights and sessions, or
- * a month of days. It is a bound in both directions. The queue cannot be
- * starved, because the share is small and is only taken once per batch that
- * was applied; and the list cannot be ignored, because every applied batch
- * takes it.
+ * So each applied batch is followed by a fraction of a slice on the dirty
+ * list. The fraction follows the list: a fifth of a slice when there is next
+ * to nothing waiting -- about 130 statements, a handful of nights and sessions
+ * or a month of days -- rising in a straight line to half a slice once
+ * `REBUILD_BACKLOG_FULL` marks or more are, so a backfill that marks faster
+ * than a fifth can rebuild is answered with more, and the list stops growing
+ * rather than waiting for the queue to empty.
+ *
+ * It is a bound in both directions. The queue cannot be starved, because the
+ * share is never more than half and is only taken once per batch that was
+ * applied; and the list cannot be ignored, because every applied batch takes
+ * at least the fifth.
+ *
+ * Whatever is taken above the fifth comes out of what the slice has not yet
+ * spent (`unspent`, a fraction of its budget): a batch that ends a slice
+ * already at its budget is followed by the fifth and no more, as it always
+ * was, so the larger share never moves a slice any closer to D1's own limit
+ * on queries.
  */
-const REBUILD_SHARE = 0.2;
+const REBUILD_SHARE_MIN = 0.2;
+const REBUILD_SHARE_MAX = 0.5;
+/** Marks waiting at which the share is at its largest; the count stops there. */
+const REBUILD_BACKLOG_FULL = 400;
+
+/** The share of a slice the rebuild takes after a batch: see `REBUILD_SHARE_MIN`. */
+export function rebuildShare(backlog: number, unspent: number): number {
+  const fullness = Math.min(1, Math.max(0, backlog) / REBUILD_BACKLOG_FULL);
+  const wanted = REBUILD_SHARE_MIN + (REBUILD_SHARE_MAX - REBUILD_SHARE_MIN) * fullness;
+  return Math.max(REBUILD_SHARE_MIN, Math.min(wanted, unspent));
+}
 
 /** The work of one slice, and which phase it ended in. */
 async function workSlice(
@@ -934,9 +1071,11 @@ async function workSlice(
       if (cursor !== null) return paused(cursor);
       // Applied or set aside: either way it is no longer the head.
       if (cache !== undefined) cache.head = null;
-      // See `REBUILD_SHARE`. Marks are settled exactly as in the rebuild
+      // See `REBUILD_SHARE_MIN`. Marks are settled exactly as in the rebuild
       // proper: a row written, then its mark cleared, in one transaction.
-      const part = meter.share(REBUILD_SHARE);
+      meter.spend();
+      const backlog = await dirtyBacklog(ctx, deviceId, REBUILD_BACKLOG_FULL);
+      const part = meter.share(rebuildShare(backlog, meter.unspent));
       ({ tzDigest } = await rebuildSlice(ctx, deviceId, tzDigest, part));
       meter.absorb(part);
     }

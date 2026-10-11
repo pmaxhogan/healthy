@@ -7,18 +7,25 @@
  * change that caused it and deleted in the same `db.batch` as the row it asked
  * for, so neither a lost mark nor a rebuilt-but-still-marked row can happen.
  *
+ * One saving on the writing side: a `day` mark covers two dozen chunks, and a
+ * batch that has already written one does not write it again for the next
+ * chunk of the same day (worker/src/hc/apply.ts). That is the same guarantee,
+ * not a weaker one: nothing clears a mark while the batch that wrote it is
+ * still being applied, because the rebuild only ever runs between batches.
+ *
  * Kinds, and what `key` is for each:
  *
  *   hr        `<originHash>|<hourUtc>`  a per-minute heart-rate row
- *   day       `<hourUtc>|<type>`        the day rollups of the local day(s) that
- *                                       UTC hour falls on, every origin (the
- *                                       hour zero-padded: key order is time order)
+ *   day       `d<utcDay>|<type>`        the day rollups of the local days that
+ *                                       UTC day falls on, every origin (the day
+ *                                       zero-padded: key order is time order)
  *   sleep     blinded record id         one sleep night summary
  *   exercise  blinded record id         one exercise session summary
  *
- * A `day` mark names a UTC hour, not a day: which calendar day an hour belongs
- * to depends on the configured zone, and the zone that counts is the one in
- * force when the day is rebuilt, not when the record arrived.
+ * A `day` mark names a UTC day, not a calendar day: which calendar days an
+ * instant belongs to depends on the configured zone, and the zone that counts
+ * is the one in force when the day is rebuilt, not when the record arrived --
+ * there may not even be one yet.
  *
  * ### Parked marks
  *
@@ -29,10 +36,11 @@
  * `unparkMarks` puts them back.
  */
 
-import { all, run } from "../../db/client.ts";
+import { all, one, run } from "../../db/client.ts";
 
 import { HOUR_MS } from "./keys.ts";
 
+import type { Meter } from "./budget.ts";
 import type { Ctx } from "../../db/client.ts";
 
 type DirtyKind = "hr" | "day" | "sleep" | "exercise";
@@ -167,15 +175,43 @@ export function nextDirtySql(kind: string): string {
  * The next marks to rebuild: a page of the first kind, in rebuild order, that
  * has any. One read along the primary key per kind -- never a sort of the
  * whole list, which after a backfill is long. Parked marks are not returned.
+ *
+ * Up to four statements, and the meter is told of each: D1 counts them all.
  */
-export async function nextDirty(ctx: Ctx, deviceId: string, limit: number): Promise<DirtyRow[]> {
+export async function nextDirty(
+  ctx: Ctx,
+  deviceId: string,
+  limit: number,
+  meter?: Meter,
+): Promise<DirtyRow[]> {
   for (const kind of REBUILD_ORDER) {
+    meter?.spend();
     const rows = await all<DirtyRow>(
       ctx.db.prepare(nextDirtySql(kind)).bind(deviceId, kind, limit),
     );
     if (rows.length > 0) return rows;
   }
   return [];
+}
+
+/**
+ * The statement `dirtyBacklog` runs. Bound: the device, then the cap. The inner
+ * LIMIT is what makes it cheap: it reads at most that many primary-key entries
+ * however long the list is.
+ */
+export const DIRTY_BACKLOG_SQL = `SELECT count(*) AS marks FROM (
+    SELECT 1 FROM hc_dirty
+     WHERE device_id = ? AND kind IN (${REBUILD_ORDER.map((kind) => `'${kind}'`).join(", ")})
+     LIMIT ?)`;
+
+/**
+ * How many marks are waiting to be rebuilt, counted no further than `cap`:
+ * enough to tell a list that is keeping up from one that is not, without
+ * reading all of a long one. Parked marks are not counted.
+ */
+export async function dirtyBacklog(ctx: Ctx, deviceId: string, cap: number): Promise<number> {
+  const row = await one<{ marks: number }>(ctx.db.prepare(DIRTY_BACKLOG_SQL).bind(deviceId, cap));
+  return row?.marks ?? 0;
 }
 
 /** The statements that set a mark aside: kept under `parked:<kind>`, out of the rebuild's way. */

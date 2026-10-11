@@ -176,7 +176,8 @@ schema, so it is listed plainly:
   app, not which app; that a record id recurs, not what it is.
 - `hc_rollup_day.tz_digest` is a keyed digest of the zone the row was built for,
   never the zone's name, so a change of the `timezone` setting is detectable.
-  `hc_dirty` holds the rebuild work list: a UTC hour or a blinded id, under a kind
+  `hc_dirty` holds the rebuild work list: a UTC day with a record type, an origin
+  blind with a UTC hour, or a blinded record id, under a kind
   that is this app's own vocabulary (`parked:<kind>` for a mark set aside).
 
 None of it is a value, a name or a place. It is the owner's rhythm, which is the

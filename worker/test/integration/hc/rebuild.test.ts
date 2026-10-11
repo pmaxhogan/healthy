@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { makeRepos } from "../../../src/db/index.ts";
 import { setSetting } from "../../../src/db/settings.ts";
-import { runHcSlice } from "../../../src/hc/apply.ts";
+import { rebuildShare, runHcSlice } from "../../../src/hc/apply.ts";
 import { dayBoundsMs } from "../../../src/hc/rollup/day.ts";
 import { unparkMarks } from "../../../src/hc/store/dirty.ts";
 import { HOUR_MS, dayMarkKey } from "../../../src/hc/store/keys.ts";
@@ -44,6 +44,7 @@ import {
   WEARABLE,
 } from "./helpers.ts";
 
+import type { HcRunnerState, HeadCache } from "../../../src/hc/apply.ts";
 import type { HcRecord } from "../../../src/hc/wire.ts";
 
 beforeEach(resetHc);
@@ -86,6 +87,43 @@ async function dayCounts(
     origins: [origin],
   });
   return Object.fromEntries(rows.map((row) => [row.day, row.rollup.records]));
+}
+
+/** Every `day` mark of a device, as it is stored. */
+async function dayMarks(deviceId: string): Promise<string[]> {
+  const { results } = await env.DB.prepare(
+    "SELECT key FROM hc_dirty WHERE device_id = ? AND kind = 'day' ORDER BY key",
+  )
+    .bind(deviceId)
+    .all<{ key: string }>();
+  return results.map((row) => row.key);
+}
+
+/** When the one `day` mark of a device was last written. */
+async function markedAt(deviceId: string): Promise<number[]> {
+  const { results } = await env.DB.prepare(
+    "SELECT marked_at FROM hc_dirty WHERE device_id = ? AND kind = 'day'",
+  )
+    .bind(deviceId)
+    .all<{ marked_at: number }>();
+  return results.map((row) => row.marked_at);
+}
+
+/** Slices of a few chunks each until `chunks` of the head batch are written. */
+async function applyUntil(
+  slow: ReturnType<typeof testCtx>,
+  deviceId: string,
+  chunks: number,
+  cache: HeadCache | undefined,
+  carried?: HcRunnerState,
+): Promise<HcRunnerState | undefined> {
+  let state = carried;
+  for (let slice = 0; slice < 200; slice += 1) {
+    const written = await count("hc_chunks", deviceId);
+    if (written >= chunks) break;
+    ({ state } = await runHcSlice(slow, deviceId, state, { maxQueries: 12, maxMs: 20_000 }, cache));
+  }
+  return state;
 }
 
 describe("day rollups", () => {
@@ -572,30 +610,214 @@ describe("day marks and the zone", () => {
   it("are resolved to days when rebuilt, in the zone configured then", async () => {
     const deviceId = await seedDevice(repos);
     const from = Date.UTC(2026, 0, 10);
-    // Applied with no zone configured, and hardly rebuilt: a budget this
-    // small ends every slice as soon as it has finished one thing.
+    // Applied with no zone configured, and only partly rebuilt: on a budget
+    // this small the rebuild's share of a slice is one thing, and one thing is
+    // a week of days at most. Ten days leave marks behind.
     await enqueue(repos, deviceId, {
       batchId: "batch-0001",
-      upserts: hourly(from, from + 48 * HOUR_MS),
+      upserts: hourly(from, from + 10 * 24 * HOUR_MS),
     });
     let state;
     for (let slice = 0; slice < 500; slice += 1) {
-      ({ state } = await runHcSlice(ctx, deviceId, state, { maxQueries: 1, maxMs: 20_000 }));
+      ({ state } = await runHcSlice(ctx, deviceId, state, { maxQueries: 30, maxMs: 20_000 }));
       const backlog = await storeBacklog(ctx, deviceId);
       if (backlog.queuedBatches === 0) break;
     }
-    expect(await count("hc_dirty", deviceId)).toBeGreaterThan(0);
+    // One mark a type and UTC day, and the newest week of them is gone.
+    expect(await count("hc_dirty", deviceId)).toBe(3);
 
     await setSetting(ctx, "timezone", FIXED_WEST);
     await drain(ctx, deviceId);
 
-    // The days of the zone set afterwards, not of the one in force at apply time.
+    // The days of the zone set afterwards, not of the one in force at apply
+    // time -- for the days that were built before it was set, too.
+    const whole = Object.fromEntries(
+      Array.from({ length: 9 }, (_, index) => [`2026-01-${String(10 + index)}`, 24]),
+    );
     expect(await dayCounts(deviceId, "2026-01-01", "2026-01-31")).toStrictEqual({
       "2026-01-09": 5,
-      "2026-01-10": 24,
-      "2026-01-11": 19,
+      ...whole,
+      "2026-01-19": 19,
     });
     expect(await count("hc_dirty", deviceId)).toBe(0);
+  }, 30_000);
+
+  it("are one a type and UTC day, however many hours of the day were written", async () => {
+    const deviceId = await seedDevice(repos);
+    const from = Date.UTC(2026, 0, 10);
+    await enqueue(repos, deviceId, {
+      batchId: "batch-0001",
+      upserts: hourly(from, from + 3 * 24 * HOUR_MS),
+    });
+    // Stopped part way through the batch, so nothing has been rebuilt yet: a
+    // few chunks a slice, until most of the seventy-two are written.
+    let state;
+    let chunks = 0;
+    for (let slice = 0; slice < 500 && chunks < 60; slice += 1) {
+      ({ state } = await runHcSlice(ctx, deviceId, state, { maxQueries: 12, maxMs: 20_000 }));
+      chunks = await count("hc_chunks", deviceId);
+    }
+
+    expect(chunks).toBeLessThan(72);
+    const log = await logRow(deviceId, "batch-0001");
+    expect(log?.status).toBe("applying");
+    // Sixty-odd chunks written, in hour order: three days, three marks.
+    expect(await dayMarks(deviceId)).toStrictEqual([
+      dayMarkKey("Steps", from / HOUR_MS),
+      dayMarkKey("Steps", from / HOUR_MS + 24),
+      dayMarkKey("Steps", from / HOUR_MS + 48),
+    ]);
+  }, 30_000);
+
+  it("rebuild both local days their UTC day falls on, and nothing else", async () => {
+    const deviceId = await seedDevice(repos);
+    await setSetting(ctx, "timezone", FIXED_WEST);
+    const from = Date.UTC(2026, 0, 10);
+    await enqueue(repos, deviceId, {
+      batchId: "batch-0001",
+      upserts: hourly(from, from + 4 * 24 * HOUR_MS),
+    });
+    await drain(ctx, deviceId);
+    const twelfth = dayMarkKey("Steps", Date.UTC(2026, 0, 12) / HOUR_MS);
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM hc_rollup_day WHERE device_id = ?").bind(deviceId),
+      env.DB.prepare(
+        "INSERT INTO hc_dirty (device_id, kind, key, marked_at) VALUES (?, 'day', ?, 0)",
+      ).bind(deviceId, twelfth),
+    ]);
+
+    await drain(ctx, deviceId);
+
+    // 12 January UTC is the last five hours of the 11th and the first nineteen
+    // of the 12th in this zone; each is built whole, from every hour it has.
+    expect(await dayCounts(deviceId, "2026-01-01", "2026-01-31")).toStrictEqual({
+      "2026-01-11": 24,
+      "2026-01-12": 24,
+    });
+    expect(await count("hc_dirty", deviceId)).toBe(0);
+  });
+
+  it("that are not day marks at all are cleared, and the real ones beside them rebuilt", async () => {
+    const deviceId = await seedDevice(repos);
+    await setSetting(ctx, "timezone", FIXED_WEST);
+    const from = Date.UTC(2026, 0, 10);
+    await enqueue(repos, deviceId, {
+      batchId: "batch-0001",
+      upserts: hourly(from, from + 24 * HOUR_MS),
+    });
+    await drain(ctx, deviceId);
+    const real = dayMarkKey("Steps", from / HOUR_MS);
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM hc_rollup_day WHERE device_id = ?").bind(deviceId),
+      env.DB.prepare(
+        `INSERT INTO hc_dirty (device_id, kind, key, marked_at)
+         VALUES (?1, 'day', ?2, 0), (?1, 'day', '0491736|Steps', 0), (?1, 'day', 'nonsense', 0)`,
+      ).bind(deviceId, real),
+    ]);
+
+    await drain(ctx, deviceId);
+
+    expect(await count("hc_dirty", deviceId)).toBe(0);
+    expect(await dayCounts(deviceId, "2026-01-01", "2026-01-31")).toStrictEqual({
+      "2026-01-09": 5,
+      "2026-01-10": 19,
+    });
+  });
+
+  it("are written once by a batch, not once for every chunk of the day", async () => {
+    const time = clock();
+    const moving = testCtx({ now: time.now });
+    const deviceId = await seedDevice(repos);
+    const from = Date.UTC(2026, 0, 10);
+    await enqueue(repos, deviceId, {
+      batchId: "batch-0001",
+      upserts: hourly(from, from + 24 * HOUR_MS),
+    });
+    const first = time.now();
+    // The parsed batch, and what it has marked, carried from slice to slice as
+    // the runner carries it.
+    const cache: HeadCache = { head: null };
+
+    const state = await applyUntil(moving, deviceId, 4, cache);
+    expect(await markedAt(deviceId)).toStrictEqual([first]);
+
+    // Later slices of the same batch write more chunks of the day, and leave
+    // the mark as it is: there, and not written again.
+    time.advance(600);
+    await applyUntil(moving, deviceId, 16, cache, state);
+
+    expect(await count("hc_chunks", deviceId)).toBeLessThan(24);
+    expect(await markedAt(deviceId)).toStrictEqual([first]);
+  }, 30_000);
+
+  it("are written again by a slice that does not know what the batch has marked", async () => {
+    const time = clock();
+    const moving = testCtx({ now: time.now });
+    const deviceId = await seedDevice(repos);
+    const from = Date.UTC(2026, 0, 10);
+    await enqueue(repos, deviceId, {
+      batchId: "batch-0001",
+      upserts: hourly(from, from + 24 * HOUR_MS),
+    });
+    const first = time.now();
+
+    // No cache: every slice reads the batch afresh, as after an eviction.
+    const state = await applyUntil(moving, deviceId, 4, undefined);
+    time.advance(600);
+    await applyUntil(moving, deviceId, 16, undefined, state);
+
+    expect(await markedAt(deviceId)).toStrictEqual([first + 600]);
+  }, 30_000);
+
+  it("are written again by the next batch, after the rebuild has cleared them", async () => {
+    const deviceId = await seedDevice(repos);
+    await setSetting(ctx, "timezone", FIXED_WEST);
+    const from = Date.UTC(2026, 0, 10, 12);
+    const cache: HeadCache = { head: null };
+    const run = async (): Promise<void> => {
+      let state: HcRunnerState | undefined;
+      for (let slice = 0; slice < 200; slice += 1) {
+        const result = await runHcSlice(ctx, deviceId, state, undefined, cache);
+        ({ state } = result);
+        if (!result.more) return;
+      }
+    };
+    await enqueue(repos, deviceId, {
+      batchId: "batch-0001",
+      upserts: hourly(from, from + 2 * HOUR_MS),
+    });
+    await run();
+    expect(await dayCounts(deviceId, "2026-01-10", "2026-01-10")).toStrictEqual({
+      "2026-01-10": 2,
+    });
+
+    // The same day again, through the same runner: the mark is not remembered
+    // from the batch before, and the day follows the new records.
+    await enqueue(repos, deviceId, {
+      batchId: "batch-0002",
+      upserts: hourly(from + 2 * HOUR_MS, from + 5 * HOUR_MS),
+    });
+    await run();
+
+    expect(await dayCounts(deviceId, "2026-01-10", "2026-01-10")).toStrictEqual({
+      "2026-01-10": 5,
+    });
+    expect(await count("hc_dirty", deviceId)).toBe(0);
+  });
+
+  it("take a larger share of a slice the longer the list, and never more than half", () => {
+    expect(rebuildShare(0, 1)).toBeCloseTo(0.2);
+    expect(rebuildShare(200, 1)).toBeCloseTo(0.35);
+    expect(rebuildShare(400, 1)).toBeCloseTo(0.5);
+    expect(rebuildShare(1_000_000, 1)).toBeCloseTo(0.5);
+  });
+
+  it("take what is above a fifth only out of what the slice has left", () => {
+    // A long list, and a slice that has spent all but a third of its budget.
+    expect(rebuildShare(1_000_000, 1 / 3)).toBeCloseTo(1 / 3);
+    // Nothing left at all: the fifth every applied batch is followed by.
+    expect(rebuildShare(1_000_000, 0)).toBeCloseTo(0.2);
+    expect(rebuildShare(0, 0)).toBeCloseTo(0.2);
   });
 });
 
@@ -849,7 +1071,7 @@ describe("while batches are still arriving", () => {
     const from = Date.UTC(2026, 0, 10);
     await enqueue(repos, deviceId, {
       batchId: "batch-0001",
-      upserts: hourly(from, from + 4 * DAY),
+      upserts: hourly(from, from + 10 * DAY),
     });
     await enqueue(repos, deviceId, {
       batchId: "batch-0002",
@@ -857,7 +1079,7 @@ describe("while batches are still arriving", () => {
     });
 
     // Small slices until the first batch is in: the slice that finishes it has
-    // only its share to rebuild with, which is a couple of days.
+    // only its share to rebuild with, which is one run of days -- a week.
     let state;
     for (let slice = 0; slice < 500; slice += 1) {
       ({ state } = await runHcSlice(ctx, deviceId, state, { maxQueries: 60, maxMs: 20_000 }));
@@ -871,7 +1093,7 @@ describe("while batches are still arriving", () => {
       .bind(deviceId)
       .all<{ oldest: string | null; newest: string | null }>();
     // The last day of the batch is built; its first is still waiting.
-    expect(results[0]?.newest).toBe("2026-01-13");
-    expect(results[0]?.oldest).not.toBe("2026-01-09");
+    expect(results[0]?.newest).toBe("2026-01-19");
+    expect(results[0]?.oldest).toBe("2026-01-12");
   }, 30_000);
 });

@@ -249,31 +249,105 @@ export function samplesInInterval(records: readonly HcRecord[]): {
 
 const KEY_SEPARATOR = "|";
 
-/** Digits a `day` mark's hour is padded to: enough for the next thousand years. */
-const HOUR_KEY_DIGITS = 7;
+/** Hours in a UTC day: what one `day` mark covers. */
+export const DAY_HOURS = 24;
+
+/** What a `day` mark's key starts with, and the digits its UTC day number is padded to (2,700 years' worth). */
+const DAY_KEY_PREFIX = "d";
+const DAY_KEY_DIGITS = 6;
+/** The part of a `day` mark's key before the separator. It agrees with the two constants above. */
+const DAY_KEY_PATTERN = /^d\d{6}$/u;
+
+/** The UTC day (days since the epoch) an hour falls in. */
+export function utcDayOf(hourUtc: number): number {
+  return Math.floor(hourUtc / DAY_HOURS);
+}
 
 /**
- * A `day` mark: one record type in one UTC hour. Which local day (or, in a
- * zone off the hour, which two) that is, is worked out when the mark is
- * rebuilt, in the zone configured then.
+ * A `day` mark: one record type in one UTC day, named by any hour of it. Which
+ * local days that is -- two, in any zone off UTC -- is worked out when the mark
+ * is rebuilt, in the zone configured then.
  *
- * The hour comes first and is zero-padded, so the primary key's own order is
+ * A UTC day and not an hour: a backfill writes every hour of every day, and a
+ * mark per hour would be two dozen rows for a day that is rebuilt once. The
+ * list a long backfill leaves behind is one row per type and day.
+ *
+ * The day comes first and is zero-padded, so the primary key's own order is
  * time order: the rebuild takes the newest marks first by reading the key
  * backwards, with no sort.
  */
 export function dayMarkKey(type: string, hourUtc: number): string {
-  return `${String(hourUtc).padStart(HOUR_KEY_DIGITS, "0")}${KEY_SEPARATOR}${type}`;
+  const day = String(utcDayOf(hourUtc)).padStart(DAY_KEY_DIGITS, "0");
+  return `${DAY_KEY_PREFIX}${day}${KEY_SEPARATOR}${type}`;
 }
 
 /** SQL for `dayMarkKey(record_type, hour_utc)`, for marking straight from a table. */
-export const DAY_MARK_KEY_SQL = `printf('%0${String(HOUR_KEY_DIGITS)}d', hour_utc) || '${KEY_SEPARATOR}' || record_type`;
+export const DAY_MARK_KEY_SQL = `'${DAY_KEY_PREFIX}' || printf('%0${String(DAY_KEY_DIGITS)}d', hour_utc / ${String(DAY_HOURS)}) || '${KEY_SEPARATOR}' || record_type`;
 
-export function parseDayMarkKey(key: string): { type: string; hourUtc: number } | null {
+/** The type and UTC day a `day` mark names, or null for a key that is not one. */
+export function parseDayMarkKey(key: string): { type: string; utcDay: number } | null {
   const parts = key.split(KEY_SEPARATOR);
-  const [hour, type] = parts;
-  if (type === undefined || hour === undefined || type === "" || hour === "") return null;
-  const hourUtc = Number(hour);
-  return parts.length === 2 && Number.isSafeInteger(hourUtc) ? { type, hourUtc } : null;
+  const [when, type] = parts;
+  if (type === undefined || type === "" || parts.length !== 2) return null;
+  return when !== undefined && DAY_KEY_PATTERN.test(when)
+    ? { type, utcDay: Number(when.slice(DAY_KEY_PREFIX.length)) }
+    : null;
+}
+
+/** Consecutive UTC days of one type whose marks are settled together. */
+export interface DayRun {
+  type: string;
+  /** The earliest UTC day of the run. */
+  firstDay: number;
+  /** How many days it runs for: at least one. */
+  days: number;
+}
+
+/**
+ * A page of `day` mark keys as the runs to rebuild: per type, consecutive UTC
+ * days together, `maxDays` at most to a run, the newest run first.
+ * `unreadable` are the keys that are not `day` marks at all.
+ *
+ * Runs, because neighbouring UTC days share a local day: rebuilt one mark at a
+ * time, every local day of a backfill would be built twice.
+ */
+export function dayRuns(
+  keys: readonly string[],
+  maxDays: number,
+): { runs: DayRun[]; unreadable: string[] } {
+  const byType = new Map<string, Set<number>>();
+  const unreadable: string[] = [];
+  for (const key of keys) {
+    const parsed = parseDayMarkKey(key);
+    if (parsed === null) {
+      unreadable.push(key);
+    } else {
+      const days = byType.get(parsed.type) ?? new Set<number>();
+      days.add(parsed.utcDay);
+      byType.set(parsed.type, days);
+    }
+  }
+  const runs: DayRun[] = [];
+  for (const [type, days] of byType) {
+    let run: DayRun | null = null;
+    const newestFirst = sortedBy(days, (left, right) => right - left);
+    for (const day of newestFirst) {
+      if (run !== null && day === run.firstDay - 1 && run.days < maxDays) {
+        run.firstDay = day;
+        run.days += 1;
+      } else {
+        run = { type, firstDay: day, days: 1 };
+        runs.push(run);
+      }
+    }
+  }
+  const byEnd = sortedBy(
+    runs,
+    (left, right) =>
+      right.firstDay + right.days - (left.firstDay + left.days) ||
+      compareText(left.type, right.type),
+  );
+  return { runs: byEnd, unreadable };
 }
 
 /** An `hr` mark: the per-minute heart-rate row of one origin and UTC hour. */

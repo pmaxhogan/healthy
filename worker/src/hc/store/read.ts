@@ -124,28 +124,64 @@ export const WINDOW_SCAN = {
   where: " AND hour_utc >= ? AND hour_utc < ?",
 } as const;
 /**
- * The second comparison repeats what the first implies, on purpose: it is the
- * predicate of the partial index `hc_chunks_spill` ("this chunk runs past its
- * own hour"). `INDEXED BY` makes that small index the plan; left to choose, the
- * planner walks `hc_chunks_range` through every earlier chunk of the type.
+ * The earlier chunks that reach into a window starting at `startMs`.
+ *
+ * A record is the half-open interval `[start, end)` and so is a window, so a
+ * record of an earlier hour is in the window only if it ends AFTER the window
+ * starts: `max_end_ms > startMs`, strictly. One that ends exactly on the
+ * window's first instant has nothing in it. (A record with no length is the one
+ * instant it sits on, and that instant is in its own hour's chunk, which the
+ * window scan reads.) Such a chunk runs past the end of its own hour, and those
+ * are exactly what the partial index `hc_chunks_spill` holds; the last
+ * comparison repeats the index's predicate so that `INDEXED BY` can name it.
+ * Left to choose, the planner walks `hc_chunks_range` through every earlier
+ * chunk of the type.
+ *
+ * `keysFirst`: the rows are found in the index alone and only then looked up
+ * in the table (see `chunkScanSql`).
  */
 export const SPILL_SCAN = {
   from: "hc_chunks INDEXED BY hc_chunks_spill",
-  where: ` AND hour_utc < ? AND max_end_ms >= ? AND max_end_ms >= (hour_utc + 1) * ${String(HOUR_MS)}`,
+  where: ` AND hour_utc < ? AND max_end_ms > ? AND max_end_ms > (hour_utc + 1) * ${String(HOUR_MS)}`,
+  keysFirst: true,
 } as const;
 
-/** The statement one page of a chunk scan runs. Exported so its plan can be asserted. */
-export function chunkScanSql(scan: { from: string; where: string }, extra = ""): string {
-  return `SELECT ${CHUNK_COLUMNS} FROM ${scan.from}
-            WHERE device_id = ? AND record_type = ?${scan.where}${extra}
+interface ChunkScan {
+  from: string;
+  where: string;
+  keysFirst?: boolean;
+}
+
+/**
+ * The statement one page of a chunk scan runs. Exported so its plan can be
+ * asserted.
+ *
+ * A `keysFirst` scan selects the page's primary keys in a subquery, which the
+ * index answers by itself (the table is WITHOUT ROWID, so an index entry
+ * carries the whole key), and joins the table to them for the payloads. Asked
+ * for in one flat SELECT, SQLite fetches the table row of every index entry in
+ * range before it tests `hour_utc` -- and the range is every later chunk of the
+ * type that runs past its hour, so a read of an old window would open the
+ * payload of each of them. Same order, same page, same bound values either way.
+ */
+export function chunkScanSql(scan: ChunkScan, extra = ""): string {
+  const filter = `WHERE device_id = ? AND record_type = ?${scan.where}${extra}
             ORDER BY hour_utc, origin_hash, part LIMIT ?`;
+  if (scan.keysFirst !== true) return `SELECT ${CHUNK_COLUMNS} FROM ${scan.from} ${filter}`;
+  return `SELECT c.record_type, c.origin_hash, c.hour_utc, c.part, c.payload_enc, c.content_hash
+            FROM (SELECT device_id, record_type, origin_hash, hour_utc, part FROM ${scan.from}
+            ${filter}) AS k
+           CROSS JOIN hc_chunks AS c
+              ON c.device_id = k.device_id AND c.record_type = k.record_type
+             AND c.origin_hash = k.origin_hash AND c.hour_utc = k.hour_utc AND c.part = k.part
+           ORDER BY c.hour_utc, c.origin_hash, c.part`;
 }
 
 async function scanChunks(
   ctx: Ctx,
   deviceId: string,
   type: string,
-  scan: { from: string; where: string },
+  scan: ChunkScan,
   origin: { sql: string; values: string[] },
   values: readonly (string | number)[],
 ): Promise<ChunkRow[]> {
@@ -178,7 +214,8 @@ async function scanChunks(
  * A record lives in the chunk of its start hour however long it runs, so the
  * window is read in two parts: the chunks whose hour is in it, and the earlier
  * chunks whose `max_end_ms` reaches into it (a night of sleep that began the
- * evening before). Only overlapping chunks are opened.
+ * evening before; see `SPILL_SCAN` for exactly where the line is). Only
+ * overlapping chunks are opened.
  */
 export async function readRecords(ctx: Ctx, window: RecordWindow): Promise<HcRecord[]> {
   const { deviceId, type, startMs, endMs } = window;

@@ -9,10 +9,12 @@ import { describe, expect, it } from "vitest";
 import { blindHcOrigin, blindHcRecordId, blinderFor } from "../../../../src/db/blind.ts";
 import { Meter } from "../../../../src/hc/store/budget.ts";
 import {
+  DAY_HOURS,
   HOUR_MS,
   chunkExtent,
   compareText,
   dayMarkKey,
+  dayRuns,
   dedupeUpserts,
   groupUpserts,
   hourOf,
@@ -27,6 +29,7 @@ import {
   samplesInInterval,
   sortRecords,
   sortedBy,
+  utcDayOf,
 } from "../../../../src/hc/store/keys.ts";
 
 import type { HcRecord } from "../../../../src/hc/wire.ts";
@@ -265,32 +268,88 @@ describe("overlapsWindow", () => {
   });
 });
 
+/** The mark of one type's UTC day. */
+const at = (type: string, day: number): string => dayMarkKey(type, day * DAY_HOURS);
+
 describe("dirty keys", () => {
   it("round-trip a day mark, including a type with punctuation", () => {
-    expect(dayMarkKey("Agg.Steps", 495_123)).toBe("0495123|Agg.Steps");
+    // Hour 495,123 is in UTC day 20,630.
+    expect(dayMarkKey("Agg.Steps", 495_123)).toBe("d020630|Agg.Steps");
     expect(parseDayMarkKey(dayMarkKey("Agg.Steps", H))).toStrictEqual({
       type: "Agg.Steps",
-      hourUtc: H,
+      utcDay: utcDayOf(H),
     });
     expect(parseDayMarkKey("Steps")).toBeNull();
     expect(parseDayMarkKey("|Steps")).toBeNull();
     expect(parseDayMarkKey("2026-01-10|Steps")).toBeNull();
     expect(parseDayMarkKey("1|a|2")).toBeNull();
+    expect(parseDayMarkKey("d20630|Steps")).toBeNull();
+    expect(parseDayMarkKey("d020630|")).toBeNull();
+  });
+
+  it("mark every hour of a UTC day with the one key, and the next day with another", () => {
+    const midnight = 20_630 * DAY_HOURS;
+
+    expect(dayMarkKey("Steps", midnight)).toBe(dayMarkKey("Steps", midnight + 23));
+    expect(dayMarkKey("Steps", midnight + 24)).not.toBe(dayMarkKey("Steps", midnight));
+    expect(dayMarkKey("Steps", midnight - 1)).toBe("d020629|Steps");
+  });
+
+  it("read nothing but a day mark as one", () => {
+    // A bare number before the separator is an hour or a day of some other
+    // scheme, not this one: the key says what it is with its first letter.
+    expect(parseDayMarkKey("0495123|Steps")).toBeNull();
+    expect(parseDayMarkKey("020630|Steps")).toBeNull();
+    expect(parseDayMarkKey("d0495123|Steps")).toBeNull();
   });
 
   it("order day marks by time, whatever their types", () => {
     const keys = [
       dayMarkKey("Weight", 99_999),
-      dayMarkKey("Steps", 100_000),
+      dayMarkKey("Steps", 100_000 + DAY_HOURS),
       dayMarkKey("Agg.Steps", 9),
     ];
 
-    // Plain string order, which is what the primary key gives, is hour order.
+    // Plain string order, which is what the primary key gives, is day order.
     expect(sortedBy(keys, compareText)).toStrictEqual([
       dayMarkKey("Agg.Steps", 9),
       dayMarkKey("Weight", 99_999),
-      dayMarkKey("Steps", 100_000),
+      dayMarkKey("Steps", 100_000 + DAY_HOURS),
     ]);
+  });
+
+  it("group a page of day marks into runs of consecutive days, newest first", () => {
+    const keys = [
+      at("Steps", 105),
+      at("Steps", 104),
+      at("Steps", 103),
+      at("Steps", 100),
+      at("Weight", 104),
+      // The same mark twice is one day, not two.
+      at("Steps", 104),
+      at("Steps", 99),
+      "not-a-mark",
+    ];
+
+    expect(dayRuns(keys, 7)).toStrictEqual({
+      runs: [
+        { type: "Steps", firstDay: 103, days: 3 },
+        { type: "Weight", firstDay: 104, days: 1 },
+        { type: "Steps", firstDay: 99, days: 2 },
+      ],
+      unreadable: ["not-a-mark"],
+    });
+  });
+
+  it("cut a run at the most days one may hold", () => {
+    const keys = Array.from({ length: 10 }, (_, index) => dayMarkKey("Steps", index * DAY_HOURS));
+
+    expect(dayRuns(keys, 4).runs).toStrictEqual([
+      { type: "Steps", firstDay: 6, days: 4 },
+      { type: "Steps", firstDay: 2, days: 4 },
+      { type: "Steps", firstDay: 0, days: 2 },
+    ]);
+    expect(dayRuns([], 4)).toStrictEqual({ runs: [], unreadable: [] });
   });
 
   it("round-trip a heart-rate mark", () => {
@@ -321,6 +380,18 @@ describe("Meter", () => {
     expect(meter.progressed).toBe(true);
     expect(meter.mayStart(8)).toBe(true);
     expect(meter.mayStart(9)).toBe(false);
+  });
+
+  it("says how much of its statement budget is left", () => {
+    const meter = new Meter({ maxQueries: 20, maxMs: 1000 }, () => 0);
+
+    expect(meter.unspent).toBe(1);
+    meter.spend(5);
+    expect(meter.unspent).toBe(0.75);
+    // A unit under way may run past the budget; what is left is then nothing.
+    meter.spend(30);
+    expect(meter.unspent).toBe(0);
+    expect(new Meter({ maxQueries: 0, maxMs: 1000 }, () => 0).unspent).toBe(0);
   });
 
   it("refuses a unit once the time is spent", () => {

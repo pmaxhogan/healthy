@@ -194,19 +194,53 @@ export const READ_CHUNKS_SQL = `SELECT c.record_type, c.origin_hash, c.hour_utc,
     AND c.hour_utc = json_extract(k.value, '$[2]')`;
 
 /**
- * The statement `hrSpillIn` runs. Bound: device, type, origin blind, the hour,
- * and the hour's first instant.
+ * The statement `hrSpillIn` runs: every earlier chunk of one origin that can
+ * hold a heart-rate sample timed in the hour H. Bound: device, type, origin
+ * blind, and H.
  *
- * The last comparison repeats what the one before it implies, on purpose: it
- * is the predicate of the partial index `hc_chunks_spill`, which holds only the
- * few chunks that run past their own hour. `INDEXED BY` makes that index the
- * plan rather than a hope; without it the primary key is walked through every
- * earlier chunk of the origin.
+ * ### The rule at the hour boundary
+ *
+ * A record is the half-open interval `[start, end)`: one that ends exactly
+ * where H starts has no time in H. But its SAMPLES are instants, and one
+ * stamped exactly on the boundary (`t == end == start of H`) is in H, and
+ * belongs to H's minute row although its record started the hour before
+ * (`samplesInInterval` keeps `t <= end`). So the chunks that matter are the
+ * earlier ones with `max_end_ms >= start of H`, and they are found in two
+ * disjoint ways:
+ *
+ *   - `max_end_ms == start of H`. Only the chunk of the hour before can end
+ *     there (an earlier one that reached H would have run past its own hour by
+ *     an hour or more), so it is read by primary key: one row. A wearable's
+ *     contiguous series ends on the boundary every hour, so this is the usual
+ *     case, and its chunk is not in any index for it.
+ *   - `max_end_ms > start of H`, from any earlier hour. Such a chunk runs past
+ *     the end of its own hour, which is exactly what the partial index
+ *     `hc_chunks_spill` holds. The comparison with `(hour_utc + 1)` repeats the
+ *     index's own predicate so that `INDEXED BY` can name it.
+ *
+ * ### Keys first
+ *
+ * The index is entered at `max_end_ms`, so the range holds every LATER chunk
+ * of the origin that overruns as well, and those are told apart by
+ * `hour_utc < H`. The inner select is answered from the index alone -- the
+ * table being WITHOUT ROWID, an entry carries the whole primary key -- and
+ * only the keys that pass are looked up for their payload. In one flat SELECT
+ * SQLite fetches the table row of every entry in range BEFORE it tests the
+ * hour: a payload read per later chunk, for every chunk written.
  */
-export const HR_SPILL_SQL = `SELECT ${CHUNK_COLUMNS} FROM hc_chunks INDEXED BY hc_chunks_spill
-  WHERE device_id = ? AND record_type = ? AND origin_hash = ?
-    AND hour_utc < ? AND max_end_ms >= ?
-    AND max_end_ms >= (hour_utc + 1) * ${String(HOUR_MS)}`;
+export const HR_SPILL_SQL = `SELECT record_type, origin_hash, hour_utc, part, payload_enc, content_hash
+   FROM hc_chunks
+  WHERE device_id = ?1 AND record_type = ?2 AND origin_hash = ?3
+    AND hour_utc = ?4 - 1 AND max_end_ms = ?4 * ${String(HOUR_MS)}
+ UNION ALL
+ SELECT c.record_type, c.origin_hash, c.hour_utc, c.part, c.payload_enc, c.content_hash
+   FROM (SELECT hour_utc, part FROM hc_chunks INDEXED BY hc_chunks_spill
+          WHERE device_id = ?1 AND record_type = ?2 AND origin_hash = ?3
+            AND hour_utc < ?4 AND max_end_ms > ?4 * ${String(HOUR_MS)}
+            AND max_end_ms > (hour_utc + 1) * ${String(HOUR_MS)}) AS k
+  CROSS JOIN hc_chunks AS c
+     ON c.device_id = ?1 AND c.record_type = ?2 AND c.origin_hash = ?3
+    AND c.hour_utc = k.hour_utc AND c.part = k.part`;
 
 /** The chunks at the given keys that exist, by `keyId`. */
 export async function readChunks(
@@ -352,8 +386,9 @@ export async function readChunksInHours(
 }
 
 /**
- * HeartRate records of earlier chunks of the same origin that run into the
- * hour `hourUtc`, however long ago they started.
+ * HeartRate records of earlier chunks of the same origin that reach the hour
+ * `hourUtc` -- run into it, or end exactly where it starts -- however long ago
+ * they started.
  *
  * A heart-rate series is filed under its start hour however long it runs, but
  * each sample belongs to the minute row of its own hour, so the row for an
@@ -369,9 +404,7 @@ export async function hrSpillIn(
 ): Promise<HcRecord[]> {
   meter?.spend();
   const rows = await all<ChunkRow>(
-    ctx.db
-      .prepare(HR_SPILL_SQL)
-      .bind(deviceId, TYPE_HEART_RATE, originHash, hourUtc, hourUtc * HOUR_MS),
+    ctx.db.prepare(HR_SPILL_SQL).bind(deviceId, TYPE_HEART_RATE, originHash, hourUtc),
   );
   const chunks = await assembleChunks(ctx, deviceId, rows);
   return chunks.flatMap((stored) => stored.records);
