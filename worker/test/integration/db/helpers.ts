@@ -48,13 +48,13 @@ export const T0 = 1_767_225_600;
 
 function testEnv(dataKey = TEST_DATA_KEY, orgSecretKey?: string): Env {
   // `Cloudflare.Env` types HEALTHY_MCP as DurableObjectNamespace<HealthyMcp>,
-  // which is narrower than the hand-written Env's plain DurableObjectNamespace.
-  // That one difference is all the cast covers.
+  // which is narrower than the hand-written Env's plain DurableObjectNamespace
+  // and assignable to it, so the spread needs no cast.
   return {
     ...env,
     DATA_KEY: dataKey,
     ...(orgSecretKey !== undefined && { EPIC_ORG_SECRET_KEY: orgSecretKey }),
-  } as unknown as Env;
+  };
 }
 
 /** A clock the test moves by hand, so TTLs and windows need no real waiting. */

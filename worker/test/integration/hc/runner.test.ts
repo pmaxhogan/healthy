@@ -23,12 +23,11 @@ import { wipeDevice } from "../../../src/hc/store/wipe.ts";
 
 import { T, count, enqueue, logRow, resetHc, seedDevice, steps } from "./helpers.ts";
 
-import type { Env } from "../../../src/env.ts";
-
 beforeEach(resetHc);
 
-// `Cloudflare.Env` types the namespaces more narrowly than the hand-written Env.
-const ctx = makeCtx(env.DB, env as unknown as Env);
+// `Cloudflare.Env` types the namespaces more narrowly than the hand-written Env,
+// and is assignable to it as it stands.
+const ctx = makeCtx(env.DB, env);
 const repos = makeRepos(ctx);
 
 type RunnerStub = ReturnType<typeof env.HC_INGEST.getByName>;

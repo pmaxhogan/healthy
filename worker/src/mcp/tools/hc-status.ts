@@ -21,6 +21,7 @@ import { ageHours, deviceStatus } from "../../hc/coverage.ts";
 import { recordStartMs } from "../../hc/wire.ts";
 import { AVAILABILITY_NOTE, BUDGET_NOTE, hcArgs } from "../hc/args.ts";
 import { openStampedPage } from "../hc/page.ts";
+import { mcpErrorCode } from "../hc/phone-errors.ts";
 import { policyResourceType } from "../hc/policy.ts";
 import {
   availabilityByType,
@@ -237,7 +238,17 @@ async function deviceItem(
   for (const [type, row] of view.rows) {
     if (view.entries.has(coverageResourceType(type))) visible.push(row);
   }
+  // Codes are shown as `mcpErrorCode` words them: what the phone may read is
+  // the owner's business on the Phone page, not something a client is told.
   const lastError = report?.lastError ?? null;
+  const lastErrorCode = lastError === null ? null : mcpErrorCode(lastError.errorCode);
+  const recentFailures: { receivedAt: string | null; errorCode: string | null }[] = [];
+  for (const entry of log) {
+    if (entry.status !== "failed") continue;
+    const errorCode = entry.errorCode === null ? null : mcpErrorCode(entry.errorCode);
+    if (errorCode === null && entry.errorCode !== null) continue;
+    recentFailures.push({ receivedAt: at(call, entry.receivedAt), errorCode });
+  }
   return {
     kind: "device",
     healthSystem: device.name,
@@ -257,9 +268,9 @@ async function deviceItem(
     androidSdk: report?.androidSdk ?? null,
     healthConnectVersion: report?.hcProviderVersion ?? null,
     lastPhoneError:
-      lastError === null
+      lastError === null || lastErrorCode === null
         ? null
-        : { errorCode: lastError.errorCode, at: call.clock.iso(lastError.at) },
+        : { errorCode: lastErrorCode, at: call.clock.iso(lastError.at) },
     typesWithData: visible.length,
     records: visible.reduce((sum, row) => sum + row.recordCount, 0),
     // Records the phone still has to upload, by its own count.
@@ -270,9 +281,7 @@ async function deviceItem(
     parkedBatches: backlog.parkedBatches,
     rollupsPending: backlog.dirty,
     recentBatches: log.length,
-    recentFailures: log
-      .filter((entry) => entry.status === "failed")
-      .map((entry) => ({ receivedAt: at(call, entry.receivedAt), errorCode: entry.errorCode })),
+    recentFailures,
   };
 }
 
@@ -356,7 +365,10 @@ export function registerHcStatusTools(server: McpServer, deps: ToolDeps): void {
         "phone: `status` (`active`, `stale` after six hours without an upload, `revoked`, " +
         "`never`), `lastUploadAt`, `lastSeenAt`, `hoursSinceUpload`, `appVersion`, " +
         "`backgroundRead`, `historyRead`, `batteryOptimisationExempt`, `backfillComplete`, " +
-        "`lastPhoneError`, `phoneBacklog` (records the phone still has to send), " +
+        "`lastPhoneError` (a stable pipeline code and when: `network`, `hc_rate_limited`, " +
+        "`backlogged`, ..., or `phone_not_reading` when the phone is reading nothing at " +
+        "all; null when nothing is wrong with the pipeline), " +
+        "`phoneBacklog` (records the phone still has to send), " +
         "`queuedBatches` and `rollupsPending` (work this server still has to do: non-zero " +
         "means the newest upload may not be in every answer yet), `parkedBatches` (uploads " +
         "that could not be applied and are set aside: their records are missing until they " +
