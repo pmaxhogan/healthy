@@ -67,6 +67,8 @@ export interface Env {
   /** Epic app client ids, one per Epic environment. */
   EPIC_CLIENT_ID_PROD?: string;
   EPIC_CLIENT_ID_NONPROD?: string;
+  /** The ModMed certified FHIR API app's client id. ModMed has no sandbox, so there is one. */
+  MODMED_CLIENT_ID?: string;
   /**
    * base64 of 32 random bytes: the HMAC key per-organisation Epic client secrets
    * are derived from. Never rotate it -- see `db/org-secret.ts`.

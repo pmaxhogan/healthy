@@ -4,6 +4,11 @@
 // The editor holds a draft and saves on demand rather than on every keystroke:
 // a title template is half-invalid while it is being typed, and a PATCH per
 // character would sync nonsense.
+//
+// The vendor and FHIR base are editable only while the health system has no live
+// connection: a connected one's cache and tokens belong to the old endpoint, and
+// the Worker refuses the change with a 409. The editor mirrors that rule rather
+// than offering a field that can only fail.
 
 import { computed, reactive, ref, watch } from "vue";
 
@@ -21,7 +26,7 @@ import PortalAccountCard from "./PortalAccountCard.vue";
 import StatusPill from "./StatusPill.vue";
 import TitleTemplateField from "./TitleTemplateField.vue";
 
-import type { ColorOptionDto, HealthSystemDto, SettingsDto } from "@shared/types.ts";
+import type { ColorOptionDto, HealthSystemDto, SettingsDto, Vendor } from "@shared/types.ts";
 
 const props = defineProps<{
   healthSystem: HealthSystemDto;
@@ -35,6 +40,8 @@ interface Draft {
   displayName: string;
   orgShort: string;
   epicOrgId: string;
+  vendor: Vendor;
+  fhirBaseUrl: string;
   portalUrl: string;
   titleTemplate: string;
   colorId: string | null;
@@ -48,6 +55,8 @@ function draftFrom(healthSystem: HealthSystemDto): Draft {
     displayName: healthSystem.displayName,
     orgShort: healthSystem.config.orgShort ?? "",
     epicOrgId: healthSystem.config.epicOrgId ?? "",
+    vendor: healthSystem.vendor,
+    fhirBaseUrl: healthSystem.fhirBaseUrl,
     portalUrl: healthSystem.portalUrl ?? "",
     titleTemplate: healthSystem.config.titleTemplate ?? "",
     colorId: healthSystem.config.colorId ?? null,
@@ -77,7 +86,15 @@ watch(
 );
 
 const status = computed(() => props.healthSystem.connection?.status ?? "disconnected");
+const endpointEditable = computed(
+  () =>
+    props.healthSystem.connection === null ||
+    props.healthSystem.connection.status === "disconnected",
+);
+// The draft's vendor, so the Epic-only field disappears as soon as ModMed is picked.
+const isModmed = computed(() => draft.vendor === "modmed");
 const href = computed(() => reconnectHref(props.healthSystem));
+const vendorLabel = computed(() => (props.healthSystem.vendor === "modmed" ? "ModMed" : "Epic"));
 const secretLabel = computed(
   () =>
     ({ stored: "secret set", derived: "secret derived", none: "no client secret" })[
@@ -95,8 +112,15 @@ async function onSave(): Promise<void> {
   const orgShort = draft.orgShort.trim();
   const epicOrgId = draft.epicOrgId.trim();
   const portal = draft.portalUrl.trim();
+  const fhirBaseUrl = draft.fhirBaseUrl.trim();
   const ok = await save.run(async () => {
     await endpoints.updateHealthSystem(props.healthSystem.id, {
+      // Only a changed endpoint field is sent: the Worker re-runs SMART discovery
+      // for it, and rejects it outright once the health system is connected.
+      ...(endpointEditable.value &&
+        draft.vendor !== props.healthSystem.vendor && { vendor: draft.vendor }),
+      ...(endpointEditable.value &&
+        fhirBaseUrl !== props.healthSystem.fhirBaseUrl && { fhirBaseUrl }),
       displayName: draft.displayName.trim(),
       portalUrl: portal === "" ? null : portal,
       // The config is replaced wholesale, and every optional field is rejected
@@ -108,7 +132,7 @@ async function onSave(): Promise<void> {
         enabled: draft.enabled,
         ...(template !== "" && { titleTemplate: template }),
         ...(orgShort !== "" && { orgShort }),
-        ...(epicOrgId !== "" && { epicOrgId }),
+        ...(epicOrgId !== "" && !isModmed.value && { epicOrgId }),
         ...(draft.colorId !== null && { colorId: draft.colorId }),
         ...(draft.arrivalOffsetMin !== null && { arrivalOffsetMin: draft.arrivalOffsetMin }),
       },
@@ -182,7 +206,7 @@ async function onRemove(): Promise<void> {
         Short label — <code>{orgShort}</code>
         <input v-model="draft.orgShort" autocomplete="off" />
       </label>
-      <label class="field">
+      <label v-if="!isModmed" class="field">
         Epic organisation id
         <input
           v-model="draft.epicOrgId"
@@ -195,6 +219,24 @@ async function onRemove(): Promise<void> {
         Patient portal URL
         <input v-model="draft.portalUrl" type="url" autocomplete="off" placeholder="optional" />
       </label>
+      <label class="field">
+        Vendor
+        <select v-if="endpointEditable" v-model="draft.vendor" name="vendor">
+          <option value="epic">Epic</option>
+          <option value="modmed">ModMed</option>
+        </select>
+        <input v-else :value="vendorLabel" readonly name="vendor" />
+      </label>
+      <label class="field">
+        FHIR base URL
+        <input
+          v-model="draft.fhirBaseUrl"
+          type="url"
+          autocomplete="off"
+          name="fhirBaseUrl"
+          :readonly="!endpointEditable"
+        />
+      </label>
       <label class="field check">
         <span>Sync</span>
         <span class="toggle">
@@ -203,6 +245,14 @@ async function onRemove(): Promise<void> {
         </span>
       </label>
     </div>
+
+    <p v-if="!endpointEditable" class="muted">
+      Disconnect this health system before changing its vendor or FHIR base URL.
+    </p>
+    <p v-else-if="isModmed" class="muted">
+      Use the practice's own FHIR base URL: a generic ModMed base passes the check but then rejects
+      every patient sign-in.
+    </p>
 
     <TitleTemplateField
       v-model="draft.titleTemplate"

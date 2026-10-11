@@ -47,6 +47,7 @@ interface CreateHealthSystem {
 }
 
 interface UpdateHealthSystem {
+  vendor?: string;
   displayName?: string;
   fhirBaseUrl?: string;
   brandKey?: string | null;
@@ -176,6 +177,7 @@ export function makeHealthSystemsRepo(ctx: Ctx) {
         sets.push(`${column} = ?`);
         values.push(value);
       };
+      if (patch.vendor !== undefined) put("vendor", patch.vendor);
       if (patch.displayName !== undefined) {
         put(STORED.display_name, await sealIdentity("display_name", id, patch.displayName));
       }
@@ -256,7 +258,7 @@ export function makeHealthSystemsRepo(ctx: Ctx) {
       if (row.client_secret_enc !== null) {
         return open(ctx.env, row.client_secret_enc, secretAad(id));
       }
-      const orgId = derivableOrgId(ctx, configOf(row));
+      const orgId = derivableOrgId(ctx, row);
       return orgId === null
         ? null
         : deriveOrgClientSecret(ctx.env.EPIC_ORG_SECRET_KEY ?? "", row.environment, orgId);
@@ -265,7 +267,7 @@ export function makeHealthSystemsRepo(ctx: Ctx) {
     /** Where `getClientSecret` would get this row's secret from, without computing it. */
     clientSecretSource(row: HealthSystemRow): ClientSecretSource {
       if (row.client_secret_enc !== null) return "stored";
-      return derivableOrgId(ctx, configOf(row)) === null ? "none" : "derived";
+      return derivableOrgId(ctx, row) === null ? "none" : "derived";
     },
 
     /** The parsed per-health system overrides, defaults applied. */
@@ -284,9 +286,12 @@ function configOf(row: HealthSystemRow): HealthSystemConfig {
 }
 
 /** The organisation id a secret can be derived for, or null when either half is missing. */
-function derivableOrgId(ctx: Ctx, config: HealthSystemConfig): string | null {
+function derivableOrgId(ctx: Ctx, row: HealthSystemRow): string | null {
+  // Derivation is Epic's: an organisation id left in the config of a health
+  // system since moved to another vendor must not conjure a secret for it.
+  if (row.vendor !== "epic") return null;
   const key = ctx.env.EPIC_ORG_SECRET_KEY;
-  return key === undefined || key === "" ? null : (config.epic_org_id ?? null);
+  return key === undefined || key === "" ? null : (configOf(row).epic_org_id ?? null);
 }
 
 /** `row` with the identity columns of an already-opened copy of it. */

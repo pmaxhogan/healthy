@@ -48,6 +48,7 @@ export const T0 = 1_781_611_200;
 /** Fake client credentials. Not secrets: they authenticate against a stub. */
 const EPIC_CLIENT_ID = "epic-test-client";
 const EPIC_CLIENT_SECRET = "epic-test-secret";
+const MODMED_CLIENT_ID = "modmed-test-client";
 const GOOGLE_CLIENT_ID = "google-test-client";
 const GOOGLE_CLIENT_SECRET = "google-test-secret";
 
@@ -83,6 +84,7 @@ export function syncEnv(options: TestEnvOptions = {}): Env {
     DATA_KEY,
     EPIC_CLIENT_ID_PROD: EPIC_CLIENT_ID,
     EPIC_CLIENT_ID_NONPROD: EPIC_CLIENT_ID,
+    MODMED_CLIENT_ID,
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
   };
@@ -163,6 +165,8 @@ export function loggedFields(lines: readonly string[], event: string): Record<st
 // ---------------------------------------------------------------------------
 
 export interface SeedHealthSystemOptions {
+  /** Defaults to Epic. */
+  vendor?: "epic" | "modmed";
   displayName?: string;
   host?: string;
   /** Seconds from the ctx clock until the seeded access token expires. */
@@ -193,7 +197,7 @@ export async function seedConnectedHealthSystem(
   const host = options.host ?? "fhir.a.example.test";
   const fhirBaseUrl = `https://${host}/api/FHIR/R4`;
   const healthSystem = await repos.healthSystems.create({
-    vendor: "epic",
+    vendor: options.vendor ?? "epic",
     displayName: options.displayName ?? "A Example Health",
     fhirBaseUrl,
     portalUrl:

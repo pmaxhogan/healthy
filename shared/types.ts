@@ -5,7 +5,7 @@
  * into these shapes on the Worker side; the SPA never sees a raw D1 row.
  */
 
-export type Vendor = "epic";
+export type Vendor = "epic" | "modmed";
 export type HealthSystemEnvironment = "prod" | "sandbox";
 export type ConnectionStatus = "connected" | "needs_reauth" | "error" | "disconnected";
 export type RunKind = "calendar" | "full" | "refresh" | "manual";
@@ -480,18 +480,26 @@ export interface BrandDto {
 }
 
 export interface CreateHealthSystemRequest {
+  /** Absent means Epic. */
+  vendor?: Vendor;
   displayName: string;
-  /** Either a brand id from /api/brands or a manual fhirBaseUrl (discovery is run either way). */
+  /** Either a brand id from /api/brands (Epic only) or a manual fhirBaseUrl (discovery is run either way). */
   brandId?: string;
   fhirBaseUrl?: string;
   portalUrl?: string;
   environment: HealthSystemEnvironment;
-  /** Per-org client secret from the Epic developer portal; write-only. */
+  /** The client secret the vendor issued for this organisation; write-only. */
   clientSecret?: string;
   config?: HealthSystemConfig;
 }
 
 export interface UpdateHealthSystemRequest {
+  /**
+   * Where the health system points. Accepted only while it has no live
+   * connection: a connected one's cache and tokens belong to the old endpoint.
+   */
+  vendor?: Vendor;
+  fhirBaseUrl?: string;
   displayName?: string;
   portalUrl?: string | null;
   config?: HealthSystemConfig;

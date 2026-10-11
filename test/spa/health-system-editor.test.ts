@@ -8,7 +8,14 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import HealthSystemEditor from "../../src/components/HealthSystemEditor.vue";
 
-import { fakeResponse, installFakeApi, portalAccount, healthSystem, settings } from "./helpers.ts";
+import {
+  connection,
+  fakeResponse,
+  installFakeApi,
+  portalAccount,
+  healthSystem,
+  settings,
+} from "./helpers.ts";
 
 import type { FakeFetch } from "./helpers.ts";
 import type { HealthSystemDto } from "@shared/types.ts";
@@ -31,6 +38,9 @@ function lastMutation(api: FakeFetch): { url: string; method: string; body: unkn
     ? { url: call.url, method: call.method, body: JSON.parse(call.body ?? "null") }
     : undefined;
 }
+
+const vendorField = (wrapper: ReturnType<typeof mount>) => wrapper.find('[name="vendor"]');
+const baseField = (wrapper: ReturnType<typeof mount>) => wrapper.find('input[name="fhirBaseUrl"]');
 
 describe("HealthSystemEditor", () => {
   let api: FakeFetch;
@@ -239,5 +249,44 @@ describe("HealthSystemEditor", () => {
       await flushPromises();
       expect(lastMutation(api), label).toEqual({ url: path, method: "POST", body: null });
     }
+  });
+
+  describe("endpoint fields", () => {
+    it("shows them read-only, with a note, while the health system is connected", async () => {
+      const wrapper = mountEditor(healthSystem({ vendor: "modmed" }));
+      expect(vendorField(wrapper).element.tagName).toBe("INPUT");
+      expect(baseField(wrapper).attributes("readonly")).toBeDefined();
+      expect(wrapper.text()).toContain("Disconnect this health system before changing");
+      expect(wrapper.text()).not.toContain("Epic organisation id");
+
+      await baseField(wrapper).setValue("https://fhir.example-health.test/other/fhir");
+      await save(wrapper);
+      const body = lastMutation(api)?.body as Record<string, unknown>;
+      expect(body).not.toHaveProperty("fhirBaseUrl");
+      expect(body).not.toHaveProperty("vendor");
+    });
+
+    it("lets them be edited when there is no connection, sending only what changed", async () => {
+      const wrapper = mountEditor(healthSystem({ connection: null }));
+      expect(vendorField(wrapper).element.tagName).toBe("SELECT");
+      expect(baseField(wrapper).attributes("readonly")).toBeUndefined();
+
+      await save(wrapper);
+      expect(lastMutation(api)?.body).not.toHaveProperty("fhirBaseUrl");
+
+      await vendorField(wrapper).setValue("modmed");
+      await baseField(wrapper).setValue("https://fhir.example-health.test/practice-1/fhir");
+      await save(wrapper);
+      const body = lastMutation(api)?.body as Record<string, unknown>;
+      expect(body.vendor).toBe("modmed");
+      expect(body.fhirBaseUrl).toBe("https://fhir.example-health.test/practice-1/fhir");
+    });
+
+    it("lets them be edited when the connection is disconnected", () => {
+      const wrapper = mountEditor(
+        healthSystem({ connection: connection({ status: "disconnected" }) }),
+      );
+      expect(vendorField(wrapper).element.tagName).toBe("SELECT");
+    });
   });
 });

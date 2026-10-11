@@ -116,6 +116,9 @@ const colorId = z.string().min(1).max(8);
 
 const offsetMinutes = z.number().int().min(0).max(1440);
 
+/** A vendor the adapter registry has an implementation for. */
+const vendorSchema = z.enum(["epic", "modmed"]);
+
 /** The camelCase per-health system config the SPA sends. */
 const healthSystemConfigSchema = z.strictObject({
   titleTemplate: z.string().min(1).max(300).optional(),
@@ -135,6 +138,7 @@ const healthSystemConfigSchema = z.strictObject({
  * meant when they disagree.
  */
 export const healthSystemCreateSchema = z.strictObject({
+  vendor: vendorSchema.optional(),
   displayName: shortText,
   brandId: z.string().min(1).max(200).optional(),
   fhirBaseUrl: httpsUrl.optional(),
@@ -144,8 +148,15 @@ export const healthSystemCreateSchema = z.strictObject({
   config: healthSystemConfigSchema.optional(),
 });
 
-/** `PATCH /api/health-systems/:id`. The FHIR base is not editable; delete and re-add. */
+/**
+ * `PATCH /api/health-systems/:id`.
+ *
+ * `vendor` and `fhirBaseUrl` are accepted, but the handler refuses them while the
+ * health system has a live connection.
+ */
 export const updateHealthSystemSchema = z.strictObject({
+  vendor: vendorSchema.optional(),
+  fhirBaseUrl: httpsUrl.optional(),
   displayName: shortText.optional(),
   portalUrl: httpsUrl.nullable().optional(),
   config: healthSystemConfigSchema.optional(),

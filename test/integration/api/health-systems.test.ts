@@ -29,6 +29,8 @@ import {
 import type { ApiError, HealthSystemDto } from "@shared/types.ts";
 
 const SECRET = "the-per-org-client-secret";
+/** A made-up practice base, distinct from `TEST_FHIR_BASE` so a move is visible. */
+const MODMED_BASE = "https://fhir.example-practice.test/R4";
 
 const owner = freshOwner();
 
@@ -91,6 +93,51 @@ describe("POST /api/health-systems", () => {
     expect(stub.requests[0]?.url).toBe(`${TEST_FHIR_BASE}/.well-known/smart-configuration`);
     const dto = await json<HealthSystemDto>(response);
     expect(dto.brandKey).toBeNull();
+  });
+
+  it("creates a ModMed health system from a manual base, validated by discovery", async () => {
+    const stub = stubFetch([
+      { match: "/.well-known/smart-configuration", body: smartConfiguration },
+    ]);
+    usePorts({ fetch: stub.fetchImpl });
+
+    const response = await owner().send("POST", "/api/health-systems", {
+      vendor: "modmed",
+      displayName: "Example Practice",
+      fhirBaseUrl: MODMED_BASE,
+      environment: "prod",
+    });
+
+    expect(response.status).toBe(201);
+    expect(stub.requests[0]?.url).toBe(`${MODMED_BASE}/.well-known/smart-configuration`);
+    const dto = await json<HealthSystemDto>(response);
+    expect(dto.vendor).toBe("modmed");
+    expect(dto.fhirBaseUrl).toBe(MODMED_BASE);
+    expect(dto.brandKey).toBeNull();
+  });
+
+  it("refuses a brand id for a ModMed health system", async () => {
+    const response = await owner().send("POST", "/api/health-systems", {
+      vendor: "modmed",
+      displayName: "Example Practice",
+      brandId: someBrandId(),
+      environment: "prod",
+    });
+
+    const body = await json<ApiError>(response);
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("bad_request");
+  });
+
+  it("refuses a vendor it does not know", async () => {
+    const response = await owner().send("POST", "/api/health-systems", {
+      vendor: "oracle-health",
+      displayName: "Example Practice",
+      fhirBaseUrl: MODMED_BASE,
+      environment: "prod",
+    });
+
+    expect(response.status).toBe(400);
   });
 
   it("refuses to insert a manual base whose discovery fails", async () => {
@@ -322,6 +369,157 @@ describe("GET and PATCH /api/health systems/:id", () => {
     );
 
     expect(dto.portalUrl).toBeNull();
+  });
+});
+
+/** A stubbed organisation that answers SMART discovery. */
+function discoveryStub(): ReturnType<typeof stubFetch> {
+  return stubFetch([{ match: "/.well-known/smart-configuration", body: smartConfiguration }]);
+}
+
+describe("PATCH /api/health-systems/:id moving the endpoint", () => {
+  it("moves an unconnected health system to another vendor and base", async () => {
+    const id = await seedHealthSystem();
+    const stub = discoveryStub();
+    usePorts({ fetch: stub.fetchImpl });
+
+    const response = await owner().send("PATCH", `/api/health-systems/${id}`, {
+      vendor: "modmed",
+      fhirBaseUrl: MODMED_BASE,
+    });
+
+    expect(response.status).toBe(200);
+    // Discovery ran against the new base, not the stored one.
+    expect(stub.requests.map((request) => request.url)).toStrictEqual([
+      `${MODMED_BASE}/.well-known/smart-configuration`,
+    ]);
+    const dto = await json<HealthSystemDto>(response);
+    expect(dto.vendor).toBe("modmed");
+    expect(dto.fhirBaseUrl).toBe(MODMED_BASE);
+    const reread = await json<HealthSystemDto>(await owner().get(`/api/health-systems/${id}`));
+    expect(reread.vendor).toBe("modmed");
+    expect(reread.fhirBaseUrl).toBe(MODMED_BASE);
+  });
+
+  it("clears the cache the old endpoint filled and forgets the brand", async () => {
+    const id = await seedHealthSystem();
+    const repos = testRepos();
+    await repos.healthSystems.update(id, { brandKey: someBrandId() });
+    await repos.fhirCache.upsertMany(
+      id,
+      [{ resourceType: "CareTeam", id: "ct-1", status: "active" }],
+      60_000,
+    );
+    usePorts({ fetch: discoveryStub().fetchImpl });
+
+    const dto = await json<HealthSystemDto>(
+      await owner().send("PATCH", `/api/health-systems/${id}`, { fhirBaseUrl: MODMED_BASE }),
+    );
+
+    expect(dto.vendor).toBe("epic");
+    expect(dto.brandKey).toBeNull();
+    expect(await repos.fhirCache.countsByType()).toStrictEqual([]);
+  });
+
+  it("treats the stored vendor and base as a no-op: no discovery, cache and brand kept", async () => {
+    const id = await seedHealthSystem();
+    const repos = testRepos();
+    await repos.healthSystems.update(id, { brandKey: someBrandId() });
+    await repos.fhirCache.upsertMany(
+      id,
+      [{ resourceType: "CareTeam", id: "ct-1", status: "active" }],
+      60_000,
+    );
+    const stub = discoveryStub();
+    usePorts({ fetch: stub.fetchImpl });
+    // Connected, so a real move would be refused: the no-op must not be.
+    await repos.connections.upsertTokens(id, { accessToken: "a", status: "connected" });
+
+    const response = await owner().send("PATCH", `/api/health-systems/${id}`, {
+      vendor: "epic",
+      fhirBaseUrl: TEST_FHIR_BASE,
+      displayName: "Renamed Health",
+    });
+
+    const dto = await json<HealthSystemDto>(response);
+    expect(response.status).toBe(200);
+    expect(dto.displayName).toBe("Renamed Health");
+    expect(dto.brandKey).toBe(someBrandId());
+    expect(stub.requests).toStrictEqual([]);
+    expect(await repos.fhirCache.countsByType()).toHaveLength(1);
+  });
+
+  it("refuses with a 409 while the health system is connected, changing nothing", async () => {
+    const id = await seedHealthSystem();
+    await testRepos().connections.upsertTokens(id, { accessToken: "a", status: "connected" });
+    const stub = discoveryStub();
+    usePorts({ fetch: stub.fetchImpl });
+
+    const response = await owner().send("PATCH", `/api/health-systems/${id}`, {
+      vendor: "modmed",
+      fhirBaseUrl: MODMED_BASE,
+    });
+
+    expect(response.status).toBe(409);
+    const body = await json<ApiError>(response);
+    expect(body.error).toBe("conflict");
+    expect(stub.requests).toStrictEqual([]);
+    const dto = await json<HealthSystemDto>(await owner().get(`/api/health-systems/${id}`));
+    expect(dto.vendor).toBe("epic");
+    expect(dto.fhirBaseUrl).toBe(TEST_FHIR_BASE);
+  });
+
+  it("allows the move again once the connection is disconnected", async () => {
+    const id = await seedHealthSystem();
+    const repos = testRepos();
+    const connection = await repos.connections.upsertTokens(id, {
+      accessToken: "a",
+      status: "connected",
+    });
+    await repos.connections.disconnect(connection.id);
+    usePorts({ fetch: discoveryStub().fetchImpl });
+
+    const response = await owner().send("PATCH", `/api/health-systems/${id}`, {
+      vendor: "modmed",
+      fhirBaseUrl: MODMED_BASE,
+    });
+
+    const dto = await json<HealthSystemDto>(response);
+    expect(response.status).toBe(200);
+    expect(dto.vendor).toBe("modmed");
+  });
+
+  it("refuses a base whose discovery fails, leaving the row as it was", async () => {
+    const id = await seedHealthSystem();
+    usePorts({
+      fetch: stubFetch([
+        { match: "/.well-known/smart-configuration", status: 404, body: { error: "nope" } },
+      ]).fetchImpl,
+    });
+
+    const response = await owner().send("PATCH", `/api/health-systems/${id}`, {
+      fhirBaseUrl: MODMED_BASE,
+    });
+
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    const dto = await json<HealthSystemDto>(await owner().get(`/api/health-systems/${id}`));
+    expect(dto.fhirBaseUrl).toBe(TEST_FHIR_BASE);
+  });
+
+  it("refuses an unknown vendor and a base that is not https", async () => {
+    const id = await seedHealthSystem();
+    usePorts({ fetch: discoveryStub().fetchImpl });
+
+    const vendor = await owner().send("PATCH", `/api/health-systems/${id}`, {
+      vendor: "oracle-health",
+    });
+    const insecure = await owner().send("PATCH", `/api/health-systems/${id}`, {
+      // eslint-disable-next-line unicorn/prefer-https -- a non-https base is the input under test; the assertion is that it is refused.
+      fhirBaseUrl: "http://fhir.example-practice.test/R4",
+    });
+
+    expect(vendor.status).toBe(400);
+    expect(insecure.status).toBe(400);
   });
 });
 

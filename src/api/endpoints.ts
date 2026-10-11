@@ -74,8 +74,9 @@ export const endpoints = {
   createHealthSystem: (body: CreateHealthSystemRequest): Promise<HealthSystemDto> =>
     api.post("/api/health-systems", body),
   /**
-   * PATCH, not PUT: the FHIR base is not editable, so this is a partial update by
-   * construction. The `config` it carries, however, replaces the stored config
+   * PATCH, not PUT: a partial update by construction (the vendor and FHIR base are
+   * only sent when changed, and the Worker accepts them only while the health system
+   * is disconnected). The `config` it carries, however, replaces the stored config
    * wholesale -- the Worker says so -- which is how a blank field clears back to
    * the global default.
    */

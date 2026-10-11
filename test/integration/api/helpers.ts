@@ -64,6 +64,7 @@ const overrides: Partial<Env> = {
   GOOGLE_CLIENT_SECRET: "test-google-client-secret",
   EPIC_CLIENT_ID_NONPROD: "test-epic-nonprod-client-id",
   EPIC_CLIENT_ID_PROD: "test-epic-prod-client-id",
+  MODMED_CLIENT_ID: "test-modmed-client-id",
   EPIC_ORG_SECRET_KEY: randomDataKey(),
   TRELLO_KEY: "test-trello-key",
   TRELLO_TOKEN: "test-trello-token",

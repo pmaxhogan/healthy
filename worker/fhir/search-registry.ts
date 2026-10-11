@@ -383,6 +383,29 @@ export function filterSupported(
 }
 
 /**
+ * The same entries with `category` taken off every search.
+ *
+ * For a server that answers a plain `patient=` search
+ * (`EhrAdapter.categoryScopedSearches` is false): one search then returns every
+ * category, where the per-category ones return only the categories this table
+ * happens to name. The per-category sets collapse into one, hence the dedupe.
+ */
+export function withoutCategoryScope(registry: readonly RegistryEntry[]): RegistryEntry[] {
+  return registry.map((entry) => {
+    const build = entry.params;
+    return {
+      ...entry,
+      params: (patientId, sinceIso) =>
+        dedupe(
+          build(patientId, sinceIso).map((set) =>
+            Object.fromEntries(Object.entries(set).filter(([name]) => name !== "category")),
+          ),
+        ),
+    };
+  });
+}
+
+/**
  * Encounter statuses the calendar sync cares about.
  *
  * `cancelled` is included on purpose: a cancelled encounter is what turns an

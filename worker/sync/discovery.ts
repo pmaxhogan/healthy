@@ -26,7 +26,6 @@
  * `tokenUrl` before it has a token at all.
  */
 
-import { AppError } from "../lib/errors.ts";
 import { errorFields } from "../lib/log.ts";
 
 import type { Ctx } from "../db/client.ts";
@@ -164,18 +163,4 @@ export async function getCapabilityIndex(
     });
     return null;
   }
-}
-
-/** The Epic client id for a health system's environment. Throws when it is unset. */
-export function clientIdFor(ctx: Ctx, healthSystem: HealthSystemRow): string {
-  const clientId =
-    healthSystem.environment === "prod"
-      ? ctx.env.EPIC_CLIENT_ID_PROD
-      : ctx.env.EPIC_CLIENT_ID_NONPROD;
-  if (clientId === undefined || clientId === "") {
-    throw new AppError("internal", "the Epic client id secret for this environment is not set", {
-      environment: healthSystem.environment,
-    });
-  }
-  return clientId;
 }

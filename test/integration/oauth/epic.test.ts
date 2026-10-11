@@ -162,6 +162,29 @@ describe("GET /oauth/epic/start", () => {
     );
   });
 
+  it("uses the ModMed client id and asks for launch/patient, whatever the environment", async () => {
+    const healthSystem = await testRepos().healthSystems.create({
+      vendor: "modmed",
+      displayName: "Example Practice",
+      fhirBaseUrl: TEST_FHIR_BASE,
+      environment: "sandbox",
+    });
+    usePorts({ fetch: stubEpic().fetchImpl });
+
+    const response = await call(`/oauth/epic/start?healthSystem=${healthSystem.id}`, {
+      headers: { cookie: owner().cookie },
+    });
+
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get("location") ?? "");
+    expect(location.searchParams.get("client_id")).toBe("test-modmed-client-id");
+    const scopes = (location.searchParams.get("scope") ?? "").split(" ");
+    expect(scopes).toContain("launch/patient");
+    expect(scopes).toContain("patient/Condition.rs");
+    // A scope ModMed does not register would refuse the whole request.
+    expect(scopes).not.toContain("patient/Binary.rs");
+  });
+
   it("renders a 404 page for an unknown or deleted health system", async () => {
     const id = await seedHealthSystem();
     await testRepos().healthSystems.softDelete(id);
@@ -247,6 +270,43 @@ describe("GET /oauth/callback", () => {
 
     expect(recorded.resolved).toStrictEqual([{ healthSystemId: id }]);
     expect(recorded.synced).toStrictEqual([{ healthSystemIds: [id], trigger: "manual" }]);
+  });
+
+  it("authenticates a ModMed exchange with the ModMed client id", async () => {
+    const healthSystem = await testRepos().healthSystems.create({
+      vendor: "modmed",
+      displayName: "Example Practice",
+      fhirBaseUrl: TEST_FHIR_BASE,
+      environment: "prod",
+      clientSecret: SECRET,
+    });
+    let authorization = "";
+    usePorts({
+      fetch: stubFetch([
+        { match: "/.well-known/smart-configuration", body: smartConfiguration },
+        {
+          match: smartConfiguration.token_endpoint,
+          method: "POST",
+          respond: (request) => {
+            authorization = request.headers.get("authorization") ?? "";
+            return Response.json(tokenResponse);
+          },
+        },
+      ]).fetchImpl,
+    });
+    recordingSync();
+    const state = await startFlow(healthSystem.id);
+
+    const response = await call(`/oauth/callback?code=auth-code&state=${state}`, {
+      headers: { cookie: owner().cookie },
+    });
+
+    expect(response.status).toBe(302);
+    // The fixture offers HTTP Basic, so the id travels as its first half.
+    const decoded = atob(authorization.replace(/^Basic /u, ""));
+    expect(decoded.startsWith("test-modmed-client-id:")).toBe(true);
+    const connection = await testRepos().connections.getForHealthSystem(healthSystem.id);
+    expect(connection?.status).toBe("connected");
   });
 
   it("skips the post-connect sync when Google is not connected yet", async () => {

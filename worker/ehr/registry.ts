@@ -1,19 +1,21 @@
 /**
  * vendor -> adapter.
  *
- * The only place in the Worker that names a vendor. Adding Oracle Health means
- * one entry here and one implementation under `ehr/`.
+ * The only place in the Worker that names a vendor. Adding another means one
+ * entry here and one implementation under `ehr/`.
  */
 
 import { AppError } from "../lib/errors.ts";
 
 import { createEpicAdapter } from "./epic/index.ts";
+import { createModMedFhirAdapter } from "./modmed-fhir/index.ts";
 
 import type { AdapterDeps, EhrAdapter, EhrAdapterFactory } from "./adapter.ts";
 import type { Vendor } from "../fhir/types.ts";
 
 export const ADAPTER_FACTORIES: Record<Vendor, EhrAdapterFactory> = {
   epic: createEpicAdapter,
+  modmed: createModMedFhirAdapter,
 };
 
 export const VENDORS: readonly Vendor[] = Object.keys(ADAPTER_FACTORIES) as Vendor[];

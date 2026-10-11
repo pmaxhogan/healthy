@@ -1,5 +1,5 @@
 /**
- * Epic access tokens: caching, expiry, and the single-flight refresh.
+ * Health system access tokens: caching, expiry, and the single-flight refresh.
  *
  * `withAccessToken` returns a *getter*, not a token, because `FhirClient` calls
  * it once per request and a sync run makes many: handing out a string would mean
@@ -7,11 +7,12 @@
  *
  * The four rules that make this safe, in the order they matter:
  *
- * 1. **Refresh at five minutes, not at zero.** Epic's access-token lifetime is
+ * 1. **Refresh ahead of expiry, not at zero.** Epic's access-token lifetime is
  *    set per organisation and has been seen as short as a few minutes. A token
- *    inside the skew is treated as already dead.
+ *    inside the adapter's margin (`EhrAdapter.refreshSkewMs`, five minutes unless
+ *    the vendor's tokens are shorter-lived than that) is treated as already dead.
  *
- * 2. **One refresh at a time, enforced twice.** Epic invalidates a refresh token
+ * 2. **One refresh at a time, enforced twice.** A refresh token is invalidated
  *    the moment it is redeemed, so two concurrent refreshes lose the connection
  *    outright and the owner has to re-authorise. The D1 lease (`acquireLease`, a
  *    single conditional UPDATE) is the cross-isolate guard; a promise latch is the
@@ -35,6 +36,8 @@
  */
 
 import { makeRepos } from "../db/index.ts";
+import { DEFAULT_REFRESH_SKEW_MS } from "../ehr/adapter.ts";
+import { clientIdFor } from "../ehr/client-id.ts";
 import { createFhirClient } from "../ehr/epic/fhir-client.ts";
 import { adapterFor } from "../ehr/registry.ts";
 import { AppError, isAppError, toAppError } from "../lib/errors.ts";
@@ -42,7 +45,7 @@ import { newToken } from "../lib/ids.ts";
 
 import { openReconnectAlert, resolveReconnectAlert } from "./alerts.ts";
 import { resolveDeps } from "./deps.ts";
-import { clientIdFor, getSmartConfig } from "./discovery.ts";
+import { getSmartConfig } from "./discovery.ts";
 
 import type { SyncDeps } from "./deps.ts";
 import type { Ctx } from "../db/client.ts";
@@ -52,8 +55,11 @@ import type { EhrAdapter } from "../ehr/adapter.ts";
 import type { FhirClient } from "../ehr/epic/fhir-client.ts";
 import type { SmartConfig } from "../fhir/types.ts";
 
-/** Refresh once this little of the access token's life is left. Five minutes. */
-export const REFRESH_SKEW_MS = 5 * 60 * 1000;
+/**
+ * Refresh once this little of an access token's life is left. Five minutes: the
+ * Google token manager's margin, and a health system adapter's default.
+ */
+export const REFRESH_SKEW_MS = DEFAULT_REFRESH_SKEW_MS;
 /** How long a refresh may hold the connection lease. */
 export const LEASE_TTL_MS = 60_000;
 /** Polls while waiting for whoever holds the lease to finish. */
@@ -107,7 +113,7 @@ async function loadCredentials(
     });
   }
   return {
-    clientId: clientIdFor(ctx, healthSystem),
+    clientId: clientIdFor(ctx.env, healthSystem),
     clientSecret,
     patientId: patientFhirId,
     refreshToken: secrets?.refreshToken ?? null,
@@ -173,7 +179,7 @@ export async function withAccessToken(
   /** The cached token when it is still comfortably valid, else null. */
   const freshToken = (): string | null => {
     const token = state.accessToken;
-    return token !== null && state.expiresAtMs - nowMs() > REFRESH_SKEW_MS ? token : null;
+    return token !== null && state.expiresAtMs - nowMs() > adapter.refreshSkewMs ? token : null;
   };
 
   /** Someone else holds the lease: wait for their result rather than racing it. */
@@ -189,7 +195,7 @@ export async function withAccessToken(
           healthSystemId,
         });
       }
-      if ((row.access_expires_at ?? 0) * 1000 - nowMs() <= REFRESH_SKEW_MS) continue;
+      if ((row.access_expires_at ?? 0) * 1000 - nowMs() <= adapter.refreshSkewMs) continue;
       const secrets = await repos.connections.getSecrets(connection.id);
       const token = secrets?.accessToken ?? null;
       // eslint-disable-next-line security/detect-possible-timing-attacks -- a null check on a freshly read column, not a secret comparison; there is nothing to compare against.

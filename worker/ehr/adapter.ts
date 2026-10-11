@@ -2,9 +2,8 @@
  * The vendor boundary.
  *
  * Everything above this interface (OAuth routes, the sync engine, the MCP
- * server) is written against `EhrAdapter` and knows nothing about Epic.
- * Adding Oracle Health later means adding one implementation and one line in
- * `registry.ts`.
+ * server) is written against `EhrAdapter` and knows nothing about a vendor.
+ * Adding one means adding one implementation and one line in `registry.ts`.
  *
  * Adapters are pure: they take a `fetchImpl`, a `Logger` and a clock, and they
  * never read `env`, touch D1, or cache anything. Discovery documents,
@@ -77,6 +76,33 @@ export interface RefreshInput {
 export interface EhrAdapter {
   readonly vendor: Vendor;
   /**
+   * How much of an access token's life must be left for it to be used rather
+   * than refreshed, in milliseconds. Per vendor because lifetimes are: a margin
+   * sized for an hour-long token is the whole life of a five-minute one, and
+   * would turn every request into a refresh.
+   */
+  readonly refreshSkewMs: number;
+  /**
+   * Whether a patient search has to be narrowed by `category` to be answered.
+   *
+   * Epic's patient-facing searches are category-scoped, so the registry runs one
+   * search per category it knows. A server that answers a plain `patient=` search
+   * returns every category at once, including the ones the registry has no name
+   * for -- and there, searching by category is how resources get left behind.
+   */
+  readonly categoryScopedSearches: boolean;
+  /**
+   * Whether this vendor's Encounters are what goes on the calendar.
+   *
+   * Epic's are: a scheduled visit is an Encounter whose `period.start` is the
+   * appointment time. Where an Encounter is instead the record of a visit that
+   * happened -- started when the patient was roomed, sometimes never closed --
+   * its start is minutes off the booked time, so it would sit beside the patient
+   * portal's copy of the same visit rather than merge with it. There the calendar
+   * is left to the portal and Encounters are only cached as part of the record.
+   */
+  readonly encountersAreAppointments: boolean;
+  /**
    * Parse `{base}/.well-known/smart-configuration`.
    *
    * Cached by the caller (7 days per health system); an organisation can move its
@@ -106,6 +132,9 @@ export interface EhrAdapter {
 }
 
 export type EhrAdapterFactory = (deps: AdapterDeps) => EhrAdapter;
+
+/** The refresh margin for a vendor whose access tokens last tens of minutes. Five minutes. */
+export const DEFAULT_REFRESH_SKEW_MS = 5 * 60 * 1000;
 
 /** The SMART scopes every connection needs regardless of resource types. */
 export const SMART_BASE_SCOPES: readonly string[] = ["openid", "fhirUser", "offline_access"];

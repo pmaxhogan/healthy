@@ -7,8 +7,9 @@
  * from `data/epic-brands.json`, which is Epic's own published directory, so its
  * FHIR base is taken as given. A manual `fhirBaseUrl` is not: it must be https and
  * it must answer a SMART discovery request *before* the row is written. Storing an
- * endpoint that turns out not to be an Epic FHIR server produces a health system that
- * can never be connected and a reconnect card that can never be cleared.
+ * endpoint that turns out not to be a SMART FHIR server produces a health system that
+ * can never be connected and a reconnect card that can never be cleared. The same
+ * check runs when a PATCH moves an unconnected health system to another endpoint.
  *
  * **Deletion is a disconnect plus a soft delete.** The calendar events already
  * written are left exactly as they are -- they are the owner's appointment history,
@@ -29,7 +30,7 @@
 import { Hono } from "hono";
 
 import { brandById } from "../../brands.ts";
-import { adapterFor } from "../../ehr/registry.ts";
+import { adapterFor, isVendor } from "../../ehr/registry.ts";
 import { AppError } from "../../lib/errors.ts";
 import { makeLogger } from "../../lib/log.ts";
 import { closeAlert, portalSubject, healthSystemSubject } from "../close-alert.ts";
@@ -45,10 +46,10 @@ import {
 import type { AppHonoEnv } from "../../auth/gate.ts";
 import type { HealthSystemRow } from "../../db/rows.ts";
 import type { ApiContext } from "../http.ts";
-import type { HealthSystemDto } from "@shared/types.ts";
+import type { HealthSystemDto, Vendor } from "@shared/types.ts";
 
-/** The only vendor today. `worker/ehr/registry.ts` is where a second lands. */
-const VENDOR = "epic";
+/** The vendor a create request means when it does not say. */
+const DEFAULT_VENDOR: Vendor = "epic";
 
 export const healthSystemsRouter = new Hono<AppHonoEnv>();
 
@@ -104,8 +105,28 @@ healthSystemsRouter.get("/", async (c) => {
  * them has no right answer, and silently preferring one is how a health system ends up
  * pointing somewhere the owner did not choose.
  */
+/**
+ * Prove a manually entered FHIR base is really a SMART endpoint.
+ *
+ * `discover` throws `upstream_*` on a failure, which is the honest answer -- the
+ * request was fine, the endpoint was not.
+ */
+async function assertSmartEndpoint(
+  api: ApiContext,
+  vendor: Vendor,
+  fhirBaseUrl: string,
+): Promise<void> {
+  const adapter = adapterFor(vendor, {
+    fetchImpl: api.ports.fetch,
+    logger: makeLogger({ src: "api.discover" }),
+    now: Date.now,
+  });
+  await adapter.discover(fhirBaseUrl);
+}
+
 async function resolveEndpoint(
   api: ApiContext,
+  vendor: Vendor,
   input: {
     brandId?: string | undefined;
     fhirBaseUrl?: string | undefined;
@@ -119,6 +140,8 @@ async function resolveEndpoint(
   }
 
   if (input.brandId !== undefined) {
+    // The brands index is Epic's directory; no other vendor has an entry in it.
+    if (vendor !== "epic") throw new AppError("bad_request", "brandId is only for Epic");
     const brand = brandById(input.brandId);
     if (brand === null) throw new AppError("bad_request", "unknown brandId");
     return {
@@ -129,25 +152,19 @@ async function resolveEndpoint(
   }
 
   // Manual entry: prove it is really a SMART endpoint before writing the row.
-  // `discover` throws `upstream_*` on a failure, which is the honest answer --
-  // the request was fine, the endpoint was not.
   const fhirBaseUrl = input.fhirBaseUrl ?? "";
-  const adapter = adapterFor(VENDOR, {
-    fetchImpl: api.ports.fetch,
-    logger: makeLogger({ src: "api.discover" }),
-    now: Date.now,
-  });
-  await adapter.discover(fhirBaseUrl);
+  await assertSmartEndpoint(api, vendor, fhirBaseUrl);
   return { fhirBaseUrl, portalUrl: input.portalUrl ?? null, brandKey: null };
 }
 
 healthSystemsRouter.post("/", async (c) => {
   const api = apiContext(c);
   const body = await readJson(c, healthSystemCreateSchema);
-  const endpoint = await resolveEndpoint(api, body);
+  const vendor = body.vendor ?? DEFAULT_VENDOR;
+  const endpoint = await resolveEndpoint(api, vendor, body);
 
   const row = await api.repos.healthSystems.create({
-    vendor: VENDOR,
+    vendor,
     displayName: body.displayName,
     fhirBaseUrl: endpoint.fhirBaseUrl,
     brandKey: endpoint.brandKey,
@@ -166,12 +183,48 @@ healthSystemsRouter.get("/:id", async (c) => {
   return c.json(await projectHealthSystem(api, row), 200, NO_STORE);
 });
 
+/**
+ * The endpoint columns a PATCH changes, validated; empty when it changes none.
+ *
+ * Refused while the health system has a live connection: its tokens, its patient
+ * id and everything in its cache belong to the endpoint it was connected at, and
+ * none of that survives being pointed somewhere else. Disconnecting first is what
+ * makes the move explicit. What the old endpoint left in the cache -- including
+ * its discovery document, which would otherwise be trusted for another week -- is
+ * cleared here.
+ */
+async function movedEndpoint(
+  api: ApiContext,
+  row: HealthSystemRow,
+  body: { vendor?: Vendor | undefined; fhirBaseUrl?: string | undefined },
+): Promise<{ vendor?: Vendor; fhirBaseUrl?: string; brandKey?: null }> {
+  const vendor = body.vendor ?? row.vendor;
+  const fhirBaseUrl = body.fhirBaseUrl ?? row.fhir_base_url;
+  if (vendor === row.vendor && fhirBaseUrl === row.fhir_base_url) return {};
+
+  const connection = await api.repos.connections.getForHealthSystem(row.id);
+  if (connection !== null && connection.status !== "disconnected") {
+    throw new AppError("conflict", "disconnect this health system before changing where it points");
+  }
+  if (!isVendor(vendor)) throw new AppError("bad_request", "unknown health system vendor");
+  await assertSmartEndpoint(api, vendor, fhirBaseUrl);
+  await api.repos.fhirCache.clearHealthSystem(row.id);
+  return {
+    vendor,
+    fhirBaseUrl,
+    // A brand names an Epic organisation's endpoint; it does not describe this one.
+    ...(fhirBaseUrl !== row.fhir_base_url && { brandKey: null }),
+  };
+}
+
 healthSystemsRouter.patch("/:id", async (c) => {
   const api = apiContext(c);
   const row = await requireHealthSystem(api, c.req.param("id"));
   const body = await readJson(c, updateHealthSystemSchema);
+  const endpoint = await movedEndpoint(api, row, body);
 
   const updated = await api.repos.healthSystems.update(row.id, {
+    ...endpoint,
     ...(body.displayName !== undefined && { displayName: body.displayName }),
     ...(body.portalUrl !== undefined && { portalUrl: body.portalUrl }),
     ...(body.config !== undefined && { config: fromHealthSystemConfigDto(body.config) }),

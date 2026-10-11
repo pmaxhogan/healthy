@@ -1,7 +1,14 @@
 /**
- * The Epic standalone patient launch: `/oauth/epic/start` and `/oauth/callback`.
+ * The standalone patient launch for a health system: `/oauth/epic/start` and
+ * `/oauth/callback`.
  *
- * Four details here are Epic-specific and each one fails silently if it is wrong,
+ * Written for Epic and named for it -- the start path, the `epic` state kind and
+ * this file -- but it drives whichever vendor the health system row names, through
+ * `adapterFor`. The names stay because the callback path is registered with each
+ * vendor and the state kind is a CHECK constraint; neither is worth a migration
+ * to rename.
+ *
+ * Four details here came from Epic and each one fails silently if it is wrong,
  * which is why they are stated rather than inferred:
  *
  *  - **`aud` is the FHIR base, byte for byte.** Epic compares it as a string. A
@@ -13,13 +20,15 @@
  *    `http://localhost:8787`. It is built from the request's own origin so both
  *    work from one build, and it must be identical on the authorize request and
  *    the code exchange or the exchange is refused.
- *  - **The client id depends on the environment.** Epic issues a non-production id
- *    for the sandbox and a production id after "Ready for Production", and they are
- *    different strings for the same app.
- *  - **Scopes are asked for in full.** Epic silently drops any scope the app is not
- *    registered for, so the effective grant is the intersection of what was
- *    requested and what was registered; `scope` on the token response is the only
- *    honest account of what was granted, and it is stored.
+ *  - **The client id depends on the vendor and the environment.** Epic issues a
+ *    non-production id for the sandbox and a production id after "Ready for
+ *    Production", and they are different strings for the same app; ModMed issues
+ *    one. `ehr/client-id.ts` picks.
+ *  - **Scopes are the adapter's call.** Epic silently drops any scope the app is not
+ *    registered for, so its adapter asks for everything; ModMed refuses the whole
+ *    request over one, so its adapter asks only for what can be registered. Either
+ *    way `scope` on the token response is the only honest account of what was
+ *    granted, and it is stored.
  *
  * The state row is what makes the callback safe: 10 minutes, single use (a
  * `DELETE ... RETURNING`), and it carries the sealed PKCE verifier. A replayed
@@ -32,10 +41,10 @@ import { afterResponse } from "../api/http.ts";
 import { getPorts } from "../api/ports.ts";
 import { isLiveHealthSystem } from "../api/routes/health-systems.ts";
 import { reposFor } from "../db/index.ts";
+import { clientIdFor, clientIdSecretFor } from "../ehr/client-id.ts";
 import { createPkce } from "../ehr/pkce.ts";
 import { adapterFor } from "../ehr/registry.ts";
 import { SEARCH_REGISTRY } from "../fhir/search-registry.ts";
-import { AppError } from "../lib/errors.ts";
 import { makeLogger } from "../lib/log.ts";
 
 import { discoverCached } from "./discovery.ts";
@@ -43,16 +52,14 @@ import { invalidStatePage, oauthPage, authorizationRefusedPage } from "./pages.t
 
 import type { AppHonoEnv } from "../auth/gate.ts";
 import type { HealthSystemRow } from "../db/rows.ts";
-import type { Env } from "../env.ts";
+import type { EhrAdapter } from "../ehr/adapter.ts";
 import type { Context } from "hono";
 
-/** Registered with Epic. Changing this string means re-registering the app. */
+/** Registered with every vendor. Changing this string means re-registering each app. */
 const EPIC_CALLBACK_PATH = "/oauth/callback";
 
 /** How long a start link is good for. Long enough to sign in, short enough to matter. */
 export const STATE_TTL_MS = 10 * 60 * 1000;
-
-const VENDOR = "epic";
 
 export const epicRouter = new Hono<AppHonoEnv>();
 
@@ -61,41 +68,30 @@ function allResourceTypes(): string[] {
   return [...new Set(SEARCH_REGISTRY.map((entry) => entry.resourceType))];
 }
 
-/**
- * The client id for one health system's Epic environment.
- *
- * Missing is a deployment fault, not a user error, so it renders a 500 page: there
- * is nothing the owner can do in the UI about an unset Worker secret, and a 400
- * would suggest there was.
- */
-function clientIdFor(env: Env, environment: HealthSystemRow["environment"]): string {
-  const clientId = environment === "sandbox" ? env.EPIC_CLIENT_ID_NONPROD : env.EPIC_CLIENT_ID_PROD;
-  if (clientId === undefined || clientId === "") {
-    throw new AppError("internal", "epic_client_id_not_configured", { environment });
-  }
-  return clientId;
-}
-
 function callbackUri(requestUrl: string): string {
   return new URL(EPIC_CALLBACK_PATH, requestUrl).href;
 }
 
-function epicAdapter(fetchImpl: typeof fetch): ReturnType<typeof adapterFor> {
-  return adapterFor(VENDOR, {
+function adapterOf(healthSystem: HealthSystemRow, fetchImpl: typeof fetch): EhrAdapter {
+  return adapterFor(healthSystem.vendor, {
     fetchImpl,
     logger: makeLogger({ src: "oauth.epic" }),
     now: Date.now,
   });
 }
 
-/** The 500 page for an unset Epic client id. */
-function clientIdMissingPage(c: Context<AppHonoEnv>): Response {
+/**
+ * The 500 page for an unset client id.
+ *
+ * A 500 rather than a 400: there is nothing the owner can do in the UI about an
+ * unset Worker secret, and a 400 would suggest there was.
+ */
+function clientIdMissingPage(c: Context<AppHonoEnv>, healthSystem: HealthSystemRow): Response {
   return oauthPage({
     nonce: c.get("nonce"),
-    heading: "Epic client id not configured",
-    detail:
-      "This deployment has no Epic client id for that environment. Set EPIC_CLIENT_ID_NONPROD (sandbox) or EPIC_CLIENT_ID_PROD (production) as a Worker secret and try again.",
-    code: "epic_client_id_not_configured",
+    heading: "Client id not configured",
+    detail: `This deployment has no client id for that connection. Set ${clientIdSecretFor(healthSystem)} as a Worker secret and try again.`,
+    code: "client_id_not_configured",
     status: 500,
   });
 }
@@ -126,9 +122,9 @@ epicRouter.get("/epic/start", async (c) => {
 
   let clientId: string;
   try {
-    clientId = clientIdFor(c.env, healthSystem.environment);
+    clientId = clientIdFor(c.env, healthSystem);
   } catch {
-    return clientIdMissingPage(c);
+    return clientIdMissingPage(c, healthSystem);
   }
 
   const ports = getPorts();
@@ -143,11 +139,12 @@ epicRouter.get("/epic/start", async (c) => {
     ttlMs: STATE_TTL_MS,
   });
 
-  const authorizeUrl = epicAdapter(ports.fetch).buildAuthorizeUrl({
+  const adapter = adapterOf(healthSystem, ports.fetch);
+  const authorizeUrl = adapter.buildAuthorizeUrl({
     authorizeUrl: config.authorizeUrl,
     clientId,
     redirectUri: callbackUri(c.req.url),
-    scopes: epicAdapter(ports.fetch).scopesFor(allResourceTypes()),
+    scopes: adapter.scopesFor(allResourceTypes()),
     state,
     codeChallenge: pkce.challenge,
     // Exactly as stored. See the module comment.
@@ -157,7 +154,7 @@ epicRouter.get("/epic/start", async (c) => {
 });
 
 /**
- * `GET /oauth/callback` -- Epic's redirect back.
+ * `GET /oauth/callback` -- the vendor's redirect back.
  *
  * The order of the failure checks is the order of increasing trust: an `error`
  * parameter is handled before the state is consumed, so a health system that refused the
@@ -186,7 +183,8 @@ epicRouter.get("/callback", async (c) => {
   const repos = reposFor(c.env.DB, c.env, { log });
   const consumed = await repos.oauthStates.consume(state);
   // `kind` is checked as well as existence: a Google state must not be redeemable
-  // at the Epic callback, even though only this app ever mints either.
+  // at this callback, even though only this app ever mints either. `epic` is the
+  // kind for every health system launch, whatever its vendor: see the module comment.
   if (consumed?.kind !== "epic" || consumed.healthSystemId === null) {
     return invalidStatePage(nonce);
   }
@@ -204,9 +202,9 @@ epicRouter.get("/callback", async (c) => {
 
   let clientId: string;
   try {
-    clientId = clientIdFor(c.env, healthSystem.environment);
+    clientId = clientIdFor(c.env, healthSystem);
   } catch {
-    return clientIdMissingPage(c);
+    return clientIdMissingPage(c, healthSystem);
   }
 
   const clientSecret = await repos.healthSystems.getClientSecret(healthSystem.id);
@@ -215,7 +213,7 @@ epicRouter.get("/callback", async (c) => {
       nonce,
       heading: "This connection has no client secret yet",
       detail:
-        "Epic issues a separate client secret for each organisation, and this one has not been added. Paste it into the connection's settings, then start the connection again.",
+        "This connection's client secret has not been added. Paste it into the connection's settings, then start the connection again.",
       code: "client_secret_missing",
       status: 409,
       retryPath: "/",
@@ -226,12 +224,12 @@ epicRouter.get("/callback", async (c) => {
   const config = await discoverCached(healthSystem.vendor, healthSystem.fhir_base_url, {
     fetchImpl: ports.fetch,
   });
-  const tokens = await epicAdapter(ports.fetch).exchangeCode({
+  const tokens = await adapterOf(healthSystem, ports.fetch).exchangeCode({
     tokenUrl: config.tokenUrl,
     clientId,
     clientSecret,
     code,
-    // Identical to the authorize request's, or Epic refuses the exchange.
+    // Identical to the authorize request's, or the exchange is refused.
     redirectUri: callbackUri(c.req.url),
     codeVerifier: consumed.codeVerifier,
     tokenAuthMethods: config.tokenAuthMethods,

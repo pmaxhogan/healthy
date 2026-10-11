@@ -31,7 +31,7 @@ const MAX_DESCRIPTION_LENGTH = 900;
 /** Keeps a caller-supplied reason from blowing the overall card budget on its own. */
 const MAX_REASON_LENGTH = 160;
 const EPIC_CONSENT_NOTE =
-  "\n\nIf the portal shows a consent screen, keep all data categories selected so the sync sees appointments.";
+  "\n\nIf the portal shows a consent screen, keep all data categories selected so the sync sees the whole record.";
 /**
  * The word the card adds to a portal subject's name.
  *

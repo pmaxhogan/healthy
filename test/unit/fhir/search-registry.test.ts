@@ -10,6 +10,7 @@ import {
   SEARCH_REGISTRY,
   supportsInteraction,
   supportsSearchParam,
+  withoutCategoryScope,
 } from "../../../worker/fhir/search-registry.ts";
 import { loadFixture } from "../ehr/fixtures.ts";
 
@@ -279,5 +280,53 @@ describe("encounterStatusFilter", () => {
   it("includes cancelled, because that is what ghosts a calendar event", () => {
     expect(CALENDAR_ENCOUNTER_STATUSES).toContain("cancelled");
     expect(CALENDAR_ENCOUNTER_STATUSES).not.toContain("entered-in-error");
+  });
+});
+
+describe("withoutCategoryScope", () => {
+  const stripped = withoutCategoryScope(SEARCH_REGISTRY);
+
+  it("collapses Condition's three category searches into one patient-only search", () => {
+    expect(entryFor("Condition").params(PATIENT)).toHaveLength(3);
+    expect(entryFor("Condition", stripped).params(PATIENT)).toStrictEqual([
+      { patient: PATIENT, _count: "100" },
+    ]);
+  });
+
+  it("drops category from every set that carried one", () => {
+    for (const entry of stripped) {
+      for (const set of entry.params(PATIENT, "2026-01-01T00:00:00Z")) {
+        expect(set, entry.resourceType).not.toHaveProperty("category");
+      }
+    }
+  });
+
+  it("leaves an entry that never had a category exactly as it was", () => {
+    expect(entryFor("MedicationRequest", stripped).params(PATIENT)).toStrictEqual(
+      entryFor("MedicationRequest").params(PATIENT),
+    );
+  });
+
+  it("keeps the rest of the entry, so capability gating and mode still apply", () => {
+    const original = entryFor("Condition");
+    const wrapped = entryFor("Condition", stripped);
+
+    expect(wrapped.resourceType).toBe(original.resourceType);
+    expect(wrapped.mode).toBe(original.mode);
+    expect(wrapped.needsCapability).toBe(original.needsCapability);
+    expect(stripped.map((entry) => entry.resourceType)).toStrictEqual(
+      SEARCH_REGISTRY.map((entry) => entry.resourceType),
+    );
+  });
+
+  it("still produces no searches for a read-mode entry", () => {
+    const reads = stripped.filter((entry) => entry.mode === "read");
+
+    expect(reads.length).toBeGreaterThan(0);
+    for (const entry of reads) expect(entry.params(PATIENT), entry.resourceType).toStrictEqual([]);
+  });
+
+  it("does not mutate the registry it was given", () => {
+    expect(entryFor("Condition").params(PATIENT)).toHaveLength(3);
   });
 });

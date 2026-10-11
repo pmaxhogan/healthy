@@ -106,10 +106,10 @@ function isoOrNull(seconds: number | null): string | null {
 }
 
 /**
- * `health_systems.vendor` is CHECK-constrained by the migration to the vendors the
- * adapter registry knows, so the column cannot hold anything else. The assertion
- * carries that fact across the db boundary without a runtime branch that could
- * never be taken.
+ * `health_systems.vendor` is only ever written by `/api/health-systems`, which
+ * takes it from a schema enumerating the adapter registry's vendors. The
+ * assertion carries that fact across the db boundary without a runtime branch
+ * that could never be taken.
  */
 function toVendor(value: string): Vendor {
   return value as Vendor;

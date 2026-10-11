@@ -101,6 +101,30 @@ describe("the first run", () => {
     expect(rows.every((row) => row.state === "active")).toBe(true);
   });
 
+  it("calendars nothing from a vendor whose Encounters are not appointments", async () => {
+    const time = clock();
+    const { log } = recordingLog();
+    const ctx = syncCtx({ now: time.now, log });
+    const seeded = await seedConnectedHealthSystem(ctx, { host: HOST_A, vendor: "modmed" });
+    await seedGoogle(ctx);
+    await seedSettings(ctx);
+    const server = fhirServer({ resources: referencePool() });
+    server.encounters = searchBundle([encounter({ id: "enc-1", start: UPCOMING })]);
+    const upstreams = stubUpstreams({ [HOST_A]: server });
+
+    const summary = await runCalendarSync(ctx, { deps: upstreams.deps });
+
+    expect(summary.healthSystems).toBe(1);
+    expect(summary.errors).toStrictEqual([]);
+    expect(summary.encountersSeen).toBe(0);
+    expect(summary.eventsInserted).toBe(0);
+    expect(upstreams.calendar.events()).toHaveLength(0);
+    const rows = await syncRepos(ctx).calendarEvents.list({
+      healthSystemId: seeded.healthSystemId,
+    });
+    expect(rows).toStrictEqual([]);
+  });
+
   it("writes the invariant marker, the title and the resolved details", async () => {
     const h = await setup();
 

@@ -61,11 +61,11 @@ whole categories or individual fields before anything is serialised.</li>
 
 <h2>How it is built</h2>
 <p>It is a single Cloudflare Worker: one TypeScript codebase, one small SQL
-database, no other infrastructure. Epic is the only electronic-health-record
-vendor supported today, behind an adapter interface so others can be added.
+database, no other infrastructure. Two electronic-health-record vendors are
+supported, Epic and ModMed, behind an adapter interface so others can be added.
 Connections are made through the vendor's published patient API with the
-operator's own authorisation; the project is not affiliated with Epic Systems, or
-with any health system, and speaks for neither.</p>
+operator's own authorisation; the project is not affiliated with Epic Systems,
+with ModMed, or with any health system, and speaks for none of them.</p>
 
 <h2>Licence and source</h2>
 <p>MIT. The whole implementation, including everything described on this page, is

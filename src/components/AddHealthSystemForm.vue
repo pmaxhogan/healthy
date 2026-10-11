@@ -14,6 +14,10 @@
 // is the same `isHttpsUrl` predicate the Worker's schema uses -- shared so the
 // two cannot silently disagree -- and exists only to catch a typo before a
 // round trip, not to be the source of truth.
+//
+// ModMed has no brands index, so choosing it skips the search and goes straight to
+// manual entry. It also has no sandbox and no derived secrets, so the environment
+// and organisation-id fields are not shown and the environment is always `prod`.
 
 import { computed, onUnmounted, ref } from "vue";
 
@@ -25,12 +29,14 @@ import { debounce } from "../lib/debounce.ts";
 import { toastSuccess } from "../lib/toasts.ts";
 import { useAction } from "../lib/use-load.ts";
 
-import type { BrandDto, HealthSystemEnvironment } from "@shared/types.ts";
+import type { BrandDto, HealthSystemEnvironment, Vendor } from "@shared/types.ts";
 
 const emit = defineEmits<{ created: [healthSystem: { id: string; displayName: string }] }>();
 
 type Mode = "search" | "manual";
 const mode = ref<Mode>("search");
+const vendor = ref<Vendor>("epic");
+const isModmed = computed(() => vendor.value === "modmed");
 
 const query = ref("");
 const results = ref<BrandDto[]>([]);
@@ -139,6 +145,13 @@ function toggleMode(): void {
   reset();
 }
 
+/** Changing vendor starts the form over: ModMed is manual-only, Epic opens on the search. */
+function onVendorChange(next: Vendor): void {
+  vendor.value = next;
+  mode.value = next === "modmed" ? "manual" : "search";
+  reset();
+}
+
 async function submitBrand(): Promise<void> {
   const brand = picked.value;
   if (!brand) return;
@@ -149,6 +162,7 @@ async function submitBrand(): Promise<void> {
 
   await create.run(async () => {
     const healthSystem = await endpoints.createHealthSystem({
+      vendor: "epic",
       displayName: name,
       brandId: brand.id,
       environment: environment.value,
@@ -176,13 +190,14 @@ async function submitManual(): Promise<void> {
   const url = manualFhirBaseUrl.value.trim();
   const secret = clientSecret.value;
   const portal = portalUrl.value.trim();
-  const orgId = epicOrgId.value.trim();
+  const orgId = isModmed.value ? "" : epicOrgId.value.trim();
 
   await create.run(async () => {
     const healthSystem = await endpoints.createHealthSystem({
+      vendor: vendor.value,
       displayName: name,
       fhirBaseUrl: url,
-      environment: environment.value,
+      environment: isModmed.value ? "prod" : environment.value,
       ...(portal !== "" && { portalUrl: portal }),
       ...(secret !== "" && { clientSecret: secret }),
       ...(orgId !== "" && { config: { epicOrgId: orgId } }),
@@ -198,10 +213,22 @@ async function submitManual(): Promise<void> {
   <section class="card">
     <div class="row">
       <h2>Add a health system</h2>
-      <button type="button" class="small spacer" @click="toggleMode">
+      <button v-if="!isModmed" type="button" class="small spacer" @click="toggleMode">
         {{ mode === "search" ? "Enter a FHIR base URL manually" : "Search health systems instead" }}
       </button>
     </div>
+
+    <label class="field">
+      Vendor
+      <select
+        name="vendor"
+        :value="vendor"
+        @change="onVendorChange(($event.target as HTMLSelectElement).value as Vendor)"
+      >
+        <option value="epic">Epic</option>
+        <option value="modmed">ModMed</option>
+      </select>
+    </label>
 
     <template v-if="mode === 'search'">
       <label class="field">
@@ -251,7 +278,7 @@ async function submitManual(): Promise<void> {
           </label>
           <label class="field">
             Environment
-            <select v-model="environment">
+            <select v-model="environment" name="environment">
               <option value="prod">Production</option>
               <option value="sandbox">Sandbox</option>
             </select>
@@ -280,7 +307,13 @@ async function submitManual(): Promise<void> {
     </template>
 
     <template v-else>
-      <p class="muted">
+      <p v-if="isModmed" class="muted">
+        Enter the FHIR base URL of the practice itself. Every ModMed practice has its own, and a
+        generic ModMed base passes the check here but then rejects every patient sign-in. The Worker
+        confirms this is a real FHIR endpoint before the health system is saved. ModMed has no
+        sandbox, and its client secret is pasted in rather than derived.
+      </p>
+      <p v-else class="muted">
         For a health system the brands search does not list yet. The Worker confirms this is a real
         FHIR endpoint before the health system is saved.
       </p>
@@ -299,9 +332,9 @@ async function submitManual(): Promise<void> {
             @blur="manualUrlTouched = true"
           />
         </label>
-        <label class="field">
+        <label v-if="!isModmed" class="field">
           Environment
-          <select v-model="environment">
+          <select v-model="environment" name="environment">
             <option value="prod">Production</option>
             <option value="sandbox">Sandbox</option>
           </select>
@@ -314,7 +347,7 @@ async function submitManual(): Promise<void> {
           Patient portal URL <span class="muted">optional</span>
           <input v-model="portalUrl" type="url" autocomplete="off" />
         </label>
-        <label class="field">
+        <label v-if="!isModmed" class="field">
           Epic organisation id <span class="muted">optional, derives the client secret</span>
           <input v-model="epicOrgId" autocomplete="off" inputmode="numeric" />
         </label>

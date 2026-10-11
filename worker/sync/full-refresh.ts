@@ -56,7 +56,7 @@
 import { makeRepos } from "../db/index.ts";
 import { getAllSettings, setSyncBackoff } from "../db/settings.ts";
 import { EPIC_DOCUMENT_CAP } from "../fhir/operation-outcome.ts";
-import { SEARCH_REGISTRY, filterSupported } from "../fhir/search-registry.ts";
+import { SEARCH_REGISTRY, filterSupported, withoutCategoryScope } from "../fhir/search-registry.ts";
 import { isAppError } from "../lib/errors.ts";
 import { errorFields } from "../lib/log.ts";
 
@@ -375,8 +375,11 @@ async function refreshHealthSystem(
   );
   // A missing CapabilityStatement means "try the whole registry": the alternative
   // is to fetch nothing, and an unsupported search costs one 4122 warning.
-  const entries =
+  const supported =
     capabilities === null ? [...SEARCH_REGISTRY] : filterSupported(SEARCH_REGISTRY, capabilities);
+  const entries = session.adapter.categoryScopedSearches
+    ? supported
+    : withoutCategoryScope(supported);
   const byType = new Map(entries.map((entry) => [entry.resourceType, entry]));
 
   // Set once a 4135 is seen, and honoured for the rest of this health system's pass.

@@ -17,6 +17,10 @@ function mountForm(): ReturnType<typeof mount> {
   return mount(AddHealthSystemForm);
 }
 
+async function chooseModmed(wrapper: ReturnType<typeof mount>): Promise<void> {
+  await wrapper.find('select[name="vendor"]').setValue("modmed");
+}
+
 describe("AddHealthSystemForm", () => {
   let api: FakeFetch;
 
@@ -105,7 +109,7 @@ describe("AddHealthSystemForm", () => {
     await flushPromises();
     await wrapper.find(".result").trigger("click");
 
-    await wrapper.find("select").setValue("sandbox");
+    await wrapper.find('select[name="environment"]').setValue("sandbox");
     await wrapper.find('input[type="password"]').setValue("a-secret");
     await wrapper.find("button.primary").trigger("click");
     await flushPromises();
@@ -113,6 +117,7 @@ describe("AddHealthSystemForm", () => {
     const created = api.calls.find((call) => call.method === "POST");
     expect(created?.url).toBe("/api/health-systems");
     expect(JSON.parse(created?.body ?? "null")).toEqual({
+      vendor: "epic",
       displayName: "Example Health",
       brandId: "example-health",
       environment: "sandbox",
@@ -140,6 +145,7 @@ describe("AddHealthSystemForm", () => {
       "brandId",
       "displayName",
       "environment",
+      "vendor",
     ]);
     expect(payload.environment).toBe("prod");
   });
@@ -254,6 +260,7 @@ describe("AddHealthSystemForm", () => {
       const created = api.calls.find((call) => call.method === "POST");
       expect(created?.url).toBe("/api/health-systems");
       expect(JSON.parse(created?.body ?? "null")).toEqual({
+        vendor: "epic",
         displayName: "Example Health",
         fhirBaseUrl: "https://fhir.example.test/api/FHIR/R4",
         environment: "prod",
@@ -267,12 +274,13 @@ describe("AddHealthSystemForm", () => {
       const { clientSecret, portalUrl } = manualInputs(wrapper);
       await clientSecret.setValue("a-secret");
       await portalUrl.setValue("https://portal.example.test");
-      await wrapper.find("select").setValue("sandbox");
+      await wrapper.find('select[name="environment"]').setValue("sandbox");
       await wrapper.find("button.primary").trigger("click");
       await flushPromises();
 
       const created = api.calls.find((call) => call.method === "POST");
       expect(JSON.parse(created?.body ?? "null")).toEqual({
+        vendor: "epic",
         displayName: "Example Health",
         fhirBaseUrl: "https://fhir.example.test/api/FHIR/R4",
         environment: "sandbox",
@@ -305,6 +313,45 @@ describe("AddHealthSystemForm", () => {
       const { displayName, fhirBaseUrl } = manualInputs(wrapper);
       expect((displayName.element as HTMLInputElement).value).toBe("");
       expect((fhirBaseUrl.element as HTMLInputElement).value).toBe("");
+    });
+  });
+
+  describe("ModMed", () => {
+    it("goes straight to manual entry, with no brand search, sandbox or organisation id", async () => {
+      const wrapper = mountForm();
+      await chooseModmed(wrapper);
+
+      expect(wrapper.find('input[type="search"]').exists()).toBe(false);
+      expect(wrapper.text()).toContain("FHIR base URL");
+      expect(wrapper.text()).toContain("Enter the FHIR base URL of the practice itself");
+      expect(wrapper.find('select[name="environment"]').exists()).toBe(false);
+      expect(wrapper.text()).not.toContain("Epic organisation id");
+      expect(wrapper.text()).not.toContain("Enter a FHIR base URL manually");
+    });
+
+    it("posts vendor modmed with a manual base, prod, and no brandId or epicOrgId", async () => {
+      const wrapper = mountForm();
+      await chooseModmed(wrapper);
+      const [displayName, fhirBaseUrl] = wrapper.findAll("input");
+      await displayName?.setValue("Example Practice");
+      await fhirBaseUrl?.setValue("https://fhir.example-health.test/practice-1/fhir");
+      await wrapper.find("button.primary").trigger("click");
+      await flushPromises();
+
+      const created = api.calls.find((call) => call.method === "POST");
+      expect(JSON.parse(created?.body ?? "null")).toEqual({
+        vendor: "modmed",
+        displayName: "Example Practice",
+        fhirBaseUrl: "https://fhir.example-health.test/practice-1/fhir",
+        environment: "prod",
+      });
+    });
+
+    it("returns to the brand search when Epic is chosen again", async () => {
+      const wrapper = mountForm();
+      await chooseModmed(wrapper);
+      await wrapper.find('select[name="vendor"]').setValue("epic");
+      expect(wrapper.find('input[type="search"]').exists()).toBe(true);
     });
   });
 });

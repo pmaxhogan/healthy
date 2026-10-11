@@ -25,6 +25,7 @@ const EXPECTED: Record<string, string> = {
   GOOGLE_CLIENT_SECRET: "test-client-secret",
   EPIC_CLIENT_ID_PROD: "test-epic-prod",
   EPIC_CLIENT_ID_NONPROD: "test-epic-nonprod",
+  MODMED_CLIENT_ID: "test-modmed",
   TRELLO_KEY: "test-key",
   TRELLO_TOKEN: "test-token",
   TRELLO_MUST_LIST_ID: "test-must-list",

@@ -362,10 +362,14 @@ async function syncHealthSystem(run: RunContext, target: SyncTarget): Promise<vo
   );
   const statusFilter = encounterStatusFilter(capabilities);
   const search = appointmentEncounterSearch(session.patientId, run.windowStartDate);
-  const result = await session.client.search<Encounter>("Encounter", {
-    ...search.params,
-    ...statusFilter.params,
-  });
+  // A vendor whose Encounters are not appointments contributes none: the pass
+  // still runs, so this health system's portal copies are reconciled as usual.
+  const result = session.adapter.encountersAreAppointments
+    ? await session.client.search<Encounter>("Encounter", {
+        ...search.params,
+        ...statusFilter.params,
+      })
+    : { resources: [], warnings: [], pages: 0 };
 
   const filtered = countWarnings(run, result.warnings);
   // `period.start` is mandatory: an appointment with no time cannot be a timed

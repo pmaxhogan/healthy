@@ -25,8 +25,8 @@ export type {
   Resource,
 } from "fhir/r4";
 
-/** Every vendor this build knows how to talk to. Epic only, for now. */
-export type Vendor = "epic";
+/** Every vendor this build knows how to talk to. */
+export type Vendor = "epic" | "modmed";
 
 /**
  * The result of a successful token exchange or refresh.
