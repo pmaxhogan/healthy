@@ -73,14 +73,14 @@ jobs:
         with:
           node-version-file: .node-version
 
-      - name: Refresh data/epic-brands.json
-        run: node scripts/slim-brands.mjs
+      - name: Refresh worker/data/epic-brands.json
+        run: node worker/scripts/slim-brands.mjs
 
       - name: Check for changes
         id: diff
         run: |
-          if git diff --quiet data/epic-brands.json; then
-            echo "No changes to data/epic-brands.json"
+          if git diff --quiet worker/data/epic-brands.json; then
+            echo "No changes to worker/data/epic-brands.json"
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -101,7 +101,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/epic-brands.json
+          git add worker/data/epic-brands.json
           git commit -m "chore(data): refresh Epic brands index"
           git push --force origin "HEAD:refs/heads/$BRANCH"
 
@@ -113,10 +113,10 @@ jobs:
           if [ -z "$existing" ]; then
             gh pr create --base main --head "$BRANCH" \
               --title "chore(data): refresh Epic brands index" \
-              --body "Automated weekly refresh of \`data/epic-brands.json\` from the Epic brands index (\`scripts/slim-brands.mjs\`). Merges automatically once the required checks pass."
+              --body "Automated weekly refresh of \`worker/data/epic-brands.json\` from the Epic brands index (\`worker/scripts/slim-brands.mjs\`). Merges automatically once the required checks pass."
           else
             gh pr edit "$existing" \
-              --body "Automated weekly refresh of \`data/epic-brands.json\` from the Epic brands index (\`scripts/slim-brands.mjs\`). Merges automatically once the required checks pass. Last pushed: $(date -u +%Y-%m-%dT%H:%M:%SZ)."
+              --body "Automated weekly refresh of \`worker/data/epic-brands.json\` from the Epic brands index (\`worker/scripts/slim-brands.mjs\`). Merges automatically once the required checks pass. Last pushed: $(date -u +%Y-%m-%dT%H:%M:%SZ)."
           fi
           echo "number=$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[0].number')" >> "$GITHUB_OUTPUT"
 

@@ -1,0 +1,1375 @@
+/**
+ * The patient-portal pass: upcoming visits onto the calendar, without waiting for
+ * FHIR to admit they exist.
+ *
+ * It runs at the end of the hourly calendar run, per health system whose portal
+ * account is `active`, and it writes through exactly the same mapping, diff and
+ * event writer the FHIR pass uses. What is different is only where the
+ * appointments came from and what is known about them.
+ *
+ * ### Why this pass exists at all
+ *
+ * Epic's patient-facing FHIR view does not reliably return a scheduled
+ * appointment before it happens -- the owner's next two visits were absent from
+ * it -- while the portal has known about them since they were booked. So the
+ * portal is the source for *upcoming* visits and FHIR stays the source for
+ * everything else, including history and every clinical resource the MCP serves.
+ *
+ * ### The five rules that keep one appointment from becoming two events
+ *
+ * **A portal visit the FHIR pass already mapped is skipped.** Matched by the
+ * Encounter's own CSN where there is one, and otherwise by a start time within
+ * `DEDUPE_WINDOW_SECONDS`. Counted as `portalSkipped`, so "why is the portal
+ * reporting three visits and writing one event" has an answer on the Runs page.
+ *
+ * **A FHIR Encounter that turns up later adopts the portal's row and its event.**
+ * That is `adoptPortalRows`, called from the FHIR pass before its diff: the row is
+ * renamed from `<healthSystemId>:csn:<csn>` to `<healthSystemId>:<encounterId>` and the
+ * existing calendar entry is patched in place. Without it the portal event would
+ * be ghosted (it is no longer "upcoming") and a duplicate inserted beside it.
+ * Adoption needs an identity match -- the same CSN, or, for an Encounter with
+ * none, the same practitioner at the same time (`sameVisitWithinHealthSystem`).
+ * A start time alone is not enough: a cancelled Encounter at the same time as a
+ * different, live portal visit would otherwise take over its event and grey it
+ * out.
+ *
+ * **A visit that vanishes while it is still in the future is a cancellation; one
+ * that vanishes after its start time is just over.** `LoadUpcoming` only ever
+ * returns what is ahead, so every visit eventually disappears from it. Ghosting on
+ * absence alone would grey out every appointment the owner ever attended, the hour
+ * after they attended it. So a past row is left exactly as it is, and only a
+ * future one that stopped being returned is ghosted.
+ *
+ * **A duplicate already on the calendar is deleted, not ghosted.** A visit
+ * another, higher-precedence copy speaks for -- a FHIR Encounter, or the owning
+ * organisation's own portal listing of a visit this portal only sees second-hand
+ * (see `portal-dedupe.ts`) -- is not inserted. If an earlier run did insert it
+ * (before the dedupe knew better, or while the better copy was missing), its event
+ * and row are removed; see `removeDuplicates`. That is deliberately *not* the
+ * ghost rule below: a ghost says "this visit is cancelled", and a duplicate's
+ * visit is not -- it is on the calendar, once, under the other copy. A grey
+ * "Cancelled:" twin beside the real event would be both wrong and confusing. Only
+ * an event carrying `healthy=1` and the row's own key is ever deleted. Should the
+ * better copy later go away, the duplicate stops being one and is inserted again.
+ *
+ * Deleting is reserved for a match that is not a guess (security review L3): the
+ * same CSN, a live (not ghosted) FHIR row or Encounter of this health system at
+ * the same time, or -- across health systems -- the same CSN or practitioner. A
+ * match on a shared department or location alone only stops a *new* copy being
+ * inserted; an event already written for that visit is kept and maintained.
+ *
+ * **A canceled, no-show or vanished visit is ghosted with its own details.** The
+ * event is patched to the grey, transparent, "Cancelled:" variant rather than
+ * merely having its row marked. A canceled or no-show visit is still *in* the
+ * payload; a vanished future one is rendered from the last copy `portal_visits`
+ * kept of it (`vanishedMappings`), stamped `canceled`. Leaving its event alone
+ * would leave a cancelled appointment on the owner's calendar looking live. Only a
+ * row with no stored copy at all gets the row-only ghost, with the calendar entry
+ * left as it is rather than rewritten from guesses.
+ *
+ * Every visit this pass reads is also written to `portal_visits`, with the same
+ * "missing only if still ahead" rule, because that table -- not the calendar -- is
+ * what `get_appointments` serves upcoming visits from. The same session then reads
+ * the portal's secure messages into `portal_messages` (`syncMessages`), which is
+ * what `get_messages` serves.
+ *
+ * Log lines carry health system ids, counts and stable codes. Never a visit, a
+ * practitioner, a CSN, a code or a byte of portal markup -- the CSN is an upstream
+ * identifier and is treated exactly like an Encounter id (see
+ * `worker/src/db/repos/calendar-events.ts`'s `logSafeKey`).
+ */
+
+import { blindCsn } from "../db/blind.ts";
+import { encounterRef } from "../db/repos/calendar-events.ts";
+import { buildEventBody } from "../google/calendar.ts";
+import { isAppError } from "../lib/errors.ts";
+import { errorFields } from "../lib/log.ts";
+import { fromIso, toIso } from "../lib/time.ts";
+
+import { resolveReconnectAlert } from "./alerts.ts";
+import { mergeDescription } from "./description.ts";
+import { buildCalendarModel, connectedPortalOf, ghostModel } from "./mapping.ts";
+import { planChanges } from "./plan.ts";
+import {
+  matchAcrossHealthSystems,
+  outranks,
+  portalRank,
+  sameVisitWithinHealthSystem,
+} from "./portal-dedupe.ts";
+import { boilerplateOf } from "./portal-directions.ts";
+import { SIGN_IN_BUSY_CODE, acquirePortalSignIn, releasePortalSignIn } from "./portal-gate.ts";
+import {
+  DEDUPE_WINDOW_SECONDS,
+  csnOfEncounterId,
+  isOffSchedule,
+  portalKeyPrefix,
+  portalVisitView,
+} from "./portal-mapping.ts";
+import {
+  OTP_WAIT_SECONDS,
+  OWNER_RESERVED_ATTEMPTS,
+  SIGN_IN_DEFERRED,
+  attemptsLeft,
+  failSignIn,
+  openPortalSession,
+  portalDeps,
+  signInAndWait,
+  unattendedCodeWait,
+} from "./portal-signin.ts";
+import { titleDigest, titleDigestsFor, titledBody, titleSeeds } from "./titles.ts";
+
+import type { SyncDeps } from "./deps.ts";
+import type { CalendarMapping, MappingInput, MappingSettings } from "./mapping.ts";
+import type { PlanCandidate, PlanEntry } from "./plan.ts";
+import type { Sighting } from "./portal-dedupe.ts";
+import type { Boilerplate } from "./portal-directions.ts";
+import type { PortalSession } from "./portal-signin.ts";
+import type { RunState } from "./run.ts";
+import type { Blinder } from "../db/blind.ts";
+import type { Ctx } from "../db/client.ts";
+import type { Repos } from "../db/index.ts";
+import type { FetchableAttachment } from "../db/repos/portal-messages.ts";
+import type { StoredPortalVisit } from "../db/repos/portal-visits.ts";
+import type { CalendarEventRow, HealthSystemRow } from "../db/rows.ts";
+import type { PortalVisit } from "../ehr/mychart/index.ts";
+import type { CalendarClient } from "../google/calendar.ts";
+import type { CalendarEventBody, CalendarEventModel, EventRecord } from "../google/types.ts";
+
+/**
+ * What the FHIR pass saw for one health system, as the dedupe needs it.
+ *
+ * Collected during the FHIR pass rather than read back from `calendar_events`,
+ * because the strongest signal -- the Encounter's CSN -- is not stored: the row
+ * holds only the event key and the shifted start.
+ */
+export interface FhirSighting {
+  /** CSNs the Encounters published. The exact match when both sides have one. */
+  csns: Set<string>;
+  /** Shifted starts of the events the FHIR pass mapped that are still on the schedule, as unix seconds. */
+  starts: number[];
+  /**
+   * The same Encounters as the cross-health system dedupe sees them: real (unshifted)
+   * start and CSN. Only a CSN can tie another organisation's portal copy to one
+   * of these -- see `worker/src/sync/portal-dedupe.ts`.
+   */
+  sightings: Sighting[];
+}
+
+/** Everything the portal pass needs. Built by `calendar-sync.ts`, which has it all. */
+export interface PortalPassInput {
+  ctx: Ctx;
+  repos: Repos;
+  calendar: CalendarClient;
+  calendarId: string;
+  timezone: string;
+  /** Unix second the sync window opens. Rows older than this are not diffed. */
+  windowStartSeconds: number;
+  /** Every `healthy=1` event on the target calendar, across every health system. */
+  googleEvents: readonly EventRecord[];
+  settings: MappingSettings;
+  state: RunState;
+  deps: SyncDeps;
+  /** Blinds event keys and keys fingerprints; see `worker/src/db/blind.ts`. */
+  blinder: Blinder;
+  /** What the FHIR pass mapped this run, per health system id. */
+  fhirSeen: ReadonlyMap<string, FhirSighting>;
+  /** Narrow the pass to these health systems. The manual button's argument. */
+  healthSystemIds?: readonly string[] | undefined;
+  /**
+   * How long to wait for an emailed code when a session has to be re-established.
+   *
+   * The default is the full wait, which is right under cron: a scheduled
+   * invocation has the wall clock and the visits are wanted in this run. Zero means
+   * "do not attempt a sign-in at all", which is what the Durable Object passes --
+   * it establishes the session in its own alarm loop first, precisely so that no
+   * single invocation sleeps for minutes. See `portal-runner.ts`.
+   */
+  signInWaitSeconds?: number | undefined;
+  /**
+   * True for the scheduled run, which nobody is watching.
+   *
+   * An unattended run re-establishes a dead session only within limits the
+   * owner's own buttons are not held to: it leaves `OWNER_RESERVED_ATTEMPTS` of
+   * the day's sign-ins alone, and it has a code emailed only as often as
+   * `unattendedCodeWait` allows. See `ensureSession`.
+   */
+  unattended?: boolean | undefined;
+}
+
+/** One visit, with the event it would produce and whether it is a duplicate. */
+interface PortalCandidateBuild {
+  visit: PortalVisit;
+  mapping: CalendarMapping;
+  /** True when a better copy already covers this appointment: do not insert it. */
+  duplicate: boolean;
+  /**
+   * True when that match is strong enough to delete an event already written
+   * for this copy. See the module comment: a place-only match across health
+   * systems is not.
+   */
+  deletable: boolean;
+}
+
+/**
+ * Sync every active portal account's upcoming visits.
+ *
+ * Per-health system isolation, like the FHIR pass: a portal that will not let us in
+ * costs one code on `portalErrors` and nothing else. Never throws.
+ */
+export async function runPortalPass(input: PortalPassInput): Promise<void> {
+  const { ctx, repos } = input;
+  const accounts = await repos.portalAccounts.listActive();
+  const wanted = input.healthSystemIds;
+  const selected =
+    wanted === undefined
+      ? accounts
+      : accounts.filter((row) => wanted.includes(row.health_system_id));
+  if (selected.length === 0) {
+    ctx.log.debug("portal.no_accounts", { active: accounts.length });
+    return;
+  }
+
+  // Two phases, so that every portal's visits are stored before any calendar is
+  // written: which copy of a visit two organisations both list gets the event is
+  // decided from `portal_visits` (see `crossHealthSystemDuplicate`), and deciding it
+  // while a health system later in this loop had not yet been read would let whichever
+  // ran first win, and the loser be calendared too.
+  const loaded: { healthSystemId: string; visits: PortalVisit[] }[] = [];
+  for (const account of selected) {
+    const healthSystemId = account.health_system_id;
+    try {
+      const visits = await loadPortalVisits(input, healthSystemId);
+      if (visits !== null) loaded.push({ healthSystemId, visits });
+    } catch (error) {
+      portalFailed(input, healthSystemId, error);
+    }
+  }
+  for (const { healthSystemId, visits } of loaded) {
+    try {
+      await syncPortalCalendar(input, healthSystemId, visits);
+    } catch (error) {
+      portalFailed(input, healthSystemId, error);
+    }
+  }
+}
+
+function portalFailed(input: PortalPassInput, healthSystemId: string, error: unknown): void {
+  const code = isAppError(error) ? error.code : "internal";
+  input.state.summary.portalErrors.push(code);
+  input.ctx.log.error("portal.health_system_failed", { healthSystemId, ...errorFields(error) });
+}
+
+/** One health system's first phase: session, visits, and the stored copy. Null: no session. */
+async function loadPortalVisits(
+  input: PortalPassInput,
+  healthSystemId: string,
+): Promise<PortalVisit[] | null> {
+  const { ctx, repos } = input;
+  const session = await ensureSession(input, healthSystemId);
+  if (session === null) return null;
+
+  const listed = await session.client.loadUpcoming(input.timezone);
+  const visits = await withVisitDetails(input, healthSystemId, session, listed);
+  // The jar as it is now: `LoadUpcoming` refreshes the session cookie, and
+  // dropping that refresh is how a working session expires a day early.
+  await repos.portalAccounts.saveCookieJar(healthSystemId, session.client.jar.serialise());
+  input.state.summary.portalVisits += visits.length;
+  ctx.log.info("portal.upcoming", { healthSystemId, visits: visits.length });
+
+  if ((await repos.healthSystems.get(healthSystemId)) === null) return null;
+  await recordVisits(input, healthSystemId, visits);
+  await syncMessages(input, healthSystemId, session);
+  return visits;
+}
+
+/** The fields of a visit that only its details page carries. */
+type DetailFields = Pick<PortalVisit, "waitlist" | "directions" | "visitInstructions">;
+
+function detailFieldsOf(visit: PortalVisit | undefined): DetailFields {
+  if (visit === undefined) return {};
+  return {
+    ...(visit.waitlist !== undefined && { waitlist: visit.waitlist }),
+    ...(visit.directions !== undefined && { directions: visit.directions }),
+    ...(visit.visitInstructions !== undefined && { visitInstructions: visit.visitInstructions }),
+  };
+}
+
+/**
+ * Every listed visit with what its details page adds: the wait list, the
+ * directions and the visit's instructions.
+ *
+ * One GET per visit, every visit the list returned (all of them upcoming -- the
+ * list has nothing else), one after another: the list is a handful of visits,
+ * and the page is what the owner's own browser loads for each. With the held
+ * session only: this never signs in.
+ *
+ * A page that cannot be read keeps what the last run stored for that visit, so a
+ * transient failure does not strip the directions from the calendar for an hour
+ * and put them back the next -- two patches for nothing. A session that dies part
+ * way stops the reads, and every visit left keeps its stored copy the same way.
+ */
+async function withVisitDetails(
+  input: PortalPassInput,
+  healthSystemId: string,
+  session: PortalSession,
+  listed: readonly PortalVisit[],
+): Promise<PortalVisit[]> {
+  if (listed.length === 0) return [];
+  const rows = await input.repos.portalVisits.list(healthSystemId);
+  const stored = new Map(rows.map((row) => [row.csn, row.visit]));
+  const out: PortalVisit[] = [];
+  let read = 0;
+  let failed = 0;
+  let sessionEnded = false;
+  for (const visit of listed) {
+    // Another organisation's visit has no details page here: the portal's own
+    // client never links one, and whatever answers must not be able to end the
+    // reads for every visit after it.
+    if (sessionEnded || visit.external === true) {
+      out.push({ ...visit, ...detailFieldsOf(stored.get(visit.csn)) });
+      continue;
+    }
+    try {
+      const details = await session.client.loadVisitDetails(visit.csn);
+      out.push({
+        ...visit,
+        waitlist: details.waitlist,
+        ...(details.directions !== undefined && { directions: details.directions }),
+        ...(details.visitInstructions !== undefined && {
+          visitInstructions: details.visitInstructions,
+        }),
+      });
+      read += 1;
+    } catch (error) {
+      failed += 1;
+      if (isAppError(error) && error.code === "portal_session_expired") sessionEnded = true;
+      input.ctx.log.warn("portal.visit_details_failed", { healthSystemId, ...errorFields(error) });
+      out.push({ ...visit, ...detailFieldsOf(stored.get(visit.csn)) });
+    }
+  }
+  input.ctx.log.info("portal.visit_details", {
+    healthSystemId,
+    visits: listed.length,
+    read,
+    failed,
+  });
+  return out;
+}
+
+/** What one run did with the attachments its Message Center read listed. Counts only. */
+interface AttachmentPass {
+  listed: number;
+  stored: number;
+  failed: number;
+  /** Already stored, or failed too recently to try again. */
+  skipped: number;
+  /** On a message the portal still marks unread: left for a run after it is read. */
+  deferredUnread: number;
+  /** Not tried because the session ended mid-pass. */
+  abandoned: number;
+}
+
+/** Fetch and store one attachment, or record why not. Never throws for the portal's reasons. */
+async function fetchAttachment(
+  input: PortalPassInput,
+  healthSystemId: string,
+  session: PortalSession,
+  attachment: FetchableAttachment,
+): Promise<"stored" | "failed" | "abandoned"> {
+  const { ctx, repos } = input;
+  const meta = { name: attachment.name, extension: attachment.extension };
+  try {
+    const file = await session.client.loadMessageAttachment(attachment.handle);
+    await repos.portalMessageAttachments.store(
+      healthSystemId,
+      attachment.key,
+      { ...meta, contentType: file.contentType },
+      file.bytes,
+    );
+    return "stored";
+  } catch (error) {
+    const code = isAppError(error) ? error.code : "internal";
+    if (code === "portal_session_expired") return "abandoned";
+    ctx.log.warn("portal.attachment_failed", { healthSystemId, ...errorFields(error) });
+    await repos.portalMessageAttachments.fail(healthSystemId, attachment.key, meta, code);
+    return "failed";
+  }
+}
+
+/**
+ * Fetch and seal every attachment the Message Center read listed and the store
+ * does not hold yet (`worker/src/db/repos/portal-message-attachments.ts`).
+ *
+ * It has to be now: the portal names an attachment by a per-session token, so
+ * only the run that listed it can ask for it. Every attachment is fetched,
+ * however many and however large; each one that is not is on the record -- a
+ * `failed` row with a stable code, tried again a day later -- or waiting, never
+ * silently dropped:
+ *
+ *  - An attachment on a message the portal still marks unread is left alone
+ *    until it has been read. Opening a message marks it read, and whether the
+ *    document download does too has not been observed; a message the owner has
+ *    not read yet must stay unread. It is fetched on the first run after.
+ *  - A session that ends mid-pass stops the pass: the rest are tried next run,
+ *    and none is marked failed for it.
+ *
+ * Never throws into the message sync: a failure here costs attachment content,
+ * not messages.
+ */
+async function syncAttachments(
+  input: PortalPassInput,
+  healthSystemId: string,
+  session: PortalSession,
+  listed: readonly FetchableAttachment[],
+): Promise<void> {
+  const { ctx, repos } = input;
+  const pass: AttachmentPass = {
+    listed: listed.length,
+    stored: 0,
+    failed: 0,
+    skipped: 0,
+    deferredUnread: 0,
+    abandoned: 0,
+  };
+  try {
+    const unique = new Map(listed.map((attachment) => [attachment.key, attachment]));
+    const due = await repos.portalMessageAttachments.needingFetch(
+      healthSystemId,
+      listed.map((attachment) => attachment.key),
+    );
+    pass.skipped = unique.size - due.size;
+    let sessionEnded = false;
+    for (const attachment of unique.values()) {
+      if (!due.has(attachment.key)) continue;
+      if (attachment.unread !== false) {
+        pass.deferredUnread += 1;
+        continue;
+      }
+      if (sessionEnded) {
+        pass.abandoned += 1;
+        continue;
+      }
+      const outcome = await fetchAttachment(input, healthSystemId, session, attachment);
+      pass[outcome] += 1;
+      if (outcome === "abandoned") sessionEnded = true;
+    }
+  } catch (error) {
+    ctx.log.warn("portal.attachments_failed", { healthSystemId, ...errorFields(error) });
+  }
+  ctx.log.info("portal.attachments", { healthSystemId, ...pass });
+}
+
+/**
+ * Read the whole Message Center with the session the visits just used, and store
+ * every message (`worker/src/db/repos/portal-messages.ts`).
+ *
+ * Never a sign-in of its own: it runs only after `ensureSession` handed back a
+ * live session, and a session that dies mid-read is recorded on the sync row
+ * (`portal_session_expired`) for the MCP's coverage to report, not retried.
+ * Isolated from the visits: a failure here costs the MCP one run's freshness and
+ * nothing else, so it is logged and recorded but never thrown. The jar is saved
+ * either way, because every one of these calls can refresh the session cookie.
+ */
+async function syncMessages(
+  input: PortalPassInput,
+  healthSystemId: string,
+  session: PortalSession,
+): Promise<void> {
+  const { ctx, repos } = input;
+  try {
+    const result = await session.client.loadMessages();
+    const messages = result.threads.reduce((sum, thread) => sum + thread.messages.length, 0);
+    const recorded = await repos.portalMessages.record(healthSystemId, result.threads, {
+      complete: result.complete,
+    });
+    await repos.portalMessages.markSync(healthSystemId, {
+      ok: true,
+      complete: result.complete,
+      threads: result.threads.length,
+      messages,
+    });
+    input.state.summary.portalMessages += messages;
+    ctx.log.info("portal.messages_stored", {
+      healthSystemId,
+      threads: result.threads.length,
+      messages,
+      complete: result.complete,
+    });
+    await syncAttachments(input, healthSystemId, session, recorded.attachments);
+  } catch (error) {
+    const code = isAppError(error) ? error.code : "internal";
+    ctx.log.warn("portal.messages_failed", { healthSystemId, ...errorFields(error) });
+    try {
+      await repos.portalMessages.markSync(healthSystemId, { ok: false, errorCode: code });
+    } catch (markError) {
+      ctx.log.warn("portal.messages_mark_failed", { healthSystemId, ...errorFields(markError) });
+    }
+  } finally {
+    try {
+      await repos.portalAccounts.saveCookieJar(healthSystemId, session.client.jar.serialise());
+    } catch (saveError) {
+      ctx.log.warn("portal.messages_jar_save_failed", {
+        healthSystemId,
+        ...errorFields(saveError),
+      });
+    }
+  }
+}
+
+/** One health system's second phase: diff and write its calendar events. */
+async function syncPortalCalendar(
+  input: PortalPassInput,
+  healthSystemId: string,
+  visits: readonly PortalVisit[],
+): Promise<void> {
+  const { ctx, repos } = input;
+  const healthSystem = await repos.healthSystems.get(healthSystemId);
+  if (healthSystem === null) return;
+  // Read fresh rather than carried from the first phase's `listActive()` row: by
+  // the time this runs the account's own base url/mount path cannot have moved
+  // (discovery only ever runs during sign-in, and the session this visit list came
+  // from already succeeded), so a second read costs one SELECT for code that
+  // otherwise has to thread the account through `loaded` for its own sake.
+  const portalAccount = connectedPortalOf(await repos.portalAccounts.get(healthSystemId));
+
+  // Over every visit this health system has stored, past ones included (this run's
+  // were stored in the first phase): see `portal-directions.ts`.
+  const known = await repos.portalVisits.list(healthSystemId);
+  const boilerplate = boilerplateOf(known.map((row) => row.visit));
+  const target: MappingInput["healthSystem"] = {
+    id: healthSystem.id,
+    displayName: healthSystem.display_name,
+    portalUrl: healthSystem.portal_url,
+    connectedPortal: portalAccount,
+    config: await repos.healthSystems.getConfig(healthSystem.id),
+  };
+  const builds = await buildPortalCandidates(input, healthSystem, visits, target, boilerplate);
+  const vanished = await vanishedMappings(input, known, target, boilerplate);
+  const stored = await repos.calendarEvents.list({ healthSystemId, source: "portal" });
+  // Narrowed to the window before the diff sees them, exactly as the FHIR pass
+  // narrows its own: a row older than the window would be ghosted for being old.
+  const rows = stored.filter(
+    (row) => row.start_at === null || row.start_at >= input.windowStartSeconds,
+  );
+
+  const { candidates, models, ghosts, touched, duplicates } = await portalPlanInputs(
+    input,
+    builds,
+    rows,
+    vanished,
+  );
+  // Portal keys only, not every key this health system owns: the FHIR pass's events
+  // have no candidate here, and handing them to the diff would report each one as
+  // an orphan. `:csn:` is what makes the two halves distinguishable by key alone.
+  const portalPrefix = portalKeyPrefix(healthSystemId);
+  const events = input.googleEvents.filter((event) =>
+    (keyOf(event) ?? "").startsWith(portalPrefix),
+  );
+  // Duplicates are taken out of the diff whether or not their removal succeeds:
+  // left in, a row would be ghosted as vanished and its event reported as an
+  // orphan. A removal that failed leaves its row, and the next run tries again.
+  await removeDuplicates(input, healthSystemId, duplicates, events);
+  const dropped = new Set(duplicates.map((row) => row.event_key));
+  const planRows = rows.filter((row) => !dropped.has(row.event_key));
+  const planEvents = events.filter((event) => !dropped.has(keyOf(event) ?? ""));
+  const titles = await titleDigestsFor(input.blinder, healthSystemId, {
+    events: planEvents,
+    keyOf,
+    models,
+    ghosts,
+  });
+  const plan = planChanges(planRows, planEvents, candidates, { titles });
+  ctx.log.info("portal.plan", {
+    healthSystemId,
+    inserts: plan.inserts.length,
+    patches: plan.patches.length,
+    ghosts: plan.ghosts.length,
+    restores: plan.restores.length,
+    unchanged: plan.unchanged.length,
+    skipped: plan.skipped.length,
+    titlesKept: plan.titlesKept,
+  });
+
+  input.state.unchanged += plan.unchanged.length;
+  for (const entry of plan.entries) {
+    await applyPortalEntry(input, healthSystemId, entry, models, ghosts, planRows);
+  }
+  await repos.calendarEvents.seedTitleDigests(titleSeeds(plan.unchanged, planRows));
+  // Past visits the portal has stopped returning: not a change, but the rows were
+  // looked at and `last_seen_at` has to say so.
+  if (touched.length > 0) await repos.calendarEvents.touch(touched);
+
+  // The portal answered, so whatever the reconnect card was warning about is over.
+  await repos.portalAccounts.markActive(healthSystemId);
+  await resolveReconnectAlert(ctx, { healthSystemId, portal: true }, input.deps);
+}
+
+/**
+ * Keep this run's visits for the MCP, before the calendar diff can fail.
+ *
+ * `get_appointments` reads upcoming visits from `portal_visits`, not from the
+ * calendar, so this is what makes a visit the portal knows about answerable at
+ * all. The parse never truncates, so every visit `LoadUpcoming` returned is here
+ * and absence from it is a real signal -- `complete: true` is what lets a future
+ * visit that stopped coming back be marked missing. A failure here costs the MCP
+ * one run's freshness and is logged; it must not cost the owner their calendar,
+ * so it does not throw.
+ */
+async function recordVisits(
+  input: PortalPassInput,
+  healthSystemId: string,
+  visits: readonly PortalVisit[],
+): Promise<void> {
+  try {
+    await input.repos.portalVisits.record(healthSystemId, visits, { complete: true });
+  } catch (error) {
+    input.ctx.log.warn("portal.visits_store_failed", { healthSystemId, ...errorFields(error) });
+  }
+}
+
+/** The `key` marker on a Google event, or null when it carries none. */
+function keyOf(event: EventRecord): string | null {
+  const properties = event.extendedProperties?.private;
+  if (properties?.healthy !== "1") return null;
+  const key = properties.key;
+  return key === undefined || key === "" ? null : key;
+}
+
+/**
+ * A live session for this health system, signing in once if the stored one is dead.
+ *
+ * Null means the pass cannot continue for this health system, and the reason has
+ * already been recorded on the account (and on `portalErrors`). Exactly one
+ * automatic sign-in attempt per run, and only while the daily budget allows one:
+ * the account's own counter is what stops an hourly cron from walking into a
+ * lockout, and running out opens the reconnect card rather than retrying.
+ *
+ * The scheduled run is held to less than that, because nobody is watching it
+ * and every code it asks for is an email to the owner:
+ *
+ *  - it stops at `OWNER_RESERVED_ATTEMPTS` left, so the owner's "Sign in now"
+ *    always has attempts to spend, and waits for the next UTC day;
+ *  - inside the spacing after its last emailed code it does not sign in at
+ *    all -- not even to see whether the trusted device is enough, because
+ *    every look costs an attempt -- and says so on `portalErrors`;
+ *  - once its daily allowance of codes is spent, a sign-in that wants one stops
+ *    before the email (`signInAndWait`'s `unattended`).
+ *
+ * Only the last ends in `portal_signin_needs_owner` and a reconnect card: a
+ * code is really needed and the run may not ask for one. The other two are
+ * waits that end on their own, reported as `portal_signin_deferred` with the
+ * account left `active`.
+ */
+async function ensureSession(
+  input: PortalPassInput,
+  healthSystemId: string,
+): Promise<PortalSession | null> {
+  const { ctx } = input;
+  const deps = portalDeps(input.deps);
+  const opened = await openPortalSession(ctx, healthSystemId, deps);
+  if (await opened.session.client.isSessionAlive()) return opened.session;
+
+  ctx.log.info("portal.session_dead", { healthSystemId });
+  const waitSeconds = input.signInWaitSeconds ?? OTP_WAIT_SECONDS;
+  if (waitSeconds <= 0) {
+    // The caller has said it will not wait for a code here. Not a failure of the
+    // account -- the session simply has to be re-established somewhere that can
+    // wait -- so nothing is marked and no card is opened.
+    input.state.summary.portalErrors.push("portal_session_expired");
+    return null;
+  }
+
+  const left = await attemptsLeft(ctx, healthSystemId);
+  if (left <= 0) {
+    ctx.log.warn("portal.attempts_exhausted", { healthSystemId });
+    const outcome = await failSignIn(ctx, healthSystemId, "portal_attempts_exhausted", deps);
+    input.state.summary.portalErrors.push(outcome.code ?? "portal_attempts_exhausted");
+    return null;
+  }
+  const unattended = input.unattended === true;
+  if (unattended && left <= OWNER_RESERVED_ATTEMPTS) {
+    // A wait that ends on its own, at the next UTC day, like the spacing below:
+    // the account stays active and nothing is opened, so a portal that signs in
+    // on its trusted device resumes by itself tomorrow.
+    ctx.log.info("portal.signin.left_for_owner", { healthSystemId, left });
+    input.state.summary.portalErrors.push(SIGN_IN_DEFERRED);
+    return null;
+  }
+  if (unattended) {
+    const codes = await input.repos.portalAccounts.unattendedCodes(healthSystemId);
+    if (unattendedCodeWait(codes, ctx.now()) === "wait") {
+      ctx.log.info("portal.signin.deferred", { healthSystemId, codesToday: codes.today });
+      input.state.summary.portalErrors.push(SIGN_IN_DEFERRED);
+      return null;
+    }
+  }
+
+  // The same gate the admin button takes, so the two drivers cannot overlap: two
+  // sign-ins can each pass the attempt check above before either increments it,
+  // and the second `SendCode` invalidates the code the first is waiting for. See
+  // `portal-gate.ts`.
+  if (!(await acquirePortalSignIn(ctx, healthSystemId, "cron"))) {
+    ctx.log.info("portal.signin_busy", { healthSystemId });
+    input.state.summary.portalErrors.push(SIGN_IN_BUSY_CODE);
+    return null;
+  }
+  let outcome;
+  try {
+    outcome = await signInAndWait(ctx, healthSystemId, deps, waitSeconds, { unattended });
+  } finally {
+    await releasePortalSignIn(ctx, healthSystemId);
+  }
+  if (outcome.phase !== "signed_in") {
+    input.state.summary.portalErrors.push(outcome.code ?? "internal");
+    return null;
+  }
+  // Re-opened, deliberately: the sign-in sealed a new jar and the client that ran
+  // it is not this one. Carrying on with the stale client would send the request
+  // that just succeeded in signing in without the cookie it earned.
+  const reopened = await openPortalSession(ctx, healthSystemId, deps);
+  return reopened.session;
+}
+
+/** One portal visit as the calendar event it would produce. */
+function portalMapping(
+  input: PortalPassInput,
+  target: MappingInput["healthSystem"],
+  visit: PortalVisit,
+  boilerplate: Boilerplate,
+): Promise<CalendarMapping> {
+  return buildCalendarModel(portalVisitView(target.id, visit, boilerplate), {
+    healthSystem: target,
+    settings: input.settings,
+    blinder: input.blinder,
+  });
+}
+
+/**
+ * The stored visits the portal stopped returning while they were still ahead,
+ * mapped from their last copy and keyed by event key -- what the ghost of a
+ * vanished visit is rendered from (see the module comment).
+ *
+ * The copy is stamped `canceled`: that is what its absence means, and what the
+ * MCP already reports for it, so the description's status line agrees with the
+ * "Cancelled:" title rather than still saying "scheduled". Never routed through
+ * the dedupe either: a visit the portal stopped listing is not a duplicate, and
+ * a duplicate's event is deleted.
+ */
+async function vanishedMappings(
+  input: PortalPassInput,
+  known: readonly StoredPortalVisit[],
+  target: MappingInput["healthSystem"],
+  boilerplate: Boilerplate,
+): Promise<Map<string, CalendarMapping>> {
+  const now = input.ctx.now();
+  const mappings = new Map<string, CalendarMapping>();
+  for (const stored of known) {
+    if (stored.state !== "missing" || fromIso(stored.visit.start) <= now) continue;
+    const visit: PortalVisit = { ...stored.visit, status: "canceled" };
+    const mapping = await portalMapping(input, target, visit, boilerplate);
+    mappings.set(mapping.model.key, mapping);
+  }
+  return mappings;
+}
+
+/** Map every visit, and decide which ones the FHIR pass has already covered. */
+async function buildPortalCandidates(
+  input: PortalPassInput,
+  healthSystem: HealthSystemRow,
+  visits: readonly PortalVisit[],
+  target: MappingInput["healthSystem"],
+  boilerplate: Boilerplate,
+): Promise<PortalCandidateBuild[]> {
+  const seen = input.fhirSeen.get(healthSystem.id);
+  // Rows the FHIR pass wrote, whenever it wrote them: the Encounter for a visit
+  // may have been mapped in an earlier run and not returned in this one.
+  // Active only: a ghost is a visit that is off the schedule, so a live portal
+  // visit at the same time is not its copy, and must not be deleted as one.
+  const fhirRows = await input.repos.calendarEvents.list({
+    healthSystemId: healthSystem.id,
+    source: "fhir",
+    state: "active",
+  });
+  const starts = [
+    ...(seen?.starts ?? []),
+    ...fhirRows
+      .map((row) => row.start_at)
+      .filter((start): start is number => start !== null && start >= input.windowStartSeconds),
+  ];
+
+  const now = input.ctx.now();
+  const others = await otherSightings(input, healthSystem.id, now);
+  const builds: PortalCandidateBuild[] = [];
+  for (const visit of visits) {
+    const mapping = await portalMapping(input, target, visit, boilerplate);
+    const start = fromIso(mapping.model.start);
+    const mine = portalSighting(healthSystem.id, visit, now, now);
+    const sameHealthSystem =
+      (seen?.csns.has(visit.csn) ?? false) ||
+      starts.some((other) => Math.abs(other - start) <= DEDUPE_WINDOW_SECONDS);
+    const across = new Set(
+      others
+        .filter((other) => outranks(other, mine))
+        .map((other) => matchAcrossHealthSystems(other, mine)),
+    );
+    const deletable = sameHealthSystem || across.has("identity");
+    builds.push({ visit, mapping, duplicate: deletable || across.has("place"), deletable });
+  }
+
+  const skipped = builds.filter((build) => build.duplicate).length;
+  input.state.summary.portalSkipped += skipped;
+  if (skipped > 0)
+    input.ctx.log.info("portal.deduped", { healthSystemId: healthSystem.id, skipped });
+  return builds;
+}
+
+/** One portal visit as the cross-health system dedupe sees it. */
+function portalSighting(
+  healthSystemId: string,
+  visit: PortalVisit,
+  fetchedAt: number,
+  now: number,
+): Sighting {
+  return {
+    healthSystemId,
+    start: fromIso(visit.start),
+    csn: visit.csn,
+    practitioner: visit.practitioner,
+    department: visit.department,
+    location: visit.locationName,
+    rank: portalRank(visit.external === true, fetchedAt, now),
+  };
+}
+
+/**
+ * Every other health system's sightings a visit here could be a copy of: the portal
+ * visits they last stored (this run's included -- the first phase stored them)
+ * and the Encounters their FHIR pass mapped this run.
+ *
+ * A visit here that is the same appointment as one of these, and is outranked by
+ * it, is treated exactly like a visit the FHIR pass already calendared: not
+ * inserted, and deleted from the calendar if it had been (a duplicate, not a
+ * cancellation -- see the module comment). That is what keeps a visit two
+ * organisations' portals both list to one event, while a visit only another
+ * organisation's portal lists -- its own portal is not connected, or failing --
+ * is still calendared from the copy there is.
+ */
+async function otherSightings(
+  input: PortalPassInput,
+  healthSystemId: string,
+  now: number,
+): Promise<Sighting[]> {
+  const stored = await input.repos.portalVisits.listExcept(healthSystemId);
+  const sightings = stored.map((row) =>
+    portalSighting(row.healthSystemId, row.visit, row.fetchedAt, now),
+  );
+  for (const [otherId, seen] of input.fhirSeen) {
+    if (otherId !== healthSystemId) sightings.push(...seen.sightings);
+  }
+  return sightings;
+}
+
+/**
+ * The candidates, the two model maps, the rows that only need a timestamp, and the
+ * rows of calendared duplicates, which the diff never sees.
+ */
+async function portalPlanInputs(
+  input: PortalPassInput,
+  builds: readonly PortalCandidateBuild[],
+  rows: readonly CalendarEventRow[],
+  vanished: ReadonlyMap<string, CalendarMapping>,
+): Promise<{
+  candidates: PlanCandidate[];
+  models: Map<string, CalendarEventModel>;
+  ghosts: Map<string, CalendarEventModel>;
+  touched: string[];
+  duplicates: CalendarEventRow[];
+}> {
+  const models = new Map<string, CalendarEventModel>();
+  const ghosts = new Map<string, CalendarEventModel>();
+  const candidates: PlanCandidate[] = [];
+  const duplicates: CalendarEventRow[] = [];
+  const rowByKey = new Map(rows.map((row) => [row.event_key, row]));
+  const now = input.ctx.now();
+
+  for (const build of builds) {
+    const key = build.mapping.model.key;
+    const row = rowByKey.get(key);
+    if (build.duplicate && (row === undefined || build.deletable)) {
+      // A duplicate with no row of its own is simply not calendared. One that
+      // *does* have a row was calendared before a better copy was known (or is one
+      // the FHIR pass failed to adopt): it is removed, not ghosted, because the
+      // visit is not cancelled -- see the module comment. That holds even when
+      // this copy says "canceled": the better copy carries the cancellation.
+      //
+      // Only on a match that is not a guess, though. A place-only match with a
+      // row falls through and is kept as an ordinary candidate: never deleted,
+      // and not left out of `present` either, which would ghost it below.
+      if (row !== undefined) duplicates.push(row);
+      continue;
+    }
+    const offSchedule = isOffSchedule(build.visit.status);
+    candidates.push(
+      await portalCandidate(input, {
+        key,
+        mapping: build.mapping,
+        row,
+        offSchedule,
+        absent: false,
+        models,
+        ghosts,
+      }),
+    );
+  }
+
+  const present = new Set([
+    ...candidates.map((candidate) => candidate.key),
+    ...duplicates.map((row) => row.event_key),
+  ]);
+  const touched: string[] = [];
+  for (const row of rows) {
+    if (present.has(row.event_key)) continue;
+    // See the module comment: the portal only ever reports what is ahead, so a row
+    // whose visit has already started is over rather than cancelled.
+    if (row.start_at !== null && row.start_at <= now) {
+      touched.push(row.event_key);
+      continue;
+    }
+    const mapping = vanished.get(row.event_key);
+    if (mapping !== undefined) {
+      // Ghosted on the calendar from the stored copy: grey, free, "Cancelled:".
+      candidates.push(
+        await portalCandidate(input, {
+          key: row.event_key,
+          mapping,
+          row,
+          offSchedule: true,
+          absent: true,
+          models,
+          ghosts,
+        }),
+      );
+      continue;
+    }
+    candidates.push({
+      key: row.event_key,
+      fingerprint: "",
+      ghostFingerprint: null,
+      description: null,
+      ghostDescription: null,
+      offSchedule: true,
+      absent: true,
+      upcoming: true,
+      // No stored copy to render a ghost from: the row is ghosted and the calendar
+      // entry left as it is, rather than rewritten from guesses.
+      hasModel: false,
+    });
+  }
+  return { candidates, models, ghosts, touched, duplicates };
+}
+
+/**
+ * Delete each calendared duplicate's event and forget its row.
+ *
+ * Not a ghost, and the "ghosts are never deleted" rule does not apply: see the
+ * module comment. The `healthy=1` invariant does. The event is found by its key
+ * among this run's `healthy=1` listing, or -- when the listing does not have it --
+ * fetched by id and deleted only if it still carries `healthy=1` and the row's
+ * key. An event that is gone, or no longer ours, just loses its row.
+ *
+ * Google first, row second, so a failure leaves a row the next run retries. Each
+ * duplicate is on its own: one failed delete must not cost the rest of the plan.
+ */
+async function removeDuplicates(
+  input: PortalPassInput,
+  healthSystemId: string,
+  duplicates: readonly CalendarEventRow[],
+  events: readonly EventRecord[],
+): Promise<void> {
+  if (duplicates.length === 0) return;
+  let removed = 0;
+  for (const row of duplicates) {
+    try {
+      const listed = events.find((event) => keyOf(event) === row.event_key);
+      if (listed === undefined) {
+        const fetched = await input.calendar.getEvent(row.calendar_id, row.google_event_id);
+        if (fetched !== null && keyOf(fetched) === row.event_key) {
+          await input.calendar.deleteEvent(row.calendar_id, fetched.id);
+        }
+      } else {
+        await input.calendar.deleteEvent(input.calendarId, listed.id);
+      }
+      if (await input.repos.calendarEvents.remove(row.event_key)) removed += 1;
+    } catch (error) {
+      input.ctx.log.warn("portal.duplicate_remove_failed", {
+        healthSystemId,
+        ...errorFields(error),
+      });
+    }
+  }
+  input.ctx.log.info("portal.duplicates_removed", { healthSystemId, removed });
+}
+
+/** One mapped visit as a plan candidate, filling the model maps as it goes. */
+async function portalCandidate(
+  input: PortalPassInput,
+  args: {
+    key: string;
+    mapping: CalendarMapping;
+    row: CalendarEventRow | undefined;
+    offSchedule: boolean;
+    absent: boolean;
+    models: Map<string, CalendarEventModel>;
+    ghosts: Map<string, CalendarEventModel>;
+  },
+): Promise<PlanCandidate> {
+  args.models.set(args.key, args.mapping.model);
+  let ghostFingerprint: string | null = null;
+  let ghostDescription: string | null = null;
+  if (args.offSchedule || args.absent) {
+    // When it FIRST went away, so the ghost's own description -- and therefore its
+    // fingerprint -- stops moving after the run that ghosted it.
+    const ghostedAt = args.row?.ghosted_at ?? input.ctx.now();
+    const ghost = await ghostModel(args.mapping.model, {
+      ghostColorId: input.settings.ghostColorId,
+      blinder: input.blinder,
+      timezone: input.timezone,
+      ghostedAtIso: toIso(ghostedAt),
+    });
+    args.ghosts.set(args.key, ghost);
+    ghostFingerprint = ghost.fingerprint;
+    ghostDescription = ghost.description;
+  }
+  return {
+    key: args.key,
+    fingerprint: args.mapping.model.fingerprint,
+    ghostFingerprint,
+    description: args.mapping.model.description,
+    ghostDescription,
+    offSchedule: args.offSchedule,
+    absent: args.absent,
+    upcoming: fromIso(args.mapping.reportedStart) > input.ctx.now(),
+    hasModel: true,
+  };
+}
+
+/** Carry out one planned change. The portal half of `calendar-sync.ts`'s writer. */
+async function applyPortalEntry(
+  input: PortalPassInput,
+  healthSystemId: string,
+  entry: PlanEntry,
+  models: ReadonlyMap<string, CalendarEventModel>,
+  ghosts: ReadonlyMap<string, CalendarEventModel>,
+  rows: readonly CalendarEventRow[],
+): Promise<void> {
+  const { state } = input;
+  switch (entry.action) {
+    case "insert": {
+      const model = models.get(entry.key);
+      if (model === undefined) return;
+      const created = await input.calendar.insertEvent(
+        input.calendarId,
+        buildEventBody(model, mergeDescription(null, model.description)),
+      );
+      await persistPortalRow(input, healthSystemId, entry.key, created.id, model, {
+        titleDigest: await titleDigest(input.blinder, healthSystemId, model.title),
+      });
+      state.summary.eventsInserted += 1;
+      return;
+    }
+    case "patch":
+    case "restore": {
+      await patchPortal(input, healthSystemId, entry, models);
+      return;
+    }
+    case "ghost": {
+      const ghost = ghosts.get(entry.key);
+      if (ghost === undefined || entry.googleEventId === null) return;
+      const patched = await input.calendar.patchEvent(
+        input.calendarId,
+        entry.googleEventId,
+        titledBody(patchBody(input, entry.googleEventId, ghost), entry),
+      );
+      let titleWritten: string | null = null;
+      if (patched !== null) {
+        titleWritten = entry.keepTitle
+          ? entry.titleDigest
+          : await titleDigest(input.blinder, healthSystemId, ghost.title);
+      }
+      await input.repos.calendarEvents.markGhost(entry.key, {
+        // A null patch means the owner deleted the event by hand. The row still
+        // becomes a ghost, but the stored fingerprint must keep describing
+        // whatever is actually on the calendar -- which is now nothing.
+        fingerprint: patched === null ? null : ghost.fingerprint,
+        ghostedAt: ghostedAtFor(entry.key, rows, input.ctx.now()),
+        titleDigest: titleWritten,
+      });
+      state.summary.eventsGhosted += 1;
+      return;
+    }
+    case "ghost-row-only": {
+      await input.repos.calendarEvents.markGhost(entry.key, {
+        fingerprint: null,
+        ghostedAt: ghostedAtFor(entry.key, rows, input.ctx.now()),
+      });
+      state.summary.eventsGhosted += 1;
+      return;
+    }
+    default: {
+      if (entry.action === "unchanged") await input.repos.calendarEvents.touch([entry.key]);
+      return;
+    }
+  }
+}
+
+async function patchPortal(
+  input: PortalPassInput,
+  healthSystemId: string,
+  entry: PlanEntry,
+  models: ReadonlyMap<string, CalendarEventModel>,
+): Promise<void> {
+  const model = models.get(entry.key);
+  if (model === undefined || entry.googleEventId === null) return;
+  const restore = entry.action === "restore";
+  const patched = await input.calendar.patchEvent(
+    input.calendarId,
+    entry.googleEventId,
+    titledBody(patchBody(input, entry.googleEventId, model), entry),
+  );
+  const written = await titleDigest(input.blinder, healthSystemId, model.title);
+  if (patched === null) {
+    // It went away between the listing and the patch; inserting is what the plan
+    // would have decided had it known. A new event carries Healthy's title.
+    const created = await input.calendar.insertEvent(
+      input.calendarId,
+      buildEventBody(model, mergeDescription(null, model.description)),
+    );
+    await persistPortalRow(input, healthSystemId, entry.key, created.id, model, {
+      restore,
+      titleDigest: written,
+    });
+    input.state.summary.eventsInserted += 1;
+    return;
+  }
+  await persistPortalRow(input, healthSystemId, entry.key, patched.id, model, {
+    restore,
+    titleDigest: entry.keepTitle ? entry.titleDigest : written,
+  });
+  if (restore) input.state.summary.eventsRestored += 1;
+  else input.state.summary.eventsPatched += 1;
+}
+
+/**
+ * A patch body whose description merges the model's block into the event's
+ * current one, as this run's listing saw it -- so the owner's text above the rule
+ * survives without a GET. That text is personal content: never logged.
+ */
+function patchBody(
+  input: PortalPassInput,
+  googleEventId: string,
+  model: CalendarEventModel,
+): CalendarEventBody {
+  const listed = input.googleEvents.find((event) => event.id === googleEventId);
+  return buildEventBody(model, mergeDescription(listed?.description ?? null, model.description));
+}
+
+function ghostedAtFor(key: string, rows: readonly CalendarEventRow[], now: number): number {
+  return rows.find((row) => row.event_key === key)?.ghosted_at ?? now;
+}
+
+async function persistPortalRow(
+  input: PortalPassInput,
+  healthSystemId: string,
+  key: string,
+  googleEventId: string,
+  model: CalendarEventModel,
+  options: { restore?: boolean; titleDigest: string | null },
+): Promise<void> {
+  const restore = options.restore ?? false;
+  await input.repos.calendarEvents.upsert({
+    eventKey: key,
+    healthSystemId,
+    encounterId: model.encounterId,
+    calendarId: input.calendarId,
+    googleEventId,
+    fingerprint: model.fingerprint,
+    startAt: fromIso(model.start),
+    source: "portal",
+    portalCsn: csnOfEncounterId(model.encounterId),
+    restore,
+    titleDigest: options.titleDigest,
+  });
+}
+
+/** What `adoptPortalRows` was given and what it hands back. */
+export interface AdoptPortalInput {
+  ctx: Ctx;
+  repos: Repos;
+  healthSystemId: string;
+  /** This run's FHIR mappings, by event key. */
+  mappings: ReadonlyMap<string, CalendarMapping>;
+  rows: readonly CalendarEventRow[];
+  events: readonly EventRecord[];
+  /** What a row's stored `portal_csn` is compared against: the mapping's CSN, blinded. */
+  blinder: Blinder;
+}
+
+/**
+ * Hand the portal's rows and events over to the FHIR pass where they describe the
+ * same appointment.
+ *
+ * Called from the FHIR pass *before* its diff runs, and the ordering is the whole
+ * point. By the time an Encounter appears for a visit the portal already
+ * calendared, the portal's own row is usually past its start time and therefore
+ * (by this module's rules) untouched -- so the FHIR pass would see no row for its
+ * key, insert a second event, and leave the owner with two of everything. Renaming
+ * the row first turns the situation into an ordinary one: the diff finds a row and
+ * an event whose fingerprint no longer matches, patches it, and the appointment
+ * keeps the calendar entry it has had all along.
+ *
+ * Returns the rows and events with the rename applied, so the caller diffs against
+ * what is now true rather than re-reading. Never throws: a failed adoption is a
+ * duplicate event, which is bad, but a failed *sync* is worse.
+ */
+export async function adoptPortalRows(input: AdoptPortalInput): Promise<{
+  rows: CalendarEventRow[];
+  events: EventRecord[];
+  adopted: number;
+}> {
+  const portalRows = input.rows.filter((row) => row.source === "portal");
+  if (portalRows.length === 0 || input.mappings.size === 0) {
+    return { rows: [...input.rows], events: [...input.events], adopted: 0 };
+  }
+
+  const renames = await planRenames(input, portalRows);
+  if (renames.size === 0) {
+    return { rows: [...input.rows], events: [...input.events], adopted: 0 };
+  }
+
+  let adopted = 0;
+  for (const [fromKey, rename] of renames) {
+    try {
+      const moved = await input.repos.calendarEvents.rekey(fromKey, rename.toKey, {
+        encounterId: rename.encounterId,
+        source: "fhir",
+      });
+      if (moved) adopted += 1;
+      else renames.delete(fromKey);
+    } catch (error) {
+      renames.delete(fromKey);
+      input.ctx.log.warn("portal.adopt_failed", {
+        healthSystemId: input.healthSystemId,
+        ...errorFields(error),
+      });
+    }
+  }
+  input.ctx.log.info("portal.adopted", { healthSystemId: input.healthSystemId, adopted });
+
+  const refs = new Map<string, string>();
+  for (const [fromKey, rename] of renames) {
+    refs.set(fromKey, await encounterRef(input.blinder, input.healthSystemId, rename.encounterId));
+  }
+  return {
+    rows: input.rows.map((row) => {
+      const rename = renames.get(row.event_key);
+      return rename === undefined
+        ? row
+        : {
+            ...row,
+            event_key: rename.toKey,
+            encounter_id: refs.get(row.event_key) ?? "",
+            source: "fhir" as const,
+            portal_csn: null,
+            // Cleared by `rekey` too: what is on the calendar came from the
+            // portal's fields, so the FHIR fingerprint cannot match it and the
+            // diff has to see a change.
+            fingerprint: "",
+          };
+    }),
+    // The marker on the calendar entry still says the portal key. The patch this
+    // adoption sets up rewrites it; until then the diff has to be able to find it
+    // under its new name, so the in-memory copy is rewritten here.
+    events: input.events.map((event) => rekeyEvent(event, renames)),
+    adopted,
+  };
+}
+
+/** Which portal row each unmatched FHIR mapping takes over, by the row's key. */
+async function planRenames(
+  input: AdoptPortalInput,
+  portalRows: readonly CalendarEventRow[],
+): Promise<Map<string, { toKey: string; encounterId: string }>> {
+  const renames = new Map<string, { toKey: string; encounterId: string }>();
+  const claimed = new Set<string>();
+  const practitioners = await portalPractitioners(input);
+  for (const [key, mapping] of input.mappings) {
+    if (input.rows.some((row) => row.event_key === key)) continue;
+    // The row stores the CSN blinded, so the mapping's is blinded to compare.
+    const csn =
+      mapping.csn === undefined
+        ? undefined
+        : await blindCsn(input.blinder, input.healthSystemId, mapping.csn);
+    const match = portalRows.find(
+      (row) => !claimed.has(row.event_key) && sameVisit(row, mapping, csn, practitioners),
+    );
+    if (match === undefined) continue;
+    claimed.add(match.event_key);
+    renames.set(match.event_key, { toKey: key, encounterId: mapping.model.encounterId });
+  }
+  return renames;
+}
+
+/**
+ * The practitioner each stored portal visit names, by its CSN in the blinded form
+ * `calendar_events.portal_csn` holds. The row itself does not keep a name, and
+ * the name is the only identity an Encounter without a CSN can be matched on.
+ */
+async function portalPractitioners(input: AdoptPortalInput): Promise<Map<string, string>> {
+  const stored = await input.repos.portalVisits.list(input.healthSystemId);
+  const out = new Map<string, string>();
+  for (const record of stored) {
+    const practitioner = record.visit.practitioner;
+    if (practitioner === undefined || practitioner === "") continue;
+    out.set(await blindCsn(input.blinder, input.healthSystemId, record.csn), practitioner);
+  }
+  return out;
+}
+
+/**
+ * True when a portal row and a FHIR mapping are two sightings of one visit, by
+ * `sameVisitWithinHealthSystem`: the same CSN, or -- when the Encounter has none --
+ * the same practitioner at the same time. A time-only match adopts nothing: the
+ * Encounter may be a different, cancelled visit, and adopting would grey out the
+ * live one. `blindedCsn` is the mapping's CSN in the form the row stores it.
+ */
+function sameVisit(
+  row: CalendarEventRow,
+  mapping: CalendarMapping,
+  blindedCsn: string | undefined,
+  practitioners: ReadonlyMap<string, string>,
+): boolean {
+  return sameVisitWithinHealthSystem(
+    {
+      // No start: only a CSN can match it.
+      start: row.start_at ?? NaN,
+      csn: row.portal_csn ?? undefined,
+      practitioner: row.portal_csn === null ? undefined : practitioners.get(row.portal_csn),
+    },
+    { start: fromIso(mapping.model.start), csn: blindedCsn, practitioner: mapping.practitioner },
+  );
+}
+
+/** A copy of one event carrying its new key, or the event itself. */
+function rekeyEvent(
+  event: EventRecord,
+  renames: ReadonlyMap<string, { toKey: string }>,
+): EventRecord {
+  const properties = event.extendedProperties?.private;
+  if (properties === undefined) return event;
+  const rename = renames.get(properties.key ?? "");
+  if (rename === undefined) return event;
+  return {
+    ...event,
+    extendedProperties: { private: { ...properties, key: rename.toKey } },
+  };
+}

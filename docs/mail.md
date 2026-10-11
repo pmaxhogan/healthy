@@ -12,21 +12,21 @@ allowlisted sender sends.
 
 ## The pipeline
 
-`worker/index.ts` exports an `email(message, env, ctx)` handler alongside
+`worker/src/index.ts` exports an `email(message, env, ctx)` handler alongside
 `fetch` and `scheduled`, wired to `handleInboundEmail` in
-`worker/mail/handler.ts`. Every inbound message goes through, in order:
+`worker/src/mail/handler.ts`. Every inbound message goes through, in order:
 
 1. **Size guard.** A message over 1 MiB is refused (`setReject`) before
    anything reads it. No legitimate OTP or verification email is anywhere
    close to that size.
-2. **Parse** (`worker/mail/parse.ts`, via
+2. **Parse** (`worker/src/mail/parse.ts`, via
    [`postal-mime`](https://github.com/postalsys/postal-mime)). Only four
    fields survive: the header `From:` address, the subject, the plain-text
    body, and the message's byte size. HTML and every attachment are read by
    postal-mime and then dropped on the floor — they are never part of the
    parsed shape this repository passes around, so a later change cannot
    accidentally start keeping one.
-3. **Sender allowlist** (`worker/mail/classify.ts`). The parsed message's
+3. **Sender allowlist** (`worker/src/mail/classify.ts`). The parsed message's
    `From:` header domain — never `ForwardableEmailMessage.from`, which is
    the SMTP envelope sender — is checked against the comma-separated
    `mail_sender_allowlist` setting. The match is **anchored at a label
@@ -57,7 +57,7 @@ allowlisted sender sends.
    - `other` — an allowlisted sender whose content matches neither pattern.
      Stored with no code, purely so the admin UI's inbox table shows that
      mail is arriving at all.
-5. **Store.** One `mail_inbox` row per message (`worker/db/repos/mail-inbox.ts`).
+5. **Store.** One `mail_inbox` row per message (`worker/src/db/repos/mail-inbox.ts`).
    A code, when there is one, is sealed the same way every other secret in
    this repository is sealed — AES-GCM-256, AAD bound to
    `mail_inbox.code_enc.<id>` — before it ever reaches D1.
@@ -180,7 +180,7 @@ Shows the setup checklist below, the pending Gmail verification code/link
   never-hand-to-the-logger category, and on the reject path it is a string an
   unauthenticated remote sender chooses. The redactor now also drops any field
   named after a host, a domain or an origin, so a future caller cannot
-  reintroduce it. See `worker/lib/log.ts` and `SECURITY.md`.
+  reintroduce it. See `worker/src/lib/log.ts` and `SECURITY.md`.
 - **The mailbox is not a hardened channel.** Anyone who learns the mail
   address can attempt to send it mail; the allowlist, the content pattern
   match, the sender binding, and the 10-minute single-use TTL together are

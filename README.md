@@ -133,7 +133,7 @@ bypass Access, is in **[docs/setup-cloudflare.md](docs/setup-cloudflare.md)**.
 ### 3. Secrets
 
 None of these live in the repository. Set them with
-`wrangler secret put <NAME>`, or in a gitignored `.dev.vars` for local
+`wrangler secret put <NAME>`, or in a gitignored `worker/.dev.vars` for local
 development (one `NAME=value` line each).
 
 | Secret                    | Where the value comes from                                                                                       |
@@ -290,11 +290,11 @@ npm run fix           # eslint --fix + prettier --write
 ```
 
 Locally, `wrangler dev` presents every request as plain http on the routed
-custom domain; with `DEV_MODE=true` in `.dev.vars` the Worker puts it back on
-`http://localhost:8787` before anything reads it (`worker/lib/dev-origin.ts`),
+custom domain; with `DEV_MODE=true` in `worker/.dev.vars` the Worker puts it back on
+`http://localhost:8787` before anything reads it (`worker/src/lib/dev-origin.ts`),
 which is what lets the OAuth provider start at all. To run a second Worker on
 another port, set `DEV_ORIGIN=http://localhost:<port>` in that checkout's
-`.dev.vars` and start Vite with `HEALTHY_DEV_WORKER` set to the same origin.
+`worker/.dev.vars` and start Vite with `HEALTHY_DEV_WORKER` set to the same origin.
 
 `npm run check` is the only gate that matters: it is what CI runs, what the
 pre-push hook runs, and what Workers Builds runs before deploying. See

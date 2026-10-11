@@ -1,7 +1,8 @@
 # Dependencies
 node_modules/
 
-# Build output
+# Build output (patterns without a leading slash match at any depth, so the
+# worker/ copies of dist/, .wrangler/ and worker-configuration.d.ts are covered)
 dist/
 .wrangler/
 worker-configuration.d.ts

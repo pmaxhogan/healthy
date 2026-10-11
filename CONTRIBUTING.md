@@ -42,8 +42,8 @@ gitignored and must stay that way.
 - TypeScript strict, and the lint config is not advisory. If a rule is genuinely
   wrong for a case, disable it narrowly **with a comment saying why** — that
   convention is enforced by review, not by tooling.
-- Tests: pure logic goes in `test/unit/` (fast, Node); anything touching D1, a
-  Durable Object, or the Worker's request path goes in `test/integration/`,
+- Tests: pure logic goes in `worker/test/unit/` (fast, Node); anything touching D1, a
+  Durable Object, or the Worker's request path goes in `worker/test/integration/`,
   which runs in real workerd.
 - No logging of tokens, patient data, or health system names. Structured JSON logs
   with explicit fields only.

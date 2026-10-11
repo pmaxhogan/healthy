@@ -1,0 +1,309 @@
+/**
+ * Reading the cache and normalizing it: the step every clinical tool shares.
+ *
+ * A tool describes *what* it wants -- one or more resource types, the date field
+ * that kind of resource is filtered and ordered by, and any predicate of its own
+ * -- and this module does the rest: pick the health systems, resolve each health system's
+ * references, normalize, window, merge across health systems, order newest first.
+ *
+ * Two invariants it maintains that the layers above depend on:
+ *
+ *  - Each item carries `health_system` (the display name, which is what a model should
+ *    say back to a human) and `healthSystemId` (the id, which is what the policy layer
+ *    and the audit row key off). Nothing downstream has to look a health system up.
+ *  - The normalized item and the raw resource behind it stay index-aligned, so
+ *    `applyPolicy` dropping one drops the other.
+ *
+ * Nothing here talks to a health system. Every tool but `get_document_text` reads
+ * only what the scheduled refresh already cached, which is why they are all fast
+ * and none of them can be made to spend an organisation's API quota.
+ */
+
+import { mapResolver, normalizeResource } from "../fhir/normalize/index.ts";
+import { isHealthSystemDenied } from "../policy/rules.ts";
+
+import { buildCoverage } from "./coverage.ts";
+import { windowBound } from "./window.ts";
+
+import type { CoverageEntry } from "./coverage.ts";
+import type { CachedRow, HealthSystemInfo, ToolDeps } from "./deps.ts";
+import type { NormalizeCtx, NormalizedResource } from "../fhir/normalize/index.ts";
+import type { RawEntry } from "../policy/filter.ts";
+import type { PolicyRules } from "../policy/rules.ts";
+import type * as fhir4 from "fhir/r4";
+
+/** Resource types a reference in a clinical resource can point at. */
+export const REFERENCE_TYPES: readonly string[] = [
+  "Practitioner",
+  "PractitionerRole",
+  "Location",
+  "Organization",
+  "Medication",
+];
+
+/** Any normalized shape, as a plain record, plus the health system tags. */
+export type TaggedItem = Record<string, unknown>;
+
+/** One resource type a tool wants, and how to treat it. */
+export interface CollectSpec {
+  resourceType: string;
+  /** The date this kind of item is windowed and ordered by. */
+  dateOf?: ((item: NormalizedResource) => string | undefined) | undefined;
+  /**
+   * A predicate of the tool's own: category, status, code match.
+   *
+   * It gets the raw resource as well as the normalized item, because the codes a
+   * caller filters on (`laboratory`, a LOINC number) survive normalization only
+   * as a display string -- `codeText` prefers `text` and then `display`, so the
+   * machine-readable code is only in the resource.
+   */
+  keep?: ((item: NormalizedResource, resource: fhir4.FhirResource) => boolean) | undefined;
+  /** Rewrite the normalized item before it is tagged (appointments do this). */
+  project?: ((item: NormalizedResource) => TaggedItem) | undefined;
+}
+
+/**
+ * Build a spec for one resource type with the narrowed item type in hand.
+ *
+ * Without this every `dateOf` and `keep` in the tool layer would have to
+ * re-narrow the `NormalizedResource` union by hand, which is noise that hides
+ * what the predicate actually says.
+ */
+export function spec<K extends NormalizedResource["resourceType"]>(
+  resourceType: K,
+  options: {
+    dateOf?: (item: Extract<NormalizedResource, { resourceType: K }>) => string | undefined;
+    keep?: (
+      item: Extract<NormalizedResource, { resourceType: K }>,
+      resource: fhir4.FhirResource,
+    ) => boolean;
+    project?: (item: Extract<NormalizedResource, { resourceType: K }>) => TaggedItem;
+  } = {},
+): CollectSpec {
+  type Narrowed = Extract<NormalizedResource, { resourceType: K }>;
+  const { dateOf, keep, project } = options;
+  // The cast is sound because `collect` only ever calls these on items it just
+  // produced from a resource of exactly this `resourceType`.
+  const narrow = (item: NormalizedResource): Narrowed => item as Narrowed;
+  return {
+    resourceType,
+    ...(dateOf && { dateOf: (item: NormalizedResource) => dateOf(narrow(item)) }),
+    ...(keep && {
+      keep: (item: NormalizedResource, resource: fhir4.FhirResource) =>
+        keep(narrow(item), resource),
+    }),
+    ...(project && { project: (item: NormalizedResource) => project(narrow(item)) }),
+  };
+}
+
+export interface CollectOptions {
+  specs: readonly CollectSpec[];
+  /** Inclusive lower bound on the spec's date, as an ISO date or instant. */
+  from?: string | undefined;
+  /** Inclusive upper bound. A bare date means the end of that UTC day, month or year. */
+  to?: string | undefined;
+  /** Include the raw FHIR resources alongside the normalized items. */
+  raw?: boolean | undefined;
+}
+
+export interface Collected {
+  items: TaggedItem[];
+  /** Empty unless `raw` was asked for. Index-aligned with `items`. */
+  rawItems: RawEntry[];
+  /**
+   * The raw resource behind every item, whether or not `raw` was asked for.
+   * Index-aligned with `items`. For the exposure policy to judge by (which type
+   * a rendered name points at) -- never returned unless `raw` is.
+   */
+  sources: RawEntry[];
+  /** The health systems actually read from, by id. For the audit row. */
+  healthSystemIds: string[];
+  /**
+   * Per (health system, resource type) freshness for every type this call's
+   * specs covered -- see `worker/src/mcp/coverage.ts`. What lets a caller (or
+   * `respond`) tell an empty `items` apart from a sync gap.
+   */
+  coverage: CoverageEntry[];
+}
+
+/**
+ * Pick the health systems a call applies to.
+ *
+ * A denied health system is removed first and can never be named back in: the
+ * `health_systems` argument narrows the allowed set, it does not choose from the full
+ * one. An argument that matches nothing yields no health systems -- and so an empty
+ * answer -- rather than silently falling back to all of them.
+ */
+export function selectHealthSystems(
+  all: readonly HealthSystemInfo[],
+  rules: PolicyRules,
+  requested: readonly string[] | undefined,
+): HealthSystemInfo[] {
+  const allowed = all.filter((healthSystem) => !isHealthSystemDenied(rules, healthSystem.id));
+  if (requested === undefined || requested.length === 0) return allowed;
+  const needles = requested.map((value) => value.trim().toLowerCase()).filter((v) => v.length > 0);
+  return allowed.filter((healthSystem) =>
+    needles.some(
+      (needle) =>
+        healthSystem.id.toLowerCase() === needle ||
+        healthSystem.displayName.toLowerCase().includes(needle),
+    ),
+  );
+}
+
+/**
+ * The health systems a `health_system` rule denies to this caller.
+ *
+ * Never read from for an answer. `collectAppointments` uses them only to
+ * recognise a denied organisation's visit when an allowed organisation's portal
+ * lists a copy of it, so the copy can be dropped too (security review M1).
+ */
+export function deniedHealthSystems(
+  all: readonly HealthSystemInfo[],
+  rules: PolicyRules,
+): HealthSystemInfo[] {
+  return all.filter((healthSystem) => isHealthSystemDenied(rules, healthSystem.id));
+}
+
+/**
+ * A caller's `limit`, made safe to slice with -- or `undefined` for "no limit
+ * at all", which is what an absent `limit` means.
+ *
+ * There is no ceiling: a tool answers everything it found unless the caller
+ * asked to see less of it. An explicit `limit` is still floored at 1 and
+ * truncated to an integer, because "give me the top -5" and "the top 3.7" are
+ * not requests `respond()`'s `slice` can act on.
+ */
+export function effectiveLimit(limit: number | undefined): number | undefined {
+  return limit === undefined ? undefined : Math.max(1, Math.trunc(limit));
+}
+
+function isResource(value: unknown): value is fhir4.FhirResource {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { resourceType?: unknown }).resourceType === "string"
+  );
+}
+
+interface Entry {
+  item: TaggedItem;
+  raw: RawEntry;
+  /** Sort key: the spec's date as ms, or {@link NO_DATE}. */
+  order: number;
+}
+
+/** The sort key of an item whose date is missing or unparseable. Orders last. */
+const NO_DATE = -Infinity;
+
+/** The sort key for one item: its spec date in ms, or {@link NO_DATE}. */
+function orderOf(current: CollectSpec, item: NormalizedResource): number {
+  const date = current.dateOf?.(item) ?? item.lastUpdated;
+  if (date === undefined) return NO_DATE;
+  const ms = Date.parse(date);
+  return Number.isNaN(ms) ? NO_DATE : ms;
+}
+
+/**
+ * Whether an item's date falls inside the caller's window.
+ *
+ * An item with no usable date cannot be shown to be inside a window, so a windowed
+ * call excludes it rather than guessing. An unwindowed call keeps everything.
+ */
+function inWindow(order: number, after: number | undefined, before: number | undefined): boolean {
+  return order === NO_DATE
+    ? after === undefined && before === undefined
+    : (after === undefined || order >= after) && (before === undefined || order <= before);
+}
+
+/**
+ * Whether one ISO date falls inside a caller's `from`/`to` window, by exactly the
+ * rules `collect` applies: a bare `to` date covers that whole day, and an item
+ * with no usable date is only kept when there is no window at all.
+ *
+ * For items that do not come out of the FHIR cache (the portal's visits) but
+ * must be windowed as if they did.
+ */
+export function withinWindow(
+  date: string | undefined,
+  from: string | undefined,
+  to: string | undefined,
+): boolean {
+  const ms = date === undefined ? NaN : Date.parse(date);
+  return inWindow(Number.isNaN(ms) ? NO_DATE : ms, windowBound(from, false), windowBound(to, true));
+}
+
+/** Every entry one health system contributes for one spec. */
+function entriesFor(
+  healthSystem: HealthSystemInfo,
+  ctx: NormalizeCtx,
+  current: CollectSpec,
+  rows: readonly CachedRow[],
+  after: number | undefined,
+  before: number | undefined,
+): Entry[] {
+  const out: Entry[] = [];
+  const tags = { healthSystem: healthSystem.displayName, healthSystemId: healthSystem.id };
+  for (const row of rows) {
+    if (!isResource(row.resource)) continue;
+    const normalized = normalizeResource(row.resource, ctx);
+    if (current.keep && !current.keep(normalized, row.resource)) continue;
+    const order = orderOf(current, normalized);
+    if (!inWindow(order, after, before)) continue;
+    const projected = current.project ? current.project(normalized) : { ...normalized };
+    out.push({
+      item: { ...projected, ...tags },
+      raw: { ...tags, resource: row.resource },
+      order,
+    });
+  }
+  return out;
+}
+
+/**
+ * Read, normalize, filter and merge.
+ *
+ * Ordering is newest-first on the spec's own date, with items that have no date
+ * last. That is the order a model wants for "what happened recently" and it is
+ * stable across health systems, which the cache's per-health system ordering is not.
+ */
+export async function collect(
+  deps: ToolDeps,
+  healthSystems: readonly HealthSystemInfo[],
+  options: CollectOptions,
+): Promise<Collected> {
+  const after = windowBound(options.from, false);
+  const before = windowBound(options.to, true);
+  const entries: Entry[] = [];
+
+  for (const healthSystem of healthSystems) {
+    const pool = await deps.referencePool(healthSystem.id);
+    const refs = mapResolver(pool.filter(isResource));
+    const ctx: NormalizeCtx = { healthSystem: healthSystem.displayName, refs };
+
+    for (const current of options.specs) {
+      const rows = await deps.resources(healthSystem.id, current.resourceType);
+      entries.push(...entriesFor(healthSystem, ctx, current, rows, after, before));
+    }
+  }
+
+  entries.sort((a, b) => b.order - a.order);
+
+  const [rules, syncStatus] = await Promise.all([deps.rules(), deps.syncStatus()]);
+  const resourceTypes = [...new Set(options.specs.map((current) => current.resourceType))];
+  const coverage = buildCoverage({
+    healthSystems,
+    resourceTypes,
+    syncStatus,
+    rules,
+    now: deps.now(),
+  });
+
+  return {
+    items: entries.map((entry) => entry.item),
+    rawItems: options.raw === true ? entries.map((entry) => entry.raw) : [],
+    sources: entries.map((entry) => entry.raw),
+    healthSystemIds: healthSystems.map((healthSystem) => healthSystem.id),
+    coverage,
+  };
+}

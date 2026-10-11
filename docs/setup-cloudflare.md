@@ -11,7 +11,7 @@ npx wrangler d1 create healthy
 npx wrangler kv namespace create healthy-oauth-kv
 ```
 
-Put the resulting ids into `wrangler.jsonc`:
+Put the resulting ids into `worker/wrangler.jsonc`:
 
 - `d1_databases[0].database_id` — the D1 database id.
 - `kv_namespaces[0].id` — the KV namespace id. The binding name must stay
@@ -20,7 +20,7 @@ Put the resulting ids into `wrangler.jsonc`:
 - `account_id` — your Cloudflare account id.
 
 The Durable Object binding (`HEALTHY_MCP`, class `HealthyMcp`) and its
-`new_sqlite_classes` migration are already correct in `wrangler.jsonc` and
+`new_sqlite_classes` migration are already correct in `worker/wrangler.jsonc` and
 do not need editing — the class name and binding name are fixed by the v1
 migration tag and must not change.
 
@@ -34,7 +34,7 @@ npm run migrate:remote  # the real, deployed D1 (also run by `npm run deploy`)
 ## 2. Custom domain
 
 Add your domain to Cloudflare if it is not already there, then set
-`routes[0].pattern` in `wrangler.jsonc` to your hostname (`custom_domain:
+`routes[0].pattern` in `worker/wrangler.jsonc` to your hostname (`custom_domain:
 true` is already set). `workers_dev` stays `false` deliberately: a
 `*.workers.dev` hostname would be a second, un-gated front door to the same
 Worker.
@@ -68,7 +68,7 @@ versions.)** The paths:
 Everything else — including the MCP consent page at `/authorize`, both
 OAuth callback paths, and the whole admin API — stays behind Access. The
 Worker independently verifies the Access JWT itself (issuer, `aud`, and the
-email claim, in `worker/auth/access.ts`) rather than trusting a header
+email claim, in `worker/src/auth/access.ts`) rather than trusting a header
 Cloudflare attaches, so a bypass policy that is accidentally too wide does
 not by itself grant access to anything sensitive — it only removes Access
 as one of the two required gates, and the password session is still
@@ -93,7 +93,7 @@ Connect the GitHub repository to Cloudflare Workers Builds, with:
 - **Build command:** `npm run check`
 - **Deploy command:** `npm run deploy`
 
-`npm run deploy` expands to `npm run migrate:remote && wrangler deploy`, so
+`npm run deploy` runs, inside `worker/`, `npm run migrate:remote && wrangler deploy`, so
 the remote D1 migration always runs immediately before the new code that
 depends on it, in that order, on every build. **(verify whether Workers
 Builds automatically picks up `.node-version` and runs `npm ci` rather than
@@ -134,7 +134,7 @@ npm run gen-data-key -- --put  # mints a random AES-GCM-256 key, uploads it as D
 `openssl rand -base64 32` or equivalent, piped into
 `wrangler secret put SESSION_SECRET`.
 
-For local development, put the same names into a gitignored `.dev.vars`
+For local development, put the same names into a gitignored `worker/.dev.vars`
 file (`NAME=value` per line) instead of using Worker secrets, and set
 `DEV_MODE=true` there — that relaxes only the Cloudflare Access check
 (there is no Access in front of `wrangler dev`); the password session is

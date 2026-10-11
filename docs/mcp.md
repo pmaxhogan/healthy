@@ -9,7 +9,7 @@ the exposure policy's exact syntax, the audit log, and revoking access.
 
 ## Tools
 
-The server registers (in `worker/mcp/tools/index.ts`): `get_health_summary`,
+The server registers (in `worker/src/mcp/tools/index.ts`): `get_health_summary`,
 `list_health_systems`, `get_sync_status`, `get_patient_profile`,
 `get_appointments`, `get_encounters`, `get_conditions`, `get_medications`,
 `get_medication_fills`, `get_allergies`, `get_immunizations`,
@@ -71,13 +71,13 @@ history. For example, on `get_lab_results`:
   ever truncated. See [SECURITY.md](../SECURITY.md#jq-cost-bounds).
 - **Examples, per tool.** Each tool's `jq` argument description carries one
   shared sentence and then one to three examples written against that tool's
-  own item fields (`worker/mcp/jq-examples.ts`). A unit test
-  (`test/unit/mcp/jq-examples.test.ts`) runs every one of them through the
+  own item fields (`worker/src/mcp/jq-examples.ts`). A unit test
+  (`worker/test/unit/mcp/jq-examples.test.ts`) runs every one of them through the
   real tool and the real jq engine over a synthetic record and fails if any
   stops compiling or stops matching anything.
 
 **Engine.** jq-wasm (jq 1.8.2 built with Emscripten), vendored under
-`worker/mcp/jq/vendor/` by `scripts/build-jq-wasm.mjs`, which adds fuel
+`worker/src/mcp/jq/vendor/` by `worker/scripts/build-jq-wasm.mjs`, which adds fuel
 metering and the memory ceiling with Binaryen. It was chosen over a jaq
 (Rust) wasm build — no wasm32 toolchain on the build machine, and a
 not-quite-jq dialect — and over pure-JavaScript interpreters, which cannot be
@@ -89,7 +89,7 @@ lab items: 1.04 MB wasm (361 KB gzipped); a fresh instance per call costs
 ### Date windows: `from` and `to`
 
 The tools that take a window compare it against one date field of each item
-(`worker/mcp/collect.ts`, `bound` and `inWindow`):
+(`worker/src/mcp/collect.ts`, `bound` and `inWindow`):
 
 - **Both ends are inclusive.** An item dated exactly `from` or exactly `to` is
   kept.
@@ -176,7 +176,7 @@ Fatal/Warning/Information label: `info` — expected, everything that could be
 returned was; `warning` — something was left out or deferred; `error` — the
 type (or that attempt) could not be read; `unknown` — no documented meaning,
 reported as such rather than guessed. The table lives in
-`worker/sync/sync-state-codes.ts`. Epic's free-text `diagnostics` is never
+`worker/src/sync/sync-state-codes.ts`. Epic's free-text `diagnostics` is never
 stored or shown: it can echo the search's parameters.
 
 **Sources.** "Epic table" is the "FHIR Error Codes" table Epic publishes at
@@ -206,7 +206,7 @@ from payers, other providers or other FHIR servers.
 | `59001`, `59205`                                                                               | unknown  | Seen from Epic; not in Epic's published table and no text was captured.                                                                      | —                                                |
 | `category_rejected:<cat>`                                                                      | warning  | That category of a category-split search was refused while the others succeeded (coverage `partial`).                                        | This server                                      |
 | `unsupported`                                                                                  | info     | The health system does not offer the type (above).                                                                                           | This server                                      |
-| `upstream_error[:<epic>]`, `upstream_auth`, `upstream_unavailable`, `needs_reauth`, `internal` | error    | The attempt failed; with an Epic suffix, the suffix's meaning applies.                                                                       | This server (`worker/lib/errors.ts`)             |
+| `upstream_error[:<epic>]`, `upstream_auth`, `upstream_unavailable`, `needs_reauth`, `internal` | error    | The attempt failed; with an Epic suffix, the suffix's meaning applies.                                                                       | This server (`worker/src/lib/errors.ts`)         |
 
 ### Appointments: FHIR and the patient portal
 
@@ -377,7 +377,7 @@ that ends mid-pass leaves the rest for the next run.
   both tools read one item per message (`resourceType: "Communication"`,
   the rule builder's "Secure message" shape), filter those, and only then
   group what the policy released into conversations (`respond()`'s reshape,
-  `worker/mcp/message-threads.ts`). So a `resource` rule on Communication
+  `worker/src/mcp/message-threads.ts`). So a `resource` rule on Communication
   removes every conversation and the coverage, and every
   `Communication.<field>` rule on a message field (`body`, `from.name`,
   `subject`) reaches the participants, previews, bodies and search built
@@ -573,7 +573,7 @@ is the raw `valueQuantity`, `practitioners[].name` is the raw
 many normalised fields are a raw element _rendered_ to text (a code's
 `display`, a reference's `display`, a date picked out of a period). A rule in
 either vocabulary is translated through those renames
-(`worker/fhir/normalize/<type>.ts` `FIELD_ALIASES`, plus the same-name
+(`worker/src/fhir/normalize/<type>.ts` `FIELD_ALIASES`, plus the same-name
 renderings the field tree implies), so hiding a coding's raw `display` also
 removes the normalised text made from it, and hiding a normalised
 practitioner name also removes the raw display and the appointment view's

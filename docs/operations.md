@@ -32,7 +32,7 @@ deployment owner's timezone in a public repository.
   `portal.keepalive` log line per account.
 
 An unrecognised cron string is logged and ignored, not guessed at, so a
-schedule added to `wrangler.jsonc` without matching code is a visible
+schedule added to `worker/wrangler.jsonc` without matching code is a visible
 no-op rather than an accidental full refresh running on the wrong minute.
 
 ## Portal sign-ins the scheduled run makes on its own
@@ -262,7 +262,7 @@ A few things this does **not** do, worth knowing before you rely on it:
   decommissioning the deployment entirely. **(verify: there is no bulk
   "revoke every grant" endpoint today.)**
 - The D1 database name `healthy` is hard-coded in the `migrate:*` npm
-  scripts as well as in `wrangler.jsonc`; if you renamed the database, the
+  scripts as well as in `worker/wrangler.jsonc`; if you renamed the database, the
   scripts (and the commands above) need the new name too.
 
 To decommission a deployment entirely: disconnect every health system and
@@ -272,7 +272,7 @@ database and the KV namespace from the Cloudflare dashboard or with
 
 ## Log fields and redaction
 
-Logs are structured JSON lines (`worker/lib/log.ts`), one object per line.
+Logs are structured JSON lines (`worker/src/lib/log.ts`), one object per line.
 Redaction is applied to every field on every line and is a safety net, not
 the primary control — the actual guarantee is that call sites are written,
 and tested, to never pass clinical content, health system names, or credentials

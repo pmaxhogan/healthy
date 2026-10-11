@@ -93,7 +93,7 @@ else needs enabling.
 #### Derived secrets
 
 You do not have to keep a secret per organisation. Mint a derivation key once
-(`npm run epic-org-secret -- --gen-key --put`, and copy it into `.dev.vars`),
+(`npm run epic-org-secret -- --gen-key --put`, and copy it into `worker/.dev.vars`),
 then for any organisation:
 
 ```sh
@@ -147,7 +147,7 @@ Once the app is registered (sandbox is enough to start):
 
 1. Open the admin UI → **Health systems** → **Add health system**.
 2. Either pick your health system from the searchable list — sourced from
-   `data/epic-brands.json`, a slimmed copy of Epic's own published directory
+   `worker/data/epic-brands.json`, a slimmed copy of Epic's own published directory
    of FHIR endpoints — or enter a FHIR base URL manually. A manual URL is
    verified with a live SMART discovery request before the health system is
    saved; an endpoint that is not really an Epic FHIR server is rejected at

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["scripts/*.{ts,mjs}", "test/**/*.test.ts", "test/**/setup.ts", "ui/sandbox/main.ts"],
+  "project": [
+    "src/**/*.ts",
+    "ui/**/*.{ts,vue}",
+    "shared/**/*.ts",
+    "scripts/**/*.{ts,mjs}",
+    "test/**/*.ts"
+  ],
+  "ignore": ["src/mcp/jq/vendor/jq.d.wasm.ts"],
+  "ignoreDependencies": ["cloudflare", "jq-wasm"],
+  "vite": { "config": ["vite.config.ts", "vite.sandbox.config.ts"] },
+  "vitest": { "config": ["vitest.config.ts"] },
+  "wrangler": { "config": ["wrangler.jsonc"] }
+}

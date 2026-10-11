@@ -19,6 +19,10 @@
 # `ignore` and still opens its own PR, same as today.
 version: 2
 updates:
+  # The lockfile lives at the repo root and the only workspace is worker/, so
+  # the directory stays "/": Dependabot resolves workspaces from the root
+  # manifest and updates the single root package-lock.json. Pointing it at
+  # "/worker" would look for a lockfile that does not exist there.
   - package-ecosystem: "npm"
     directory: "/"
     ignore:

@@ -26,7 +26,7 @@ Three treatments, and every column is in exactly one of them:
   reader cannot compute or confirm one without the key. Every input includes the
   health system's row id, so the same upstream id at two organisations blinds to
   two unrelated values. Stored as `~` plus base64url (128 bits for an id, 256 for
-  a digest). See `worker/db/blind.ts`.
+  a digest). See `worker/src/db/blind.ts`.
 - **Plaintext**: listed below, each with the reason.
 
 | Asset                                                                                       | Store               | At rest                                                  |
@@ -237,12 +237,12 @@ can now make this Worker execute code of its choosing. What limits it:
   the caller (a model cannot fix a filter otherwise) — but only a value from
   that same policy-filtered input. It is never logged.
 - _It has no capabilities._ Real jq 1.8.2 compiled to wasm (jq-wasm, vendored
-  under `worker/mcp/jq/vendor/`), with no `eval` and no run-time wasm
+  under `worker/src/mcp/jq/vendor/`), with no `eval` and no run-time wasm
   compilation. Its "filesystem" is Emscripten's in-memory one with nothing in
   it but the input, its `$ENV` is Emscripten's fixed placeholder (no Worker
   secrets), and it has no network.
 - _It is bounded in time and memory, per call._ The wasm is instrumented
-  (`scripts/build-jq-wasm.mjs`) to burn one unit of fuel per function entry and
+  (`worker/scripts/build-jq-wasm.mjs`) to burn one unit of fuel per function entry and
   loop iteration and trap when it runs out; the budget is 100 million units
   plus 100 per input byte, capped at 2³¹−1 (a few seconds of CPU). Its linear
   memory is capped at 64 MiB, so an allocation bomb fails that call with
@@ -265,17 +265,17 @@ calendar.
 
 **The "Try a tool" panel runs in a sandboxed, opaque-origin iframe.** The admin
 UI's `/connectors` page lets the owner call a real MCP tool from the browser
-(`worker/mcp/admin-call.ts` connects a real `McpServer` — the real zod schemas,
+(`worker/src/mcp/admin-call.ts` connects a real `McpServer` — the real zod schemas,
 the real exposure policy, the real audit wrapper — to the SDK's own in-memory
 transport, and every call is audited as `admin-console`, never bypassing the
 choke point above). The tool's JSON argument editor and result viewer need
 CodeMirror 6, and CodeMirror needs to inject styles at runtime with no CSP
 nonce of its own to carry — which the app's main CSP, deliberately, has no
 exception for. Rather than loosen `style-src` app-wide, that editor and viewer
-are served as a second, self-contained page (`shared/mcp-sandbox.ts`'s
+are served as a second, self-contained page (`worker/shared/mcp-sandbox.ts`'s
 `MCP_SANDBOX_PATH`, `/tool-sandbox`) with its own, narrower CSP
-(`sandboxContentSecurityPolicy`, `worker/auth/security-headers.ts`) and
-embedded by `src/components/McpToolTester.vue` in
+(`sandboxContentSecurityPolicy`, `worker/src/auth/security-headers.ts`) and
+embedded by `worker/ui/components/McpToolTester.vue` in
 `<iframe sandbox="allow-scripts">` — deliberately without `allow-same-origin`,
 which gives the loaded document an opaque origin: no cookies, no session
 storage, and `default-src`/`connect-src`/`img-src`/`font-src` all `'none'`
@@ -293,7 +293,7 @@ touches the network. Both directions validate the message's shape at runtime
 `event.source` against the iframe's own `contentWindow` — `event.origin` is
 the literal string `"null"` for an opaque origin and cannot be used as an
 identity check. The frame's own page is built by a _second_, separate Vite
-config (`vite.sandbox.config.ts`) that inlines its script and stylesheet
+config (`worker/vite.sandbox.config.ts`) that inlines its script and stylesheet
 directly into the HTML with no `/assets/*` files of its own: a module script
 loaded via `<script src>` is always fetched CORS-mode with credentials
 "same-origin", and against this page's opaque origin that fetch is genuinely
@@ -303,7 +303,7 @@ entry, found only by comparing a working standalone load against a silently
 blank embedded one. Inlining makes the top-level navigation (which, unlike a
 subresource fetch, always carries credentials) the only request the page ever
 makes; the inline script still needs its own CSP nonce, stamped on per
-response by `worker/app.ts` with `HTMLRewriter`, since a static build cannot
+response by `worker/src/app.ts` with `HTMLRewriter`, since a static build cannot
 bake in something that has to be fresh every time.
 
 **Least privilege on the calendar.** Google is authorised only for
@@ -316,7 +316,7 @@ event is seen carrying that marker and the duplicate row's own key. A cancelled
 or vanished visit is never deleted; it becomes a grey "Cancelled:" ghost.
 
 **No PHI in logs.** Logs are structured JSON, one object per line, and every
-field passes through a redactor (`worker/lib/log.ts`) before it is written. The
+field passes through a redactor (`worker/src/lib/log.ts`) before it is written. The
 guarantee is two parts, and it is worth being precise about which is which:
 
 - _Enforced_ by the redactor: keys that name a credential (`token`, `secret`,
@@ -343,7 +343,7 @@ guarantee is two parts, and it is worth being precise about which is which:
   organisation identities must not be handed to the logger at all. Reviews check
   new log calls against that rule.
 
-`test/unit/lib/log.test.ts` pins every rule above, including a JWT, a `ya29.`
+`worker/test/unit/lib/log.test.ts` pins every rule above, including a JWT, a `ya29.`
 token, a callback URL carrying `?code=`, and a 24-character Epic patient id under
 a key that shape alone would not catch. The MCP audit trail records _that_ a tool
 ran, by whom, against which health systems, and how many rows came back — never the
