@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { TOOL_CATALOG } from "../../../src/api/tool-catalog.ts";
 import { AppError } from "../../../src/lib/errors.ts";
 import { TOOL_NAMES } from "../../../src/mcp/tools/index.ts";
+import { clock, testRepos as clockedRepos } from "../db/helpers.ts";
 
 import {
   CSRF,
@@ -263,7 +264,11 @@ describe("GET /api/mcp/grants", () => {
 
 describe("GET /api/mcp/audit", () => {
   it("lists rows newest first, with the metadata and nothing else", async () => {
-    const repos = testRepos();
+    // A clock moved by hand between the two calls: rows written in the same
+    // second are ordered by id, and two ids minted in the same millisecond sort
+    // arbitrarily, so without it "newest" is occasionally the other row.
+    const time = clock();
+    const repos = clockedRepos({ now: time.now });
     await repos.mcpAudit.insert({
       tool: "get_appointments",
       clientId: "client-1",
@@ -271,6 +276,7 @@ describe("GET /api/mcp/audit", () => {
       resultCount: 3,
       durationMs: 42,
     });
+    time.advance(1);
     await repos.mcpAudit.insert({ tool: "get_vitals", ok: false, errorCode: "policy_denied" });
 
     const rows = await json<McpAuditDto[]>(await owner().get("/api/mcp/audit"));
