@@ -248,7 +248,11 @@ privacy screen Health Connect also opens from its permission dialog.
   the re-upload rebuilds them rather than counting twice; it does not reset the
   change cursors. The Worker applies batches in the background,
   so the Phone page shows a queue draining after the phone has finished, and rollups
-  and summaries filling in while it does.
+  and summaries filling in while it does. The page refreshes itself every 15
+  seconds while it is on screen: the phone's card says how many of the granted
+  types have finished (_Backfill: 9 of 14 types complete_), and **Show details**
+  says how far back each unfinished type has reached and counts the uploads that
+  are queued, being applied and applied.
 - **Tasker.** If you use Tasker, the app is a plugin with one action, **Trigger
   refresh**, which queues the same sync as **Sync now**. It is optional; nothing
   else depends on it.
@@ -289,8 +293,10 @@ delete the old phone and its data when you pair the phone again as a new device.
   order: the phone is on and online, the app has background access and the battery
   exemption (both shown on its card), and the last error. Pressing **Sync now**
   usually settles it. A stale phone's data is still served, labelled stale.
-- **A record type says "not permitted".** The grant is missing. Allow that type
-  in Health Connect, **App permissions**, **Healthy Companion**.
+- **A record type says "not granted".** That is not an error. A type you did not
+  allow is listed as such, in grey, under **types with no data**, and is left out
+  of the backfill count. If you do want it collected, allow that type in Health
+  Connect, **App permissions**, **Healthy Companion**.
 - **Uploads answer 429.** `rate_limited` is a per-device limit and `backlogged`
   means the Worker still has a lot of that phone's data to apply. The app waits
   as told and retries; there is nothing to do but wait. See

@@ -7,6 +7,10 @@ import type { DeviceCoverageStatus, DeviceStatus } from "@shared/types.ts";
  * The one place a phone's status, or one of its record types' coverage status,
  * becomes a colour and a word. The two vocabularies overlap (`stale`, `never`),
  * so one table serves both.
+ *
+ * `unsupported` covers two different things (a type the owner has not granted,
+ * and one the phone's Health Connect does not offer), so a caller that knows
+ * which passes the word in `label`. Both are neutral: neither is a fault.
  */
 type PillStatus = DeviceStatus | DeviceCoverageStatus;
 
@@ -32,9 +36,9 @@ const TONES: Record<PillStatus, string> = {
   unsupported: "dim",
 };
 
-const props = defineProps<{ status: PillStatus }>();
+const props = defineProps<{ status: PillStatus; label?: string | null }>();
 
-const label = computed(() => LABELS[props.status]);
+const label = computed(() => props.label ?? LABELS[props.status]);
 const tone = computed(() => TONES[props.status]);
 </script>
 
