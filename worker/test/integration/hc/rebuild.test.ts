@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { makeRepos } from "../../../src/db/index.ts";
 import { setSetting } from "../../../src/db/settings.ts";
-import { rebuildShare, runHcSlice } from "../../../src/hc/apply.ts";
+import { rebuildAllowance, rebuildShare, runHcSlice } from "../../../src/hc/apply.ts";
 import { dayBoundsMs } from "../../../src/hc/rollup/day.ts";
 import { unparkMarks } from "../../../src/hc/store/dirty.ts";
 import { HOUR_MS, dayMarkKey } from "../../../src/hc/store/keys.ts";
@@ -818,6 +818,32 @@ describe("day marks and the zone", () => {
     // Nothing left at all: the fifth every applied batch is followed by.
     expect(rebuildShare(1_000_000, 0)).toBeCloseTo(0.2);
     expect(rebuildShare(0, 0)).toBeCloseTo(0.2);
+  });
+
+  // The share is of the work, not of a slice: what a batch is followed by is
+  // measured against what that batch cost, so five small batches in a slice are
+  // not each followed by a fifth of the whole slice.
+  it("are allowed a quarter of what the batch cost at a fifth, and as much again at a half", () => {
+    const slice = { maxQueries: 650, maxMs: 20_000 };
+    const batch = { statements: 200, ms: 2000 };
+
+    expect(rebuildAllowance(0.2, batch, slice)).toStrictEqual({ maxQueries: 50, maxMs: 500 });
+    expect(rebuildAllowance(0.5, batch, slice)).toStrictEqual({ maxQueries: 200, maxMs: 2000 });
+  });
+
+  it("are never allowed more than that fraction of a slice, nor less than a floor", () => {
+    const slice = { maxQueries: 650, maxMs: 20_000 };
+
+    // A batch that filled a slice and more: the old allowance, a fifth of a slice.
+    const large = rebuildAllowance(0.2, { statements: 5000, ms: 60_000 }, slice);
+    expect(large).toStrictEqual({ maxQueries: 130, maxMs: 4000 });
+    // A batch that cost nothing (every record already stored) is still followed
+    // by room for a couple of marks.
+    const free = rebuildAllowance(0.2, { statements: 0, ms: 0 }, slice);
+    expect(free).toStrictEqual({ maxQueries: 32, maxMs: 500 });
+    // And in a slice too small for the floor, the slice's own fraction rules.
+    const tiny = rebuildAllowance(0.2, { statements: 0, ms: 0 }, { maxQueries: 40, maxMs: 1000 });
+    expect(tiny).toStrictEqual({ maxQueries: 8, maxMs: 25 });
   });
 });
 
