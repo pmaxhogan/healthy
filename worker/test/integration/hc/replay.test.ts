@@ -473,7 +473,7 @@ describe("a slice that dies", () => {
     const reference = await outcome(deviceId, scenario(), never());
     const counted = never();
     await outcome(deviceId, scenario(), counted, TIGHT);
-    const faults = sample(counted.commits, 4).map((at) => killAt(at, "after"));
+    const faults = sample(counted.commits, 3).map((at) => killAt(at, "after"));
     expect(faults.length).toBeGreaterThan(3);
     await expectSameStore(deviceId, scenario, reference, faults, TIGHT);
   }, 240_000);

@@ -36,7 +36,7 @@
  * `unparkMarks` puts them back.
  */
 
-import { all, one, run } from "../../db/client.ts";
+import { batch, one, run } from "../../db/client.ts";
 
 import { HOUR_MS } from "./keys.ts";
 
@@ -172,26 +172,32 @@ export function nextDirtySql(kind: string): string {
 }
 
 /**
- * The next marks to rebuild: a page of the first kind, in rebuild order, that
- * has any. One read along the primary key per kind -- never a sort of the
- * whole list, which after a backfill is long. Parked marks are not returned.
+ * The next marks to rebuild: a page of each kind, in rebuild order, the kinds
+ * with none left out. One read along the primary key per kind -- never a sort
+ * of the whole list, which after a backfill is long. Parked marks are not
+ * returned.
  *
- * Up to four statements, and the meter is told of each: D1 counts them all.
+ * All four reads go to D1 as one `db.batch`: a round trip costs the same
+ * whatever is in it, and asking kind by kind was up to four of them to learn
+ * that only the last kind had anything. Four statements all the same, and the
+ * meter is told of each: D1 counts them all.
+ *
+ * A caller that wants the strict order -- every mark of a kind before any of
+ * the next -- takes the pages in order and asks again after one that came back
+ * full (`limit` rows): that kind may have more.
  */
 export async function nextDirty(
   ctx: Ctx,
   deviceId: string,
   limit: number,
   meter?: Meter,
-): Promise<DirtyRow[]> {
-  for (const kind of REBUILD_ORDER) {
-    meter?.spend();
-    const rows = await all<DirtyRow>(
-      ctx.db.prepare(nextDirtySql(kind)).bind(deviceId, kind, limit),
-    );
-    if (rows.length > 0) return rows;
-  }
-  return [];
+): Promise<DirtyRow[][]> {
+  meter?.spend(REBUILD_ORDER.length);
+  const pages = await batch<DirtyRow>(
+    ctx.db,
+    REBUILD_ORDER.map((kind) => ctx.db.prepare(nextDirtySql(kind)).bind(deviceId, kind, limit)),
+  );
+  return pages.filter((page) => page.length > 0);
 }
 
 /**
@@ -204,13 +210,31 @@ export const DIRTY_BACKLOG_SQL = `SELECT count(*) AS marks FROM (
      WHERE device_id = ? AND kind IN (${REBUILD_ORDER.map((kind) => `'${kind}'`).join(", ")})
      LIMIT ?)`;
 
+/** One row, `{ marks }`: what `DIRTY_BACKLOG_SQL` returns. */
+export interface BacklogRow {
+  marks: number;
+}
+
+/**
+ * The statement that counts the marks waiting to be rebuilt, no further than
+ * `cap`, for a caller that runs it with other statements: the count a batch
+ * leaves behind is read in the transaction that closes the batch.
+ */
+export function dirtyBacklogStatement(
+  ctx: Ctx,
+  deviceId: string,
+  cap: number,
+): D1PreparedStatement {
+  return ctx.db.prepare(DIRTY_BACKLOG_SQL).bind(deviceId, cap);
+}
+
 /**
  * How many marks are waiting to be rebuilt, counted no further than `cap`:
  * enough to tell a list that is keeping up from one that is not, without
  * reading all of a long one. Parked marks are not counted.
  */
 export async function dirtyBacklog(ctx: Ctx, deviceId: string, cap: number): Promise<number> {
-  const row = await one<{ marks: number }>(ctx.db.prepare(DIRTY_BACKLOG_SQL).bind(deviceId, cap));
+  const row = await one<BacklogRow>(dirtyBacklogStatement(ctx, deviceId, cap));
   return row?.marks ?? 0;
 }
 

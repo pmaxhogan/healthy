@@ -761,7 +761,8 @@ export async function parkFirstMark(
   deviceId: string,
   errorCode: string,
 ): Promise<boolean> {
-  const [mark] = await nextDirty(ctx, deviceId, 1);
+  const [page] = await nextDirty(ctx, deviceId, 1);
+  const mark = page?.[0];
   if (mark === undefined) return false;
   await batch(ctx.db, parkMarkStatements(ctx, deviceId, mark));
   ctx.log.error("hc.mark_parked", { deviceId, kind: mark.kind, errorCode });
@@ -791,6 +792,27 @@ export interface RebuildResult {
 }
 
 /**
+ * What one slice of the runner has already read and need not read again. A
+ * slice runs the rebuild after every batch it applies, and the configured zone
+ * is the same each time: it is the owner's setting, and a slice is seconds.
+ *
+ * It lives no longer than the slice. The zone can be changed at any time, and
+ * the next slice -- the next alarm -- reads it afresh.
+ */
+export interface SliceMemo {
+  zone?: string;
+}
+
+/** The configured zone: read once for a slice that carries a memo, every time otherwise. */
+async function zoneFor(ctx: Ctx, meter: Meter, memo: SliceMemo | undefined): Promise<string> {
+  if (memo?.zone !== undefined) return memo.zone;
+  meter.spend();
+  const zone = await getTimezone(ctx);
+  if (memo !== undefined) memo.zone = zone;
+  return zone;
+}
+
+/**
  * One budgeted pass over a device's rebuild work. `knownDigest` is what the
  * caller remembers from the last pass; when it is the current zone's digest
  * the check for rows of another zone is skipped.
@@ -800,16 +822,36 @@ export async function rebuildSlice(
   deviceId: string,
   knownDigest: string | null,
   meter: Meter,
+  memo?: SliceMemo,
 ): Promise<RebuildResult> {
-  meter.spend();
-  const zone = await getTimezone(ctx);
+  const zone = await zoneFor(ctx, meter, memo);
   const job: Rebuild = { ctx, deviceId, zone, digest: await tzDigest(ctx, zone), meter };
 
   if (knownDigest !== job.digest && !(await rezone(job))) return { tzDigest: null, more: true };
 
   for (;;) {
-    const marks = await nextDirty(ctx, deviceId, DIRTY_PAGE, meter);
-    if (marks.length === 0) return { tzDigest: job.digest, more: false };
-    if (!(await settlePage(job, marks))) return { tzDigest: job.digest, more: true };
+    const pages = await nextDirty(ctx, deviceId, DIRTY_PAGE, meter);
+    const left = await settlePages(job, pages);
+    if (left !== "unknown") return { tzDigest: job.digest, more: left === "some" };
   }
+}
+
+/**
+ * Settle the pages `nextDirty` returned, in order. Says what is left of the
+ * list afterwards: `"some"` when the budget ran out, `"none"` when the list is
+ * known to be empty, and `"unknown"` when it has to be read again.
+ */
+async function settlePages(
+  job: Rebuild,
+  pages: readonly DirtyRow[][],
+): Promise<"some" | "none" | "unknown"> {
+  for (const marks of pages) {
+    if (!(await settlePage(job, marks))) return "some";
+    // A full page: this kind may have more, and they come before any mark of
+    // the kinds after it. Ask again rather than go on to those.
+    if (marks.length >= DIRTY_PAGE) return "unknown";
+  }
+  // Every page was the whole of its kind, and settling a mark writes no mark:
+  // the list is empty, and there is no need to ask D1 to say so.
+  return "none";
 }
