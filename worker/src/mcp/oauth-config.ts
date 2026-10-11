@@ -42,9 +42,21 @@ import { getOAuthApi } from "@cloudflare/workers-oauth-provider";
 import type { Env } from "../env.ts";
 import type {
   OAuthHelpers,
-  TokenExchangeCallbackOptions,
+  OAuthProviderOptions,
   TokenExchangeCallbackResult,
 } from "@cloudflare/workers-oauth-provider";
+
+/**
+ * What the provider hands the token-exchange callback, read off the provider's
+ * own options type rather than named. Newer releases of the library make
+ * `TokenExchangeCallbackOptions` generic over the env, defaulting to the generated
+ * `Cloudflare.Env`, which the hand-written `Env` is not assignable to; naming the
+ * bare type would then stop the callback fitting `OAuthProviderOptions<Env>`.
+ * Derived this way it is right on either side of that change.
+ */
+type TokenExchangeOptions = Parameters<
+  NonNullable<OAuthProviderOptions<Env>["tokenExchangeCallback"]>
+>[0];
 
 /** The only scope this server issues. Read-only, and there is nothing else to be. */
 export const MCP_SCOPE = "health:read";
@@ -118,7 +130,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * consent page wrote them, so a refresh re-derives these two from the authoritative
  * ids rather than from a copy that could go stale.
  */
-function stampCallerProps(options: TokenExchangeCallbackOptions): TokenExchangeCallbackResult {
+function stampCallerProps(options: TokenExchangeOptions): TokenExchangeCallbackResult {
   const existing: unknown = options.props;
   return {
     accessTokenProps: {

@@ -10,7 +10,7 @@
  * the FHIR sections.
  */
 
-import { deviceStatus } from "../../hc/coverage.ts";
+import { ageHours, deviceStatus } from "../../hc/coverage.ts";
 import { dedupeBloodPressure } from "../../hc/rules.ts";
 import { recordStartMs } from "../../hc/wire.ts";
 
@@ -134,7 +134,10 @@ export async function phoneSummary(
   const call = await beginHcCall(deps, run, {
     devices: wanted === undefined ? undefined : [...wanted],
   });
-  const coverage = await deviceCoverageFor(deps, call, [TYPE_BLOOD_PRESSURE, TYPE_SLEEP]);
+  // Only what the phone holds: the summary asks for nothing by name.
+  const coverage = await deviceCoverageFor(deps, call, {
+    types: [TYPE_BLOOD_PRESSURE, TYPE_SLEEP],
+  });
   const items: Record<string, unknown>[] = [];
   for (const device of call.devices) {
     const availability = availabilityByType(coverage, device.id);
@@ -149,7 +152,7 @@ export async function phoneSummary(
         device.lastUploadAt === null ? null : device.lastUploadAt * SECOND_MS,
       ),
       hoursSinceUpload:
-        device.lastUploadAt === null ? null : Math.floor((call.now - device.lastUploadAt) / 3600),
+        device.lastUploadAt === null ? null : ageHours(call.now, device.lastUploadAt),
     });
     const readable = (type: string): boolean =>
       typeAllowed(call.rules, type) && availability.has(coverageResourceType(type));

@@ -10,7 +10,11 @@
 # would fold such a bump in alongside whatever else updated that week with
 # nothing to catch it -- that is what broke PR #6 (`agents` peer-depends on an
 # exact `@modelcontextprotocol/sdk` version; the group bumped the SDK alone,
-# and `npm ci` failed ERESOLVE). Rather than only pulling them out of the
+# and `npm ci` failed ERESOLVE). The SDK version therefore lives in two places:
+# the exact pin in `worker/package.json` and an `overrides` entry in the root
+# `package.json`, which forces `agents` onto the same single copy when its own
+# peer pin names an older, vulnerable release. A bump changes both, and an
+# `agents` bump is the moment to check whether the override can go. Rather than only pulling them out of the
 # group, minor/patch updates for these three are ignored outright below: CI
 # passing is not a substitute for the type-churn review CLAUDE.md asks for, so
 # there is no "opens its own PR" middle ground that auto-merge can't reach. A

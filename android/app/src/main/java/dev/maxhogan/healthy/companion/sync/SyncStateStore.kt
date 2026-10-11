@@ -2,10 +2,14 @@ package dev.maxhogan.healthy.companion.sync
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import dev.maxhogan.healthy.companion.hc.Grant
+import java.security.MessageDigest
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -39,8 +43,17 @@ data class RereadState(
  *
  * @property monthMs the month being read now
  * @property pageToken the next page of [monthMs] to read, or null for its first page
+ * @property pageSize the page size the pages of [monthMs] are being read with. A month is read
+ *   to its end at the size it was started with, so a page token is only ever used with the size
+ *   that produced it. Null with a token means the default of the build that wrote it
  * @property oldestDoneMs the oldest month fully acknowledged so far
  * @property fullHistory false when only the platform's recent window was readable
+ * @property rerun true when the owner asked for the whole history again after a backfill that
+ *   had finished. A re-run also has to take away what is no longer there: the platform totals
+ *   of hours that have none any more
+ * @property rerunFloorMs the floor of the backfill this one repeats, kept until the new range is
+ *   measured, so that months which have since lost all their records are still walked
+ * @property rerunTopMs likewise, the top of the backfill this one repeats
  */
 @Serializable
 data class BackfillState(
@@ -50,9 +63,85 @@ data class BackfillState(
     val floorMonthMs: Long? = null,
     val monthMs: Long? = null,
     val pageToken: String? = null,
+    val pageSize: Int? = null,
     val oldestDoneMs: Long? = null,
     val fullHistory: Boolean = false,
+    val rerun: Boolean = false,
+    val rerunFloorMs: Long? = null,
+    val rerunTopMs: Long? = null,
 )
+
+/**
+ * A backfill session ended with work it could not do, and starting the service again would only
+ * end the same way. Persisted, so that a process restart does not forget it and post the
+ * backfill notification once more before stopping again.
+ *
+ * It holds for as long as nothing the app can observe has changed: the same grants, the same
+ * pairing, the same build. See [lifted].
+ *
+ * @property fingerprint what the phone allowed and who it was paired with when it gave up
+ * @property appVersion the build that gave up; a newer one may not have its problem
+ * @property retryAtMs for a cause that can pass by itself (Health Connect misbehaving, a request
+ *   the server could not read), when one more attempt is allowed. Null when only a change helps
+ */
+@Serializable
+data class BackfillGaveUp(
+    val errorCode: String,
+    val atMs: Long,
+    val fingerprint: String,
+    val appVersion: String = "",
+    val retryAtMs: Long? = null,
+) {
+    /**
+     * Whether the reason is gone, as far as can be told without trying.
+     *
+     * @param appVersion null to leave the build out of it
+     */
+    fun lifted(fingerprint: String, appVersion: String?, nowMs: Long): Boolean {
+        if (fingerprint != this.fingerprint) return true
+        if (appVersion != null && appVersion != this.appVersion) return true
+        val retryAt = retryAtMs ?: return false
+        // A retry time further off than the wait itself means the clock was set back: do not
+        // wait a day for an hour to pass.
+        return nowMs >= retryAt || retryAt - nowMs > RETRY_MS
+    }
+
+    companion object {
+        /** How long a backfill that gave up on a passing cause waits before it may try again. */
+        const val RETRY_MS = 60 * 60_000L
+
+        /**
+         * Causes time alone does not lift: the owner has to act, or a new build has to (a record
+         * that cannot be made small enough will be exactly as large an hour from now).
+         */
+        val PERMANENT = setOf(
+            "unauthorized",
+            "permission_denied",
+            "unknown_record_type",
+            "backfill_state_invalid",
+            "record_too_large",
+            "payload_too_large",
+        )
+
+        /**
+         * A short digest of everything whose change is a reason to try again: which types are
+         * granted, the history and background grants, whether a read can be trusted from where
+         * the app is, and which act of pairing this is.
+         */
+        fun fingerprint(types: List<String>, session: Session): String {
+            val text = buildString {
+                for (type in types) if (session.access.types[type] == Grant.GRANTED) append(type).append(',')
+                append('|').append(session.access.historyRead.name)
+                append('|').append(session.access.backgroundRead.name)
+                append('|').append(session.canRead)
+                append('|').append(session.pairing.deviceId)
+                append('|').append(SyncEngine.pairingTag(session))
+            }
+            return MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8))
+                .take(8).joinToString("") { "%02x".format(it) }
+        }
+    }
+}
 
 /** Everything remembered about one record type. */
 @Serializable
@@ -109,7 +198,21 @@ data class GlobalState(
     val skipNotified: Boolean = false,
     /** Bumped every run so no type is always the last to be read under a tight quota. */
     val rotation: Int = 0,
-)
+    /**
+     * Set when a backfill session ended with types it could not finish, or with its token
+     * refused. Until it is lifted the periodic worker does not start the backfill service again.
+     * Cleared when the owner presses the backfill button, when the pairing changes, and when a
+     * backfill gets somewhere again.
+     */
+    val backfillGaveUp: BackfillGaveUp? = null,
+) {
+    /**
+     * Whether a backfill is waiting out a failure right now. While it is, `lastError` and
+     * `retryAtMs` are the backfill's to write: an incremental sync that runs in the meantime
+     * neither replaces nor clears them.
+     */
+    fun waitPending(nowMs: Long): Boolean = retryAtMs != null && retryAtMs > nowMs
+}
 
 data class SyncSnapshot(val global: GlobalState = GlobalState(), val types: Map<String, TypeState> = emptyMap()) {
     fun type(name: String): TypeState = types[name] ?: TypeState()
@@ -118,6 +221,19 @@ data class SyncSnapshot(val global: GlobalState = GlobalState(), val types: Map<
 /**
  * The engine's durable memory. Separate from the pairing store: this holds positions and counts,
  * never a credential and never a record.
+ *
+ * **When a write fails.** Every method may throw (in practice an `IOException` from the disk),
+ * and a failed update changes nothing, in memory or on disk. The rule the engine builds on that:
+ *
+ * - A position is written only after the server acknowledged everything behind it. If that
+ *   write fails, the position stays where it was and the unit ends as `state_store_failed`. The
+ *   next run reads the same data and sends it again, and the server, which stores by record id,
+ *   takes it as the same records. A failed write costs a repeat, never a record.
+ * - The opposite, a position stored for something the server has not acknowledged, cannot
+ *   happen: the only code that moves a position runs after the 200, and nothing carries on
+ *   from a position it failed to store.
+ * - The failure cannot be recorded in the store that just failed, so the engine keeps it in
+ *   memory ([SyncEngine.storeFailure]) for the status screen and the failure notification.
  */
 interface SyncStateStore {
     val snapshots: Flow<SyncSnapshot>
@@ -132,7 +248,12 @@ interface SyncStateStore {
     suspend fun reset(deviceId: String)
 }
 
-private val Context.syncStateDataStore: DataStore<Preferences> by preferencesDataStore(name = "healthy_sync")
+// A file that cannot be parsed is replaced by an empty one rather than failing every read from
+// then on: each type starts over, and the server deduplicates whatever is sent twice.
+private val Context.syncStateDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "healthy_sync",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 /** [SyncStateStore] on a Preferences DataStore of its own: one JSON value per record type. */
 class DataStoreSyncStateStore(private val store: DataStore<Preferences>) : SyncStateStore {

@@ -319,6 +319,8 @@ class SyncEngineTest {
         assertEquals(RunResult.Failed("hc_rate_limited"), rig.sync())
         assertEquals(1, rig.source.calls.size)
         assertTrue(rig.transport.sent.single().isStateOnly)
+        // Resumed once the limit has been waited out; until then nobody reads (see PushbackTest).
+        rig.now += 60_000
         assertEquals(RunResult.Success, rig.sync())
     }
 

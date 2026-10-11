@@ -486,7 +486,7 @@ export function registerHcHeartTools(server: McpServer, deps: ToolDeps): void {
       const opened = await openStampedPage(deps.hc, call.devices, "hr_series", args);
       if (!opened.ok) return toolError(opened.errorCode);
       const { page } = opened;
-      const coverage = await deviceCoverageFor(deps, call, [TYPE_HEART_RATE]);
+      const coverage = await deviceCoverageFor(deps, call, { named: [TYPE_HEART_RATE] });
       const allowed = typeAllowed(call.rules, TYPE_HEART_RATE);
       const query: SeriesQuery = {
         range: parseRange({
@@ -583,7 +583,7 @@ export function registerHcHeartTools(server: McpServer, deps: ToolDeps): void {
       const opened = await openStampedPage(deps.hc, call.devices, "hr_events", args);
       if (!opened.ok) return toolError(opened.errorCode);
       const { page } = opened;
-      const coverage = await deviceCoverageFor(deps, call, [TYPE_HEART_RATE]);
+      const coverage = await deviceCoverageFor(deps, call, { named: [TYPE_HEART_RATE] });
       const allowed = typeAllowed(call.rules, TYPE_HEART_RATE);
       const range = parseRange({
         start: args.start,
@@ -663,7 +663,7 @@ export function registerHcHeartTools(server: McpServer, deps: ToolDeps): void {
       const opened = await openStampedPage(deps.hc, call.devices, "blood_pressure", args);
       if (!opened.ok) return toolError(opened.errorCode);
       const { page } = opened;
-      const coverage = await deviceCoverageFor(deps, call, [TYPE_BLOOD_PRESSURE]);
+      const coverage = await deviceCoverageFor(deps, call, { named: [TYPE_BLOOD_PRESSURE] });
       const allowed = typeAllowed(call.rules, TYPE_BLOOD_PRESSURE);
       const query: PressureQuery = {
         range: parseRange({

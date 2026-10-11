@@ -45,6 +45,23 @@ object Format {
         }
     }
 
+    /**
+     * The "waiting to retry" line, or null when there is no retry pending. A moment that has
+     * passed is not a plan any more, so a time in the past is never shown, whatever the state
+     * that was handed in still says.
+     */
+    fun retryLine(errorCode: String, retryAtMs: Long?, nowMs: Long, zone: ZoneId = ZoneId.systemDefault()): String? {
+        if (retryAtMs == null || retryAtMs <= nowMs) return null
+        // Only a wait for the network is cut short by it; a server or a quota that asked for time
+        // gets all of it.
+        val sooner = when (errorCode) {
+            "network" -> "; sooner if the connection comes back"
+            "waiting_for_wifi" -> "; sooner if Wi-Fi connects"
+            else -> ""
+        }
+        return "Waiting to retry at ${dateTime(retryAtMs, zone)}$sooner."
+    }
+
     /** "2 rejected, 1 stubbed" for a type with records that did not arrive as themselves, else null. */
     fun shortfall(row: TypeRow): String? = listOfNotNull(
         row.rejected.takeIf { it > 0 }?.let { "$it rejected" },

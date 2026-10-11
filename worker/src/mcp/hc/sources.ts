@@ -15,20 +15,21 @@
  * the way out is the trusted path, this is the cheap one, and coverage must
  * not describe what the deny-list hides.
  *
- * "No rows" has four different meanings for phone data, and none of them is
- * "nothing happened". Coverage's vocabulary carries three (`unsupported` with a
- * notice for a type that is not permitted or not available on the phone,
- * `never`, `stale`); `availability` spells all of them out per type, and a
- * warning is added for the ones coverage itself is silent about.
+ * What a client hears about a type is about DATA: the store holds records of
+ * it (and the phone is current, or stale), or it holds none. A type with none
+ * is not mentioned at all unless the caller named it, and then it is `no_data`
+ * -- never a word about whether the phone was allowed to read it. See
+ * `mcpDeviceCoverage` in `worker/src/hc/coverage.ts` for the rule and why.
  */
 
-import { coverageResourceType, deviceCoverage, deviceSourceId } from "../../hc/coverage.ts";
+import { coverageResourceType, deviceSourceId, mcpDeviceCoverage } from "../../hc/coverage.ts";
+import { recordFieldsOf } from "../../hc/record-types.ts";
 import { daysTouched } from "../../hc/rollup/day.ts";
 import { isHealthSystemDenied } from "../../policy/rules.ts";
 import { respond } from "../respond.ts";
 
 import { DEFAULT_MAX_BYTES, writeCursor } from "./page.ts";
-import { isPlatformAggregate, policyResourceType, typeAllowed } from "./policy.ts";
+import { isPlatformAggregate, policyResourceType, sourceTypeOf, typeAllowed } from "./policy.ts";
 import { SECOND_MS, zoneClock } from "./time.ts";
 
 import type { StampedPage } from "./page.ts";
@@ -109,93 +110,108 @@ export async function beginHcCall(
 }
 
 /**
- * Why a type may have no rows, in plain words:
+ * What a client is told about one record type on one phone:
  *
- *  - `ok`            permitted, uploaded recently, and there are records
- *  - `no_data`       permitted and current, but the phone holds no such records
- *  - `stale`         there may be records, but the phone has not uploaded lately
- *  - `never_synced`  the phone has not reported this type (or has never uploaded)
- *  - `not_permitted` the companion app has not been granted this type
- *  - `not_available` the phone's Health Connect does not offer this type
+ *  - `ok`      the store holds records of it and the phone uploaded recently
+ *  - `stale`   it holds records, but the phone has not uploaded lately
+ *  - `no_data` it holds none. Only ever said of a type the caller NAMED; a
+ *              type nobody asked about and nobody has data for is not listed
+ *
+ * Nothing here says why there is no data, and that is the point: whether the
+ * phone may read a type is the owner's business on the Phone page
+ * (`worker/src/hc/coverage.ts`), not a client's.
  */
-export type Availability =
-  "ok" | "no_data" | "stale" | "never_synced" | "not_permitted" | "not_available";
+export type Availability = "ok" | "no_data" | "stale";
 
 function availabilityOf(entry: CoverageEntry): Availability {
-  switch (entry.status) {
-    case "unsupported": {
-      return entry.notices?.some((notice) => notice.code === "permission_unavailable") === true
-        ? "not_available"
-        : "not_permitted";
-    }
-    case "never": {
-      return "never_synced";
-    }
-    case "stale": {
-      return "stale";
-    }
-    case "ok": {
-      return entry.recordCount === 0 ? "no_data" : "ok";
-    }
-    // A device entry is never `failed` or `partial`; read as stale if one ever is.
-    case "failed":
-    case "partial": {
-      return "stale";
-    }
-  }
+  if (entry.recordCount === 0) return "no_data";
+  return entry.status === "ok" ? "ok" : "stale";
 }
 
-/** The availabilities coverage's own warnings do not already announce. */
-const ANNOUNCED_HERE: ReadonlySet<Availability> = new Set<Availability>([
-  "no_data",
-  "not_permitted",
-  "not_available",
-]);
+/** True for a record type the wire knows, a platform aggregate of one included. */
+function isKnownType(type: string): boolean {
+  const known = isPlatformAggregate(type) ? sourceTypeOf(type) : recordFieldsOf(type);
+  return known !== null;
+}
 
-/** `not_permitted:hc:<Type>:device:<id>` and its siblings, one per quiet gap. */
-function availabilityWarnings(coverage: readonly CoverageEntry[]): string[] {
+/**
+ * The warnings for the types a caller named and the store has nothing of:
+ * `no_data:hc:<Type>:device:<id>` per phone for a type the wire knows, and
+ * `unknown_type:hc:<Type>` once for a name that is no record type at all.
+ * A type that is there needs none; a stale one is announced with the rest of
+ * coverage's warnings.
+ */
+function emptyTypeWarnings(
+  call: HcCall,
+  coverage: readonly CoverageEntry[],
+  named: readonly string[],
+): string[] {
   const out: string[] = [];
   for (const entry of coverage) {
-    const availability = availabilityOf(entry);
-    if (ANNOUNCED_HERE.has(availability)) {
-      out.push(`${availability}:${entry.resourceType}:${entry.healthSystemId}`);
+    if (availabilityOf(entry) === "no_data") {
+      out.push(`no_data:${entry.resourceType}:${entry.healthSystemId}`);
+    }
+  }
+  const covered = new Set(coverage.map((entry) => entry.resourceType));
+  const asked = new Set(named);
+  for (const type of asked) {
+    const unknown = !isKnownType(type) && !covered.has(coverageResourceType(type));
+    // An aggregate nothing maps to a source is announced where it is refused.
+    if (unknown && typeAllowed(call.rules, type)) {
+      out.push(`unknown_type:${coverageResourceType(type)}`);
     }
   }
   return out;
 }
 
+/** Which record types a tool's coverage is about. */
+export interface CoverageScope {
+  /**
+   * Only these types are reported, and only when the store holds records of
+   * them. Omitted: every type it holds records of -- except the platform
+   * aggregates (`Agg.<Metric>`), which are listed only when asked for.
+   */
+  types?: readonly string[] | undefined;
+  /**
+   * Types the CALLER asked for by name (or the one type a tool is about):
+   * each is reported even when the store holds nothing of it, as `no_data`.
+   */
+  named?: readonly string[] | undefined;
+}
+
 /**
- * Coverage for the phones of this call.
- *
- * `types` names the record types the tool answers for: each is reported for
- * every phone, as `never` when the phone has said nothing about it. Omitted,
- * every type the phone has reported is -- except the platform aggregates
- * (`Agg.<Metric>`), which are listed only when named. A type the policy denies
- * is left out either way.
+ * Coverage for the phones of this call: one entry per phone and record type
+ * the store holds records of (`mcpDeviceCoverage`), within `scope`. A type the
+ * policy denies is left out.
  */
 export async function deviceCoverageFor(
   deps: ToolDeps,
   call: HcCall,
-  types?: readonly string[],
+  scope: CoverageScope = {},
 ): Promise<CoverageEntry[]> {
-  const wanted = types === undefined ? null : new Set(types.map((t) => coverageResourceType(t)));
+  const named = (scope.named ?? []).filter((type) => isKnownType(type));
+  const listed =
+    scope.types === undefined && scope.named === undefined
+      ? null
+      : [...(scope.types ?? []), ...(scope.named ?? [])];
+  const wanted = listed === null ? null : new Set(listed.map((t) => coverageResourceType(t)));
+  const reported = (entry: CoverageEntry): boolean => {
+    const type = entry.resourceType.slice(HC_PREFIX.length);
+    // Judged as the record type, so a platform aggregate follows its source type.
+    if (!typeAllowed(call.rules, type)) return false;
+    // And an aggregate is only reported when asked for by name: it is the
+    // platform's summary of another type, not a type of the phone's own.
+    return wanted === null ? !isPlatformAggregate(type) : wanted.has(entry.resourceType);
+  };
   const out: CoverageEntry[] = [];
   for (const device of call.devices) {
-    const entries = deviceCoverage({
+    const entries = mcpDeviceCoverage({
       device,
       rows: await deps.hc.syncRows(device.id),
       now: call.now,
-      ...(types !== undefined && { expectedTypes: types }),
+      namedTypes: named,
     });
-    for (const entry of entries) {
-      const type = entry.resourceType.slice(HC_PREFIX.length);
-      // Judged as the record type, so a platform aggregate follows its source type.
-      if (!typeAllowed(call.rules, type)) continue;
-      // And an aggregate is only reported when asked for by name: it is the
-      // platform's summary of another type, not a type of the phone's own.
-      if (wanted === null && isPlatformAggregate(type)) continue;
-      if (wanted === null || wanted.has(entry.resourceType)) out.push(entry);
-    }
+    out.push(...entries.filter((entry) => reported(entry)));
   }
   return out;
 }
@@ -328,6 +344,8 @@ export interface HcAnswer {
   items: readonly unknown[];
   /** Coverage for what was read; see {@link deviceCoverageFor}. */
   coverage: readonly CoverageEntry[];
+  /** The types the caller named, as given to {@link deviceCoverageFor}. */
+  named?: readonly string[] | undefined;
   warnings?: readonly string[];
   /** Envelope fields beside `timeZone`. Never anything read from a record. */
   extra?: Readonly<Record<string, unknown>>;
@@ -372,7 +390,7 @@ export function hcRespond(answer: HcAnswer): Promise<ToolOutcome> {
     warnings: [
       ...(answer.warnings ?? []),
       ...multipleDevicesWarning(answer.tool, answer.items),
-      ...availabilityWarnings(answer.coverage),
+      ...emptyTypeWarnings(call, answer.coverage, answer.named ?? []),
     ],
     coverage: answer.coverage,
     extra: { timeZone: call.clock.timeZone, ...answer.extra },

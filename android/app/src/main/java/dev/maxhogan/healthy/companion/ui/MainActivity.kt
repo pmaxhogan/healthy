@@ -28,6 +28,7 @@ class MainActivity : ComponentActivity() {
             HealthyTheme {
                 val state by graph.syncController.state.collectAsStateWithLifecycle()
                 var pairing by rememberSaveable { mutableStateOf(false) }
+                var unpairFailed by rememberSaveable { mutableStateOf(false) }
                 if (pairing) {
                     BackHandler { pairing = false }
                     PairingScreen(
@@ -40,8 +41,15 @@ class MainActivity : ComponentActivity() {
                         state = state,
                         controller = graph.syncController,
                         healthConnect = graph.healthConnect,
-                        onPair = { pairing = true },
-                        onUnpair = { graph.scope.launchUnpair(graph.pairingStore) },
+                        onPair = {
+                            unpairFailed = false
+                            pairing = true
+                        },
+                        onUnpair = {
+                            unpairFailed = false
+                            graph.scope.launchUnpair(graph.pairingStore) { cleared -> unpairFailed = !cleared }
+                        },
+                        unpairFailed = unpairFailed,
                     )
                 }
             }

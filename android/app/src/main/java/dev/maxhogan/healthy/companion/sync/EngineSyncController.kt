@@ -15,10 +15,13 @@ import dev.maxhogan.healthy.companion.hc.HealthConnectStatus
 import dev.maxhogan.healthy.companion.hc.RecordTypes
 import dev.maxhogan.healthy.companion.hc.mapper.HcRecordSerializer
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -26,7 +29,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -46,6 +51,46 @@ internal suspend fun awaitRetry(waitMs: Long, wake: ReceiveChannel<Unit>, interr
     return withTimeoutOrNull(waitMs) { wake.receive() } != null
 }
 
+/**
+ * Waits out a backoff that ends at the wall-clock time [untilMs], which is what the status
+ * screen shows as "waiting to retry at".
+ *
+ * A plain delay counts only the time the phone is awake, so after a sleep it would still be
+ * waiting long past the time on screen. This looks at the clock every [sliceMs] instead and ends
+ * as soon as the moment has come. It also ends once [waitMs] of waiting has actually been done,
+ * so a clock that is set back cannot stretch the wait.
+ *
+ * @return true when the wait was cut short by [wake]
+ */
+internal suspend fun awaitDeadline(
+    untilMs: Long,
+    waitMs: Long,
+    wake: ReceiveChannel<Unit>,
+    interruptible: Boolean,
+    now: () -> Long = System::currentTimeMillis,
+    sliceMs: Long = 15_000L,
+): Boolean {
+    var waited = 0L
+    while (true) {
+        val left = minOf(untilMs - now(), waitMs - waited)
+        if (left <= 0) return false
+        val slice = minOf(left, sliceMs)
+        if (awaitRetry(slice, wake, interruptible)) return true
+        waited += slice
+    }
+}
+
+/**
+ * How long the backfill waits before trying the same unit again.
+ *
+ * When the other side named a time (the server's `retry-after`, or the moment the shared Health
+ * Connect gate opens) that is the wait, with a little jitter, however many times in a row it has
+ * been asked for: a server that says "30 seconds" every time is asked every 30 seconds, not ever
+ * more rarely. Only a failure that names no time backs off exponentially.
+ */
+internal fun backfillWaitMs(backoff: Backoff, attempt: Int, retryAfterMs: Long?): Long =
+    if (retryAfterMs != null) backoff.delayMs(0, retryAfterMs) else backoff.delayMs(attempt)
+
 /** Pure mapping from what the engine knows to what the status screen shows. */
 object SyncUiStates {
     /** What changes without touching the store: grants, exemptions, and what is running. */
@@ -55,6 +100,11 @@ object SyncUiStates {
         val hibernationExempt: Boolean = false,
         val syncing: Boolean = false,
         val backfilling: Boolean = false,
+        /**
+         * Set while the app cannot read or write its own sync state. Shown ahead of anything the
+         * store says, since what the store says may be out of date for exactly that reason.
+         */
+        val storeError: StoredError? = null,
     )
 
     fun build(
@@ -74,7 +124,9 @@ object SyncUiStates {
         },
         lastSyncMs = snapshot.global.lastSyncMs,
         backlog = types.filter { live.access.types[it] == Grant.GRANTED }.sumOf { snapshot.type(it).backlog },
-        lastError = SyncStateReport.lastError(types, live.access, snapshot)?.let {
+        lastError = live.storeError?.let {
+            SyncError(it.errorCode, it.atMs, snapshot.global.consecutiveFailures.coerceAtLeast(1))
+        } ?: SyncStateReport.lastError(types, live.access, snapshot)?.let {
             SyncError(
                 errorCode = it.errorCode,
                 atMs = it.atMs,
@@ -147,13 +199,27 @@ object SyncUiStates {
      * the server has not refused this phone's token, and a read can be trusted from where the
      * app is now. Without the token check a refused pairing would have the service started,
      * stopped and its notification posted again on every periodic run.
+     *
+     * Nor is it started while a session that gave up still stands
+     * ([GlobalState.backfillGaveUp]): that is read from the store, so it holds across process
+     * death, and it is lifted by a change in what the phone allows or who it is paired with, by
+     * a new build, by time for a cause that can pass, and by the owner asking.
+     *
+     * @param appVersion this build, or null to leave it out of the comparison
      */
-    fun shouldResumeBackfill(types: List<String>, session: Session, snapshot: SyncSnapshot): Boolean =
+    fun shouldResumeBackfill(
+        types: List<String>,
+        session: Session,
+        snapshot: SyncSnapshot,
+        nowMs: Long = System.currentTimeMillis(),
+        appVersion: String? = null,
+    ): Boolean =
         snapshot.global.backfillRequested &&
             snapshot.global.rejectedTokenTag == null &&
             session.canRead &&
             types.any { session.access.types[it] == Grant.GRANTED } &&
-            !SyncStateReport.backfillComplete(types, session.access, snapshot)
+            !SyncStateReport.backfillComplete(types, session.access, snapshot) &&
+            snapshot.global.backfillGaveUp?.lifted(BackfillGaveUp.fingerprint(types, session), appVersion, nowMs) != false
 }
 
 /**
@@ -179,26 +245,69 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
     private val live = MutableStateFlow(SyncUiStates.Live())
     private val backfillRunning = AtomicBoolean(false)
 
-    /**
-     * Set when a backfill ended with types it could not finish. Until the owner asks again, the
-     * periodic worker does not restart the service only for it to stop at the same place.
-     */
-    private val backfillGaveUp = AtomicBoolean(false)
+    /** Runs in a row that could not read or write the sync state, which cannot count them itself. */
+    private val storeFailures = AtomicInteger(0)
     private val providerVersion: String? by lazy { readProviderVersion() }
+
+    /**
+     * Keeps the CPU on while the backfill is working. A foreground service keeps the process, not
+     * the processor: with the screen off the phone would otherwise sleep between two pages and
+     * the backfill would only move when something else woke it. Always taken with a timeout, and
+     * given up for a long wait, when there is nothing to stay awake for.
+     */
+    private val wakeLock: PowerManager.WakeLock? by lazy {
+        try {
+            context.getSystemService(PowerManager::class.java)
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "healthy:backfill")
+                .apply { setReferenceCounted(false) }
+        } catch (_: RuntimeException) {
+            null
+        }
+    }
+
+    /** A read of a store that failed is tried again; the flows the app hangs on must not end. */
+    private fun <T> Flow<T>.survivingStoreFailures(): Flow<T> = retryWhen { cause, _ ->
+        if (cause is Exception) delay(STORE_RETRY_MS)
+        cause is Exception
+    }
 
     private val pairingState = dependencies.pairingStore.pairing
         .map<Pairing?, PairingState> { it?.let { p -> PairingState.Paired(p.url, p.deviceId) } ?: PairingState.NotPaired }
         .distinctUntilChanged()
+        .survivingStoreFailures()
 
+    private class Inputs(val pairing: PairingState, val wifiOnly: Boolean, val snapshot: SyncSnapshot, val live: SyncUiStates.Live)
+
+    @OptIn(ExperimentalCoroutinesApi::class) // transformLatest: the newest inputs replace a pending re-emission
     override val state: StateFlow<SyncUiState> =
-        combine(pairingState, dependencies.settings.wifiOnly, store.snapshots, live) { pairing, wifiOnly, snapshot, live ->
-            SyncUiStates.build(types, pairing, wifiOnly, snapshot, live)
-        }.stateIn(scope, SharingStarted.Eagerly, SyncUiState())
+        combine(
+            pairingState,
+            dependencies.settings.wifiOnly,
+            store.snapshots,
+            live,
+            engine.storeFailure,
+        ) { pairing, wifiOnly, snapshot, live, storeFailure ->
+            Inputs(pairing, wifiOnly, snapshot, live.copy(storeError = storeFailure))
+        }.transformLatest { inputs ->
+            fun build() = SyncUiStates.build(types, inputs.pairing, inputs.wifiOnly, inputs.snapshot, inputs.live)
+            var ui = build()
+            emit(ui)
+            // "Waiting to retry at T" is true only until T. Nothing else changes when T comes, so
+            // the state is built again then, against the clock rather than a timer: a timer
+            // stands still while the phone sleeps and the clock does not.
+            while (true) {
+                val retryAt = ui.lastError?.retryAtMs ?: break
+                delay((retryAt - System.currentTimeMillis()).coerceIn(1, RETRY_POLL_MS))
+                ui = build()
+                emit(ui)
+            }
+        }.survivingStoreFailures().stateIn(scope, SharingStarted.Eagerly, SyncUiState())
 
     init {
         // The schedule follows the pairing and the Wi-Fi-only preference.
         scope.launch {
             combine(pairingState, dependencies.settings.wifiOnly) { pairing, wifiOnly -> pairing to wifiOnly }
+                .survivingStoreFailures()
                 .collect { (pairing, wifiOnly) ->
                     guarded {
                         if (pairing is PairingState.Paired) {
@@ -240,7 +349,7 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
                     engine.noteProblem(SyncEngine.ERROR_HC_UNAVAILABLE)
                     return@guarded
                 }
-                backfillGaveUp.set(false)
+                // Asking is what lifts a backfill that had given up; the engine clears that.
                 engine.requestBackfill(session)
                 if (!backfillRunning.get() && !BackfillService.start(context)) noteBackfillNotStarted()
             }
@@ -261,7 +370,15 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
      * unexpected failure is recorded as `internal_error` and reported as retryable.
      */
     suspend fun runSync(): RunResult? {
-        val pairing = dependencies.pairingStore.pairing.first() ?: return null
+        val pairing = try {
+            dependencies.pairingStore.pairing.first()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Who the phone is paired with could not be read: nothing is sent on a guess.
+            return storeFailed()
+        }
+        if (pairing == null) return null
         live.update { it.copy(syncing = true) }
         val result = try {
             // When the grants cannot be read the run must not go ahead on a guess: it would
@@ -281,6 +398,8 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
         } finally {
             live.update { it.copy(syncing = false) }
         }
+        if (result is RunResult.Failed && result.errorCode == SyncEngine.ERROR_STATE_STORE) return storeFailed()
+        storeFailures.set(0)
         guarded {
             val global = store.snapshot().global
             when (result) {
@@ -297,6 +416,18 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
             }
         }
         return result
+    }
+
+    /**
+     * A run that could not read or write the app's own state. The store cannot count these, so
+     * they are counted here, and the owner is told after the same number as for any failure.
+     */
+    private fun storeFailed(): RunResult.Failed {
+        val failures = storeFailures.incrementAndGet()
+        if (failures >= SyncNotifications.FAILURE_THRESHOLD) {
+            guarded { notifications.showFailure(SyncEngine.ERROR_STATE_STORE, failures) }
+        }
+        return RunResult.Failed(SyncEngine.ERROR_STATE_STORE)
     }
 
     /**
@@ -330,9 +461,28 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
             }
             try {
             while (true) {
-                val pairing = dependencies.pairingStore.pairing.first() ?: break
-                if (dependencies.settings.wifiOnly.first() && isMetered()) {
-                    delay(WAIT_FOR_WIFI_MS)
+                // Awake for the step that follows; see wakeLock.
+                stayAwake(WORK_WAKE_MS)
+                val stored = try {
+                    dependencies.pairingStore.pairing.first() to dependencies.settings.wifiOnly.first()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // The pairing or the Wi-Fi preference could not be read. Nothing is sent on
+                    // a guess at either; it is asked again shortly.
+                    letSleep()
+                    delay(STORE_RETRY_MS)
+                    continue
+                }
+                val pairing = stored.first ?: break
+                if (stored.second && isMetered()) {
+                    // Said, not only done: otherwise the screen shows a backfill that looks busy.
+                    val until = System.currentTimeMillis() + WAIT_FOR_WIFI_MS
+                    val waiting = BackfillWait(ERROR_WAITING_FOR_WIFI, until)
+                    guarded { engine.noteBackfillWaiting(waiting.errorCode, until) }
+                    guarded { notifications.updateBackfill(state.value.backfill, waiting, force = true) }
+                    letSleep()
+                    awaitDeadline(until, WAIT_FOR_WIFI_MS, networkBack, interruptible = true)
                     continue
                 }
                 val now = System.currentTimeMillis()
@@ -356,38 +506,47 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
                     is BackfillStep.Progress -> {
                         attempt = 0
                         guarded { notifications.updateBackfill(state.value.backfill) }
-                        // Stay under the server's per-device request rate.
-                        if (step.uploaded) delay(UPLOAD_PACING_MS)
+                        // Stay under the server's per-device request rate: a pause for every
+                        // request the step made, not one per step, since one page of large
+                        // records goes up as several batches.
+                        if (step.requests > 0) delay(UPLOAD_PACING_MS * step.requests)
                     }
                     is BackfillStep.Backoff -> {
                         // A session the engine would not use (the pairing changed) is rebuilt.
                         session = null
-                        val wait = backoff.delayMs(attempt++, step.retryAfterMs)
+                        val wait = backfillWaitMs(backoff, attempt++, step.retryAfterMs)
+                        val until = System.currentTimeMillis() + wait
                         if (step.errorCode != SyncEngine.ERROR_PAIRING_CHANGED) {
                             // Before the wait, not after: this is what says "waiting to retry".
-                            guarded { engine.noteBackfillWaiting(step.errorCode, System.currentTimeMillis() + wait) }
+                            guarded { engine.noteBackfillWaiting(step.errorCode, until) }
+                            guarded {
+                                notifications.updateBackfill(state.value.backfill, BackfillWait(step.errorCode, until), force = true)
+                            }
                         }
+                        // A short wait is stayed awake through; for a long one the phone may
+                        // sleep, and the wait ends by the clock when it next wakes.
+                        if (wait > MAX_AWAKE_WAIT_MS) letSleep() else stayAwake(wait + WORK_WAKE_MS)
                         // Only a lost connection is cut short by the network coming back; a
                         // server that asked for time (429, 5xx) is given it.
-                        val cutShort = awaitRetry(wait, networkBack, step.errorCode == SyncEngine.ERROR_NETWORK)
+                        val cutShort = awaitDeadline(until, wait, networkBack, step.errorCode == SyncEngine.ERROR_NETWORK)
                         if (cutShort) attempt = 0
+                        guarded { notifications.updateBackfill(state.value.backfill, force = true) }
                     }
                     BackfillStep.Complete -> break
-                    is BackfillStep.Incomplete -> {
-                        backfillGaveUp.set(true)
-                        break
-                    }
+                    // The engine has recorded that this session gave up, in the store, so the
+                    // periodic worker does not start the service again only to stop at the same
+                    // place: not in this process and not in the next.
+                    is BackfillStep.Incomplete -> break
                     BackfillStep.PairingRejected -> {
-                        // Do not let the periodic worker start the service again only to be
-                        // refused again: it stays stopped until the owner pairs and asks.
-                        if (!backfillGaveUp.getAndSet(true)) {
-                            guarded { notifications.showFailure(SyncEngine.ERROR_UNAUTHORIZED, 1) }
-                        }
+                        // Told when the server says so, not again by a session that finds the
+                        // refusal already there (a restart after the process was killed).
+                        if (run.rejectedNow) guarded { notifications.showFailure(SyncEngine.ERROR_UNAUTHORIZED, 1) }
                         break
                     }
                 }
             }
             } finally {
+                letSleep()
                 if (watching) {
                     try {
                         connectivity.unregisterNetworkCallback(callback)
@@ -411,11 +570,33 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
      */
     suspend fun resumeBackfillIfWanted() {
         guarded {
-            if (backfillRunning.get() || backfillGaveUp.get()) return@guarded
+            if (backfillRunning.get()) return@guarded
             val pairing = dependencies.pairingStore.pairing.first() ?: return@guarded
             val session = session(pairing) ?: return@guarded
-            if (!SyncUiStates.shouldResumeBackfill(types, session, store.snapshot())) return@guarded
-            BackfillService.start(context)
+            val wanted = SyncUiStates.shouldResumeBackfill(
+                types,
+                session,
+                store.snapshot(),
+                System.currentTimeMillis(),
+                BuildConfig.VERSION_NAME,
+            )
+            if (wanted) BackfillService.start(context)
+        }
+    }
+
+    private fun stayAwake(forMs: Long) {
+        try {
+            wakeLock?.acquire(forMs)
+        } catch (_: RuntimeException) {
+            // Without it the backfill still runs whenever the phone is awake.
+        }
+    }
+
+    private fun letSleep() {
+        try {
+            wakeLock?.takeIf { it.isHeld }?.release()
+        } catch (_: RuntimeException) {
+            // Released by its timeout in the meantime.
         }
     }
 
@@ -511,11 +692,24 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
         const val ERROR_BACKFILL_NOT_STARTED = "backfill_not_started"
         const val BACKFILL_BACKOFF_BASE_MS = 5_000L
         const val BACKFILL_BACKOFF_CAP_MS = 15 * 60_000L
+        const val ERROR_WAITING_FOR_WIFI = "waiting_for_wifi"
         const val WAIT_FOR_WIFI_MS = 60_000L
         const val ACCESS_REFRESH_MS = 30_000L
 
-        /** 600 ms between uploads is at most 100 requests a minute; the server allows 120. */
+        /** 600 ms after every upload is at most 100 requests a minute; the server allows 120. */
         const val UPLOAD_PACING_MS = 600L
+
+        /** How long a failed read of the pairing or the sync state is left before it is tried again. */
+        const val STORE_RETRY_MS = 5_000L
+
+        /** How often a pending "waiting to retry at" is checked against the clock. */
+        const val RETRY_POLL_MS = 1_000L
+
+        /** The wake lock's timeout for one step of work; taken again before every step. */
+        const val WORK_WAKE_MS = 10 * 60_000L
+
+        /** A wait longer than this is not worth keeping the CPU on for. */
+        const val MAX_AWAKE_WAIT_MS = 60_000L
 
         val PROVIDER_PACKAGES = listOf(
             "com.google.android.healthconnect.controller",

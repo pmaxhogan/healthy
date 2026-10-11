@@ -74,9 +74,10 @@ versions.)** The paths:
 the one path on this list that is not for an AI client or the public: a paired
 phone has no Access identity, so Access cannot gate it, and the Worker
 authenticates it instead with a per-device bearer token (see
-[SECURITY.md](../SECURITY.md#device-upload)). Add it as an **exact path**, with
-no wildcard, so the bypass covers that one URL and nothing under or beside it.
-Until it is on the list, a phone's upload is redirected to the Access login and
+[SECURITY.md](../SECURITY.md#device-upload)). Add it as the plain path, with
+no wildcard. Access treats the entry as that path and everything beneath it, but the
+Worker serves only the exact path and refuses anything beneath it through its own
+owner gate (details below). Until it is on the list, a phone's upload is redirected to the Access login and
 the app reports an error. A quick check once it is in place:
 
 ```sh
@@ -84,17 +85,29 @@ curl -i -X POST https://<your-host>/ingest/health-connect
 ```
 
 must answer `401` with `{"error":"unauthorized"}`, not a redirect to Cloudflare
-Access.
+Access. The other paths behave as follows (observed against a production Access
+application; this is Access's behaviour, not the Worker's, so check it again if
+Cloudflare changes it):
 
-Two things about how that exact-path entry behaves, observed against a production
-Access application (this is Access's behaviour, not the Worker's, so check it again
-if Cloudflare changes it). Access matches the bypass path **case-insensitively**,
-while the Worker's router is case-sensitive: a request for the same path in other
-letter case (`/Ingest/Health-Connect`) passes Access, does not match the upload route,
-falls through to the Worker's own owner gate, and is refused there for lack of an
-Access identity. That fails closed, but do not be surprised that a differently-cased
-path gets the gate's answer rather than Access's. The trailing-slash variant,
-`/ingest/health-connect/`, is not matched by the exact entry and stays behind Access.
+| Request                                                          | Result                                                                                      |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `POST /ingest/health-connect`, no device token                   | `401` JSON from the Worker                                                                  |
+| `/ingest/health-connect/`, `/ingest/health-connect/x`, `.../x/y` | `403` from the Worker's owner gate (not a redirect)                                         |
+| `/INGEST/health-connect` (other letter case)                     | `403` from the owner gate (Access matches case-insensitively, the Worker's router does not) |
+| `/ingest/health-connectx`, `/ingest/health`, `/ingest`           | `302` to the Access login                                                                   |
+
+```sh
+curl -i https://<your-host>/ingest/health-connect/x
+curl -i https://<your-host>/ingest
+```
+
+The first must answer `403`, not a redirect; the second must redirect to Access.
+Access passes the path and everything beneath it, and the Worker refuses every
+sub-path itself, so what is reachable without an Access identity is still exactly
+one route with its own bearer-token check. Right after the entry is created the
+sub-path behaviour can lag for some minutes (a sub-path may still be redirected to
+Access at first and stop being so later), so wait before trusting a check made
+immediately after adding it.
 
 Everything else — including the MCP consent page at `/authorize`, both
 OAuth callback paths, and the whole admin API — stays behind Access. The

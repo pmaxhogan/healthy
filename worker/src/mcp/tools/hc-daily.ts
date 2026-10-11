@@ -202,7 +202,11 @@ export function registerHcDailyTools(server: McpServer, deps: ToolDeps): void {
         if (typeAllowed(call.rules, type)) sections.add(section);
       }
       const warnings: string[] = deniedJoins(call.rules, "daily_summary").warnings;
-      const coverage = await deviceCoverageFor(deps, call, Object.values(DAILY_TYPES));
+      // A day is joined from whatever the phone holds; none of these types is
+      // asked for by name, so one it has nothing of is simply not mentioned.
+      const coverage = await deviceCoverageFor(deps, call, {
+        types: Object.values(DAILY_TYPES),
+      });
 
       const items: unknown[] = [];
       // Counted per kind: a copy of a reading and a losing app's records are not one thing.
@@ -308,7 +312,7 @@ export function registerHcDailyTools(server: McpServer, deps: ToolDeps): void {
       // Nothing after now is assessed: a future day is not a gap.
       const range: Range = { startMs: asked.startMs, endMs: Math.min(asked.endMs, call.nowMs) };
       const wanted = args.types === undefined ? null : new Set(args.types);
-      const coverage = await deviceCoverageFor(deps, call, args.types);
+      const coverage = await deviceCoverageFor(deps, call, { named: args.types });
 
       const warnings: string[] = [];
       const items: unknown[] = [];
@@ -344,6 +348,7 @@ export function registerHcDailyTools(server: McpServer, deps: ToolDeps): void {
         page,
         items,
         coverage,
+        named: args.types,
         warnings,
         extra: { rules: QUALITY_RULES },
       });

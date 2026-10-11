@@ -466,8 +466,8 @@ source of their own, beside the health systems and never merged into them:
 
 | Tool                | What it answers                                                                                                                                                           |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hc_coverage`       | Per record type: `availability`, permission, first and last record, count, typical cadence, the apps that wrote it. Call it first.                                        |
-| `hc_sync_status`    | Per phone: last upload, backlog, backfill, battery-optimisation exemption, queue depth, recent failed uploads. Then one row per type.                                     |
+| `hc_coverage`       | Per record type that has data: `availability`, first and last record, count, typical cadence, the apps that wrote it. Call it first.                                      |
+| `hc_sync_status`    | Per phone: last upload, backlog, backfill, battery-optimisation exemption, queue depth, recent failed uploads. Then one row per type that has data.                       |
 | `hc_records`        | Raw records of one `type` in a range, exactly as stored.                                                                                                                  |
 | `hc_aggregate`      | One `type` in calendar buckets (`hour`, `day`, `week`, `month`, `year`, `<N>min`), duplicates between apps handled.                                                       |
 | `hr_series`         | Heart rate as a series: `resolution` `raw`, `5s`, `1min` (default), `5min`, `1h`.                                                                                         |
@@ -546,23 +546,44 @@ the rows. The top-level `bucketMs` and `decimation` are given only when every
 series shares them and are null otherwise; `hr_series_decimated:<factor>`
 warns with the largest factor.
 
-**Why an answer is empty.** An empty `items` never means "nothing happened"
-on its own. `coverage` has one entry per phone and record type, and
-`hc_coverage`'s `availability` spells the cases out:
+**What a phone has, and what it does not.** These tools talk about data, not
+about permissions. A record type is there when the store holds at least one
+record of it, and absent when it holds none:
 
-| `availability`  | Coverage `status`                              | Meaning                                                        |
-| --------------- | ---------------------------------------------- | -------------------------------------------------------------- |
-| `ok`            | `ok`                                           | Permitted, uploaded recently, and there are records.           |
-| `no_data`       | `ok` with `recordCount: 0`                     | Permitted, current, and the phone holds no such records.       |
-| `not_permitted` | `unsupported`, notice `permission_denied`      | The companion app has not been granted this type on the phone. |
-| `not_available` | `unsupported`, notice `permission_unavailable` | The phone's Health Connect does not offer this type.           |
-| `stale`         | `stale`                                        | No upload for six hours; what is stored is still returned.     |
-| `never_synced`  | `never`                                        | The phone has not reported this type, or has never uploaded.   |
+- A type with no stored records is **not mentioned**: no `coverage` entry, no
+  warning, no row in `hc_coverage`, no `type_sync` row in `hc_sync_status`, no
+  place in any count, nothing in `daily_summary`, `data_quality` or the
+  summary. It makes no difference why there are none. The owner may not have
+  the device that would record it, may have chosen not to let the companion
+  app read it, or the phone may not offer it; in every case the honest answer
+  is that this data does not exist here, and that is usually by design.
+- The first record stored makes the type appear everywhere, with nothing to
+  configure: the rule reads the store's own record counts.
+- A type **asked for by name** is always answered. `hc_records`,
+  `hc_aggregate`, `hc_coverage` with `types`, `data_quality` with `types`,
+  and the tools that are about one type (`hr_series` and `hr_events` are
+  heart rate, `blood_pressure`, `sleep_sessions`, `exercise_sessions`) answer
+  with empty `items`, a `coverage` entry of `ok` with `recordCount: 0`, and
+  the warning `no_data:hc:<Type>:device:<id>`. The answer is the same
+  whatever the reason there is nothing. A name that is no record type at all
+  answers `unknown_type:hc:<Type>` instead.
+- Whether the phone may read a type is not exposed to a client in any field,
+  notice or warning. The owner sees and manages that on the admin Phone page.
 
-`stale` and `never_synced` produce the usual `stale:hc:<Type>:device:<id>:<n>h`
-and `never_synced:...` warnings; the three that coverage is otherwise quiet
-about get `no_data:hc:<Type>:device:<id>`, `not_permitted:...` and
-`not_available:...`. `hc_store_pending:device:<id>` means uploads are still
+For a type that does have records, `hc_coverage`'s `availability` is one of:
+
+| `availability` | Coverage `status`          | Meaning                                                                  |
+| -------------- | -------------------------- | ------------------------------------------------------------------------ |
+| `ok`           | `ok`                       | There are records, and the phone uploaded within six hours.              |
+| `stale`        | `stale`                    | There are records, but no upload for six hours; they are still returned. |
+| `no_data`      | `ok` with `recordCount: 0` | Only for a type the caller named: there are no records of it.            |
+
+`stale` produces the usual `stale:hc:<Type>:device:<id>:<n>h` warning. It is
+about the phone, not the type: a phone that has stopped uploading goes stale
+on every type it has data for, including one it may no longer read. Ages
+(`hoursSinceUpload`, `staleHours`, `ageHours`) are never negative: an upload
+stamped a moment after the answer's `generatedAt` is zero hours old.
+`hc_store_pending:device:<id>` means uploads are still
 being applied (or rollups rebuilt), so the newest one may not be in the answer
 yet. `hc_batches_parked:device:<id>:<n>` means `n` uploads could not be
 applied and are set aside: their records are missing from every answer until
@@ -724,7 +745,7 @@ withhold data, deny the type (`resource`) or the measurement (`field`); a
 tool rule only removes one way of asking.
 
 `hc_sync_status` reports two kinds of thing. Its per-type rows (and the
-`records`, `phoneBacklog` and type counts on the phone's row) cover only the
+`records`, `phoneBacklog` and `typesWithData` on the phone's row) cover only the
 types the policy lets the call see; a denied type has no row and is in no
 count. The queue, rollup and upload figures on the phone's row (`backlog`,
 `lastUploadAt`, `recentFailures`) are bookkeeping for the whole phone, are

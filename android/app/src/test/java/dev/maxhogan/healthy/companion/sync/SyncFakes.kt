@@ -62,21 +62,51 @@ class InMemorySyncStateStore : SyncStateStore {
     private val state = MutableStateFlow(SyncSnapshot())
     override val snapshots: Flow<SyncSnapshot> = state
 
-    override suspend fun snapshot(): SyncSnapshot = state.value
+    /**
+     * A disk that will not take a write. Asked before every write that would change something,
+     * with what is being written (`type:<name>`, `global` or `reset`) and the value it would
+     * have; true fails that write the way DataStore does, with an `IOException` and nothing
+     * changed.
+     */
+    var writeFault: (String, Any) -> Boolean = { _, _ -> false }
+
+    /** Every read fails while this is set. */
+    var readFault = false
+
+    /** What was written, in order, as `type:<name>` or `global`: only writes that changed something. */
+    val writes = ArrayList<String>()
+
+    /** The state as it is, whatever [readFault] says: for a test to look at. */
+    val current: SyncSnapshot get() = state.value
+
+    private fun writing(what: String, value: Any) {
+        if (writeFault(what, value)) throw IOException("disk")
+        writes.add(what)
+    }
+
+    override suspend fun snapshot(): SyncSnapshot {
+        if (readFault) throw IOException("disk")
+        return state.value
+    }
 
     override suspend fun updateType(type: String, transform: (TypeState) -> TypeState): TypeState {
-        val next = transform(state.value.type(type))
+        val before = state.value.type(type)
+        val next = transform(before)
+        if (next != before) writing("type:$type", next)
         state.value = state.value.copy(types = state.value.types + (type to next))
         return next
     }
 
     override suspend fun updateGlobal(transform: (GlobalState) -> GlobalState): GlobalState {
-        val next = transform(state.value.global)
+        val before = state.value.global
+        val next = transform(before)
+        if (next != before) writing("global", next)
         state.value = state.value.copy(global = next)
         return next
     }
 
     override suspend fun reset(deviceId: String) {
+        writing("reset", deviceId)
         state.value = SyncSnapshot(GlobalState(deviceId = deviceId))
     }
 }
@@ -104,6 +134,15 @@ class FakeHealthSource : HealthSource {
 
     /** Thrown by every aggregate call, and by nothing else. */
     var aggregateFailure: HealthSourceException? = null
+
+    /** The page size of every read that was asked for, probes included. */
+    val pageSizes = ArrayList<Int>()
+
+    /** When set, a read returns as many records as it asked for instead of [pageSize]. */
+    var honourPageSize = false
+
+    /** Asked for every read with its type and page size; a non-null answer is thrown. */
+    var readFailure: (String, Int) -> HealthSourceException? = { _, _ -> null }
     private val tokenCounters = HashMap<String, Int>()
 
     fun add(type: String, vararg wire: JsonObject) {
@@ -143,11 +182,13 @@ class FakeHealthSource : HealthSource {
         pageSize: Int,
     ): RecordsPage {
         calls.add("read:$type:$startMs:$endMs:${pageToken ?: "-"}")
+        pageSizes.add(pageSize)
         gate(type)
+        readFailure(type, pageSize)?.let { throw it }
         if (pageToken != null && type in refusePageTokens) {
             throw HealthSourceException(HealthSourceException.Kind.INVALID, "hc_invalid_argument")
         }
-        val size = if (pageSize == 1) 1 else this.pageSize
+        val size = if (pageSize == 1 || honourPageSize) pageSize else this.pageSize
         val matching = records[type].orEmpty()
             .filter { it.getValue("start").jsonPrimitive.long in startMs until endMs }
             .sortedBy { it.getValue("start").jsonPrimitive.long }
@@ -273,5 +314,54 @@ class Rig(types: List<String> = listOf("Steps", "HeartRate", "TotalCaloriesBurne
             if (step !is BackfillStep.Progress) return step
         }
         return BackfillStep.Progress(false)
+    }
+}
+
+/**
+ * Runs backfill steps the way the service loop does, waiting out every backoff (the clock moves
+ * by the time asked for), until a step that ends the session or [maxSteps] is reached.
+ *
+ * @return the step that ended it, and how many backoffs were waited out on the way
+ */
+suspend fun Rig.drive(run: BackfillRun = BackfillRun(), maxSteps: Int = 20_000): Pair<BackfillStep, Int> {
+    var backoffs = 0
+    var last: BackfillStep = BackfillStep.Progress(false)
+    repeat(maxSteps) {
+        last = engine.backfillStep(session(), run)
+        when (val step = last) {
+            is BackfillStep.Progress -> Unit
+            is BackfillStep.Backoff -> {
+                backoffs++
+                now += step.retryAfterMs ?: 0
+            }
+            else -> return step to backoffs
+        }
+    }
+    return last to backoffs
+}
+
+/**
+ * A Preferences DataStore held in memory, which can be told to fail the way a full or broken
+ * disk makes the real one fail: with an `IOException`, and nothing changed.
+ */
+class FakePreferencesStore : androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences> {
+    private val state = MutableStateFlow(androidx.datastore.preferences.core.emptyPreferences())
+    var failWrites = false
+    var failReads = false
+
+    override val data: Flow<androidx.datastore.preferences.core.Preferences> = kotlinx.coroutines.flow.flow {
+        if (failReads) throw IOException("disk")
+        emit(state.value)
+    }
+
+    override suspend fun updateData(
+        transform: suspend (t: androidx.datastore.preferences.core.Preferences) -> androidx.datastore.preferences.core.Preferences,
+    ): androidx.datastore.preferences.core.Preferences {
+        if (failReads) throw IOException("disk")
+        val next = transform(state.value)
+        // Like the real one, which writes nothing when nothing changed.
+        if (failWrites && next != state.value) throw IOException("disk")
+        state.value = next
+        return next
     }
 }

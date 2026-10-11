@@ -135,6 +135,8 @@ class BackfillTest {
                 is BackfillStep.Backoff -> {
                     assertEquals("hc_rate_limited", step.errorCode)
                     backoffs++
+                    // What the service loop does with a backoff: it waits it out.
+                    rig.now += step.retryAfterMs ?: 0
                 }
                 else -> {
                     assertEquals(BackfillStep.Complete, step)

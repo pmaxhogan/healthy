@@ -657,6 +657,21 @@ describe("GET /api/phone/devices/:id/coverage", () => {
     expect(row).toMatchObject({ status: "stale", ageHours: 7 });
   });
 
+  it("leaves the platform's own hourly totals out of the table and out of the type totals", async () => {
+    const { device } = await pair();
+    await seedSyncState(device.id, "Steps", { permission: "granted", count: 3 });
+    await seedSyncState(device.id, "Agg.Steps", { permission: "unknown", count: 24 });
+
+    const rows = await json<DeviceCoverageRowDto[]>(
+      await owner().get(`/api/phone/devices/${device.id}/coverage`),
+    );
+    const devices = await json<DeviceDto[]>(await owner().get("/api/phone/devices"));
+    const listed = devices.find((entry) => entry.id === device.id);
+
+    expect(rows.map((row) => row.recordType)).toStrictEqual(["Steps"]);
+    expect(listed?.totals).toMatchObject({ typesGranted: 1, typesDenied: 0 });
+  });
+
   it("is a 404 for an unknown phone", async () => {
     expect(await getStatus("/api/phone/devices/nope/coverage")).toBe(404);
   });

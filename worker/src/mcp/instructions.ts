@@ -21,7 +21,9 @@ export const MCP_INSTRUCTIONS =
   "blood pressure, weight) is a separate source with its own tools: start " +
   "with hc_coverage, then daily_summary, hc_aggregate, hr_series, hr_events, " +
   "sleep_sessions, exercise_sessions, blood_pressure, data_quality or " +
-  "hc_records. Their rows are tagged `device:<id>` and `hc:<Type>`, their " +
+  "hc_records. hc_coverage lists the record types the phone has data for; a " +
+  "type that is not listed has no data, which is normal and not a fault. " +
+  "Their rows are tagged `device:<id>` and `hc:<Type>`, their " +
   "answers stop at a soft byte budget (`truncated` plus a `cursor`; raise " +
   "`max_bytes` or project with `jq`), and get_vitals does not include them. " +
   "Every tool that reads a resource " +

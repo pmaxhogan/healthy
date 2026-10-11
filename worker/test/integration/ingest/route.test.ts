@@ -228,6 +228,35 @@ describe("authentication", () => {
 
     expect(response.status).toBe(403);
   });
+
+  // Cloudflare Access lets through more than the route serves: its bypass entry
+  // covers the path and everything beneath it, case-insensitively. What keeps
+  // that one route wide is this fall-through, so it is pinned: a valid token on
+  // anything but the exact path meets the owner gate and queues nothing.
+  it.each([
+    ["a trailing slash", `${INGEST_PATH}/`],
+    ["a sub-path", `${INGEST_PATH}/x`],
+    ["a deeper sub-path", `${INGEST_PATH}/x/y`],
+    ["another casing", INGEST_PATH.toUpperCase()],
+  ])("refuses %s at the owner gate, even with a valid token", async (_name, path) => {
+    const { device, token } = await repos.devices.mint("Test phone");
+    const body = await gzip(JSON.stringify(batch(device.id)));
+
+    const response = await send(
+      new Request(ORIGIN + path, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+          "content-encoding": "gzip",
+        },
+        body,
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(queuedBatches(device.id)).resolves.toBe(0);
+  });
 });
 
 describe("a valid batch", () => {

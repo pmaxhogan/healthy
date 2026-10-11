@@ -49,12 +49,21 @@ jobs:
             version-update:semver-minor | version-update:semver-patch) non_major=true ;;
           esac
           dev_only=$(jq -r 'length > 0 and all(.[]; .dependencyType == "direct:development")' <<<"$UPDATED")
-          if [ "$non_major" = true ] || [ "$dev_only" = true ]; then
+          # The exact-pinned packages never merge themselves, whatever the bump.
+          # `.github/dependabot.yml` already tells Dependabot not to propose
+          # them, but an `ignore` entry does not apply to SECURITY updates, and
+          # one of those is exactly the bump that needs a person: `agents`
+          # peer-depends on one exact SDK version, so moving either alone
+          # installs two copies and breaks the typecheck.
+          pinned=$(jq -r 'any(.[]; .dependencyName == "agents" or .dependencyName == "@modelcontextprotocol/sdk" or .dependencyName == "jq-wasm")' <<<"$UPDATED")
+          if [ "$pinned" = true ]; then
+            echo "merge=false" >>"$GITHUB_OUTPUT"
+          elif [ "$non_major" = true ] || [ "$dev_only" = true ]; then
             echo "merge=true" >>"$GITHUB_OUTPUT"
           else
             echo "merge=false" >>"$GITHUB_OUTPUT"
           fi
-          echo "non_major=$non_major dev_only=$dev_only"
+          echo "non_major=$non_major dev_only=$dev_only pinned=$pinned"
 
       - name: Approve
         if: steps.decide.outputs.merge == 'true'

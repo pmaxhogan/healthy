@@ -17,7 +17,7 @@
 
 import { z } from "zod";
 
-import { deviceStatus } from "../../hc/coverage.ts";
+import { ageHours, deviceStatus } from "../../hc/coverage.ts";
 import { recordStartMs } from "../../hc/wire.ts";
 import { AVAILABILITY_NOTE, BUDGET_NOTE, hcArgs } from "../hc/args.ts";
 import { openStampedPage } from "../hc/page.ts";
@@ -59,9 +59,9 @@ const TYPES_ARG = z
   .max(200)
   .optional()
   .describe(
-    "Record types to report (`HeartRate`, `Steps`, `SleepSession`, ...). A type " +
-      "the phone has never mentioned comes back as `never_synced`. Omit for every " +
-      "type the phone has reported.",
+    "Record types to report (`HeartRate`, `Steps`, `SleepSession`, ...). A named " +
+      "type with no stored records comes back as `no_data`. Omit for every type " +
+      "there are records of.",
   );
 
 const ORIGINS_ARG = z
@@ -177,7 +177,8 @@ async function coverageItem(
   withOrigins: boolean,
 ): Promise<Record<string, unknown> | null> {
   const entry = view.entries.get(coverageResourceType(type));
-  // No entry: the policy denies the type, or the caller did not ask for it.
+  // No entry: there are no records of it and it was not named, the policy
+  // denies it, or the caller did not ask for it.
   if (entry === undefined) return null;
   const { device } = view;
   const row = view.rows.get(type);
@@ -187,9 +188,8 @@ async function coverageItem(
     healthSystemId: deviceSourceId(device.id),
     resourceType: policyResourceType(type),
     type,
-    availability: view.availability.get(entry.resourceType) ?? "never_synced",
+    availability: view.availability.get(entry.resourceType) ?? "no_data",
     status: entry.status,
-    permission: row?.permissionState ?? "unknown",
     recordCount: row?.recordCount ?? 0,
     firstAt: call.clock.isoOrNull(row?.firstMs),
     lastAt: call.clock.isoOrNull(row?.lastMs),
@@ -230,14 +230,13 @@ async function deviceItem(
     deps.hc.backlog(device.id),
     deps.hc.ingestLog(device.id, recentBatches),
   ]);
-  // Only the types this call may see are counted: a total over all of them
-  // would say how much a denied type holds.
+  // Only the types this call lists are counted: the ones with stored records
+  // that the policy lets it see. A total over all of them would say how much a
+  // denied type holds.
   const visible: SyncStateRow[] = [];
   for (const [type, row] of view.rows) {
     if (view.entries.has(coverageResourceType(type))) visible.push(row);
   }
-  const count = (state: string): number =>
-    visible.filter((row) => row.permissionState === state).length;
   const lastError = report?.lastError ?? null;
   return {
     kind: "device",
@@ -248,8 +247,7 @@ async function deviceItem(
     revokedAt: at(call, device.revokedAt),
     lastSeenAt: at(call, device.lastSeenAt),
     lastUploadAt: at(call, device.lastUploadAt),
-    hoursSinceUpload:
-      device.lastUploadAt === null ? null : Math.floor((call.now - device.lastUploadAt) / 3600),
+    hoursSinceUpload: device.lastUploadAt === null ? null : ageHours(call.now, device.lastUploadAt),
     appVersion: device.appVersion,
     // What the phone last said about itself; null until it has said anything.
     backgroundRead: report?.backgroundRead ?? null,
@@ -262,8 +260,7 @@ async function deviceItem(
       lastError === null
         ? null
         : { errorCode: lastError.errorCode, at: call.clock.iso(lastError.at) },
-    typesGranted: count("granted"),
-    typesNotPermitted: count("denied"),
+    typesWithData: visible.length,
     records: visible.reduce((sum, row) => sum + row.recordCount, 0),
     // Records the phone still has to upload, by its own count.
     phoneBacklog: visible.reduce((sum, row) => sum + (row.backlog ?? 0), 0),
@@ -291,7 +288,6 @@ function typeSyncItems(call: HcCall, view: DeviceView): Record<string, unknown>[
       healthSystemId: deviceSourceId(device.id),
       resourceType: policyResourceType(type),
       type,
-      permission: row.permissionState,
       availability,
       recordCount: row.recordCount,
       tokenAgeS: row.tokenAgeS,
@@ -312,11 +308,14 @@ export function registerHcStatusTools(server: McpServer, deps: ToolDeps): void {
       name: "hc_coverage",
       description:
         "What the paired phone's Health Connect holds, one row per record type per phone: " +
-        "`availability` (`ok`, `no_data` = permitted but empty, `not_permitted`, " +
-        "`not_available`, `stale`, `never_synced`), `permission`, `recordCount`, `firstAt` " +
+        "`availability` (`ok`; `stale` = there are records but the phone has not uploaded " +
+        "for six hours), `recordCount`, `firstAt` " +
         "and `lastAt` (the oldest and newest record), `meanIntervalS` (typical cadence), " +
         "`origins` (the apps that wrote it, by package name), `lastRecordFrom` (the app and " +
-        "hardware behind the newest record), `lastSyncAt` and `staleHours`. Call it first: " +
+        "hardware behind the newest record), `lastSyncAt` and `staleHours`. Only record " +
+        "types with at least one stored record are listed: a type that is not here has no " +
+        "data, and appears by itself once it has some. A type named in `types` is always " +
+        "answered, as `no_data` when there is nothing of it. Call it first: " +
         "it says which of the other Health Connect tools have anything to answer with, and " +
         "the `type` names they take. Health Connect's own hourly totals (`Agg.<Metric>`, " +
         "which `hc_aggregate` uses) are listed only when named in `types`. Phone data is " +
@@ -329,7 +328,7 @@ export function registerHcStatusTools(server: McpServer, deps: ToolDeps): void {
       const opened = await openStampedPage(deps.hc, call.devices, "hc_coverage", args);
       if (!opened.ok) return toolError(opened.errorCode);
       const { page } = opened;
-      const coverage = await deviceCoverageFor(deps, call, args.types);
+      const coverage = await deviceCoverageFor(deps, call, { named: args.types });
       const items = await coverageItems(deps, call, coverage, {
         types: args.types,
         origins: args.origins ?? true,
@@ -341,6 +340,7 @@ export function registerHcStatusTools(server: McpServer, deps: ToolDeps): void {
         page,
         items,
         coverage,
+        named: args.types,
         extra: { units: { meanIntervalS: "s", staleHours: "h" } },
       });
     },
@@ -362,8 +362,9 @@ export function registerHcStatusTools(server: McpServer, deps: ToolDeps): void {
         "that could not be applied and are set aside: their records are missing until they " +
         "are queued again, and the answer warns `hc_batches_parked:...`), and `recentFailures` " +
         "among the last `recent_batches` uploads. Then one `kind: type_sync` row per record " +
-        "type: `permission`, `availability`, `tokenAgeS` (age of the phone's change token), " +
-        "`backlog`, `backfillComplete`, `backfillOldestAt`, `recordCount`. The queue, " +
+        "type that has stored records: `availability`, `tokenAgeS` (age of the phone's " +
+        "change token), `backlog`, `backfillComplete`, `backfillOldestAt`, `recordCount`. " +
+        "`typesWithData` on the `device` row counts those rows. The queue, " +
         "rollup and upload figures on the `device` row are bookkeeping for the whole phone, " +
         "not per record type; `records`, `phoneBacklog` and the type counts cover only the " +
         "types the owner's policy lets this call see, and a type it withholds has no row. " +

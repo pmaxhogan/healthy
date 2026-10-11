@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   HC_STALE_AFTER_SECONDS,
   coverageResourceType,
-  deviceCoverage,
+  adminDeviceCoverage,
+  ageHours,
   deviceSourceId,
   deviceStatus,
+  mcpDeviceCoverage,
 } from "../../../src/hc/coverage.ts";
 
 import type { CoverageSyncRow } from "../../../src/hc/coverage.ts";
@@ -28,7 +30,7 @@ function statusAfter(age: number) {
   return deviceStatus({ revokedAt: null, lastUploadAt: NOW - age }, NOW);
 }
 
-function only(entries: ReturnType<typeof deviceCoverage>) {
+function only(entries: ReturnType<typeof adminDeviceCoverage>) {
   expect(entries).toHaveLength(1);
   const [entry] = entries;
   if (entry === undefined) throw new Error("no entry");
@@ -38,7 +40,11 @@ function only(entries: ReturnType<typeof deviceCoverage>) {
 /** The one coverage entry of a granted type whose device last uploaded `age` seconds ago. */
 function entryAfter(age: number) {
   return only(
-    deviceCoverage({ device: { ...DEVICE, lastUploadAt: NOW - age }, rows: [row()], now: NOW }),
+    adminDeviceCoverage({
+      device: { ...DEVICE, lastUploadAt: NOW - age },
+      rows: [row()],
+      now: NOW,
+    }),
   );
 }
 
@@ -65,9 +71,9 @@ describe("deviceStatus", () => {
   });
 });
 
-describe("deviceCoverage", () => {
+describe("adminDeviceCoverage", () => {
   it("joins the MCP coverage array under device:<id> and hc:<Type>", () => {
-    const entry = only(deviceCoverage({ device: DEVICE, rows: [row()], now: NOW }));
+    const entry = only(adminDeviceCoverage({ device: DEVICE, rows: [row()], now: NOW }));
 
     expect(entry.healthSystemId).toBe("device:DEV1");
     expect(entry.healthSystemId).toBe(deviceSourceId("DEV1"));
@@ -77,7 +83,7 @@ describe("deviceCoverage", () => {
   });
 
   it("reports a granted type with data as ok", () => {
-    const entry = only(deviceCoverage({ device: DEVICE, rows: [row()], now: NOW }));
+    const entry = only(adminDeviceCoverage({ device: DEVICE, rows: [row()], now: NOW }));
 
     expect(entry.status).toBe("ok");
     expect(entry.recordCount).toBe(42);
@@ -86,7 +92,7 @@ describe("deviceCoverage", () => {
 
   it("reports a granted type with no records as ok with a zero count: permitted, no data", () => {
     const entry = only(
-      deviceCoverage({ device: DEVICE, rows: [row({ recordCount: 0 })], now: NOW }),
+      adminDeviceCoverage({ device: DEVICE, rows: [row({ recordCount: 0 })], now: NOW }),
     );
 
     expect(entry.status).toBe("ok");
@@ -95,7 +101,7 @@ describe("deviceCoverage", () => {
 
   it("calls a denied type unsupported, with a notice saying it is not permitted", () => {
     const entry = only(
-      deviceCoverage({ device: DEVICE, rows: [row({ permissionState: "denied" })], now: NOW }),
+      adminDeviceCoverage({ device: DEVICE, rows: [row({ permissionState: "denied" })], now: NOW }),
     );
 
     expect(entry.status).toBe("unsupported");
@@ -105,7 +111,7 @@ describe("deviceCoverage", () => {
 
   it("calls an unavailable type unsupported, with a notice saying it is not available on this phone", () => {
     const entry = only(
-      deviceCoverage({
+      adminDeviceCoverage({
         device: DEVICE,
         rows: [row({ permissionState: "unavailable" })],
         now: NOW,
@@ -120,7 +126,11 @@ describe("deviceCoverage", () => {
     const revoked = { ...DEVICE, revokedAt: NOW - 5 };
 
     const entry = only(
-      deviceCoverage({ device: revoked, rows: [row({ permissionState: "denied" })], now: NOW }),
+      adminDeviceCoverage({
+        device: revoked,
+        rows: [row({ permissionState: "denied" })],
+        now: NOW,
+      }),
     );
 
     expect(entry.status).toBe("unsupported");
@@ -136,7 +146,7 @@ describe("deviceCoverage", () => {
 
   it("reports ageHours rounded down", () => {
     const entry = only(
-      deviceCoverage({
+      adminDeviceCoverage({
         device: { ...DEVICE, lastUploadAt: NOW - (9 * 3600 + 3599) },
         rows: [row()],
         now: NOW,
@@ -148,7 +158,7 @@ describe("deviceCoverage", () => {
 
   it("calls every type of a revoked device stale, however fresh its last upload", () => {
     const entry = only(
-      deviceCoverage({ device: { ...DEVICE, revokedAt: NOW - 5 }, rows: [row()], now: NOW }),
+      adminDeviceCoverage({ device: { ...DEVICE, revokedAt: NOW - 5 }, rows: [row()], now: NOW }),
     );
 
     expect(entry.status).toBe("stale");
@@ -156,7 +166,11 @@ describe("deviceCoverage", () => {
 
   it("is never for a row whose permission has not been reported", () => {
     const entry = only(
-      deviceCoverage({ device: DEVICE, rows: [row({ permissionState: "unknown" })], now: NOW }),
+      adminDeviceCoverage({
+        device: DEVICE,
+        rows: [row({ permissionState: "unknown" })],
+        now: NOW,
+      }),
     );
 
     expect(entry.status).toBe("never");
@@ -164,7 +178,7 @@ describe("deviceCoverage", () => {
 
   it("calls a revoked phone that never uploaded stale, not never", () => {
     const entry = only(
-      deviceCoverage({
+      adminDeviceCoverage({
         device: { ...DEVICE, lastUploadAt: null, revokedAt: NOW - 5 },
         rows: [row({ lastUploadAt: null })],
         now: NOW,
@@ -175,7 +189,7 @@ describe("deviceCoverage", () => {
   });
 
   it("never produces a row for ExerciseRoute, reported or expected", () => {
-    const entries = deviceCoverage({
+    const entries = adminDeviceCoverage({
       device: DEVICE,
       rows: [row({ recordType: "ExerciseRoute" }), row()],
       now: NOW,
@@ -187,7 +201,7 @@ describe("deviceCoverage", () => {
 
   it("is never for a device that has not uploaded", () => {
     const entry = only(
-      deviceCoverage({
+      adminDeviceCoverage({
         device: { ...DEVICE, lastUploadAt: null },
         rows: [row({ lastUploadAt: null })],
         now: NOW,
@@ -198,7 +212,7 @@ describe("deviceCoverage", () => {
   });
 
   it("reports expected types the phone has not sent a row for as never, sorted with the rest", () => {
-    const entries = deviceCoverage({
+    const entries = adminDeviceCoverage({
       device: DEVICE,
       rows: [row({ recordType: "Steps" })],
       now: NOW,
@@ -210,5 +224,87 @@ describe("deviceCoverage", () => {
       ["hc:Steps", "ok"],
       ["hc:Weight", "never"],
     ]);
+  });
+});
+
+describe("mcpDeviceCoverage", () => {
+  const STATES = ["granted", "denied", "unavailable", "unknown"] as const;
+
+  it.each(STATES)("leaves out a type with no records when its permission is %s", (state) => {
+    const rows = [row(), row({ recordType: "Steps", permissionState: state, recordCount: 0 })];
+
+    const entries = mcpDeviceCoverage({ device: DEVICE, rows, now: NOW });
+
+    expect(entries.map((entry) => entry.resourceType)).toStrictEqual(["hc:HeartRate"]);
+  });
+
+  it.each(STATES)("reads a type with records as its data when its permission is %s", (state) => {
+    const rows = [row({ permissionState: state })];
+
+    const entry = only(mcpDeviceCoverage({ device: DEVICE, rows, now: NOW }));
+
+    expect(entry).toStrictEqual({
+      healthSystemId: "device:DEV1",
+      healthSystem: "Example phone",
+      resourceType: "hc:HeartRate",
+      status: "ok",
+      lastOkAt: new Date((NOW - 60) * 1000).toISOString(),
+      recordCount: 42,
+    });
+  });
+
+  it.each(STATES)("answers a named type with no records the same when it is %s", (state) => {
+    const rows = [row({ recordType: "Steps", permissionState: state, recordCount: 0 })];
+
+    const named = mcpDeviceCoverage({ device: DEVICE, rows, now: NOW, namedTypes: ["Steps"] });
+    const unheard = mcpDeviceCoverage({
+      device: DEVICE,
+      rows: [],
+      now: NOW,
+      namedTypes: ["Steps"],
+    });
+
+    expect(named).toStrictEqual(unheard);
+    expect(only(named)).toStrictEqual({
+      healthSystemId: "device:DEV1",
+      healthSystem: "Example phone",
+      resourceType: "hc:Steps",
+      status: "ok",
+      recordCount: 0,
+    });
+  });
+
+  it("goes stale with the phone, one second past the limit", () => {
+    const fresh = { ...DEVICE, lastUploadAt: NOW - HC_STALE_AFTER_SECONDS };
+    const silent = { ...DEVICE, lastUploadAt: NOW - HC_STALE_AFTER_SECONDS - 1 };
+
+    const before = only(mcpDeviceCoverage({ device: fresh, rows: [row()], now: NOW }));
+    const after = only(mcpDeviceCoverage({ device: silent, rows: [row()], now: NOW }));
+
+    expect(before.status).toBe("ok");
+    expect(after).toMatchObject({ status: "stale", ageHours: 6 });
+  });
+
+  it("carries no notice of any kind", () => {
+    const rows = STATES.map((state, index) =>
+      row({ recordType: `Type${String(index)}`, permissionState: state }),
+    );
+
+    const entries = mcpDeviceCoverage({ device: DEVICE, rows, now: NOW });
+
+    expect(entries).toHaveLength(4);
+    expect(entries.every((entry) => entry.notices === undefined)).toBe(true);
+  });
+});
+
+describe("an age", () => {
+  it("is never negative when the upload is stamped after now", () => {
+    const ahead = { ...DEVICE, lastUploadAt: NOW + 5 };
+
+    expect(ageHours(NOW, NOW + 5)).toBe(0);
+    expect(ageHours(NOW, NOW - 7200)).toBe(2);
+    expect(deviceStatus(ahead, NOW)).toBe("active");
+    const entries = adminDeviceCoverage({ device: ahead, rows: [row()], now: NOW });
+    expect(only(entries).status).toBe("ok");
   });
 });

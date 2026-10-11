@@ -61,6 +61,13 @@ object ErrorMessages {
         "backfill_state_invalid" to "The saved backfill position for a type was unreadable. Run the full backfill again.",
         "unknown_record_type" to "The app asked Health Connect for a type it does not know. Update the app.",
         "sync_failed" to "The sync failed. It is tried again on the next run.",
+        SyncEngine.ERROR_STATE_STORE to
+            "The app could not save its own sync position on this phone. Nothing is lost: what was sent is sent " +
+            "again. If it keeps happening, free up storage or restart the phone.",
+        HealthConnectSource.ERROR_PAGE_TOO_LARGE to
+            "A batch of very large records did not fit in memory. It is read again in smaller pieces.",
+        "waiting_for_wifi" to
+            "The backfill is waiting for Wi-Fi, because uploading on Wi-Fi only is switched on.",
     )
 
     /** The sentence for [errorCode]. Never empty: a code this table lacks still gets a plain one. */

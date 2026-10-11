@@ -48,9 +48,14 @@ import dev.maxhogan.healthy.companion.sync.PairingStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
-/** Clears the stored pairing on a scope that outlives the screen that asked for it. */
-fun CoroutineScope.launchUnpair(store: PairingStore) {
-    launch { store.clear() }
+/**
+ * Clears the stored pairing on a scope that outlives the screen that asked for it.
+ *
+ * @param onResult told whether the pairing is gone. False means the write failed and the phone
+ *   is still paired, which the owner who pressed "Unpair" has to see
+ */
+fun CoroutineScope.launchUnpair(store: PairingStore, onResult: (Boolean) -> Unit = {}) {
+    launch { onResult(store.clear()) }
 }
 
 /**

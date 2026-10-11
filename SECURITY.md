@@ -233,8 +233,9 @@ rather than the address itself.
 
 **MCP path scoping.** An AI client cannot complete an interactive Access login,
 so a deliberately narrow set of paths bypasses Access: `/mcp*`, `/oauth/token`,
-`/oauth/register`, `/.well-known/*`, the public pages, and exactly one path for
-the phone, `/ingest/health-connect`. The MCP paths are protected instead by the
+`/oauth/register`, `/.well-known/*`, the public pages, and one path for the
+phone, `/ingest/health-connect` (Access treats that entry as the path and
+everything beneath it; see below). The MCP paths are protected instead by the
 OAuth provider, which issues short-lived access tokens against a consent grant
 the owner approved from behind the full gate; the phone's path is protected by
 its own device token (next). Anything else that can change state — including the
@@ -242,26 +243,39 @@ consent page itself and every OAuth callback — stays behind Access and the
 password. The Worker does not rely on the Access policy for that: it verifies the
 Access JWT itself on every path behind the owner gate (all but the public
 pages, the MCP and OAuth-provider paths, and the phone's one route), so a bypass
-entry wider than it should be (a wildcard where the phone's path should be exact)
-exposes no other path. A request without a valid Access identity gets 403, and one
+entry wider than it should be exposes no other path. A request without a valid Access identity gets 403, and one
 without a password session gets 401 or the login page: it fails closed.
 
-One mismatch between Access and the Worker was observed in production and is
-harmless for the same reason. Cloudflare Access matches the phone's bypass path
-**case-insensitively**, while the Worker's router is case-sensitive, so
-`/Ingest/Health-Connect` passes Access, does not match the upload route, falls to
-the Worker's own owner gate and is refused there (403, no Access identity): it
-fails closed. The trailing-slash variant `/ingest/health-connect/` is not matched
-by the exact entry and stays behind Access. The case behaviour is Access's, not
-something this repository controls, so it is worth checking again after a change
-on Cloudflare's side.
+Two mismatches between Access and the Worker were observed in production, and
+both are harmless for the same reason. Access treats the phone's bypass entry as
+that path **and everything beneath it**: `/ingest/health-connect/`,
+`/ingest/health-connect/x` and `/ingest/health-connect/x/y` all pass Access. It
+also matches **case-insensitively**, while the Worker's router is case-sensitive,
+so `/INGEST/health-connect` passes Access too. Nothing is registered beneath that
+path and the case variants do not match the upload route, so all of these fall to
+the Worker's own owner gate, which verifies the Access identity itself and refuses
+them (403, no Access identity): they fail closed. Siblings such as
+`/ingest/health-connectx`, `/ingest/health` and `/ingest` are not matched and stay
+behind Access. These are Access's behaviours, not something this repository
+controls, so check them again after a change on Cloudflare's side. Right after the
+entry is created the sub-path behaviour can lag for some minutes (a sub-path may
+still be redirected to Access at first), so a check made immediately can mislead.
+
+What keeps this safe is the Worker's route order (`worker/src/app.ts`) and the
+owner gate's own Access check, not Access matching exactly. What is reachable
+without an Access identity is still exactly one route, with its own bearer-token
+check. The corollary is a rule for the future: because Access publishes everything
+beneath `/ingest/health-connect/`, **nothing may ever be registered under that
+path** (for example `/ingest/health-connect/status`) without its own
+authentication, since it would be reachable without Access.
 
 <a id="device-upload"></a>**The phone's upload route is the one route above the
 owner gate.** `POST /ingest/health-connect` is registered between the public
 router and `ownerGate` (the header comment of `worker/src/app.ts` is the contract),
 because a phone has neither an Access identity nor a password session. Its
-Access bypass entry is that exact path and nothing wider. The route is terminal
-for every other method on the path (405), so nothing there can fall through to the
+Access bypass entry opens that path and the paths beneath it, but the Worker serves
+only the exact path; everything beneath it is refused by the owner gate. The route
+is terminal for every other method on the exact path (405), so nothing there can fall through to the
 gate and answer with a login page. It authenticates with a **device token**:
 `hcd1.<device id>.<secret>`, where the secret is 32 bytes from the CSPRNG. The
 token is shown once when it is minted (as a QR code and a copyable pairing code on

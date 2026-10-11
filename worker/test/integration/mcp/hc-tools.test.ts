@@ -389,38 +389,47 @@ function later(): number {
   return Math.floor(Date.now() / 1000) + HC_STALE_AFTER_SECONDS + 3600;
 }
 
+/** Words a client must never be handed about a type the phone has nothing of. */
+const BLAME = /permission|permitted|denied|unsupported|grant|not_available|never_synced/iu;
+
 describe("why an answer is empty", () => {
-  it("tells not permitted, not available and permitted-but-empty apart from data", async () => {
+  it("lists only the types with stored records, whatever the phone may read", async () => {
     const answer = await call("hc_coverage", { devices: [seeded.source], origins: false });
+    const status = await call("hc_sync_status", { devices: [seeded.source] });
     const byType = new Map(answer.items.map((item) => [item.type, item]));
 
-    expect(byType.get("BodyTemperature")).toMatchObject({
-      availability: "not_permitted",
-      permission: "denied",
-      recordCount: 0,
-    });
-    expect(byType.get("OxygenSaturation")).toMatchObject({ availability: "not_available" });
-    expect(byType.get("Hydration")).toMatchObject({ availability: "no_data", status: "ok" });
+    // Refused, not offered by the phone, and allowed but empty: none is listed.
+    for (const type of ["BodyTemperature", "OxygenSaturation", "Hydration"]) {
+      expect(byType.has(type), type).toBe(false);
+      expect(
+        status.items.some((item) => item.type === type),
+        type,
+      ).toBe(false);
+    }
     expect(byType.get("Steps")).toMatchObject({ availability: "ok", recordCount: 20 });
-    expect(answer.warnings).toStrictEqual(
-      expect.arrayContaining([
-        `not_permitted:hc:BodyTemperature:${seeded.source}`,
-        `not_available:hc:OxygenSaturation:${seeded.source}`,
-        `no_data:hc:Hydration:${seeded.source}`,
-      ]),
-    );
+    expect(answer.warnings).toStrictEqual([]);
+    expect(JSON.stringify([answer.items, answer.coverage, status.items])).not.toMatch(BLAME);
   });
 
-  it("says so on the tool that came back empty, in coverage and in warnings", async () => {
+  it("answers a named type with no records the same way, whatever the reason", async () => {
     const devices = [seeded.source];
-    const denied = await call("hc_records", { devices, type: "BodyTemperature", ...RANGE });
+    const refused = await call("hc_records", { devices, type: "BodyTemperature", ...RANGE });
     const empty = await call("hc_aggregate", { devices, type: "Hydration", ...LOCAL_DAYS });
+    const named = await call("hc_coverage", { devices, types: ["OxygenSaturation"] });
+    const unknown = await call("hc_records", { devices, type: "NotARecordType", ...RANGE });
 
-    expect(denied.items).toStrictEqual([]);
-    expect(denied.warnings).toStrictEqual([`not_permitted:hc:BodyTemperature:${seeded.source}`]);
-    expect(denied.coverage[0]).toMatchObject({ status: "unsupported" });
+    expect(refused.items).toStrictEqual([]);
+    expect(refused.warnings).toStrictEqual([`no_data:hc:BodyTemperature:${seeded.source}`]);
+    expect(refused.coverage[0]).toMatchObject({ status: "ok", recordCount: 0 });
     expect(empty.items.every((item) => item.hasData === false)).toBe(true);
     expect(empty.warnings).toStrictEqual([`no_data:hc:Hydration:${seeded.source}`]);
+    expect(named.items).toStrictEqual([
+      expect.objectContaining({ type: "OxygenSaturation", availability: "no_data" }),
+    ]);
+    expect(unknown.warnings).toStrictEqual(["unknown_type:hc:NotARecordType"]);
+    expect(JSON.stringify([refused, empty, named].map((answer) => answer.items))).not.toMatch(
+      BLAME,
+    );
   });
 
   it("calls the phone stale once six hours pass without an upload, and still returns its data", async () => {
@@ -437,17 +446,16 @@ describe("why an answer is empty", () => {
     expect(steps.warnings).toStrictEqual([`stale:hc:Steps:${seeded.source}:7h`]);
   });
 
-  it("calls a phone that has never uploaded never_synced, not empty", async () => {
+  it("answers `no_data` for a phone that has never uploaded, and lists nothing for it", async () => {
     const idle = `device:${seeded.idleDeviceId}`;
 
     const answer = await call("hc_records", { devices: [idle], type: "Steps", ...RANGE });
+    const listed = await call("hc_coverage", { devices: [idle] });
     const status = await call("hc_sync_status", { devices: [idle] });
 
     expect(answer.items).toStrictEqual([]);
-    expect(answer.warnings).toStrictEqual([
-      "incomplete_no_data_is_not_absence",
-      `never_synced:hc:Steps:${idle}`,
-    ]);
+    expect(answer.warnings).toStrictEqual([`no_data:hc:Steps:${idle}`]);
+    expect(listed.items).toStrictEqual([]);
     expect(status.items).toStrictEqual([
       expect.objectContaining({ kind: "device", status: "never", lastUploadAt: null, records: 0 }),
     ]);
@@ -695,7 +703,6 @@ describe("what the real store hands back", () => {
     });
     expect(answer.items.find((item) => item.type === "Steps")).toMatchObject({
       kind: "type_sync",
-      permission: "granted",
       recordCount: 20,
       tokenAgeS: 60,
     });

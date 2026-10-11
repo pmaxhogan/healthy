@@ -76,6 +76,7 @@ fun StatusScreen(
     healthConnect: HealthConnectAccess,
     onPair: () -> Unit,
     onUnpair: () -> Unit,
+    unpairFailed: Boolean = false,
 ) {
     val context = LocalContext.current
     var notificationsGranted by remember { mutableStateOf(hasNotificationPermission(context)) }
@@ -110,7 +111,7 @@ fun StatusScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                item { PairingCard(state.pairing, onPair, onUnpair) }
+                item { PairingCard(state.pairing, onPair, onUnpair, unpairFailed) }
                 item { SyncCard(state, controller) }
                 item {
                     PermissionsCard(
@@ -160,7 +161,7 @@ private fun Fact(label: String, value: String) {
 }
 
 @Composable
-private fun PairingCard(pairing: PairingState, onPair: () -> Unit, onUnpair: () -> Unit) {
+private fun PairingCard(pairing: PairingState, onPair: () -> Unit, onUnpair: () -> Unit, unpairFailed: Boolean) {
     var confirmUnpair by remember { mutableStateOf(false) }
     Section("Server") {
         when (pairing) {
@@ -175,6 +176,14 @@ private fun PairingCard(pairing: PairingState, onPair: () -> Unit, onUnpair: () 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = onPair) { Text("Pair again") }
                     TextButton(onClick = { confirmUnpair = true }) { Text("Unpair") }
+                }
+                if (unpairFailed) {
+                    Text(
+                        "The pairing could not be removed on this phone, so it is still paired and still " +
+                            "uploading. Try again; if it keeps failing, restart the phone.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                 }
             }
         }
@@ -215,7 +224,11 @@ private fun SyncCard(state: SyncUiState, controller: SyncController) {
                 SyncActivity.IDLE -> "Idle"
                 SyncActivity.SYNCING -> "Syncing"
                 SyncActivity.BACKFILLING ->
-                    if (state.lastError?.retryAtMs != null) "Backfilling, waiting to retry" else "Backfilling"
+                    if ((state.lastError?.retryAtMs ?: 0) > System.currentTimeMillis()) {
+                        "Backfilling, waiting to retry"
+                    } else {
+                        "Backfilling"
+                    }
             },
         )
         Fact("Last sync", Format.dateTime(state.lastSyncMs))
@@ -239,11 +252,8 @@ private fun SyncCard(state: SyncUiState, controller: SyncController) {
                     if (it.consecutiveFailures > 1) " (${it.consecutiveFailures} syncs in a row)" else "",
                 style = MaterialTheme.typography.bodySmall,
             )
-            it.retryAtMs?.let { retryAt ->
-                Text(
-                    "Waiting to retry at ${Format.dateTime(retryAt)}; sooner if the connection comes back.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+            Format.retryLine(it.errorCode, it.retryAtMs, System.currentTimeMillis())?.let { line ->
+                Text(line, style = MaterialTheme.typography.bodyMedium)
             }
         }
         state.skipReason?.let {

@@ -148,10 +148,20 @@ class HealthConnectSource(
             throw e
         } catch (e: Exception) {
             throw classify(e)
+        } catch (e: OutOfMemoryError) {
+            // A page of very large records (an exercise route, a long series) did not fit in
+            // memory as JSON. By the time this is caught the half-built page is garbage, so it is
+            // safe to carry on: reported as a read that failed, which the backfill answers by
+            // asking for fewer records at a time. Left uncaught it would kill the process, the
+            // service would restart at the same page, and the backfill would never get past it.
+            throw HealthSourceException(HealthSourceException.Kind.TRANSIENT, ERROR_PAGE_TOO_LARGE)
         }
     }
 
     companion object {
+        /** A page of records was too large to hold in memory at once. */
+        const val ERROR_PAGE_TOO_LARGE = "hc_page_too_large"
+
         /**
          * The client library turns the platform's error codes into plain exceptions
          * (`ExceptionConverter`): security, invalid argument, I/O and remote keep a type of

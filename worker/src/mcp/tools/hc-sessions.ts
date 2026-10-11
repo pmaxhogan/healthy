@@ -270,7 +270,12 @@ export function registerHcSessionTools(server: McpServer, deps: ToolDeps): void 
       const opened = await openStampedPage(deps.hc, call.devices, "sleep_sessions", args);
       if (!opened.ok) return toolError(opened.errorCode);
       const { page } = opened;
-      const coverage = await deviceCoverageFor(deps, call, SLEEP_TYPES);
+      // The tool is about sleep sessions; what is joined onto a night is listed
+      // only where the phone has some.
+      const coverage = await deviceCoverageFor(deps, call, {
+        types: SLEEP_TYPES,
+        named: [TYPE_SLEEP],
+      });
       const allowed = typeAllowed(call.rules, TYPE_SLEEP);
       const range = parseRange({
         start: args.start,
@@ -340,7 +345,10 @@ export function registerHcSessionTools(server: McpServer, deps: ToolDeps): void 
       const opened = await openStampedPage(deps.hc, call.devices, "exercise_sessions", args);
       if (!opened.ok) return toolError(opened.errorCode);
       const { page } = opened;
-      const coverage = await deviceCoverageFor(deps, call, EXERCISE_TYPES);
+      const coverage = await deviceCoverageFor(deps, call, {
+        types: EXERCISE_TYPES,
+        named: [TYPE_EXERCISE],
+      });
       const allowed = typeAllowed(call.rules, TYPE_EXERCISE);
       const range = parseRange({
         start: args.start,

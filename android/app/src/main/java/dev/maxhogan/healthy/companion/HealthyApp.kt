@@ -3,7 +3,9 @@ package dev.maxhogan.healthy.companion
 import android.app.Application
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStore
 import dev.maxhogan.healthy.companion.hc.HealthConnectAccess
 import dev.maxhogan.healthy.companion.sync.KeystoreTokenCipher
@@ -17,7 +19,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 
-private val Context.appDataStore: DataStore<Preferences> by preferencesDataStore(name = "healthy")
+// A file that cannot be parsed is replaced by an empty one, which reads as "not paired": the
+// owner scans again. Without it every read would fail for good and the app could do nothing.
+private val Context.appDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "healthy",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 /**
  * The process-wide object graph. Built lazily on first use so a worker or receiver that needs

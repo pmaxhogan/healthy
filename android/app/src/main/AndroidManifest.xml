@@ -55,6 +55,12 @@
     <!-- The full-history backfill runs as a foreground service of type "health". -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+    <!--
+        Keeps the CPU on while the backfill is working with the screen off; a foreground service
+        alone keeps the process, not the processor. Always taken with a timeout. (WorkManager
+        declares the same permission for its own use.)
+    -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Backfill progress, and a warning after repeated failed syncs. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Reading the pairing QR code; frames are decoded on the device and never stored. -->

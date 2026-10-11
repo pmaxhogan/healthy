@@ -105,11 +105,11 @@ export const JQ_EXAMPLES = {
   ],
   hc_coverage: [
     ".[] | {type, availability, recordCount, firstAt, lastAt, origins}",
-    '.[] | select(.availability != "ok") | {type, availability, permission}',
+    ".[] | select(.lastRecordFrom != null) | {type, lastAt, lastSyncAt, lastRecordFrom}",
   ],
   hc_sync_status: [
     '.[] | select(.kind == "device") | {healthSystem, status, lastUploadAt, phoneBacklog, queuedBatches, recentFailures}',
-    '.[] | select(.kind == "type_sync" and .backfillComplete == false) | {type, backlog, backfillOldestAt}',
+    '.[] | select(.kind == "type_sync") | {type, recordCount, backlog, backfillComplete, backfillOldestAt}',
   ],
   hc_records: [
     ".[] | {time: (.time // .start), origin, data}",

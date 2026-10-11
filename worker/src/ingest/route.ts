@@ -3,8 +3,16 @@
  *
  * This is the one machine-facing route in the Hono app, and it sits ABOVE the
  * owner gate (see `worker/src/app.ts`): the phone has no Cloudflare Access
- * identity and no password session, so Access is configured to let this exact
- * path through and the bearer check below is the whole of its authentication.
+ * identity and no password session, so Access is configured to let this path
+ * through and the bearer check below is the whole of its authentication.
+ *
+ * Access lets through more than this file serves: its bypass entry covers the
+ * path and everything beneath it, and matches without regard to case. Only the
+ * exact path is registered here, so a sub-path or another casing falls to the
+ * owner gate, which checks the Access identity itself and answers 403. That
+ * fail-closed fall-through is what keeps the opening one route wide -- so
+ * NOTHING may ever be registered beneath this path without its own
+ * authentication: it would be on the internet with no Access in front of it.
  * Read it as the security boundary it is.
  *
  * What the route does, in order, and why in that order:

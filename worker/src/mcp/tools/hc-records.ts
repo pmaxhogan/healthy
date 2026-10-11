@@ -441,7 +441,7 @@ export function registerHcRecordTools(server: McpServer, deps: ToolDeps): void {
         nowMs: call.nowMs,
       });
       if (range.endMs < range.startMs) return toolError("invalid_range");
-      const coverage = await deviceCoverageFor(deps, call, [args.type]);
+      const coverage = await deviceCoverageFor(deps, call, { named: [args.type] });
       const allowed = typeAllowed(call.rules, args.type);
       const rows = allowed
         ? await readRows(deps, call, {
@@ -466,6 +466,7 @@ export function registerHcRecordTools(server: McpServer, deps: ToolDeps): void {
         page,
         items,
         coverage,
+        named: [args.type],
         warnings: allowed ? [] : [typeDeniedWarning(args.type)],
         extra: { units: unitsFor(args.type), order: args.order ?? "asc" },
         // A `jq` program's output rows are not the records, so only an
@@ -533,7 +534,7 @@ export function registerHcRecordTools(server: McpServer, deps: ToolDeps): void {
         nowMs: call.nowMs,
       });
       if (range.endMs < range.startMs) return toolError("invalid_range");
-      const coverage = await deviceCoverageFor(deps, call, [type]);
+      const coverage = await deviceCoverageFor(deps, call, { named: [type] });
       const allowed = typeAllowed(call.rules, type);
       const fillPlan = bmrFillPlan(call, type, args.bmr_fill === true);
       const metrics = args.metrics ?? defaultMetrics(type);

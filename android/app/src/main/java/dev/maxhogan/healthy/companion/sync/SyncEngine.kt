@@ -5,8 +5,11 @@ import dev.maxhogan.healthy.companion.hc.HealthAccess
 import dev.maxhogan.healthy.companion.hc.HealthConnectStatus
 import java.io.IOException
 import java.security.MessageDigest
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.random.Random
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -68,8 +71,13 @@ sealed interface RunResult {
 
 /** How one step of the backfill ended. The caller loops while it is [Progress]. */
 sealed interface BackfillStep {
-    /** @property uploaded whether the step sent anything, so the caller can pace its requests */
-    data class Progress(val uploaded: Boolean) : BackfillStep
+    /**
+     * @property uploaded whether the step sent anything
+     * @property requests how many requests it made of the server, so the caller can pace them:
+     *   one page of large records goes up as several batches, and each counts against the
+     *   server's per-device rate
+     */
+    data class Progress(val uploaded: Boolean, val requests: Int = if (uploaded) 1 else 0) : BackfillStep
 
     /** Every granted type has been read back to its oldest record. */
     data object Complete : BackfillStep
@@ -91,6 +99,16 @@ class BackfillRun {
 
     /** Months already restarted once because their page token was refused. */
     internal val pageRestarts: MutableSet<String> = HashSet()
+
+    /** How many records to ask for at a time, per type, steered by what the pages weigh. */
+    internal val pages = PageSizer()
+
+    /**
+     * True when the server refused the token during this session, as opposed to the session
+     * finding a refusal that was already known. The owner is told of a refusal once.
+     */
+    var rejectedNow: Boolean = false
+        internal set
 }
 
 /**
@@ -121,6 +139,15 @@ class BackfillRun {
  * - a batch the server keeps answering 5xx for stalls its type (and the backfill of that type)
  *   until the server recovers: it is retried for as long as that takes, never skipped.
  *
+ * **Pushback is not failure.** Health Connect's rate limit and the server's 429 both mean "not
+ * now". Each closes a gate ([PushbackGate]) that every caller in the process shares: until it
+ * opens, neither the backfill nor an incremental sync makes that kind of request, a run that
+ * finds it closed counts no failed sync, and a wait the backfill has put on screen is left
+ * there. See [syncOnce] and [backfillStep].
+ *
+ * **The store may fail too.** See [SyncStateStore] for the rule; [storeFailure] is where a
+ * failed write shows.
+ *
  * Nothing here logs, and no error code is ever built from a message.
  *
  * @param currentPairing the pairing as it is stored right now. It is read inside the engine's
@@ -128,8 +155,8 @@ class BackfillRun {
  *   (or wipe) the state of a newer one, nor keep uploading after the owner unpaired
  */
 class SyncEngine(
-    private val store: SyncStateStore,
-    private val source: HealthSource,
+    store: SyncStateStore,
+    source: HealthSource,
     private val transport: HttpTransport,
     private val appVersion: String,
     private val types: List<String>,
@@ -142,6 +169,31 @@ class SyncEngine(
     private val mutex = Mutex()
     private var uploads = 0L
     private val uploadBackoff = Backoff(UPLOAD_BACKOFF_BASE_MS, UPLOAD_BACKOFF_CAP_MS, random = random)
+    private val store: SyncStateStore = GuardedStateStore(store)
+
+    /** Closed while Health Connect's rate limit is being waited out. One per process. */
+    private val hcGate = PushbackGate(clock)
+
+    /** Closed while the server has asked for time (a 429, or any refusal with `retry-after`). */
+    private val serverGate = PushbackGate(clock)
+    private val source: HealthSource = GatedHealthSource(source, hcGate)
+    private val storeFailed = MutableStateFlow<StoredError?>(null)
+
+    /**
+     * Set while the state store is failing, and cleared by the next unit that gets through it.
+     * Kept in memory because the store that failed cannot be asked to remember that it did.
+     */
+    val storeFailure: StateFlow<StoredError?> get() = storeFailed
+
+    /** Runs one entry point, turning a store that will not read or write into [onFailure]. */
+    private suspend fun <T> storing(onFailure: () -> T, block: suspend () -> T): T = try {
+        val result = block()
+        if (storeFailed.value != null) storeFailed.value = null
+        result
+    } catch (e: StateStoreException) {
+        storeFailed.value = StoredError(ERROR_STATE_STORE, clock())
+        onFailure()
+    }
 
     private sealed interface Outcome {
         data object Ok : Outcome
@@ -158,6 +210,8 @@ class SyncEngine(
             val upload: Boolean = false,
             val transientHc: Boolean = false,
             val retryable: Boolean = true,
+            /** Asked to wait (a rate limit), not failed: no failed sync is counted for it. */
+            val pushback: Boolean = false,
         ) : Outcome
 
         /** @property fresh the server refused the token just now, in this run */
@@ -180,13 +234,26 @@ class SyncEngine(
      * A run that could read nothing is not a success: with no type granted it fails as
      * `no_permissions`, and in the background without the background-read grant it is skipped
      * as `background_read_missing`. Both still report the phone's state to the server.
+     *
+     * While the server's gate is closed the run does nothing at all, and while Health Connect's
+     * is closed it reads nothing and only reports its state. Either way it returns the refusal
+     * that closed the gate as a [RunResult.Failed], but no failed sync is counted (so the
+     * three-failures notification is not raised by a wait), and if the backfill is showing
+     * "waiting to retry" that is left exactly as it is.
      */
-    suspend fun syncOnce(session: Session): RunResult = mutex.withLock {
+    suspend fun syncOnce(session: Session): RunResult = storing({ RunResult.Failed(ERROR_STATE_STORE) }) {
+        mutex.withLock { syncLocked(session) }
+    }
+
+    private suspend fun syncLocked(session: Session): RunResult {
         when (prepare(session)) {
-            Ready.REJECTED -> return@withLock RunResult.PairingRejected(notify = false)
-            Ready.STALE -> return@withLock RunResult.Failed(ERROR_PAIRING_CHANGED, retryable = false)
+            Ready.REJECTED -> return RunResult.PairingRejected(notify = false)
+            Ready.STALE -> return RunResult.Failed(ERROR_PAIRING_CHANGED, retryable = false)
             Ready.OK -> Unit
         }
+        // The server asked for time. Nothing it has not asked for is sent, and nothing is read
+        // that could not be delivered anyway.
+        serverGate.remainingMs()?.let { return RunResult.Failed(serverGate.errorCode, it) }
         val runStart = clock()
         // An error from when a type was still granted says nothing about it now.
         for (type in types) {
@@ -203,8 +270,13 @@ class SyncEngine(
             // before the background check, which would otherwise hide it behind a lesser reason.
             val available = session.access.status == HealthConnectStatus.AVAILABLE
             failure = Outcome.RunFailed(if (available) ERROR_NO_PERMISSIONS else ERROR_HC_UNAVAILABLE, retryable = false)
+        } else if (!session.canRead) {
+            return skipRun(session)
+        } else if (hcGate.remainingMs() != null) {
+            // Health Connect said "not now" to someone in this process, and that goes for every
+            // reader until the moment it gave. No quota is spent finding out again.
+            failure = Outcome.RunFailed(hcGate.errorCode, pushback = true)
         } else {
-            if (!session.canRead) return@withLock skipRun(session)
             val rotation = store.updateGlobal {
                 it.copy(rotation = (it.rotation + 1) % ROTATION_MODULUS, skipReason = null)
             }.rotation
@@ -219,7 +291,7 @@ class SyncEngine(
                         lastTypeError = outcome.errorCode
                     }
                     is Outcome.RunFailed -> failure = outcome
-                    is Outcome.Rejected -> return@withLock RunResult.PairingRejected(notify = outcome.fresh)
+                    is Outcome.Rejected -> return RunResult.PairingRejected(notify = outcome.fresh)
                 }
                 if (failure != null) break
             }
@@ -233,38 +305,48 @@ class SyncEngine(
             // the error first, so the server never sees an error one sync late.
             val now = clock()
             val standing = failure?.let { StoredError(it.errorCode, now) }
-            store.updateGlobal { it.copy(lastError = standing, retryAtMs = null) }
+            store.updateGlobal { it.withRunError(standing, now) }
             when (val outcome = sendState(session)) {
-                is Outcome.Rejected -> return@withLock RunResult.PairingRejected(notify = outcome.fresh)
+                is Outcome.Rejected -> return RunResult.PairingRejected(notify = outcome.fresh)
                 is Outcome.RunFailed -> failure = if (outcome === stale) outcome else failure ?: outcome
                 is Outcome.TypeFailed -> failure = failure ?: Outcome.RunFailed(outcome.errorCode)
                 Outcome.Ok -> Unit
             }
         }
 
-        val failed = failure
-        when {
-            failed == null -> {
-                val now = clock()
-                store.updateGlobal {
-                    it.copy(
-                        lastSyncMs = now,
-                        consecutiveFailures = 0,
-                        lastError = null,
-                        retryAtMs = null,
-                        skipNotified = false,
-                        skipReason = null,
-                    )
-                }
-                RunResult.Success
+        val failed = failure ?: run {
+            val now = clock()
+            store.updateGlobal {
+                it.copy(lastSyncMs = now, consecutiveFailures = 0, skipNotified = false, skipReason = null)
+                    .withRunError(null, now)
             }
-            // Not this pairing's failure to record: the store belongs to the new one.
-            failed.errorCode == ERROR_PAIRING_CHANGED -> RunResult.Failed(ERROR_PAIRING_CHANGED, retryable = false)
-            else -> {
-                noteFailure(failed.errorCode)
-                RunResult.Failed(failed.errorCode, failed.retryAfterMs, failed.retryable)
-            }
+            return RunResult.Success
         }
+        return runFailed(failed)
+    }
+
+    /**
+     * Sets the error a run ends with (or clears it), unless a backfill is waiting something out:
+     * then `lastError` and `retryAtMs` say why nothing is moving and when it is tried again, and
+     * a sync that happens to run in the meantime must not take that off the screen.
+     */
+    private fun GlobalState.withRunError(error: StoredError?, nowMs: Long): GlobalState =
+        if (waitPending(nowMs)) this else copy(lastError = error, retryAtMs = null)
+
+    /** Records how a run failed and builds its result. */
+    private suspend fun runFailed(failed: Outcome.RunFailed): RunResult.Failed {
+        when {
+            // Not this pairing's failure to record: the store belongs to the new one.
+            failed.errorCode == ERROR_PAIRING_CHANGED -> return RunResult.Failed(ERROR_PAIRING_CHANGED, retryable = false)
+            // Asked to wait. Shown, but not a failed sync: the count behind the "syncs keep
+            // failing" notification does not move.
+            failed.pushback -> {
+                val now = clock()
+                store.updateGlobal { it.withRunError(StoredError(failed.errorCode, now), now) }
+            }
+            else -> noteFailure(failed.errorCode)
+        }
+        return RunResult.Failed(failed.errorCode, failed.retryAfterMs, failed.retryable)
     }
 
     /**
@@ -272,25 +354,25 @@ class SyncEngine(
      * be read. Nothing is sent: a state report built from an unknown state would overwrite a
      * true one on the server.
      */
-    suspend fun failRun(errorCode: String): RunResult.Failed = mutex.withLock {
-        noteFailure(errorCode)
-        RunResult.Failed(errorCode)
+    suspend fun failRun(errorCode: String): RunResult.Failed = storing({ RunResult.Failed(errorCode) }) {
+        mutex.withLock {
+            noteFailure(errorCode)
+            RunResult.Failed(errorCode)
+        }
     }
 
     /** Something the owner asked for could not be done; say why, without counting a failed sync. */
-    suspend fun noteProblem(errorCode: String) = mutex.withLock {
-        val now = clock()
-        store.updateGlobal { it.copy(lastError = StoredError(errorCode, now), retryAtMs = null) }
+    suspend fun noteProblem(errorCode: String) = storing<Unit>({}) {
+        mutex.withLock {
+            val now = clock()
+            store.updateGlobal { it.copy(lastError = StoredError(errorCode, now), retryAtMs = null) }
+        }
     }
 
     private suspend fun noteFailure(errorCode: String) {
         val now = clock()
         store.updateGlobal {
-            it.copy(
-                consecutiveFailures = it.consecutiveFailures + 1,
-                lastError = StoredError(errorCode, now),
-                retryAtMs = null,
-            )
+            it.copy(consecutiveFailures = it.consecutiveFailures + 1).withRunError(StoredError(errorCode, now), now)
         }
     }
 
@@ -300,9 +382,11 @@ class SyncEngine(
      * moving and when it will be tried again, instead of a backfill that merely looks busy.
      * Cleared by the next step that makes progress.
      */
-    suspend fun noteBackfillWaiting(errorCode: String, retryAtMs: Long) = mutex.withLock {
-        val now = clock()
-        store.updateGlobal { it.copy(lastError = StoredError(errorCode, now), retryAtMs = retryAtMs) }
+    suspend fun noteBackfillWaiting(errorCode: String, retryAtMs: Long) = storing<Unit>({}) {
+        mutex.withLock {
+            val now = clock()
+            store.updateGlobal { it.copy(lastError = StoredError(errorCode, now), retryAtMs = retryAtMs) }
+        }
     }
 
     /**
@@ -310,9 +394,18 @@ class SyncEngine(
      * next one, so the block and its error are dropped; positions and counts are kept, in case
      * the same device is paired again.
      */
-    suspend fun pairingCleared() = mutex.withLock {
-        store.updateGlobal {
-            it.copy(rejectedTokenTag = null, lastError = it.lastError.unlessUnauthorized(), retryAtMs = null)
+    suspend fun pairingCleared() = storing<Unit>({}) {
+        mutex.withLock {
+            store.updateGlobal {
+                it.copy(
+                    rejectedTokenTag = null,
+                    lastError = it.lastError.unlessUnauthorized(),
+                    retryAtMs = null,
+                    // Whatever stopped the backfill under the old pairing says nothing about
+                    // the next one.
+                    backfillGaveUp = null,
+                )
+            }
         }
     }
 
@@ -333,8 +426,7 @@ class SyncEngine(
             is Outcome.Rejected -> return RunResult.PairingRejected(notify = outcome.fresh)
             is Outcome.RunFailed -> {
                 if (outcome === stale) return RunResult.Failed(ERROR_PAIRING_CHANGED, retryable = false)
-                noteFailure(outcome.errorCode)
-                return RunResult.Failed(outcome.errorCode, outcome.retryAfterMs)
+                return runFailed(outcome)
             }
             is Outcome.TypeFailed -> {
                 noteFailure(outcome.errorCode)
@@ -465,18 +557,35 @@ class SyncEngine(
      * every record twice). That is the owner's recovery path when the server lost or could not
      * apply something it had acknowledged, and it is safe to repeat, since the server stores by
      * record id. The changes tokens are left alone: incremental sync is not disturbed.
+     *
+     * A re-run differs from a first backfill in one thing: it also removes. The first time there
+     * is nothing on the server to take away, so a month only uploads the hourly platform totals
+     * it has. The second time the server may hold a total for an hour that has none any more
+     * (its records were deleted while a changes token was expired, say), so each month of a
+     * re-run also sends a delete for every hour without a total, and it walks every month of the
+     * range the earlier backfill covered, including months that have lost all their records.
+     *
+     * Asking is also what lifts a backfill that had given up: the owner wants it tried.
      */
-    suspend fun requestBackfill(session: Session) = mutex.withLock {
+    suspend fun requestBackfill(session: Session) = storing<Unit>({}) {
+        mutex.withLock { requestBackfillLocked(session) }
+    }
+
+    private suspend fun requestBackfillLocked(session: Session) {
         // First, so that state left by another device is gone before the request is recorded.
-        if (prepare(session) == Ready.STALE) return@withLock
+        if (prepare(session) == Ready.STALE) return
         val again = SyncStateReport.backfillComplete(types, session.access, store.snapshot())
-        store.updateGlobal { it.copy(backfillRequested = true) }
+        store.updateGlobal { it.copy(backfillRequested = true, backfillGaveUp = null) }
         if (again) {
             for (type in types) {
                 if (session.access.types[type] != Grant.GRANTED) continue
                 store.updateType(type) {
                     it.copy(
-                        backfill = BackfillState(),
+                        backfill = BackfillState(
+                            rerun = true,
+                            rerunFloorMs = it.backfill.floorMonthMs,
+                            rerunTopMs = it.backfill.topMonthMs,
+                        ),
                         backfillError = null,
                         uploaded = 0,
                         rejected = 0,
@@ -506,13 +615,25 @@ class SyncEngine(
      */
     private suspend fun reconcileHistory(session: Session) {
         val historyGranted = session.access.historyRead == Grant.GRANTED
+        // Called before every backfill step, and almost never has anything to do: look first,
+        // and write only for a type that needs it.
+        val snapshot = store.snapshot()
         for (type in types) {
             if (session.access.types[type] != Grant.GRANTED) continue
+            val seen = snapshot.type(type).backfill
+            if (!seen.started || seen.fullHistory == historyGranted) continue
+            if (!historyGranted && seen.complete) continue
             store.updateType(type) {
                 val backfill = it.backfill
                 when {
                     !backfill.started -> it
-                    historyGranted && !backfill.fullHistory -> it.copy(backfill = BackfillState())
+                    historyGranted && !backfill.fullHistory -> it.copy(
+                        backfill = BackfillState(
+                            rerun = backfill.rerun,
+                            rerunFloorMs = backfill.rerunFloorMs ?: backfill.floorMonthMs.takeIf { backfill.rerun },
+                            rerunTopMs = backfill.rerunTopMs ?: backfill.topMonthMs.takeIf { backfill.rerun },
+                        ),
+                    )
                     !historyGranted && backfill.fullHistory && !backfill.complete ->
                         it.copy(backfill = backfill.copy(fullHistory = false))
                     else -> it
@@ -528,11 +649,24 @@ class SyncEngine(
      *
      * A batch the server keeps failing with 5xx is reported as [BackfillStep.Backoff] every
      * time: the type waits for the server, it is not skipped.
+     *
+     * A step that finds a gate closed (Health Connect's rate limit, or the server having asked
+     * for time, whoever in the process was told) is a [BackfillStep.Backoff] carrying the time
+     * left, and makes no request.
+     *
+     * When the session can do no more, that is persisted ([GlobalState.backfillGaveUp]) before
+     * the step returns, so the periodic worker does not start the service again for nothing,
+     * in this process or the next.
      */
-    suspend fun backfillStep(session: Session, run: BackfillRun): BackfillStep = mutex.withLock {
+    suspend fun backfillStep(session: Session, run: BackfillRun): BackfillStep =
+        storing({ BackfillStep.Backoff(ERROR_STATE_STORE) }) {
+            mutex.withLock { backfillLocked(session, run) }
+        }
+
+    private suspend fun backfillLocked(session: Session, run: BackfillRun): BackfillStep {
         when (prepare(session)) {
-            Ready.REJECTED -> return@withLock BackfillStep.PairingRejected
-            Ready.STALE -> return@withLock BackfillStep.Backoff(ERROR_PAIRING_CHANGED)
+            Ready.REJECTED -> return BackfillStep.PairingRejected
+            Ready.STALE -> return BackfillStep.Backoff(ERROR_PAIRING_CHANGED)
             Ready.OK -> Unit
         }
         if (!session.canRead) {
@@ -540,8 +674,10 @@ class SyncEngine(
             // or bring the app to the front.
             val now = clock()
             store.updateGlobal { it.copy(skipReason = StoredError(ERROR_BACKGROUND_READ, now)) }
-            return@withLock BackfillStep.Incomplete(ERROR_BACKGROUND_READ)
+            return BackfillStep.Incomplete(ERROR_BACKGROUND_READ)
         }
+        serverGate.remainingMs()?.let { return BackfillStep.Backoff(serverGate.errorCode, it) }
+        hcGate.remainingMs()?.let { return BackfillStep.Backoff(hcGate.errorCode, it) }
         reconcileHistory(session)
         val snapshot = store.snapshot()
         val candidates = types.filter {
@@ -549,24 +685,29 @@ class SyncEngine(
         }
         if (candidates.isEmpty()) {
             val error = run.skipped.values.lastOrNull()
-            return@withLock if (error == null) BackfillStep.Complete else BackfillStep.Incomplete(error)
+            if (error == null) {
+                backfillMoving()
+                return BackfillStep.Complete
+            }
+            val passing = run.skipped.values.any { it !in BackfillGaveUp.PERMANENT }
+            gaveUp(session, error, retry = passing)
+            return BackfillStep.Incomplete(error)
         }
         val type = candidates.firstOrNull { !snapshot.type(it).backfill.started }
             ?: candidates.maxBy { snapshot.type(it).backfill.monthMs ?: Long.MIN_VALUE }
 
         val uploadsBefore = uploads
-        when (val outcome = guarded(type, backfill = true, clock()) { backfillUnit(session, type, run) }) {
+
+        fun progress() = (uploads - uploadsBefore).toInt().let { BackfillStep.Progress(uploaded = it > 0, requests = it) }
+        return when (val outcome = guarded(type, backfill = true, clock()) { backfillUnit(session, type, run) }) {
             Outcome.Ok -> {
                 run.strikes.remove(type)
-                // Whatever the backfill was waiting out is over.
-                if (store.snapshot().global.retryAtMs != null) {
-                    store.updateGlobal { it.copy(lastError = null, retryAtMs = null) }
-                }
-                BackfillStep.Progress(uploaded = uploads != uploadsBefore)
+                backfillMoving()
+                progress()
             }
             is Outcome.TypeFailed -> {
                 run.skipped[type] = outcome.errorCode
-                BackfillStep.Progress(uploaded = uploads != uploadsBefore)
+                progress()
             }
             is Outcome.RunFailed -> {
                 if (outcome.transientHc) {
@@ -577,13 +718,48 @@ class SyncEngine(
                         run.skipped[type] = outcome.errorCode
                         val error = StoredError(outcome.errorCode, clock())
                         store.updateType(type) { it.copy(lastError = error, backfillError = error) }
-                        return@withLock BackfillStep.Progress(uploaded = uploads != uploadsBefore)
+                        return progress()
                     }
                 }
-                BackfillStep.Backoff(outcome.errorCode, outcome.retryAfterMs)
+                // Health Connect gives no time of its own; the gate that just closed has one.
+                val wait = outcome.retryAfterMs ?: hcGate.remainingMs().takeIf { outcome.pushback && !outcome.upload }
+                BackfillStep.Backoff(outcome.errorCode, wait)
             }
-            is Outcome.Rejected -> BackfillStep.PairingRejected
+            is Outcome.Rejected -> {
+                run.rejectedNow = outcome.fresh
+                gaveUp(session, ERROR_UNAUTHORIZED, retry = false)
+                BackfillStep.PairingRejected
+            }
         }
+    }
+
+    /** The backfill got somewhere: whatever it was waiting out, or had given up over, is over. */
+    private suspend fun backfillMoving() {
+        val global = store.snapshot().global
+        if (global.retryAtMs == null && global.backfillGaveUp == null) return
+        store.updateGlobal {
+            val cleared = if (it.retryAtMs != null) it.copy(lastError = null, retryAtMs = null) else it
+            cleared.copy(backfillGaveUp = null)
+        }
+    }
+
+    /**
+     * This session can do no more. Remembered across process death, with what the phone allowed
+     * at the time, so that a change in that (a grant, a new pairing, a new build) is the cue to
+     * try again and nothing else is.
+     *
+     * @param retry true when the cause may pass by itself, so one more try is allowed later
+     */
+    private suspend fun gaveUp(session: Session, errorCode: String, retry: Boolean) {
+        val now = clock()
+        val record = BackfillGaveUp(
+            errorCode = errorCode,
+            atMs = now,
+            fingerprint = BackfillGaveUp.fingerprint(types, session),
+            appVersion = appVersion,
+            retryAtMs = if (retry) now + BackfillGaveUp.RETRY_MS else null,
+        )
+        store.updateGlobal { it.copy(backfillGaveUp = record) }
     }
 
     private suspend fun backfillUnit(session: Session, type: String, run: BackfillRun): Outcome {
@@ -593,18 +769,28 @@ class SyncEngine(
         if (state.token == null && state.reread == null) takeToken(type)
 
         val backfill = state.backfill
+        // A re-run of a type with platform totals walks every month, so that it can take away
+        // the totals of months that have lost their records. Everything else skips empty months.
+        val everyMonth = backfill.rerun && AggMetric.forType(type) != null
         if (!backfill.started) {
             val fullHistory = session.access.historyRead == Grant.GRANTED
-            val earliest = probe(type, ascending = true)
-            if (earliest == null) {
+            val first = probe(type, ascending = true)
+            val earliest = first?.startMs
+            val before = backfill.takeIf { everyMonth && it.rerunFloorMs != null }
+            if (earliest == null && before == null) {
                 store.updateType(type) {
-                    it.copy(backfill = BackfillState(started = true, complete = true, fullHistory = fullHistory))
+                    it.copy(
+                        backfill = BackfillState(started = true, complete = true, fullHistory = fullHistory, rerun = backfill.rerun),
+                    )
                 }
                 return Outcome.Ok
             }
-            val latest = probe(type, ascending = false) ?: earliest
-            val top = maxOf(Months.floor(clock()), Months.floor(latest))
-            val floor = minOf(Months.floor(earliest), top)
+            val newest = if (earliest == null) null else probe(type, ascending = false)
+            val latest = earliest?.let { newest?.startMs ?: it }
+            // The two records just read are the first word on how heavy this type's records are.
+            listOfNotNull(first, newest).maxOfOrNull { it.rawBytes }?.let { run.pages.seed(type, it.toLong()) }
+            val top = listOfNotNull(Months.floor(clock()), latest?.let(Months::floor), before?.rerunTopMs).max()
+            val floor = minOf(listOfNotNull(earliest?.let(Months::floor), before?.rerunFloorMs).min(), top)
             store.updateType(type) {
                 it.copy(
                     backfill = BackfillState(
@@ -613,6 +799,7 @@ class SyncEngine(
                         floorMonthMs = floor,
                         monthMs = top,
                         fullHistory = fullHistory,
+                        rerun = backfill.rerun,
                     ),
                 )
             }
@@ -622,23 +809,47 @@ class SyncEngine(
         val month = backfill.monthMs ?: return Outcome.TypeFailed("backfill_state_invalid")
         val floor = backfill.floorMonthMs ?: return Outcome.TypeFailed("backfill_state_invalid")
         val monthEnd = Months.next(month)
+        // A month is read to its end at the size it was started with: a page token is only ever
+        // handed back with the page size that produced it.
+        val pageSize = if (backfill.pageToken == null) {
+            run.pages.size(type)
+        } else {
+            backfill.pageSize ?: HealthSource.DEFAULT_PAGE_SIZE
+        }
         val page = try {
-            source.readRecords(type, month, monthEnd, backfill.pageToken)
+            source.readRecords(type, month, monthEnd, backfill.pageToken, pageSize = pageSize)
         } catch (e: HealthSourceException) {
+            val transient = e.kind == HealthSourceException.Kind.TRANSIENT
+            if (transient && tooMuchAtOnce(e, type, run) && run.pages.shrink(type, pageSize)) {
+                // The page may simply have been too much at once. The month is started again at
+                // a smaller size, straight away and without counting against the type; what was
+                // already uploaded of it goes again, which the server takes as the same records.
+                store.updateType(type) { it.copy(backfill = it.backfill.copy(pageToken = null, pageSize = null)) }
+                return Outcome.Ok
+            }
             if (e.kind != HealthSourceException.Kind.INVALID || backfill.pageToken == null) throw e
             // Start the month again, once per session. If its page tokens keep being refused
             // the type is set aside rather than read from page one for ever.
             if (!run.pageRestarts.add("$type\u001f$month")) return Outcome.TypeFailed(ERROR_PAGE_TOKEN)
-            store.updateType(type) { it.copy(backfill = it.backfill.copy(pageToken = null)) }
+            store.updateType(type) { it.copy(backfill = it.backfill.copy(pageToken = null, pageSize = null)) }
             return Outcome.Ok
         }
         val now = clock()
         val items = page.records.map(BatchItem::record)
+        run.pages.measured(type, items.size, items.sumOf { it.rawBytes.toLong() })
         val last = page.pageToken == null
+        if (last && items.isEmpty() && backfill.pageToken == null && !everyMonth) {
+            return skipEmptyMonths(type, month, floor)
+        }
         val aggregates = if (last) {
-            // Only hours that have a total. An empty hour needs no delete here: a first backfill
-            // has nothing to remove, and incremental sync deletes the hours it empties.
-            aggregateItems(type, Hours.covering(month, monthEnd).toHashSet(), includeDeletes = false, now)
+            // The month's own hours, and any later hour one of its records runs into: the month
+            // above may be empty and skipped, and that hour would then never get its total.
+            val hours = Hours.covering(month, monthEnd).toHashSet()
+            hours.addAll(touchedHours(items))
+            // A first backfill sends only the hours that have a total: there is nothing on the
+            // server to remove, and incremental sync deletes the hours it empties. A re-run
+            // also deletes the hours that have none, so the server's totals converge.
+            aggregateItems(type, hours, includeDeletes = backfill.rerun, now)
         } else {
             emptyList()
         }
@@ -646,7 +857,7 @@ class SyncEngine(
         return deliverAndCommit(session, type, position, items + aggregates, BACKFILL_ATTEMPTS) {
             val current = it.backfill
             if (!last) {
-                it.copy(backfill = current.copy(pageToken = page.pageToken))
+                it.copy(backfill = current.copy(pageToken = page.pageToken, pageSize = pageSize))
             } else {
                 val previous = Months.previous(month)
                 val done = previous < floor
@@ -654,6 +865,7 @@ class SyncEngine(
                     backfill = current.copy(
                         monthMs = if (done) month else previous,
                         pageToken = null,
+                        pageSize = null,
                         oldestDoneMs = month,
                         complete = done,
                     ),
@@ -662,10 +874,50 @@ class SyncEngine(
         }
     }
 
-    /** The time of the type's earliest or latest readable record, or null when it has none. */
-    private suspend fun probe(type: String, ascending: Boolean): Long? =
-        source.readRecords(type, 0, FAR_FUTURE_MS, null, ascending = ascending, pageSize = 1)
-            .records.firstOrNull()?.let(BatchItem::record)?.startMs
+    /**
+     * Whether a failed read is worth repeating smaller. A page that did not fit in memory is, at
+     * once. Any other failure is first tried again as it was (Health Connect does stumble), and
+     * only when it has failed [SHRINK_AFTER_STRIKES] times running is its size suspected.
+     */
+    private fun tooMuchAtOnce(e: HealthSourceException, type: String, run: BackfillRun): Boolean =
+        e.errorCode == HealthConnectSource.ERROR_PAGE_TOO_LARGE || (run.strikes[type] ?: 0) >= SHRINK_AFTER_STRIKES
+
+    /**
+     * [month] has no record at all. Rather than ask for every month below it in turn, ask once
+     * for the newest record older than it and go straight to that record's month; when there is
+     * none the type is done. A type with a reading every few years then costs a few requests,
+     * not one per month of its range, and nothing in between needs an upload.
+     */
+    private suspend fun skipEmptyMonths(type: String, month: Long, floor: Long): Outcome {
+        val older = if (month > floor) probe(type, ascending = false, endMs = month)?.startMs else null
+        store.updateType(type) {
+            val current = it.backfill
+            if (older == null) {
+                it.copy(
+                    backfill = current.copy(pageToken = null, oldestDoneMs = minOf(floor, month), complete = true),
+                    backlog = 0,
+                )
+            } else {
+                val target = Months.floor(older)
+                it.copy(
+                    backfill = current.copy(
+                        monthMs = target,
+                        // A record older than the range that was measured has appeared since.
+                        floorMonthMs = minOf(floor, target),
+                        pageToken = null,
+                        oldestDoneMs = Months.next(target),
+                    ),
+                    backlog = 0,
+                )
+            }
+        }
+        return Outcome.Ok
+    }
+
+    /** The type's earliest or latest readable record before [endMs], or null when it has none. */
+    private suspend fun probe(type: String, ascending: Boolean, endMs: Long = FAR_FUTURE_MS): BatchItem.Upsert? =
+        source.readRecords(type, 0, endMs, null, ascending = ascending, pageSize = 1)
+            .records.firstOrNull()?.let(BatchItem::record)
 
     // ---------------------------------------------------------------------------------------
     // Shared machinery
@@ -674,7 +926,16 @@ class SyncEngine(
     /** Whether [pairing] is still the one that is stored. True when nobody can be asked. */
     private suspend fun isCurrent(pairing: Pairing): Boolean {
         val provider = currentPairing ?: return true
-        return provider() == pairing
+        val current = try {
+            provider()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // The pairing store could not be read. Not knowing who the phone is paired with is
+            // a reason to send nothing, so it ends the unit like any other failed store.
+            throw StateStoreException(e)
+        }
+        return current == pairing
     }
 
     /** Whether this session may touch the stored state and the server at all. */
@@ -698,7 +959,9 @@ class SyncEngine(
         if (rejected == pairingTag(session)) return Ready.REJECTED
         // A different token, or the same one paired afresh: the owner has asked to try again,
         // and one request is all it costs to find out. The old refusal is no longer the news.
-        store.updateGlobal { it.copy(rejectedTokenTag = null, lastError = it.lastError.unlessUnauthorized()) }
+        store.updateGlobal {
+            it.copy(rejectedTokenTag = null, lastError = it.lastError.unlessUnauthorized(), backfillGaveUp = null)
+        }
         return Ready.OK
     }
 
@@ -717,8 +980,8 @@ class SyncEngine(
                     Outcome.TypeFailed(e.errorCode)
                 HealthSourceException.Kind.TRANSIENT ->
                     if (backfill) Outcome.RunFailed(e.errorCode, transientHc = true) else Outcome.TypeFailed(e.errorCode)
-                HealthSourceException.Kind.RATE_LIMITED, HealthSourceException.Kind.UNAVAILABLE ->
-                    Outcome.RunFailed(e.errorCode)
+                HealthSourceException.Kind.RATE_LIMITED -> Outcome.RunFailed(e.errorCode, pushback = true)
+                HealthSourceException.Kind.UNAVAILABLE -> Outcome.RunFailed(e.errorCode)
             }
         }
         when (outcome) {
@@ -876,8 +1139,7 @@ class SyncEngine(
                 }
                 UploadResult.Unauthorized -> return Delivery.Stopped(refused(session))
                 UploadResult.Stale -> return Delivery.Stopped(stale)
-                is UploadResult.Retry ->
-                    return Delivery.Stopped(Outcome.RunFailed(result.errorCode, result.retryAfterMs, upload = true))
+                is UploadResult.Retry -> return Delivery.Stopped(notDelivered(result))
             }
         }
         return Delivery.Done(tally)
@@ -901,12 +1163,20 @@ class SyncEngine(
         if (probe == null) return Outcome.RunFailed(bug.errorCode, upload = true)
         return when (val result = send(session, probe, attempts)) {
             is UploadResult.Bug -> Outcome.RunFailed(result.errorCode, upload = true)
-            is UploadResult.Retry -> Outcome.RunFailed(result.errorCode, result.retryAfterMs, upload = true)
+            is UploadResult.Retry -> notDelivered(result)
             UploadResult.Unauthorized -> refused(session)
             UploadResult.Stale -> stale
             is UploadResult.Ok, UploadResult.TooLarge, UploadResult.Conflict -> Outcome.TypeFailed(bug.errorCode)
         }
     }
+
+    /** A batch the server did not take this time. Pushback when it was a 429 that said so. */
+    private fun notDelivered(result: UploadResult.Retry): Outcome.RunFailed = Outcome.RunFailed(
+        result.errorCode,
+        result.retryAfterMs,
+        upload = true,
+        pushback = serverGate.remainingMs() != null && serverGate.uncounted && serverGate.errorCode == result.errorCode,
+    )
 
     /** The server answered 401. Latches the refusal, unless the pairing is no longer ours. */
     private suspend fun refused(session: Session): Outcome {
@@ -929,12 +1199,20 @@ class SyncEngine(
             // more byte goes out under the old pairing.
             if (!isCurrent(pairing)) return UploadResult.Stale
             uploads++
-            val result = try {
-                UploadClassifier.classify(transport.post(pairing.ingestUrl, pairing.token, batch.gzip))
+            val reply = try {
+                transport.post(pairing.ingestUrl, pairing.token, batch.gzip)
             } catch (_: IOException) {
-                UploadClassifier.network()
+                null
             }
+            val result = reply?.let(UploadClassifier::classify) ?: UploadClassifier.network()
+            if (result is UploadResult.Ok) serverGate.passed()
             if (result !is UploadResult.Retry) return result
+            // A 429, or any refusal that names a time: nobody in the process asks again before
+            // it. Only the 429 is pushback; a 503 with `retry-after` is still a failure.
+            val limited = reply?.status == HTTP_TOO_MANY_REQUESTS
+            if (limited || result.retryAfterMs != null) {
+                serverGate.close(result.errorCode, result.retryAfterMs, uncounted = limited)
+            }
             attempt++
             if (attempt >= attempts) return result
             val wait = uploadBackoff.delayMs(attempt - 1, result.retryAfterMs)
@@ -1042,6 +1320,10 @@ class SyncEngine(
         /** Health Connect refused a page token again after the read was started over. */
         const val ERROR_PAGE_TOKEN = "page_token_invalid"
 
+        /** The phone could not read or write its own sync state. Nothing was lost: see [SyncStateStore]. */
+        const val ERROR_STATE_STORE = "state_store_failed"
+        private const val HTTP_TOO_MANY_REQUESTS = 429
+
         /** Tries per batch within one scheduled run before the run gives up until next time. */
         const val IN_RUN_ATTEMPTS = 3
 
@@ -1053,6 +1335,9 @@ class SyncEngine(
         /** A scheduled run never sleeps longer than this in one go; it ends and is rescheduled. */
         const val MAX_IN_RUN_WAIT_MS = 90_000L
         const val MAX_TRANSIENT_STRIKES = 5
+
+        /** Failed reads of one page in a row before the backfill tries a smaller page. */
+        const val SHRINK_AFTER_STRIKES = 2
         private const val ROTATION_MODULUS = 1_000_000
 
         /** The refused pairing: its token's tag and the act of pairing it came from. */

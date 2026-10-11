@@ -24,7 +24,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 
-import { coverageResourceType, deviceCoverage } from "../../hc/coverage.ts";
+import { adminDeviceCoverage, coverageResourceType } from "../../hc/coverage.ts";
 import { kickIngestRunner } from "../../hc/kick.ts";
 import { unparkMarks } from "../../hc/store/dirty.ts";
 import { storeBacklog } from "../../hc/store/read.ts";
@@ -60,6 +60,9 @@ const PAIRING_VERSION = 1;
 
 /** Hosts that may stay on plain http in a pairing URL. `URL` keeps the brackets on an IPv6 host. */
 const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["localhost", "127.0.0.1"]);
+
+/** What the type name of one of Health Connect's own hourly totals starts with. */
+const PLATFORM_AGGREGATE_PREFIX = "Agg.";
 
 const NO_TOTALS: DeviceTotals = { recordCount: 0, typesGranted: 0, typesDenied: 0 };
 
@@ -237,8 +240,12 @@ phoneRouter.post("/devices/:id/wipe", async (c) => {
 phoneRouter.get("/devices/:id/coverage", async (c) => {
   const api = apiContext(c);
   const device = await requireDevice(api, c.req.param("id"));
-  const rows = await api.repos.hcStatus.syncRows(device.id);
-  const entries = deviceCoverage({ device, rows, now: api.ctx.now() });
+  // Health Connect's own hourly totals (`Agg.<Metric>`) are stored like a
+  // record type but are not one: nothing grants or refuses them, so in a table
+  // of permissions they would read as a type the phone never asked about.
+  const stored = await api.repos.hcStatus.syncRows(device.id);
+  const rows = stored.filter((row) => !row.recordType.startsWith(PLATFORM_AGGREGATE_PREFIX));
+  const entries = adminDeviceCoverage({ device, rows, now: api.ctx.now() });
   const byType = new Map(entries.map((entry) => [entry.resourceType, entry]));
   const dtos: DeviceCoverageRowDto[] = rows.map((row) => {
     const entry = byType.get(coverageResourceType(row.recordType));

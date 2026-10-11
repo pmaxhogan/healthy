@@ -49,13 +49,22 @@ class PairingStore(
         false
     }
 
-    suspend fun clear() {
+    /**
+     * Forgets the pairing. False when the disk write failed: nothing changed, the app is still
+     * paired and still uploading, and whoever asked has to be told so.
+     */
+    suspend fun clear(): Boolean = try {
         store.edit {
             it.remove(URL)
             it.remove(DEVICE_ID)
             it.remove(TOKEN_SEALED)
             it[GENERATION] = (it[GENERATION] ?: 0) + 1
         }
+        true
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        false
     }
 
     private fun read(prefs: Preferences): Pairing? {

@@ -110,7 +110,8 @@ export const BUDGET_NOTE =
 
 /** What every Health Connect tool says about an empty answer. */
 export const AVAILABILITY_NOTE =
-  "An empty answer is not 'nothing happened': `coverage` (one entry per phone and " +
-  "`hc:<Type>`) and `warnings` say whether a type is not permitted on the phone " +
-  "(`not_permitted:...`), permitted but empty (`no_data:...`), `stale` (no upload for six " +
-  "hours) or `never_synced`.";
+  "`coverage` has one entry per phone and `hc:<Type>` that has stored records, and " +
+  "`warnings` say when one is `stale` (the phone has not uploaded for six hours, so the " +
+  "newest data may be missing). A type with no stored records is simply not listed; " +
+  "asked for by name it answers empty with `no_data:hc:<Type>:device:<id>`, and a name " +
+  "that is no record type answers `unknown_type:hc:<Type>`.";

@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.IBinder
 import dev.maxhogan.healthy.companion.graph
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -57,6 +58,11 @@ class BackfillService : Service() {
             job = scope.launch {
                 try {
                     controller.runBackfill()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // Nothing the loop throws may take the process down: the service stops, the
+                    // backfill shows as paused, and the cursors in the store are where they were.
                 } finally {
                     stopForeground(STOP_FOREGROUND_REMOVE)
                     stopSelf()
