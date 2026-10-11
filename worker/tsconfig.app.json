@@ -9,8 +9,7 @@
     // every browser that has ES2023's array methods has this too.
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "types": ["vite/client"],
-    "jsx": "preserve",
-    "baseUrl": "."
+    "jsx": "preserve"
   },
   // test/spa/** belongs to this project rather than the Node one: those tests
   // import .vue single-file components, which only vue-tsc can read, and they
