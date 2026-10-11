@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { isoFromMs, toDeviceCoverageRowDto, toDeviceDto } from "../../../src/api/dto.ts";
+import {
+  isoFromMs,
+  toDeviceCoverageRowDto,
+  toDeviceDto,
+  toDeviceIngestSummaryDto,
+} from "../../../src/api/dto.ts";
 
 describe("isoFromMs", () => {
   it("formats an instant", () => {
@@ -34,7 +39,7 @@ describe("device projections are total", () => {
       parked: { batches: 0, bytes: 0, errorCodes: [] },
       parkedMarks: 0,
       report: null,
-      totals: { recordCount: 0, typesGranted: 0, typesDenied: 0 },
+      totals: { recordCount: 0, typesGranted: 0, typesDenied: 0, typesBackfilled: 0 },
     });
 
     expect(dto.rotatedAt).toBeNull();
@@ -60,5 +65,40 @@ describe("device projections are total", () => {
     );
 
     expect([dto.firstAt, dto.lastAt, dto.backfillOldestAt]).toStrictEqual([null, null, null]);
+  });
+});
+
+describe("toDeviceIngestSummaryDto", () => {
+  const summary = {
+    queued: 132,
+    applying: 1,
+    applied: 40,
+    failed: 2,
+    appliedRecently: 12,
+    lastAppliedAt: 1_790_000_000,
+    applyMsMedian: 1800,
+    applySample: 20,
+  };
+
+  it("totals the states, carries the parked count and formats the instant", () => {
+    expect(toDeviceIngestSummaryDto(summary, 2)).toStrictEqual({
+      total: 175,
+      queued: 132,
+      applying: 1,
+      applied: 40,
+      failed: 2,
+      parked: 2,
+      appliedLastHour: 12,
+      lastAppliedAt: "2026-09-21T14:13:20.000Z",
+      applyMsMedian: 1800,
+      applySample: 20,
+    });
+  });
+
+  it("is total over a log with nothing applied and a bad stored instant", () => {
+    const empty = { ...summary, applied: 0, appliedRecently: 0, applyMsMedian: null };
+
+    expect(toDeviceIngestSummaryDto({ ...empty, lastAppliedAt: null }, 0).lastAppliedAt).toBeNull();
+    expect(toDeviceIngestSummaryDto({ ...empty, lastAppliedAt: NaN }, 0).lastAppliedAt).toBeNull();
   });
 });

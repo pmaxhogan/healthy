@@ -9,17 +9,25 @@
 import { computed, ref } from "vue";
 
 import { endpoints } from "../api/endpoints.ts";
-import { formatBytes, formatDateTime, relativeTime } from "../lib/format.ts";
+import { formatBytes } from "../lib/format.ts";
 import { toastSuccess } from "../lib/toasts.ts";
 import { useAction } from "../lib/use-load.ts";
 
 import ConfirmDialog from "./ConfirmDialog.vue";
 import DeviceDetails from "./DeviceDetails.vue";
 import PhoneStatusPill from "./PhoneStatusPill.vue";
+import RelTime from "./RelTime.vue";
 
 import type { DeviceDto, PairedDeviceDto } from "@shared/types.ts";
 
-const props = defineProps<{ device: DeviceDto; timezone: string | null }>();
+const props = defineProps<{
+  device: DeviceDto;
+  timezone: string | null;
+  /** The page's clock, so relative times tick. */
+  now: number;
+  /** Bumped by the page each time it refreshes; the open details follow it. */
+  refreshTick: number;
+}>();
 
 const emit = defineEmits<{ changed: []; paired: [paired: PairedDeviceDto] }>();
 
@@ -44,6 +52,17 @@ const queueText = computed(() => {
   const { batches, bytes } = props.device.queue;
   if (batches === 0) return "empty";
   return `${String(batches)} batch${batches === 1 ? "" : "es"} · ${formatBytes(bytes)}`;
+});
+
+/**
+ * How far the backfill has got, over the types the phone may read. A type the
+ * owner has not granted has no backfill to finish, so it is in neither number.
+ */
+const backfillText = computed(() => {
+  const { typesBackfilled, typesGranted } = props.device.totals;
+  return typesGranted === 0
+    ? "—"
+    : `${String(typesBackfilled)} of ${String(typesGranted)} types complete`;
 });
 
 function startRename(): void {
@@ -119,6 +138,12 @@ async function doRetry(): Promise<void> {
   if (ok) emit("changed");
 }
 
+/** A permission in the page's one vocabulary. Not granting something is a choice, not a fault. */
+function permissionWord(state: "granted" | "denied" | "unavailable"): string {
+  if (state === "denied") return "not granted";
+  return state === "unavailable" ? "not available" : "granted";
+}
+
 function yesNo(value: boolean | null): string {
   if (value === null) return "—";
   return value ? "yes" : "no";
@@ -176,14 +201,14 @@ function yesNo(value: boolean | null): string {
     <dl class="facts">
       <div>
         <dt>Last upload</dt>
-        <dd :title="formatDateTime(device.lastUploadAt, timezone)">
-          {{ device.lastUploadAt ? relativeTime(device.lastUploadAt) : "never" }}
+        <dd>
+          <RelTime :iso="device.lastUploadAt" :timezone="timezone" :now="now" empty="never" />
         </dd>
       </div>
       <div>
         <dt>Last seen</dt>
-        <dd :title="formatDateTime(device.lastSeenAt, timezone)">
-          {{ device.lastSeenAt ? relativeTime(device.lastSeenAt) : "never" }}
+        <dd>
+          <RelTime :iso="device.lastSeenAt" :timezone="timezone" :now="now" empty="never" />
         </dd>
       </div>
       <div>
@@ -194,9 +219,13 @@ function yesNo(value: boolean | null): string {
         <dt>Types</dt>
         <dd>
           {{ device.totals.typesGranted }} granted<template v-if="device.totals.typesDenied > 0"
-            >, <span class="danger-text">{{ device.totals.typesDenied }} denied</span></template
+            >, {{ device.totals.typesDenied }} not granted</template
           >
         </dd>
+      </div>
+      <div>
+        <dt>Backfill</dt>
+        <dd>{{ backfillText }}</dd>
       </div>
       <div>
         <dt>Waiting to apply</dt>
@@ -204,13 +233,14 @@ function yesNo(value: boolean | null): string {
       </div>
       <div>
         <dt>Paired</dt>
-        <dd :title="formatDateTime(device.createdAt, timezone)">
-          {{ relativeTime(device.createdAt) }}
+        <dd>
+          <RelTime :iso="device.createdAt" :timezone="timezone" :now="now" />
           <template v-if="device.rotatedAt">
-            · token rotated {{ relativeTime(device.rotatedAt) }}
+            · token rotated
+            <RelTime :iso="device.rotatedAt" :timezone="timezone" :now="now" />
           </template>
           <template v-if="device.revokedAt">
-            · revoked {{ relativeTime(device.revokedAt) }}
+            · revoked <RelTime :iso="device.revokedAt" :timezone="timezone" :now="now" />
           </template>
         </dd>
       </div>
@@ -231,16 +261,14 @@ function yesNo(value: boolean | null): string {
       </div>
       <div v-if="device.report.exerciseRoutes">
         <dt>Exercise routes</dt>
-        <dd :class="{ 'danger-text': device.report.exerciseRoutes !== 'granted' }">
-          {{ device.report.exerciseRoutes }}
-        </dd>
+        <dd>{{ permissionWord(device.report.exerciseRoutes) }}</dd>
       </div>
       <div>
         <dt>History read</dt>
         <dd>{{ yesNo(device.report.historyRead) }}</dd>
       </div>
       <div>
-        <dt>Backfill complete</dt>
+        <dt>Phone says backfill done</dt>
         <dd>{{ yesNo(device.report.backfillComplete) }}</dd>
       </div>
       <div v-if="device.report.lastErrorCode">
@@ -248,7 +276,7 @@ function yesNo(value: boolean | null): string {
         <dd class="danger-text">
           {{ device.report.lastErrorCode }}
           <template v-if="device.report.lastErrorAt">
-            · {{ relativeTime(device.report.lastErrorAt) }}
+            · <RelTime :iso="device.report.lastErrorAt" :timezone="timezone" :now="now" />
           </template>
         </dd>
       </div>
@@ -275,7 +303,13 @@ function yesNo(value: boolean | null): string {
       </button>
     </div>
 
-    <DeviceDetails v-if="showDetails" :device-id="device.id" :timezone="timezone" />
+    <DeviceDetails
+      v-if="showDetails"
+      :device-id="device.id"
+      :timezone="timezone"
+      :now="now"
+      :refresh-tick="refreshTick"
+    />
 
     <ConfirmDialog
       v-if="pending === 'rotate'"
