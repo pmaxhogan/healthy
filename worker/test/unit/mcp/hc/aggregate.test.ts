@@ -76,6 +76,19 @@ function request(
 }
 
 const readers = (hc: FakeHc): string[] => [...new Set(hc.calls.map((call) => call.reader))];
+/**
+ * The readers used for the range itself. A running count also reads the hour
+ * rollups of the two days BEFORE the range (or before a day it opens), where a
+ * record that runs into it would be listed: those reads end where the range
+ * (or the day) starts, and are left out here.
+ */
+const readersWithin = (hc: FakeHc, ...starts: number[]): string[] => [
+  ...new Set(
+    hc.calls
+      .filter((call) => !(call.reader === "hourRollups" && starts.includes(call.endMs ?? -1)))
+      .map((call) => call.reader),
+  ),
+];
 const sums = (rows: { values: Record<string, { sum?: number | null }> }[], field = "count") =>
   rows.map((row) => row.values[field]?.sum ?? null);
 
@@ -95,7 +108,12 @@ describe("which level of the store answers", () => {
 
     expect(sums(result.rows)).toStrictEqual([300, 400, 800]);
     expect(result.sources).toStrictEqual(["day_rollup"]);
-    expect(readers(hc)).toStrictEqual(["dayRollups"]);
+    // The days themselves, and the hour rollups of the two days before them,
+    // where a record that runs into the range would be listed.
+    expect(readers(hc)).toStrictEqual(["dayRollups", "hourRollups"]);
+    expect(hc.calls.filter((call) => call.reader === "hourRollups")).toStrictEqual([
+      { reader: "hourRollups", type: "Steps", startMs: D0 - 2 * DAY_MS, endMs: D0 },
+    ]);
   });
 
   it("composes days from hour rollups when the answer is in another zone", async () => {
@@ -133,11 +151,14 @@ describe("which level of the store answers", () => {
 
     expect(result.rows.map((row) => row.bucket)).toStrictEqual(["2026-03-11", "2026-03-12"]);
     expect(sums(result.rows)).toStrictEqual([400, 0]);
-    // Three boundaries, each inside one UTC hour: three one-hour raw reads, no more.
+    // Three boundaries, each inside one UTC hour: three raw reads of that hour
+    // -- and the half hour before the range, which is where a record that runs
+    // into it would have started.
     const raw = hc.calls.filter((call) => call.reader === "records");
     expect(raw.map((call) => (call.endMs ?? 0) - (call.startMs ?? 0))).toStrictEqual([
       HOUR_MS / 2,
       HOUR_MS,
+      HOUR_MS / 2,
       HOUR_MS / 2,
     ]);
   });
@@ -163,8 +184,16 @@ describe("which level of the store answers", () => {
     expect(afterHourly).toStrictEqual(["hourRollups"]);
     expect(sums(quarters.rows)).toStrictEqual([0, 200, 0, 0]);
     expect(quarters.rows[1]?.bucket).toBe("2026-03-10T09:15:00+00:00");
+    // The range's own records, and the hour rollups of the two days before it:
+    // a record that started there and runs into the range is listed in them.
     expect(hc.calls).toStrictEqual([
       { reader: "records", type: "Steps", startMs: morning.startMs, endMs: morning.endMs },
+      {
+        reader: "hourRollups",
+        type: "Steps",
+        startMs: morning.startMs - 48 * HOUR_MS,
+        endMs: morning.startMs,
+      },
     ]);
   });
 
@@ -378,7 +407,7 @@ describe("origin modes", () => {
     expect(result.rows[0]).toMatchObject({ method: "platform", values: { count: { sum: 8320 } } });
     expect(result).toMatchObject({ usedFallback: false, duplicatesDropped: 0 });
     // Was every hour of every such day read, to choose an origin nobody asked for.
-    expect(readers(hc)).toStrictEqual(["dayRollups"]);
+    expect(readersWithin(hc, D0)).toStrictEqual(["dayRollups"]);
   });
 
   it("composes a bucket the platform covers only part of, hour by hour", async () => {
@@ -513,8 +542,14 @@ describe("sessions", () => {
       request(hc, { type: "SleepSession", metrics: defaultMetrics("SleepSession") }),
     );
 
-    expect(defaultMetrics("SleepSession")).toStrictEqual(["duration", "records"]);
-    expect(result.rows[0]).toMatchObject({ records: 2, durationMs: 8 * HOUR_MS });
+    expect(defaultMetrics("SleepSession")).toStrictEqual(["duration", "in_bed", "records"]);
+    expect(defaultMetrics("ExerciseSession")).toStrictEqual(["duration", "records"]);
+    // Neither night has stages, so all of each counts as asleep.
+    expect(result.rows[0]).toMatchObject({
+      records: 2,
+      durationMs: 8 * HOUR_MS,
+      inBedMs: 8 * HOUR_MS,
+    });
   });
 });
 
@@ -606,7 +641,7 @@ describe("the fallback adds up: a month is the sum of its days and of its hours"
       request(hc, { range: daysRange("2026-04-01", "2026-04-30", UTC), bucket: "month", nowMs }),
     );
 
-    expect(readers(hc)).toStrictEqual(["dayRollups"]);
+    expect(readersWithin(hc, APRIL)).toStrictEqual(["dayRollups"]);
   });
 
   it("opens hour by hour only the days two apps both recorded", async () => {
@@ -626,12 +661,21 @@ describe("the fallback adds up: a month is the sum of its days and of its hours"
     // 12:00 on the 3rd is the wearable's; 15:00 only the phone recorded.
     expect(sums(month.rows)).toStrictEqual([30_070]);
     expect(month.duplicatesDropped).toBe(1);
+    // The one day -- and, for a record that runs into it, the two days before
+    // it, as the two days before the month were read for the month.
     expect(hc.calls.filter((call) => call.reader === "hourRollups")).toStrictEqual([
+      { reader: "hourRollups", type: "Steps", startMs: APRIL - 2 * DAY_MS, endMs: APRIL },
       {
         reader: "hourRollups",
         type: "Steps",
         startMs: APRIL + 2 * DAY_MS,
         endMs: APRIL + 3 * DAY_MS,
+      },
+      {
+        reader: "hourRollups",
+        type: "Steps",
+        startMs: APRIL,
+        endMs: APRIL + 2 * DAY_MS,
       },
     ]);
     expect(readers(hc)).not.toContain("records");

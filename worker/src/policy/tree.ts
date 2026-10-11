@@ -1730,9 +1730,11 @@ const HC_BUCKET = {
   method: ["string", "platform, max_origin, all_origins or origin"],
   origins: ["string[]", "The apps whose records the numbers are"],
   records: "integer",
-  durationMs: "number",
+  durationMs: ["number", "How long the records ran; for sleep, the time asleep"],
+  inBedMs: ["number", "Sleep only: the nights from start to end"],
   values: ["object?", "Per field of the type, the metrics asked for"],
   duplicatesDropped: "integer",
+  longRecordSum: ["number", "Of the total, what comes from records longer than an hour"],
   bmrFillKcal: "number",
 } as const;
 
@@ -1787,7 +1789,8 @@ const HC_SLEEP = {
   stagesOverlap: ["boolean", "True when the stages overlapped and were cut"],
   onset: ["string", "First moment asleep"],
   wearableWake: ["string", "End of the last sleep stage the wearable logged"],
-  hrWake: ["string", "Where the heart rate left its overnight baseline"],
+  hrWake: ["string", "Where the heart rate left its overnight baseline for good"],
+  hrFirstRise: ["string", "The first sustained rise of heart rate at or after the end"],
   hr: ["object?", "Overnight heart rate: min, mean, max, n"],
   hrv: ["object?", "Overnight HRV: median, q1, q3, iqr, n"],
   respiratoryRate: "number",
@@ -1807,9 +1810,11 @@ const HC_EXERCISE = {
   durationMin: "number",
   hr: ["object?", "Heart rate during the session: mean, max, min, n"],
   energy: ["number", "Active kcal"],
+  energyOrigin: ["string", "The app whose active-calorie records `energy` sums"],
   distance: "number",
   steps: "number",
   likelyLeftRunning: "boolean",
+  leftRunningReason: ["string", "Which rule flagged it: resting_tail or tail_below_active_phase"],
   overThreeHours: "boolean",
   zeroLength: "boolean",
   exactDuplicate: "boolean",
@@ -1856,7 +1861,7 @@ const HC_DAY = {
   totalKcal: "number",
   sleep: ["object?", "The night that ended on the day"],
   restingHr: "number",
-  hrvRmssd: "number",
+  hrvRmssdMean: ["number", "Mean of the day's HRV readings, not a night's median"],
   respiratoryRate: "number",
   bloodPressure: ["object?", "Mean of the day's readings"],
   weight: "number",
@@ -1894,6 +1899,7 @@ const HC_FINDING = {
   durationMin: "number",
   duplicateOf: "string",
   note: "string",
+  vitals: ["string[]", "The overnight record types present on a date with no sleep session"],
 } as const;
 
 /** The phone's lines in `get_health_summary`. */

@@ -13,6 +13,11 @@
  * intervals) -- it just has no `fields`. Never an error: a newer Health Connect
  * SDK's type must roll up to something.
  *
+ * A record is counted whole in the rollup of the hour it STARTS in. For the
+ * running counts (`isSpreadType`) a record that runs past the end of that hour
+ * is also listed (`crossing`), so an answer can divide it among the buckets it
+ * spans; and every rollup says which UTC hours its records start in (`hours`).
+ *
  * Tolerant by design. `data` arrives as the phone serialised it; a field that
  * is missing, not a number, or not finite is skipped and not counted in `n`. A
  * field no record carried is left out of `fields` rather than written as NaN.
@@ -23,7 +28,9 @@
 import { recordEndMs, recordStartMs } from "../wire.ts";
 
 import type { HcRecord } from "../wire.ts";
-import type { BucketRollup, FieldStats } from "./types.ts";
+import type { BucketRollup, CrossingRecord, FieldStats, SpreadShare } from "./types.ts";
+
+const HOUR_MS = 3_600_000;
 
 /**
  * One summarised field.
@@ -155,6 +162,43 @@ export const ROLLUP_FIELD_TABLE: readonly RollupTypeSpec[] = [
   { type: "ExerciseSession", fields: [] },
 ];
 
+/**
+ * The running counts: types whose interval records say "this much between
+ * these two instants", so that a record spanning several buckets belongs to
+ * each in proportion to the time it spends there -- which is how Health
+ * Connect's own aggregation divides one. A logged entry (a drink, a meal) is
+ * not one of them: it is an event with a length, not a rate.
+ */
+const SPREAD_TYPES: ReadonlySet<string> = new Set([
+  "Steps",
+  "Distance",
+  "ActiveCaloriesBurned",
+  "TotalCaloriesBurned",
+  "FloorsClimbed",
+  "ElevationGained",
+  "WheelchairPushes",
+]);
+
+/** True for a type whose interval records are divided among the buckets they span. */
+export function isSpreadType(type: string): boolean {
+  return SPREAD_TYPES.has(type);
+}
+
+/**
+ * The longest record that is divided. One that claims to run for longer says
+ * nothing usable about when its count happened, and looking for it from every
+ * bucket it might reach would mean reading back without limit: it is counted
+ * whole where it starts, as a long record. Two days, the bound the session
+ * summaries use for the same reason.
+ */
+export const SPREAD_MAX_MS = 48 * HOUR_MS;
+
+/**
+ * Above this a record is "long": a total someone wrote for a stretch, not a
+ * count of what happened in any one hour of it.
+ */
+export const LONG_RECORD_MS = HOUR_MS;
+
 /** The synthetic platform-aggregate family: `Agg.<Metric>`, one record per UTC hour. */
 const AGG_TYPE_PREFIX = "Agg.";
 
@@ -270,12 +314,18 @@ function finish(stats: Map<string, FieldStats>): Record<string, FieldStats> {
  */
 export function rollupBucket(type: string, records: readonly HcRecord[]): BucketRollup {
   const specs = rollupFieldsFor(type);
+  const spread = isSpreadType(type);
   const stats = new Map<string, FieldStats>();
+  const hours = new Set<number>();
+  const crossing: CrossingRecord[] = [];
   let durationMs: number | undefined;
   for (const record of records) {
     const startMs = recordStartMs(record);
+    hours.add(Math.floor(startMs / HOUR_MS));
     if (record.start !== undefined) {
       durationMs = (durationMs ?? 0) + Math.max(0, recordEndMs(record) - startMs);
+      const listed = spread ? crossingOf(specs, record, startMs) : null;
+      if (listed !== null) crossing.push(listed);
     }
     for (const spec of specs) foldField(stats, spec, record, startMs);
   }
@@ -283,6 +333,50 @@ export function rollupBucket(type: string, records: readonly HcRecord[]): Bucket
     records: records.length,
     fields: finish(stats),
     ...(durationMs !== undefined && { durationMs }),
+    hours: ascending(hours),
+    ...(crossing.length > 0 && { crossing }),
+  };
+}
+
+function ascending(values: Iterable<number>): number[] {
+  const out = [...values];
+  out.sort((left, right) => left - right);
+  return out;
+}
+
+/** `record` as a crossing record, or null when it ends within the hour it starts in. */
+function crossingOf(
+  specs: readonly RollupFieldSpec[],
+  record: HcRecord,
+  startMs: number,
+): CrossingRecord | null {
+  const endMs = recordEndMs(record);
+  if (endMs <= (Math.floor(startMs / HOUR_MS) + 1) * HOUR_MS) return null;
+  const values: [string, number][] = [];
+  for (const spec of specs) {
+    const value = spec.kind === "scalar" ? finite(record.data[spec.path]) : null;
+    if (value !== null) values.push([spec.name, value]);
+  }
+  return values.length === 0 ? null : { s: startMs, e: endMs, v: Object.fromEntries(values) };
+}
+
+/** Two sets of per-field amounts, added. */
+function addAmounts(
+  left: Readonly<Record<string, number>>,
+  right: Readonly<Record<string, number>>,
+): Record<string, number> {
+  const out = new Map(Object.entries(left));
+  for (const [name, value] of Object.entries(right)) out.set(name, (out.get(name) ?? 0) + value);
+  return Object.fromEntries(out);
+}
+
+/** Two spread shares, added. */
+export function addShares(left: SpreadShare | undefined, right: SpreadShare): SpreadShare {
+  if (left === undefined) return { sum: { ...right.sum }, ms: right.ms, long: { ...right.long } };
+  return {
+    sum: addAmounts(left.sum, right.sum),
+    ms: left.ms + right.ms,
+    long: addAmounts(left.long, right.long),
   };
 }
 
@@ -299,21 +393,46 @@ export function rollupBucket(type: string, records: readonly HcRecord[]): Bucket
  * array keeps `first` and the later takes `last`, the rule `rollupBucket` uses.
  * A field only some parts carry is merged over the parts that carry it. No
  * parts at all is an empty rollup.
+ *
+ * `hours` is the union of the parts' -- and absent as soon as one part that
+ * holds records does not say, since the union would then claim to be complete
+ * when it is not. `crossing` lists and `spread` shares are added together.
  */
 export function mergeRollups(parts: readonly BucketRollup[]): BucketRollup {
   const stats = new Map<string, FieldStats>();
   let records = 0;
   let durationMs: number | undefined;
+  const crossing: CrossingRecord[] = [];
+  let spread: SpreadShare | undefined;
   for (const part of parts) {
     records += part.records;
     if (part.durationMs !== undefined) durationMs = (durationMs ?? 0) + part.durationMs;
     for (const [name, field] of Object.entries(part.fields)) {
       if (field.n > 0) absorb(stats, name, field);
     }
+    crossing.push(...(part.crossing ?? []));
+    if (part.spread !== undefined) spread = addShares(spread, part.spread);
   }
+  const hours = hoursOf(parts);
   return {
     records,
     fields: finish(stats),
     ...(durationMs !== undefined && { durationMs }),
+    ...(hours !== null && { hours }),
+    ...(crossing.length > 0 && { crossing }),
+    ...(spread !== undefined && { spread }),
   };
+}
+
+/** The union of the parts' `hours`, or null when a part that holds records does not say. */
+function hoursOf(parts: readonly BucketRollup[]): number[] | null {
+  const hours = new Set<number>();
+  for (const part of parts) {
+    if (part.hours === undefined) {
+      if (part.records > 0) return null;
+      continue;
+    }
+    for (const hour of part.hours) hours.add(hour);
+  }
+  return ascending(hours);
 }

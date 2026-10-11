@@ -208,7 +208,7 @@ describe("applying a batch", () => {
     expect(await logRow(deviceId, "batch-0004")).toMatchObject({ applied: 1, superseded: 1 });
   });
 
-  it("deletes by id, and drops a late upsert of a deleted id", async () => {
+  it("deletes by id, and takes the record back when a later batch writes it again", async () => {
     const deviceId = await seedDevice(repos);
     await enqueue(repos, deviceId, {
       batchId: "batch-0001",
@@ -220,15 +220,17 @@ describe("applying a batch", () => {
     expect(await stored(deviceId)).toStrictEqual(["b:200"]);
     expect(await logRow(deviceId, "batch-0002")).toMatchObject({ status: "applied", removed: 1 });
 
-    // Health Connect never reuses an id: this is the deleted record, late.
+    // An id comes back: an app that deletes a record and writes it again under
+    // the same client record id is given the id it had. This batch arrived
+    // after the delete, so it is the record written again, not the old one late.
     await enqueue(repos, deviceId, {
       batchId: "batch-0003",
       upserts: [steps("a", T, 999, { lastModified: 9000 })],
     });
     await drain(ctx, deviceId);
 
-    expect(await stored(deviceId)).toStrictEqual(["b:200"]);
-    expect(await logRow(deviceId, "batch-0003")).toMatchObject({ applied: 0, superseded: 1 });
+    expect(await stored(deviceId)).toStrictEqual(["a:999", "b:200"]);
+    expect(await logRow(deviceId, "batch-0003")).toMatchObject({ applied: 1, superseded: 0 });
   });
 
   it("deletes the chunk and its rollup when its last record goes", async () => {
@@ -245,22 +247,24 @@ describe("applying a batch", () => {
     expect(await count("hc_record_index", deviceId)).toBe(1);
   });
 
-  it("keeps a record deleted when its upsert and its delete share a batch, or arrive reversed", async () => {
+  it("keeps a record deleted when its upsert and its delete share a batch", async () => {
     const deviceId = await seedDevice(repos);
     await enqueue(repos, deviceId, {
       batchId: "batch-0001",
       upserts: [steps("gone", T, 100), steps("kept", T, 200)],
       deletes: ["gone"],
     });
+    // A delete of an id never seen, then the id in a later batch: written
+    // after it was deleted, so it is there.
     await enqueue(repos, deviceId, { batchId: "batch-0002", deletes: ["never-seen"] });
     await enqueue(repos, deviceId, {
       batchId: "batch-0003",
-      upserts: [steps("never-seen", T, 300)],
+      upserts: [steps("never-seen", T + MINUTE_MS, 300)],
     });
 
     await drain(ctx, deviceId);
 
-    expect(await stored(deviceId)).toStrictEqual(["kept:200"]);
+    expect(await stored(deviceId)).toStrictEqual(["kept:200", "never-seen:300"]);
     expect(await logRow(deviceId, "batch-0001")).toMatchObject({
       applied: 1,
       superseded: 1,
@@ -980,6 +984,7 @@ describe("a batch that keeps making slices fail", () => {
       ],
     });
     // What the phone sent afterwards: a newer copy of one, the deletion of the other.
+    time.advance(60);
     await enqueue(repos, deviceId, {
       batchId: "batch-0002",
       upserts: [steps("x", T, 9, { lastModified: 2000 })],

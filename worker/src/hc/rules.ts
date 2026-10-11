@@ -631,6 +631,153 @@ export const EXERCISE_MERGE_MAX_MS = 12 * HOUR_MS;
  */
 export const SLEEP_MERGE_MAX_MS = 18 * HOUR_MS;
 
+// --------------------------------------------------------------------------
+// Left running, judged against the session's own active phase
+// --------------------------------------------------------------------------
+
+/**
+ * {@link isLikelyLeftRunning} asks whether a long session ENDS AT REST: a tail
+ * at or below a resting heart rate with next to no steps. That misses the
+ * commonest way a session is forgotten -- the workout ends, the person stays
+ * on their feet, and the tracker runs on through an evening of being up and
+ * about. The pulse is then above resting and there are a few steps, so the
+ * tail is not "at rest"; it is simply nothing like the workout.
+ *
+ * The rule here compares the tail with the session ITSELF instead of with a
+ * fixed resting level. For a session over three hours (and no longer than the
+ * twelve past which a session stands alone anyway):
+ *
+ *  1. The TAIL is its last {@link LEFT_RUNNING_TAIL_MS}, the stretch the
+ *     resting rule examines too.
+ *  2. The ACTIVE PHASE is the half hour before the tail with the highest mean
+ *     heart rate (of per-minute means): the workout at its busiest.
+ *  3. The session is flagged when ALL of these hold:
+ *      - the tail's mean heart rate is at least
+ *        {@link LEFT_RUNNING_ACTIVE_DROP_BPM} below the active phase's;
+ *      - the tail's cadence is at most {@link LEFT_RUNNING_TAIL_MAX_CADENCE}
+ *        steps a minute;
+ *      - the active phase's cadence was at least
+ *        {@link LEFT_RUNNING_ACTIVE_MIN_CADENCE} steps a minute.
+ *
+ * The last condition is what keeps it conservative. A ride, a swim or a
+ * session on a machine makes no steps at any point, so "no steps at the end"
+ * says nothing about it and the rule does not fire: only an activity that
+ * was making steps and stopped making them is judged. A steady hike keeps
+ * both its pulse and its cadence to the end and is never flagged; neither is
+ * a session missing either signal, or with fewer than
+ * {@link LEFT_RUNNING_MIN_MINUTES} minutes of heart rate in the tail or in
+ * every half hour before it.
+ *
+ * It is a flag beside the session and never changes a stored value: the
+ * session keeps its times, its duration and every figure. Both rules are
+ * applied when the session's summary is built ({@link leftRunningReason}), so
+ * the flag and the rule that raised it are stored with the summary and every
+ * tool reads the same ones.
+ */
+
+/** The tail's mean heart rate must be this far below the active phase's, bpm. */
+export const LEFT_RUNNING_ACTIVE_DROP_BPM = 20;
+
+/**
+ * The tail may hold at most this many steps a minute. Twenty is pottering
+ * about a house; any walk, however slow, is several times that.
+ */
+export const LEFT_RUNNING_TAIL_MAX_CADENCE = 20;
+
+/**
+ * The active phase must have held at least this many steps a minute for the
+ * tail's lack of them to mean anything: twice the tail's limit, so the fall
+ * is a real one and an activity that never made steps is left alone.
+ */
+export const LEFT_RUNNING_ACTIVE_MIN_CADENCE = 40;
+
+/** Minutes of heart rate a half hour needs before its mean is used. */
+const LEFT_RUNNING_MIN_MINUTES = 10;
+
+/** Why a session is flagged as left running. */
+export type LeftRunningReason = "resting_tail" | "tail_below_active_phase";
+
+interface MinuteMean {
+  /** Start of the minute, epoch ms. */
+  t: number;
+  mean: number;
+}
+
+/** The mean of the minute means in `[fromMs, toMs)`, or null with too few minutes to say. */
+function windowMean(minutes: readonly MinuteMean[], fromMs: number, toMs: number): number | null {
+  const inside = minutes.filter((minute) => minute.t >= fromMs && minute.t < toMs);
+  return inside.length < LEFT_RUNNING_MIN_MINUTES
+    ? null
+    : mean(inside.map((minute) => minute.mean));
+}
+
+/** Steps a minute over `[fromMs, toMs]`, from one origin's Steps records. */
+function cadence(steps: readonly HcRecord[], fromMs: number, toMs: number): number {
+  return (quantityWithin(steps, "count", fromMs, toMs) ?? 0) / ((toMs - fromMs) / MINUTE_MS);
+}
+
+/**
+ * True when a long session's tail is far below its own active phase in both
+ * heart rate and cadence. See the comment above for the rule.
+ *
+ * `minutes` are per-minute heart-rate means and `steps` ONE origin's Steps
+ * records; both may run wider than the session, and only what falls inside it
+ * is used.
+ */
+export function tailBelowActivePhase(
+  session: SessionSpan,
+  minutes: readonly MinuteMean[],
+  steps: readonly HcRecord[],
+): boolean {
+  const { startMs, endMs } = session;
+  if (!isOverThreeHours(session) || endMs - startMs > EXERCISE_MERGE_MAX_MS) return false;
+  const tailStart = endMs - LEFT_RUNNING_TAIL_MS;
+  const tailBpm = windowMean(minutes, tailStart, endMs + 1);
+  if (tailBpm === null) return false;
+
+  // The busiest half hour before the tail, by heart rate.
+  let active: { fromMs: number; bpm: number } | null = null;
+  for (const minute of minutes) {
+    const fromMs = minute.t;
+    if (fromMs < startMs || fromMs + LEFT_RUNNING_TAIL_MS > tailStart) continue;
+    const bpm = windowMean(minutes, fromMs, fromMs + LEFT_RUNNING_TAIL_MS);
+    if (bpm !== null && (active === null || bpm > active.bpm)) active = { fromMs, bpm };
+  }
+  if (active === null || tailBpm > active.bpm - LEFT_RUNNING_ACTIVE_DROP_BPM) return false;
+
+  const inSession = steps.filter(
+    (record) => recordStartMs(record) < endMs && recordEndMs(record) > startMs,
+  );
+  if (inSession.length === 0) return false;
+  const activeCadence = cadence(inSession, active.fromMs, active.fromMs + LEFT_RUNNING_TAIL_MS);
+  return (
+    activeCadence >= LEFT_RUNNING_ACTIVE_MIN_CADENCE &&
+    cadence(inSession, tailStart, endMs) <= LEFT_RUNNING_TAIL_MAX_CADENCE
+  );
+}
+
+/**
+ * Which rule, if either, says an exercise session was left running: the
+ * resting tail first ({@link isLikelyLeftRunning}), then the tail far below
+ * the session's own active phase ({@link tailBelowActivePhase}). Null when
+ * neither does.
+ *
+ * `hr` is heart rate around the session -- samples, or one point a minute --
+ * and `steps` ONE origin's Steps records.
+ */
+export function leftRunningReason(
+  session: SessionSpan,
+  hr: readonly HrSample[],
+  steps: readonly HcRecord[],
+): LeftRunningReason | null {
+  if (isLikelyLeftRunning(session, hr, steps)) return "resting_tail";
+  // The minute the session ends in is part of it.
+  const inside = hr.filter((sample) => sample.t >= session.startMs && sample.t <= session.endMs);
+  return tailBelowActivePhase(session, minuteSeries(inside), steps)
+    ? "tail_below_active_phase"
+    : null;
+}
+
 /** What decides which overlapping sessions may be merged. All optional. */
 export interface SessionMergeOptions {
   /**

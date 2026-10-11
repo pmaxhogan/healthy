@@ -4,14 +4,16 @@
  * Beside the session's own facts (type, length, segments, laps, whether it has
  * a route) this puts what was measured while it ran, and four judgements about
  * the session itself -- does it overlap another, is it an exact copy of
- * another, is it of zero length, was it probably left running. The judgements
+ * another, is it of zero length, was it probably left running (and by which
+ * of the two rules). The judgements
  * are made by `../rules.ts`, which owns every such rule and threshold; nothing
  * is decided here that a query tool could decide differently.
  *
  * ### What counts as "during the session"
  *
- * - Heart rate: samples timed in `[start, end]`. `mean` is the mean of the
- *   per-minute means (see `summariseHeartRate`); `n` is the sample count.
+ * - Heart rate: what was measured in `[start, end]`. `min` and `max` are the
+ *   lowest and highest sample, `mean` is the mean of the per-minute means (see
+ *   `summariseHeartRate`), and `n` is the sample count.
  * - Steps, distance, active energy: the share of each record that falls in
  *   `[start, end]`. A record wholly inside counts whole; one that straddles an
  *   end of the session counts in proportion to the overlap (`quantityWithin`
@@ -30,8 +32,8 @@
 
 import {
   isExactDuplicateSession,
-  isLikelyLeftRunning,
   isZeroLengthSession,
+  leftRunningReason,
   quantityWithin,
   sessionsOverlap,
 } from "../rules.ts";
@@ -39,6 +41,7 @@ import { recordEndMs, recordStartMs } from "../wire.ts";
 
 import { summariseHeartRate } from "./hr.ts";
 
+import type { HrSample } from "./hr.ts";
 import type { HcRecord } from "../wire.ts";
 import type { ExerciseSummary } from "./types.ts";
 
@@ -53,7 +56,8 @@ const MINUTE_MS = 60_000;
  * otherwise be added together. Choosing the origin is the caller's job.
  */
 export interface ExerciseContext {
-  hr: readonly { t: number; bpm: number }[];
+  /** Heart rate: samples, or one point a minute carrying that minute's extremes. */
+  hr: readonly HrSample[];
   /** Steps records, from a single origin. */
   steps: readonly HcRecord[];
   /** Distance records, from a single origin. */
@@ -81,6 +85,13 @@ export function summariseExercise(session: HcRecord, context: ExerciseContext): 
   const startMs = recordStartMs(session);
   const endMs = recordEndMs(session);
   const span = { startMs, endMs };
+  const energy = quantityWithin(context.activeCalories, "energy", startMs, endMs);
+  // One origin's records by contract, so any of them that reaches into the
+  // session names the app the energy is from.
+  const energyFrom = context.activeCalories.find(
+    (record) => recordStartMs(record) <= endMs && recordEndMs(record) >= startMs,
+  );
+  const leftRunning = leftRunningReason(span, context.hr, context.steps);
 
   return {
     origin: session.origin,
@@ -96,13 +107,15 @@ export function summariseExercise(session: HcRecord, context: ExerciseContext): 
     hr: summariseHeartRate(context.hr, startMs, endMs),
     steps: quantityWithin(context.steps, "count", startMs, endMs),
     distance: quantityWithin(context.distance, "distance", startMs, endMs),
-    energy: quantityWithin(context.activeCalories, "energy", startMs, endMs),
+    energy,
+    energyOrigin: energy === null ? null : (energyFrom?.origin ?? null),
     segments: lengthOf(session.data.segments),
     laps: lengthOf(session.data.laps),
     hasRoute: lengthOf(session.data.route) > 0,
     overlaps: context.others.filter((other) => sessionsOverlap(span, other)).map((o) => o.idBlind),
     exactDuplicate: context.others.some((other) => isExactDuplicateSession(span, other)),
-    likelyLeftRunning: isLikelyLeftRunning(span, context.hr, context.steps),
+    likelyLeftRunning: leftRunning !== null,
+    leftRunningReason: leftRunning,
     zeroLength: isZeroLengthSession(span),
   };
 }

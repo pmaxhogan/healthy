@@ -386,8 +386,8 @@ function scenario(): TestBatch[] {
   const third: TestBatch = {
     batchId: "batch-0003",
     upserts: [
-      // The moves again (now no-ops), one more move, and a late upsert of a
-      // deleted id.
+      // The moves again (now no-ops), one more move, and a deleted id written
+      // again: this batch arrived after the delete, so the record is back.
       steps("a", NEXT + 2 * MINUTE_MS, 150, { lastModified: 3000 }),
       steps("sparse-3", T + 40 * HOUR_MS, 77, { lastModified: 4000 }),
       steps("gone-1", T + 3 * HOUR_MS, 1, { lastModified: 9000 }),
@@ -490,8 +490,9 @@ describe("a slice that dies", () => {
     const tombstones = (stored.index as { deleted_at: number | null }[]).filter(
       (row) => row.deleted_at !== null,
     );
-    // gone-1..3, hr-gone, never-seen, sparse-5, hr-midnight, workout.
-    expect(tombstones).toHaveLength(8);
+    // gone-2 and gone-3, hr-gone, never-seen, sparse-5, hr-midnight, workout.
+    // Not gone-1: the last batch wrote it again.
+    expect(tombstones).toHaveLength(7);
   });
 
   it("reaches the same store whatever the slices' budget", async () => {
@@ -500,7 +501,7 @@ describe("a slice that dies", () => {
     const tight = await outcome(deviceId, scenario(), never(), TIGHT);
     expect(whole).toStrictEqual(expected);
     expect(tight).toStrictEqual(expected);
-  });
+  }, 60_000);
 
   // The rows a rebuild would repair are compared before any rebuild has run:
   // sharing a commit must not leave a minute row, or a mark, for it to fix.

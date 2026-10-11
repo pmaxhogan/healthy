@@ -19,11 +19,17 @@
 
 import { z } from "zod";
 
-import { AVAILABILITY_NOTE, BUDGET_NOTE, hcArgs, rangeArgs } from "../hc/args.ts";
+import { AVAILABILITY_NOTE, BUDGET_NOTE, RANGE_NOTE, hcArgs, rangeArgs } from "../hc/args.ts";
 import { DAILY_TYPES, dailySummary, summaryDays } from "../hc/daily.ts";
-import { openStampedPage } from "../hc/page.ts";
-import { deniedJoins, isPlatformAggregate, policyResourceType, stripJoined } from "../hc/policy.ts";
-import { QUALITY_RULES, dataQuality } from "../hc/quality.ts";
+import { DEFAULT_MAX_BYTES, openStampedPage } from "../hc/page.ts";
+import {
+  deniedJoins,
+  isPlatformAggregate,
+  policyResourceType,
+  sourceTypeOf,
+  stripJoined,
+} from "../hc/policy.ts";
+import { QUALITY_RULES, dataQualityPage } from "../hc/quality.ts";
 import {
   beginHcCall,
   dayRollupsUsable,
@@ -45,6 +51,9 @@ import type { HcDevice } from "../hc/reads.ts";
 import type { HcCall } from "../hc/sources.ts";
 import type { Range } from "../hc/time.ts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+
+/** What a record type is prefixed with in a warning and a row's `resourceType`. */
+const HC_PREFIX = "hc:";
 
 /** What a `daily_summary` row is tagged as: a view over several record types. */
 const DAILY_SUMMARY_TYPE = "DailySummary";
@@ -90,7 +99,7 @@ const DAILY_UNITS = {
   awakeMin: "min",
   skinTempDelta: "celsius",
   restingHr: "bpm",
-  hrvRmssd: "ms",
+  hrvRmssdMean: "ms",
   respiratoryRate: "breaths/min",
   systolic: "mmHg",
   diastolic: "mmHg",
@@ -157,17 +166,22 @@ export function registerHcDailyTools(server: McpServer, deps: ToolDeps): void {
       description:
         "One row per local day from the phone's Health Connect data: `steps`, `distance`, " +
         "`activeKcal`, `totalKcal` (what was recorded -- never padded with basal metabolic " +
-        "rate, so a day the tracker was off is low, not plausible), `sleep` (the night that " +
+        "rate, so a day the tracker was off is low, not plausible; when an app wrote a " +
+        "day's energy as one long record, that record only counts in the hours no app " +
+        "measured, and the day is then flagged `long_record_used`), `sleep` (the night that " +
         "ended that day, the day you woke up -- the same date `sleep_sessions` and " +
         "`hc_aggregate` give it: `asleepMin`, `inBedMin`, `awakeMin`, `start`, `end`, `naps`), " +
         "`restingHr` (from the wearable's resting-heart-rate records; a blood-pressure " +
-        "cuff's pulse written as one is excluded), `hrvRmssd`, `respiratoryRate`, " +
+        "cuff's pulse written as one is excluded), `hrvRmssdMean` (the MEAN of the day's " +
+        "HRV readings -- not the night's median that `sleep_sessions` gives as " +
+        "`hrv.median`), `respiratoryRate` (the day's mean), " +
         "`bloodPressure` (mean of the day's readings, duplicates counted once), `weight` " +
         "(the day's last weighing that is not a profile entry; `weighings` lists every " +
         "one, each with its `flag`), `exercises` (each workout on the day it started, with " +
         "its own `start` and `durationMin`, `overThreeHours` and `likelyLeftRunning`), and " +
         "`flags` saying what to read with " +
-        "care (`partial_day`, `other_origins_dropped`, `bp_duplicates_dropped`, " +
+        "care (`partial_day`, `other_origins_dropped`, `long_record_used`, " +
+        "`bp_duplicates_dropped`, " +
         "`resting_hr_cuff_pulse_excluded`, `weight_profile_artefact_excluded`, " +
         "`exercise_over_three_hours`, `exercise_likely_left_running`, " +
         "`session_context_clamped`, ...). The two exclusions each need a second record " +
@@ -182,9 +196,10 @@ export function registerHcDailyTools(server: McpServer, deps: ToolDeps): void {
         "`resting_hr_cuff_pulse_excluded:<n>`. Pass `date` for one day or `start` and `end` " +
         "for a range; with neither, today. `end` without `start`, `date` together with a " +
         "range, and an `end` that is not after `start` are refused (`invalid_range`). " +
-        "Totals follow `hc_aggregate`'s `hc_priority`. A " +
+        "Totals follow `hc_aggregate`'s `hc_priority`. A workout's `likelyLeftRunning` is " +
+        "the flag `exercise_sessions` gives it, by either of its two rules. A " +
         "missing value is null; a section the owner's policy withholds is absent. " +
-        `${AVAILABILITY_NOTE} ${BUDGET_NOTE}`,
+        `${RANGE_NOTE} ${AVAILABILITY_NOTE} ${BUDGET_NOTE}`,
       schema: DAILY_SCHEMA,
     },
     async (args, run) => {
@@ -277,13 +292,22 @@ export function registerHcDailyTools(server: McpServer, deps: ToolDeps): void {
         "rate above 200 or below 20 bpm, speed above 15 m/s, an implausible floor count, a " +
         "weight typed into a profile screen and saved as a weighing -- `reason` says which, " +
         "grouped per hour for dense types), `overlapping_sessions`, `overlapping_stages` (a " +
-        "night whose sleep stages overlapped and had to be cut), `long_session` (an " +
+        "night whose sleep stages overlapped and had to be cut), `session_missing` (a date " +
+        "with overnight readings of at least two kinds -- resting heart rate, respiratory " +
+        "rate, HRV, skin temperature, listed in `vitals` -- that no stored sleep session " +
+        "accounts for: the wearable measured a night whose session did not arrive), " +
+        "`long_session` (an " +
         "exercise session longer than three hours, by the clock alone), " +
-        "`likely_left_running` (one of those that also ends in resting heart rate and no " +
-        "steps), " +
+        "`likely_left_running` (one of those that looks forgotten; `reason` says by which " +
+        "rule: `resting_tail`, its last half hour at resting heart rate with no steps, or " +
+        "`tail_below_active_phase`, its last half hour far below its own busiest half hour " +
+        "in both pulse and cadence -- the flag and reason `exercise_sessions` gives it), " +
         "`zero_length_session`, `overlapping_origins` (two apps recording the same steps " +
         "or energy on one day, which a plain sum would double count), `gap` (days without a " +
-        "type that is otherwise recorded most days), `source_switch` (the app supplying a " +
+        "type that is otherwise recorded most days -- reported only for what a device " +
+        "records by itself, day in and day out: the sensor counters, the vitals a wearable " +
+        "samples unasked, and sleep; a week without a workout, a weighing or a " +
+        "blood-pressure reading is not a gap), `source_switch` (the app supplying a " +
         "type went away and another took over: reported only when the earlier app is " +
         "absent, or nearly, on the day of the change -- `previousShare` is its share of " +
         "that day's total -- so two apps recording side by side are not a switch), " +
@@ -294,7 +318,20 @@ export function registerHcDailyTools(server: McpServer, deps: ToolDeps): void {
         "height beside it, unless the owner's policy withholds heights. `rules` in the " +
         "answer gives every threshold. Nothing is " +
         "removed from the store by any of this: the other tools apply the same rules when " +
-        `they answer. ${AVAILABILITY_NOTE} ${BUDGET_NOTE}`,
+        "they answer. A platform total named in `types` (`Agg.Steps`) is not assessed, and " +
+        "the answer says so: `not_assessed:hc:Agg.<Metric>`. " +
+        "A LONG RANGE COMES BACK IN PAGES. The range is assessed half a year at a time, " +
+        "oldest first, and one call reads at most two such windows (a year) -- fewer once " +
+        "it holds `max_bytes` of findings -- because a single request cannot open years of " +
+        "the store. When it stops short of `end` the answer says `truncated: true` with a " +
+        "`cursor`, EVEN IF this page holds few findings or none: an empty or short page " +
+        'with `truncated: true` means "nothing found so far", not "nothing found". ' +
+        "Repeat the call with the `cursor` until `truncated` is false. On a truncated page " +
+        "`total` and `matched` count the findings so far, this page and the ones before " +
+        "it, not the whole range. No finding is dropped or repeated across pages, and what " +
+        "a rule sees is not cut at a page: each window is judged with the half year before " +
+        "it in view. " +
+        `${RANGE_NOTE} ${AVAILABILITY_NOTE} ${BUDGET_NOTE}`,
       schema: QUALITY_SCHEMA,
     },
     async (args, run) => {
@@ -314,22 +351,44 @@ export function registerHcDailyTools(server: McpServer, deps: ToolDeps): void {
       const wanted = args.types === undefined ? null : new Set(args.types);
       const coverage = await deviceCoverageFor(deps, call, { named: args.types });
 
-      const warnings: string[] = [];
+      // A type named and not assessed is answered all the same: the platform's
+      // own totals are not something to judge the quality of, and saying
+      // nothing would read as "nothing found". (A name that is no type at all
+      // is answered `unknown_type` with the rest of what was named.)
+      const warnings: string[] = (args.types ?? [])
+        .filter((type) => isPlatformAggregate(type) && sourceTypeOf(type) !== null)
+        .filter((type) => typeAllowed(call.rules, type))
+        .map((type) => `not_assessed:${HC_PREFIX}${type}`);
       const items: unknown[] = [];
+      // The range is walked a window at a time, and one call reads a bounded
+      // stretch of it (`dataQualityPage`). Where the first phone's page stops
+      // is where every phone's does, so a page is one stretch of time for all
+      // of them and the cursor names it.
+      let scan: { fromMs: number; untilMs: number; done: boolean } | undefined;
       for (const device of call.devices) {
         const state = await storeState(deps, device);
         warnings.push(...state.warnings);
-        const findings = await dataQuality(deps.hc, {
-          deviceId: device.id,
-          range,
-          clock: call.clock,
-          nowMs: call.nowMs,
-          dayRollupsUsable: (type, span) =>
-            dayRollupsUsable(deps, call, device, { state, type, range: span }),
-          // Which findings to report. What a rule may read is the policy's alone.
-          types: await assessableTypes(deps, call, device, wanted),
-          allowed: (type) => typeAllowed(call.rules, type),
-        });
+        const scanned = await dataQualityPage(
+          deps.hc,
+          {
+            deviceId: device.id,
+            range,
+            clock: call.clock,
+            nowMs: call.nowMs,
+            dayRollupsUsable: (type, span) =>
+              dayRollupsUsable(deps, call, device, { state, type, range: span }),
+            // Which findings to report. What a rule may read is the policy's alone.
+            types: await assessableTypes(deps, call, device, wanted),
+            allowed: (type) => typeAllowed(call.rules, type),
+          },
+          {
+            fromMs: page.anchorMs,
+            untilMs: page.untilMs ?? scan?.untilMs,
+            maxBytes: args.max_bytes ?? DEFAULT_MAX_BYTES,
+          },
+        );
+        scan ??= { fromMs: scanned.fromMs, untilMs: scanned.untilMs, done: scanned.done };
+        const { findings } = scanned;
         const healthSystemId = deviceSourceId(device.id);
         for (const finding of findings) {
           items.push({
@@ -351,6 +410,7 @@ export function registerHcDailyTools(server: McpServer, deps: ToolDeps): void {
         named: args.types,
         warnings,
         extra: { rules: QUALITY_RULES },
+        ...(scan !== undefined && { scan }),
       });
     },
   );

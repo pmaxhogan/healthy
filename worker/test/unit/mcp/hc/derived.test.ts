@@ -634,11 +634,15 @@ describe("hc_aggregate on sleep", () => {
     const [night] = nights.items;
     const [, day] = days.items;
 
-    // Was on YESTERDAY: the date the night started.
-    expect(aggregate.items.map((item) => [item.bucket, item.durationMs])).toStrictEqual([
-      [YESTERDAY, 0],
-      [TODAY, 8 * HOUR_MS],
+    // Was on YESTERDAY: the date the night started. `durationMs` is the time
+    // asleep (the night began with twenty minutes awake); `inBedMs` the night.
+    expect(
+      aggregate.items.map((item) => [item.bucket, item.durationMs, item.inBedMs]),
+    ).toStrictEqual([
+      [YESTERDAY, 0, 0],
+      [TODAY, 8 * HOUR_MS - 20 * 60_000, 8 * HOUR_MS],
     ]);
+    expect(night).toMatchObject({ asleepMin: 460, inBedMin: 480 });
     expect(envelope(aggregate).bucketing).toBe("end_time");
     expect(night?.date).toBe(TODAY);
     expect(day).toMatchObject({ date: TODAY, sleep: { inBedMin: 480 } });

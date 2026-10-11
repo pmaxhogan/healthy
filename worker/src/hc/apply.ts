@@ -96,6 +96,8 @@ import {
 import {
   indexUpsertStatement,
   lookupIndex,
+  restampStatement,
+  revivesTombstone,
   tombstoneStatement,
   unknownTombstoneStatement,
 } from "./store/record-index.ts";
@@ -295,6 +297,13 @@ interface BatchRun {
   startedMs: number;
   /** The alert channel's seam: see `runHcSlice`. */
   deps: SyncDeps | undefined;
+  /**
+   * When the batch arrived (the queue row's `received_at`, unix seconds), and
+   * the ids it deletes: what its tombstones are stamped with, and what decides
+   * whether one of its upserts brings a tombstoned id back
+   * (worker/src/hc/store/record-index.ts).
+   */
+  arrival: { receivedAt: number; deletes: (id: string) => boolean };
   /**
    * The `day` marks this batch is known to have written, by key: `Head.marked`.
    * A day is two dozen chunks, and each of them would write the same mark.
@@ -690,7 +699,7 @@ async function deleteSlot(
     const rewrite = await rewriteChunk(job, slot.key, stored.origin, stored, records, removed);
     statements.push(...rewrite);
   }
-  statements.push(tombstoneStatement(ctx, deviceId, slot.blinds));
+  statements.push(tombstoneStatement(ctx, deviceId, slot.blinds, job.arrival.receivedAt));
   // Noted at once, durable or not: a type noted too often is only recounted.
   noteShrunk(cursor, slot.key.type);
   const removed = slot.blinds.length;
@@ -723,7 +732,18 @@ async function deletePage(job: BatchRun, page: readonly string[]): Promise<boole
 
   const unknown = every.filter((blind) => !index.has(blind));
   if (unknown.length > 0) {
-    const statements = [unknownTombstoneStatement(ctx, deviceId, unknown)];
+    const statements = [unknownTombstoneStatement(ctx, deviceId, unknown, job.arrival.receivedAt)];
+    await defer(job, { statements, chunks: [], settle: countNothing });
+  }
+  // Deleted before, and deleted again by this batch: the tombstone takes this
+  // batch's arrival, so that only a still later upsert brings the id back.
+  const { receivedAt } = job.arrival;
+  const again = every.filter((blind) => {
+    const entry = index.get(blind);
+    return entry?.deleted === true && (entry.deletedAt ?? receivedAt) < receivedAt;
+  });
+  if (again.length > 0) {
+    const statements = [restampStatement(ctx, deviceId, again, receivedAt)];
     await defer(job, { statements, chunks: [], settle: countNothing });
   }
 
@@ -789,6 +809,11 @@ function nextPage(groups: readonly UpsertGroup[], from: number): UpsertGroup[] {
 interface GroupJob {
   group: UpsertGroup;
   key: ChunkKey;
+  /**
+   * True when a record of the group brings its tombstoned id back to life: the
+   * record written again, in a batch that arrived after the one that deleted it.
+   */
+  revives: (record: HcRecord) => boolean;
   /** The index entry of a record of the group, if it has one. */
   entryOf: (record: HcRecord) => IndexEntry | undefined;
   blindOf: (record: HcRecord) => string;
@@ -823,8 +848,10 @@ function planGroup(
   const incoming: HcRecord[] = [];
   const leaving = new Map<string, Set<string>>();
   for (const record of work.group.records) {
-    // A tombstoned id is never written again: Health Connect does not reuse one.
-    if (work.entryOf(record)?.deleted === true) continue;
+    // A tombstoned id is only written again by a batch that arrived after the
+    // delete: the record written anew, under the id it had. An upsert older
+    // than the delete is the deleted record, late, and stays out.
+    if (work.entryOf(record)?.deleted === true && !work.revives(record)) continue;
     const from = movedFrom(work, record);
     const old = heldCopy(chunks, from, record);
     // The stored copy is newer: this upsert is the stale one, and stays out.
@@ -906,15 +933,21 @@ async function applyGroup(job: BatchRun, work: GroupJob, held: HeldChunks): Prom
     ...moved,
     ...(await rewriteChunk(job, key, group.origin, target, merged.records, touched)),
   ];
-  // Index rows for what is new here or has just arrived from another chunk.
-  const unindexed = merged.accepted
-    .filter((record) => {
-      const entry = work.entryOf(record);
-      return entry === undefined || !sameKey(entry.key, key);
-    })
-    .map((record) => work.blindOf(record));
+  // Index rows for what is new here or has just arrived from another chunk,
+  // and for what is back after a tombstone -- those in a statement of their
+  // own, the only one that may bring a tombstone back to life.
+  const unindexed: string[] = [];
+  const revived: string[] = [];
+  for (const record of merged.accepted) {
+    const entry = work.entryOf(record);
+    if (entry?.deleted === true) revived.push(work.blindOf(record));
+    else if (entry === undefined || !sameKey(entry.key, key)) unindexed.push(work.blindOf(record));
+  }
   if (unindexed.length > 0) {
     statements.push(indexUpsertStatement(ctx, deviceId, key, unindexed));
+  }
+  if (revived.length > 0) {
+    statements.push(indexUpsertStatement(ctx, deviceId, key, revived, true));
   }
   // Forgotten before the write, not after: if it fails part way, what is held
   // must not be taken for what is stored.
@@ -962,7 +995,11 @@ async function applyUpserts(job: BatchRun, groups: readonly UpsertGroup[]): Prom
     for (const group of page) {
       const originHash = await originHashOf(group.origin);
       const key: ChunkKey = { type: group.type, originHash, hourUtc: group.hourUtc };
-      jobs.push({ group, key, entryOf, blindOf });
+      const revives = (record: HcRecord): boolean => {
+        const entry = entryOf(record);
+        return entry !== undefined && revivesTombstone(entry, job.arrival, record.id);
+      };
+      jobs.push({ group, key, revives, entryOf, blindOf });
     }
     // Every chunk the page will read, in one statement (a second only when
     // records are moving between chunks): see `HeldChunks`.
@@ -993,6 +1030,8 @@ interface Head {
   batch: ParsedBatch;
   /** The `day` marks the apply of this batch has written so far: see `BatchRun.marked`. */
   marked: Set<string>;
+  /** The ids the batch deletes: see `BatchRun.arrival`. */
+  deleted: ReadonlySet<string>;
 }
 
 /**
@@ -1028,7 +1067,8 @@ async function headBatchId(ctx: Ctx, deviceId: string): Promise<string | null> {
  * moved on, so the queued body is the only copy of its records; it stays in
  * `hc_ingest_queue` until the cause is fixed and the batch is queued again
  * (`unpark`), or the device is wiped. Applying it late is safe: an upsert only
- * replaces an older `lastModified`, and a tombstoned id is never written.
+ * replaces an older `lastModified`, and an id deleted by a batch that arrived
+ * after this one stays deleted.
  */
 async function failBatch(
   ctx: Ctx,
@@ -1123,7 +1163,7 @@ async function openHead(
     await failBatch(ctx, deviceId, queued.batchId, "batch_mismatch", null, deps);
     return "failed";
   }
-  return { queued, batch, marked: new Set() };
+  return { queued, batch, marked: new Set(), deleted: new Set(batch.deletes) };
 }
 
 /**
@@ -1156,7 +1196,8 @@ async function finishBatch(job: BatchRun, head: Head): Promise<number> {
       status: "applied",
       applied: cursor.applied,
       // Upserts that did not become the stored copy: an older `lastModified`
-      // than what is held, a duplicate within the batch, or a tombstoned id.
+      // than what is held, a duplicate within the batch, or an id deleted by
+      // this batch or a later one.
       superseded: batch.upserts.length - cursor.applied,
       removed: cursor.removed,
       applyMs,
@@ -1231,6 +1272,10 @@ async function applyHead(
     cursor,
     startedMs,
     deps,
+    arrival: {
+      receivedAt: head.queued.receivedAt,
+      deletes: (id) => head.deleted.has(id),
+    },
     marked: head.marked,
     pending: [],
     pendingBytes: 0,

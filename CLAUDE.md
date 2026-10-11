@@ -62,6 +62,19 @@ body is the only copy of those records. These hold for `worker/src/hc/**`,
   `worker/test/integration/hc/replay.test.ts` kills a run around every commit and
   compares the store with an uninterrupted one: a change to `apply.ts` keeps it
   green.
+- **A record id comes back.** Health Connect gives a record rewritten under the
+  same client record id the id it had, and the app's own ids for the platform's
+  hourly totals (`agg:<Metric>:<hour>`) are deleted and upserted as an hour
+  empties and fills. A tombstone in `hc_record_index` carries when the deleting
+  batch ARRIVED (`received_at`), and only refuses an upsert from a batch that
+  arrived before it; never compare it with a record's `lastModified`.
+- **A stored rollup holds every record whole, where it starts.** Dividing a
+  record among the buckets it spans is done when an answer is made
+  (`worker/src/mcp/hc/aggregate.ts`), from the `crossing` list a rollup carries.
+  A change to what a rollup holds raises `ROLLUP_REVISION`
+  (`worker/src/hc/store/read.ts`): that re-rolls every stored day, and the hour
+  rollups under them, by the path a change of zone takes, with nothing to run
+  by hand.
 - Statements are nearly free in production (about a millisecond); round trips
   are not (about 20 ms a read, 65 to 80 ms a commit). `hc.slice` logs
   `roundTrips`, `executed` and `sqlMs`: measure there before optimising, and do
@@ -158,8 +171,12 @@ applies to what is fetched from the phone or stored: the upload, the store and
 the rollups are uncapped in total. The upload route does bound a single request
 (8 MiB compressed, 16 MiB decompressed, 25,000 records, a rate limit and queue
 backpressure), but it refuses an oversize batch whole with 413 so the phone splits
-it, and never truncates one. Do not copy this pattern to another tool without
-recording it here.
+it, and never truncates one. `data_quality` additionally stops at a window
+boundary: it assesses a range half a year at a time and reads at most two
+windows a call, because one request cannot read years of rollups, and when it
+stops short it always says `truncated: true` with a cursor (nothing is dropped,
+and `total` is then the findings so far). Do not copy this pattern to another
+tool without recording it here.
 
 ## Naming: "health system", not "provider"
 

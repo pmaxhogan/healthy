@@ -5,8 +5,17 @@
  * that whole local day in the zone the call runs in, or an instant that says
  * its own offset (`2026-01-31T09:00:00-05:00`, `...Z`). A date-time with no
  * offset is refused: it could only be guessed at, and a guess that is an hour
- * out moves a night's sleep into the wrong day. Every range is half-open,
- * `[start, end)`; an `end` given as a date runs to the end of that local day.
+ * out moves a night's sleep into the wrong day. Every range is half-open in
+ * instants, `[start, end)` -- and what that means for `end` depends on how it
+ * was written:
+ *
+ *  - an `end` given as an INSTANT is exclusive: the range stops just before it;
+ *  - an `end` given as a calendar DATE is inclusive of that date: it stands for
+ *    the whole local day, so the range runs to the midnight that ends it.
+ *    `start: 2026-01-30, end: 2026-01-31` is two days, not one.
+ *
+ * Nothing in the tools may describe `end` as plainly "exclusive": a caller who
+ * passes two dates gets both.
  *
  * Out: every instant is ISO-8601 carrying the zone's offset at that instant
  * (`2026-01-31T09:00:00-05:00`), so a string compares correctly within one

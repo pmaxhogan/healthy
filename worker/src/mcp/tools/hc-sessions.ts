@@ -33,10 +33,10 @@
 import { z } from "zod";
 
 import { isOverThreeHours } from "../../hc/rules.ts";
-import { AVAILABILITY_NOTE, BUDGET_NOTE, hcArgs, rangeArgs } from "../hc/args.ts";
+import { AVAILABILITY_NOTE, BUDGET_NOTE, RANGE_NOTE, hcArgs, rangeArgs } from "../hc/args.ts";
 import { openStampedPage } from "../hc/page.ts";
 import { JOINED_FIELDS, deniedJoins, stripJoined } from "../hc/policy.ts";
-import { groupSessions } from "../hc/sessions.ts";
+import { groupSessions, leftRunningReasons } from "../hc/sessions.ts";
 import {
   beginHcCall,
   deviceCoverageFor,
@@ -54,7 +54,7 @@ import { readTool } from "./register.ts";
 import type { ExerciseSummary, SleepNight } from "../../hc/rollup/types.ts";
 import type { ToolDeps } from "../deps.ts";
 import type { HcDevice } from "../hc/reads.ts";
-import type { Group, Spanned } from "../hc/sessions.ts";
+import type { Group, LeftRunningReason, Spanned } from "../hc/sessions.ts";
 import type { HcCall } from "../hc/sources.ts";
 import type { Range } from "../hc/time.ts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -169,6 +169,7 @@ function sleepRow(
     onset: clock.isoOrNull(night.onsetMs),
     wearableWake: clock.isoOrNull(night.stageWakeMs),
     hrWake: clock.isoOrNull(night.hrWakeMs),
+    hrFirstRise: clock.isoOrNull(night.hrFirstRiseMs),
     hr: night.hr,
     hrv: night.hrv === null ? null : { ...night.hrv, iqr: night.hrv.q3 - night.hrv.q1 },
     respiratoryRate: night.respiratoryRate,
@@ -191,6 +192,7 @@ function exerciseRow(
   device: HcDevice,
   group: Group<ExerciseSummary>,
   recordIds: RecordIds,
+  reasons: ReadonlyMap<string, LeftRunningReason>,
 ): Record<string, unknown> {
   const { clock } = call;
   const session = group.primary.summary;
@@ -205,10 +207,14 @@ function exerciseRow(
     durationMin: (session.endMs - session.startMs) / MINUTE_MS,
     hr: session.hr,
     energy: session.energy,
+    energyOrigin: session.energyOrigin ?? null,
     distance: session.distance,
-    steps: session.steps,
+    // A record that straddles an end of the session counts in proportion, so
+    // the stored sum can be fractional: a count of steps is rounded once, here.
+    steps: session.steps === null ? null : Math.round(session.steps),
     overThreeHours: isOverThreeHours(session),
     likelyLeftRunning: session.likelyLeftRunning,
+    leftRunningReason: reasons.get(group.primary.id) ?? null,
     zeroLength: session.zeroLength,
     exactDuplicate: session.exactDuplicate,
     hasRoute: session.hasRoute,
@@ -264,14 +270,18 @@ async function exerciseRows(
   for (const device of call.devices) {
     const sessions = await deps.hc.exerciseSessions({ deviceId: device.id, ...range });
     const recordIds = await sessionIds(deps, device, TYPE_EXERCISE, range, sessions.length);
-    const groups = groupSessions(
-      TYPE_EXERCISE,
-      sessions
-        .filter(({ session }) => wanted === null || wanted.has(session.exerciseType.toUpperCase()))
-        .map(({ id, session }) => ({ id, summary: session })),
-      leftRunningReadable(call),
-    );
-    for (const group of groups) rows.push(exerciseRow(call, device, group, recordIds));
+    const chosen = sessions
+      .filter(({ session }) => wanted === null || wanted.has(session.exerciseType.toUpperCase()))
+      .map(({ id, session }) => ({ id, summary: session }));
+    // The flag is heart rate and steps, judged when the summary was built: a
+    // call that may not see it gets neither it nor its reason (`stripJoined`
+    // takes both off the row), and its grouping does not depend on it.
+    const readable = leftRunningReadable(call);
+    const reasons = readable ? leftRunningReasons(chosen) : new Map<string, LeftRunningReason>();
+    const groups = groupSessions(TYPE_EXERCISE, chosen, readable);
+    for (const group of groups) {
+      rows.push(exerciseRow(call, device, group, recordIds, reasons));
+    }
   }
   return rows;
 }
@@ -287,14 +297,27 @@ export function registerHcSessionTools(server: McpServer, deps: ToolDeps): void 
         "anything in `[start, end)`. `date` is the local date the sleep ended on. " +
         "`inBedMin`, `asleepMin`, `awakeMin`, `stageMin` (minutes per stage: LIGHT, DEEP, " +
         "REM, AWAKE, ...), `onset` (first moment asleep), and two wake times: " +
-        "`wearableWake` is the end of the last sleep stage the wearable logged, `hrWake` " +
-        "is the first sustained rise in heart rate after the pulse was last settled -- so " +
-        "an awakening the sleeper went back to sleep from is not the wake. They differ when " +
+        "`wearableWake` is the end of the last sleep stage the wearable logged; `hrWake` " +
+        "is when the heart rate left its sleeping level FOR GOOD -- the start of the " +
+        "sustained rise (12 bpm over the night's baseline, held five minutes) that follows " +
+        "the LAST time the pulse was settled, looked for from 90 minutes before the " +
+        "session's end to an hour after it. That makes `hrWake` the final get-up, not the " +
+        "first stirring: if the pulse rose on waking, settled again for five minutes or " +
+        "more (lying in, dozing), and rose again, `hrWake` is the second rise, and it can " +
+        "be up to an hour after `end`. An awakening the sleeper went back to sleep from is " +
+        "never it. `hrFirstRise` is the FIRST stirring after the session: the first rise " +
+        "of the same size, held five minutes, that begins at or after `end` (within the " +
+        "hour after it), whether or not the pulse settled again afterwards. It is `end` " +
+        "itself when the pulse was already up as the session closed, equals `hrWake` when " +
+        "there was only one rise and it came after `end`, and is null when nothing rose in " +
+        "that hour or there is too little heart rate to say (and on a night whose summary " +
+        "predates the field). The two wake times differ when " +
         "the wearable kept logging sleep after you got up, or stopped early. " +
         "`stagesOverlap` is true when the stages overlapped and were cut so no stretch " +
-        "counts twice. Overnight `hr` (`min` and `max` over the samples; `mean` is the mean " +
-        "of per-minute means, so a densely sampled stretch does not outweigh a sparse " +
-        "one), `hrv` (`median`, `q1`, `q3`, `iqr` of RMSSD), " +
+        "counts twice. Overnight `hr`: `min` and `max` are the lowest and highest single " +
+        "SAMPLE of the night, `n` is the number of samples, and `mean` is the mean of the " +
+        "per-minute means (not of the samples), so a densely sampled stretch does not " +
+        "outweigh a sparse one. `hrv` (`median`, `q1`, `q3`, `iqr` of RMSSD), " +
         "`respiratoryRate`, `skinTempDelta` (versus the wearable's own baseline), " +
         "`restingHr`, and `origin`. Sessions two apps wrote for the same night are one " +
         "row (`mergedSessions`, `origins`), described by the longest, with every session " +
@@ -304,7 +327,7 @@ export function registerHcSessionTools(server: McpServer, deps: ToolDeps): void 
         "A row's `id` and each member's `id` is that SleepSession record's `id` in `hc_records`. " +
         "`contextClamped` is true when a session claimed so long a span that only its first " +
         "48 hours of heart rate and the rest were read for the joins. `include_stages` " +
-        `adds the stage timeline. ${AVAILABILITY_NOTE} ${BUDGET_NOTE}`,
+        `adds the stage timeline. ${RANGE_NOTE} ${AVAILABILITY_NOTE} ${BUDGET_NOTE}`,
       schema: SLEEP_SCHEMA,
     },
     async (args, run) => {
@@ -361,14 +384,34 @@ export function registerHcSessionTools(server: McpServer, deps: ToolDeps): void 
       description:
         "Workouts with anything in `[start, end)`, one row each: `title`, `exerciseType` " +
         "(the Health Connect name, e.g. WALKING, RUNNING, BIKING), `start`, `end`, " +
-        "`durationMin`, heart rate during it (`hr`: `max` and `min` over the samples, " +
-        "`mean` as the mean of per-minute means), `energy` (active kcal), `distance`, " +
-        "`steps` (a record that only partly overlaps the session counts in proportion), " +
+        "`durationMin`, heart rate during it (`hr`: `min` and `max` are the lowest and " +
+        "highest single SAMPLE, `n` the number of samples, and `mean` the mean of the " +
+        "per-minute means, not of the samples), `energy` (active kcal: the " +
+        "sum of the `ActiveCaloriesBurned` records ONE app wrote during the session -- the " +
+        "session's own app when it wrote any, otherwise the app that wrote the most; " +
+        "`energyOrigin` names that app -- and " +
+        "null when no app recorded active calories then, which is not zero; it is never " +
+        "derived from total calories or a basal rate), `distance`, " +
+        "`steps` (a whole number: a record that only partly overlaps the session counts in " +
+        "proportion, and the sum is rounded once), " +
         "`origin`, and four flags: `overThreeHours` (the session is longer than three " +
         "hours, by the clock alone), " +
-        "`likelyLeftRunning` (over three hours, ending in resting heart rate and no steps: " +
-        "probably a forgotten stop button, so do not trust its duration), `zeroLength`, and " +
-        "`exactDuplicate`. Sessions of the same exercise type that overlap in time -- the " +
+        "`likelyLeftRunning` (probably a forgotten stop button, so do not trust its " +
+        "duration; `leftRunningReason` names the rule that found it. `resting_tail`: over " +
+        "three hours, and its last 30 minutes are at or below 100 bpm with at most 30 steps " +
+        "-- or it has neither heart rate nor steps to judge by. `tail_below_active_phase`: " +
+        "over three hours, and its last 30 minutes are at least 20 bpm below its own " +
+        "busiest half hour AND hold at most 20 steps a minute where that busiest half hour " +
+        "held at least 40: the workout stopped and the tracker ran on while the wearer was " +
+        "up and about. An activity that makes no steps is never judged by the second rule. " +
+        "It is a flag only: no time or figure on the row is changed by it, and it is the " +
+        "same flag `daily_summary`, `hc_aggregate` and `data_quality` use), `zeroLength`, " +
+        'and `exactDuplicate`. For "minutes of exercise" over a period do not sum ' +
+        "`durationMin` here: only same-type overlaps are merged, so two DIFFERENT exercise " +
+        "types recorded at once count that time twice. `hc_aggregate` on `ExerciseSession` " +
+        "with `duration` is Health Connect's own total, overlaps across types removed, and " +
+        "is the one to quote; these rows say what the sessions were. " +
+        "Sessions of the same exercise type that overlap in time -- the " +
         "same workout from two apps -- are merged into one row (`mergedSessions`, `origins`, " +
         "`exactDuplicates`). Every figure on the row, `start`, `end` and `durationMin` " +
         "included, is the longest session's; `members` lists every session the row stands " +
@@ -380,7 +423,7 @@ export function registerHcSessionTools(server: McpServer, deps: ToolDeps): void 
         "keeps its own row. A row's `id` and each member's `id` is that ExerciseSession " +
         "record's `id` in `hc_records`. `contextClamped` is true when a session claimed so long a span " +
         "that only its first 48 hours of heart rate, steps and energy were read. " +
-        `${AVAILABILITY_NOTE} ${BUDGET_NOTE}`,
+        `${RANGE_NOTE} ${AVAILABILITY_NOTE} ${BUDGET_NOTE}`,
       schema: EXERCISE_SCHEMA,
     },
     async (args, run) => {

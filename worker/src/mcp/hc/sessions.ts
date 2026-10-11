@@ -20,8 +20,10 @@ import {
 
 import { compareText } from "./util.ts";
 
-import type { MergedSession, SessionMergeOptions } from "../../hc/rules.ts";
+import type { LeftRunningReason, MergedSession, SessionMergeOptions } from "../../hc/rules.ts";
 import type { HcRecord } from "../../hc/wire.ts";
+
+export type { LeftRunningReason } from "../../hc/rules.ts";
 
 export interface Stored<Summary> {
   id: string;
@@ -135,4 +137,36 @@ function speaker<Summary extends Spanned>(
     if (order < 0) best = member;
   }
   return best;
+}
+
+// --------------------------------------------------------------------------
+// Left running: why
+// --------------------------------------------------------------------------
+
+/** What the left-running flag reads of a stored exercise summary. */
+interface LeftRunningSubject {
+  likelyLeftRunning: boolean;
+  leftRunningReason?: LeftRunningReason | null;
+}
+
+/**
+ * Why each flagged session was flagged, by summary key.
+ *
+ * Both rules are applied when a session's summary is built
+ * (`leftRunningReason` in `worker/src/hc/rules.ts`), so the flag and its
+ * reason are stored and every tool reads the same ones: nothing is judged, and
+ * nothing is read, when a tool answers. A summary written before the reason
+ * was stored was flagged by the only rule there was then.
+ *
+ * The flag is heart rate and steps, so a caller whose policy withholds either
+ * must not report it: `leftRunningReadable` in the tools decides.
+ */
+export function leftRunningReasons<Summary extends LeftRunningSubject>(
+  stored: readonly Stored<Summary>[],
+): Map<string, LeftRunningReason> {
+  const reasons = new Map<string, LeftRunningReason>();
+  for (const { id, summary } of stored) {
+    if (summary.likelyLeftRunning) reasons.set(id, summary.leftRunningReason ?? "resting_tail");
+  }
+  return reasons;
 }

@@ -284,6 +284,14 @@ reported, not what is served: the MCP still answers from the stored copy and say
 the source is stale, so an assistant does not take an old reading for a current
 one. A revoked phone also reads as stale in coverage.
 
+An MCP client is told sooner than that, and more quietly. Every Health Connect
+answer carries `freshness` (the phone's last upload and, per record type, where
+its newest stored record ends), and once the last upload is more than **one
+hour** old the answer also warns `hc_upload_stale:device:<id>:<hours>h`. That is
+a note on an answer and nothing else: the phone is not stale on this page until
+six hours have passed, no alert is opened and no card is made. The only alert a
+phone raises is `hc_parked`, above.
+
 ### Rotate, revoke, delete
 
 | Action                    | Effect on the token                     | Effect on stored data                                                         | Reversible                       |

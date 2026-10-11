@@ -511,7 +511,8 @@ upload (`section: "sync"`), its newest blood-pressure reading and last night's
 sleep.
 
 **Rows and the envelope.** The envelope is the usual one, plus `timeZone`,
-`units` and, when rows were cut, `cursor`. Every row is tagged
+`units`, `freshness` (how current the phone's data is; see below) and, when
+rows were cut, `cursor`. Every row is tagged
 `healthSystemId: "device:<id>"` and `resourceType: "hc:<Type>"` (the Health
 Connect record class without `Record`: `hc:HeartRate`, `hc:SleepSession`),
 which is what `coverage`, the warnings and the exposure policy key on. Numbers
@@ -527,7 +528,12 @@ total; an answer whose rows come from more than one phone warns
 **Times.** `start` and `end` are a calendar date (`2026-01-31`, that whole
 local day) or an instant that carries its offset (`2026-01-31T09:00:00-05:00`,
 `...Z`); a date-time with no offset is refused, not guessed at. Ranges are
-half-open, `[start, end)`, and `end` defaults to now. "Local" means the zone
+half-open in instants, `[start, end)`, and `end` defaults to now. What that
+means for `end` depends on how it is written: an **instant** `end` is
+exclusive (the range stops just before it), while a **calendar-date** `end`
+includes that whole local day, because the instant it stands for is the
+midnight that ends it. So `start: 2026-01-30, end: 2026-01-31` is two days
+(and 48 hourly buckets), and the same date in both is one day. "Local" means the zone
 of the `tz` argument, or the owner's `timezone` setting when it is omitted;
 the answer names the zone it used in `timeZone`, day, week and month buckets
 begin at that zone's midnight (so a day is 23 or 25 hours across a clock
@@ -594,7 +600,11 @@ record of it, and absent when it holds none:
   with empty `items`, a `coverage` entry of `ok` with `recordCount: 0`, and
   the warning `no_data:hc:<Type>:device:<id>`. The answer is the same
   whatever the reason there is nothing. A name that is no record type at all
-  answers `unknown_type:hc:<Type>` instead.
+  answers `unknown_type:hc:<Type>` instead; that includes an `Agg.<Metric>`
+  name that is no platform total, such as `Agg.` put before a type Health
+  Connect does not total (`Agg.Weight`). A known type the owner's policy
+  withholds answers `policy_resource_denied:hc:<Type>`. No named type is
+  dropped without one of the three.
 - Whether the phone may read a type is not exposed to a client in any field,
   notice or warning. The owner sees and manages that on the admin Phone page.
 
@@ -611,6 +621,27 @@ about the phone, not the type: a phone that has stopped uploading goes stale
 on every type it has data for, including one it may no longer read. Ages
 (`hoursSinceUpload`, `staleHours`, `ageHours`) are never negative: an upload
 stamped a moment after the answer's `generatedAt` is zero hours old.
+
+**How current an answer is.** The phone uploads about every fifteen minutes,
+and an answer holds nothing newer than its last upload. Every Health Connect
+answer says how current it is in `freshness`, one entry per phone:
+`lastUploadAt`, `hoursSinceUpload` (hours to one decimal, never floored) and
+`dataThrough`, a map from each `hc:<Type>` the answer's `coverage` lists with
+records to the end of the newest stored record of that type. Nothing of the
+type after that instant is in the answer. It is read from the store's own
+bookkeeping and opens no record. Once the last upload is more than **one
+hour** old every answer also warns `hc_upload_stale:device:<id>:<hours>h`
+(`<hours>` to one decimal): hours of heart rate and steps may be missing, and
+the gap must not be read as inactivity. That warning is separate from, and
+much earlier than, `stale`: the coverage status, `hc_coverage`'s
+`availability` and `hc_sync_status`'s `status` still turn `stale` at six
+hours, and nothing about the one-hour warning raises an alert for the owner.
+A revoked phone is not warned about this way; its types already read `stale`.
+`hc_sync_status`'s `backfillOldestAt` is the one time written in UTC (`...Z`)
+whatever the answer's zone: the phone walks its history back in UTC calendar
+months, so it is normally a UTC month start. `hc_coverage`'s `lastRecordFrom`
+is the app (and hardware and recording method, when the app gave them) behind
+the record that ends last; it is null only for a type with no records.
 `hc_store_pending:device:<id>` means uploads are still
 being applied (or rollups rebuilt), so the newest one may not be in the answer
 yet. `hc_batches_parked:device:<id>:<n>` means `n` uploads could not be
@@ -629,13 +660,22 @@ numbers each bucket holds, in the row's `method` and `origins`:
 - `hc_priority` (the default). The phone uploads Health Connect's own
   priority-merged hourly totals for the types the platform aggregates (steps,
   distance, active calories, floors, elevation, wheelchair pushes, hydration,
-  exercise and sleep duration). A bucket that has them is answered with them
-  (`method: "platform"`). Where there are none the answer falls back, by what
-  the type is:
+  exercise and sleep duration). A bucket is answered with them
+  (`method: "platform"`) when the platform has a figure for **every hour of
+  the bucket in which something was recorded**. Where there are none the
+  answer falls back, by what the type is:
   - A sensor's running count (steps, distance, active and total energy,
     floors, elevation, wheelchair pushes) is decided **hour by hour**: in each
-    UTC hour the one app with the largest total is taken, and the hours are
-    summed into the bucket (`"max_origin"`). The hour is the unit whatever the
+    UTC hour one app is taken, and the hours are summed into the bucket
+    (`"max_origin"`). The app taken is the one with the largest total among
+    those that recorded something in or around the hour itself. An app that
+    has only its share of a record **longer than an hour** there -- a day's
+    energy written as one record, typically an estimate of basal energy -- is
+    taken only for an hour no other app recorded, so such a record is never
+    counted on top of a tracker's own total (which already includes basal
+    energy). What a row's total owes to such records is its `longRecordSum`;
+    the answer warns `hc_long_record_used:<rows>` and `daily_summary` flags
+    the day `long_record_used`. The hour is the unit whatever the
     bucket size, so a month is the sum of its days and of its hours in every
     zone, and an app that recorded the first half of a month does not erase
     the app that recorded the second. `duplicatesDropped` counts only another
@@ -650,22 +690,49 @@ numbers each bucket holds, in the row's `method` and `origins`:
     as heart rate or weight, and an entry someone logs (a drink, a meal),
     since two entries from two apps are two entries.
 
-  A bucket the platform covers only part of is composed hour by hour
-  (`"platform_and_max_origin"`, `"platform_and_all_origins"`). The answer
-  warns `hc_priority_fallback` when any bucket fell back and
-  `hc_duplicates_dropped:<n>` with the total.
+  A bucket the platform has a figure for only some of those hours is composed
+  hour by hour, the platform's figure where there is one and the fallback
+  elsewhere (`"platform_and_max_origin"`, `"platform_and_all_origins"`). So a
+  day is always the sum of its hours as answered at the same moment, and a day
+  still going on is called `platform` only when the platform has every hour
+  recorded so far. The answer warns `hc_priority_fallback` when any bucket
+  fell back and `hc_duplicates_dropped:<n>` with the total.
+
+  Step, distance and the other platform totals are therefore **composed from
+  the platform's hourly figures**, and can differ from the daily figure the
+  Health Connect app or a tracker's own app shows. On an ordinary day by a few
+  steps: the platform gives each hour as a whole number, having divided the
+  records that straddle an hour, and the hours are added here as they were
+  uploaded, with no further rounding. On a day several apps wrote overlapping
+  steps by far more: the platform's own daily figure is then not the sum of
+  its own hours (it is not additive across bucket sizes), and can exceed
+  every single app's count. The hour-composed figure is the one that adds up.
 
 - `origin:<package>`: that app's records alone.
 - `all_separately`: one row per bucket per app.
 
-A record counts in the bucket its **start** falls in, whole (`bucketing:
-"start_time"`). A night of sleep is the one exception: it counts in the
-bucket it **ended** in, the day you woke up (`bucketing: "end_time"`), which
-is the `date` `sleep_sessions` gives it and the day `daily_summary` puts it
-on. For that reason sleep is never answered from the platform's hourly
-figure, which would split a night at midnight. Empty buckets are returned with `hasData: false`, filled with
+A record counts in the bucket its **start** falls in (`bucketing:
+"start_time"`), with two exceptions. A running count's interval record (steps,
+distance, energy, floors, elevation, wheelchair pushes) that runs past the end
+of its bucket is **divided**: each bucket gets the share of its value that the
+time it spends there is of its length, as Health Connect's own aggregation
+does. A day's total written as one record is a twenty-fourth in each hour, not
+all of it at midnight. Only `sum` and `duration` are divided; `records`, `n`
+and the other statistics stay with the bucket the record starts in, and a
+record longer than two days is not divided at all. And a night of sleep counts
+in the bucket it **ended** in, the day you woke up (`bucketing: "end_time"`),
+which is the `date` `sleep_sessions` gives it and the day `daily_summary` puts
+it on. For that reason sleep is never answered from the platform's hourly
+figure, which would split a night at midnight. For sleep, `duration`
+(`durationMs`) is the time **asleep**, which is what Health Connect reports as
+a night's duration, and the `in_bed` metric (`inBedMs`) is the night from start
+to end; both are returned by default.
+
+Every bucket from `start` to the end of the range (or to now) is returned.
+Empty ones have `hasData: false` and are filled with
 zero or, with `fill: "null"`, null (a mean or an extreme of nothing is null
-either way). Nothing dated after now is counted unless `exclude_future` is
+either way). A long answer is still cut by the byte budget: it then says
+`truncated`, `total` counts every bucket, and the `cursor` continues. Nothing dated after now is counted unless `exclude_future` is
 false. Total calories are what was recorded: Health Connect pads unrecorded
 hours with basal metabolic rate, which turns "no data" into a plausible
 number, so that padding is off unless `bmr_fill: true`, and then shown per row
@@ -691,7 +758,18 @@ below 20 bpm and speeds above 15 m/s are left out; a weight written within a
 minute of a height record by the same app is a profile screen, not a weighing;
 overlapping sleep or exercise sessions are one row; an exercise session over
 three hours is `overThreeHours`, and one of those that also ends in resting
-heart rate and no steps is `likelyLeftRunning`. A flag takes a value out of a figure, never out of a
+heart rate and no steps is `likelyLeftRunning`. There is a second way to earn
+that flag, for the session forgotten
+while its wearer stayed on their feet (a raised pulse and a few steps are not
+"at rest"): over three hours, with a last 30 minutes at least 20 bpm below the
+session's own busiest half hour AND at most 20 steps a minute where that
+busiest half hour held at least 40. An activity that makes no steps is never
+judged that way, and a steady hike keeps its cadence to the end.
+`leftRunningReason` (`resting_tail` or `tail_below_active_phase`; `reason` on
+the `data_quality` finding) says which rule fired. Both rules are applied when
+the session's summary is built, so the flag is stored and `exercise_sessions`,
+`daily_summary`, `hc_aggregate` and `data_quality` all read the same one. It is
+a flag only: no time, duration or figure changes. A flag takes a value out of a figure, never out of a
 listing: `daily_summary`'s `weight` is the last weighing that was not flagged,
 and its `weighings` lists every one with the `flag` it earned. `daily_summary`
 adds one rule of its own: a "resting heart rate" written by an app within a
@@ -739,29 +817,89 @@ finding is every exercise session over three hours; `source_switch` is
 reported only when the app that supplied a type is absent, or nearly (at most
 a tenth of the day's total, weighed by the field's sum and not by record
 counts), on the day another takes over, so two apps recording side by side
-are not a switch.
+are not a switch. A `gap` is reported only for what a device records by
+itself, day in and day out: the sensor counters (steps, distance, energy,
+floors), the vitals a wearable samples unasked (heart rate, resting heart
+rate, HRV, respiratory rate, oxygen saturation, skin temperature) and sleep.
+Event data, which exists when a person does something (a workout, a
+blood-pressure reading, a weighing, a meal), has no gaps: a week without a
+workout is not a hole in the data. `session_missing` is the night the
+wearable measured whose session is not in the store: a date with readings of
+at least two different overnight types (resting heart rate, respiratory rate,
+HRV, skin temperature; `vitals` lists them) that no stored sleep session
+accounts for, a reading being accounted for when it is timed inside a session
+or within 30 minutes of either end. It is a `hc:SleepSession` finding. A
+platform total named in `types` (`Agg.Steps`) is not something to judge the
+quality of: it yields no finding and the answer warns
+`not_assessed:hc:Agg.<Metric>`, so that silence does not read as "nothing
+found".
+
+`data_quality` answers a long range **in pages**. It assesses the range half a
+year at a time, oldest first, each window with the half year before it in
+view, and one call reads at most two windows (a year), or fewer once it holds
+`max_bytes` of findings: a single request cannot open years of the store. When
+it stops short of the end the answer is `truncated: true` with a `cursor`,
+even when the page holds few findings or none, and `total` and `matched` are
+then the findings **so far** (this page and those before it). Follow the
+cursor until `truncated` is false; no finding is dropped or repeated.
+
+**Minutes of exercise: which total.** Three figures can be called that, and
+they differ:
+
+- `hc_aggregate` on `ExerciseSession` with `duration` is Health Connect's own
+  total where the phone uploaded one: overlapping sessions are counted once,
+  **including sessions of different exercise types**. This is the figure to
+  quote for "minutes of exercise" over a period, and the one that matches
+  what Health Connect shows.
+- The sum of `exercise_sessions` `durationMin` is larger whenever two
+  sessions of different types overlap (a walk recorded inside a longer
+  hike): this tool merges only same-type overlaps into one row, because two
+  different activities are two things to list. Use its rows to see what the
+  sessions were, not to total them.
+- The sum of `exercise_sessions` `spanMin` counts no hour twice within one
+  exercise type, and still counts it twice across types.
+
+An exercise row's `energy` is active kilocalories only: the sum of the
+`ActiveCaloriesBurned` records ONE app wrote during the session (the
+session's own app when it wrote any, otherwise the app that wrote the most).
+It is null when no app recorded active calories then, which is common for
+older history, and is never derived from total calories or a basal rate.
+`steps` is a whole number: records that straddle an end of the session count
+in proportion, and the sum is rounded once.
 
 **Which mean.** Heart rate is sampled unevenly, every second during activity
 and every few minutes at rest, so "the mean" depends on what is averaged:
 
-| Field                                                      | What it is                                                                         |
-| ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `hr_series` `mean` at `1min`                               | The plain mean of that minute's samples.                                           |
-| `hr_series` `mean` at `5min`, `1h`, or decimated           | The mean of the minute means in the bucket.                                        |
-| `hr_series` `mean` at `5s`                                 | Time-weighted: each reading counts for as long as it stood.                        |
-| `hr_series` `mean` at `raw`                                | The reading itself.                                                                |
-| `sleep_sessions` `hr.mean`, `exercise_sessions` `hr.mean`  | The mean of per-minute means over the session; `min` and `max` are of the samples. |
-| `hc_aggregate` `values.bpm.mean`                           | The plain mean of the samples of the records that start in the bucket.             |
-| `daily_summary` `hrvRmssd`, `respiratoryRate`, `restingHr` | The plain mean of the day's records.                                               |
+| Field                                                     | What it is                                                                         |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `hr_series` `mean` at `1min`                              | The plain mean of that minute's samples.                                           |
+| `hr_series` `mean` at `5min`, `1h`, or decimated          | The mean of the minute means in the bucket.                                        |
+| `hr_series` `mean` at `5s`                                | Time-weighted: each reading counts for as long as it stood.                        |
+| `hr_series` `mean` at `raw`                               | The reading itself.                                                                |
+| `sleep_sessions` `hr.mean`, `exercise_sessions` `hr.mean` | The mean of per-minute means. `min`, `max` are single samples; `n` counts samples. |
+| `hc_aggregate` `values.bpm.mean`                          | The plain mean of the samples of the records that start in the bucket.             |
+| `daily_summary` `respiratoryRate`, `restingHr`            | The plain mean of the day's records.                                               |
+| `daily_summary` `hrvRmssdMean`                            | The plain mean of the day's records; `sleep_sessions` `hrv.median` is a night's.   |
 
 `hr_events` works on the minute means. An event's baseline is the 10th
 percentile of the quiet minutes in the `window_s` seconds before it, with the
 minutes of an earlier event left out. With the defaults (30 bpm over a
 ten-minute window) a slow climb of a couple of beats a minute is **not**
 reported, because the baseline climbs with it: lengthen `window_s` or lower
-`min_delta_bpm` to look for one. `sleep_sessions`' `hrWake` is the first
-sustained rise after the pulse was last settled, so an awakening the sleeper
-went back to sleep from is not the wake; `stagesOverlap` says the wearable's
+`min_delta_bpm` to look for one. `sleep_sessions`' `hrWake` is when the heart
+rate left its sleeping level **for good**: the start of the sustained rise (12
+bpm over the night's baseline, held five minutes) that follows the LAST time
+the pulse was settled, searched from 90 minutes before the session's end to an
+hour after it. It is therefore the final get-up, not the first stirring: a
+pulse that rose on waking, settled again for five minutes or more and rose a
+second time gives the second rise, which can be most of an hour after `end`.
+An awakening the sleeper went back to sleep from is never it. `hrFirstRise`
+is the first stirring instead: the first rise of the same size, held five
+minutes, that begins at or after `end` and within the hour after it, whether
+or not the pulse settled again afterwards. It is `end` itself when the pulse
+was already up as the session closed, the same instant as `hrWake` when there
+was one rise and it came after `end`, and null when nothing rose in that hour.
+`stagesOverlap` says the wearable's
 stages overlapped and were cut so that no stretch counts twice. An exercise
 session's `steps`, `distance` and `energy` count a record that only partly
 overlaps the session in proportion to the overlap.

@@ -23,7 +23,7 @@ import {
   groupBloodPressureSessions,
 } from "../../hc/rules.ts";
 import { recordStartMs } from "../../hc/wire.ts";
-import { AVAILABILITY_NOTE, BUDGET_NOTE, hcArgs, rangeArgs } from "../hc/args.ts";
+import { AVAILABILITY_NOTE, BUDGET_NOTE, RANGE_NOTE, hcArgs, rangeArgs } from "../hc/args.ts";
 import {
   TYPE_HEART_RATE,
   readMinutes,
@@ -478,7 +478,7 @@ export function registerHcHeartTools(server: McpServer, deps: ToolDeps): void {
         "not interpolated. Readings above 200 or below 20 bpm are sensor artefacts and are " +
         "left out " +
         "(`hr_artefacts_dropped:<n>`). One app's readings only, unless `origins` names " +
-        `several: two devices are never blended. ${AVAILABILITY_NOTE} ${BUDGET_NOTE}`,
+        `several: two devices are never blended. ${RANGE_NOTE} ${AVAILABILITY_NOTE} ${BUDGET_NOTE}`,
       schema: SERIES_SCHEMA,
     },
     async (args, run) => {
@@ -575,7 +575,7 @@ export function registerHcHeartTools(server: McpServer, deps: ToolDeps): void {
         "`deltaBpm`, `timeToPeakS`, `durationS`, `origin`, and `context` -- `exercise` " +
         "(during a recorded workout), `wake` (at the end of a sleep session), `sleep` or " +
         "`other`. Computed on per-minute means, so a rise shorter than a minute is not " +
-        `seen. ${AVAILABILITY_NOTE} ${BUDGET_NOTE}`,
+        `seen. ${RANGE_NOTE} ${AVAILABILITY_NOTE} ${BUDGET_NOTE}`,
       schema: EVENTS_SCHEMA,
     },
     async (args, run) => {
@@ -655,7 +655,7 @@ export function registerHcHeartTools(server: McpServer, deps: ToolDeps): void {
         "and the answer says how many copies it left out (`hc_duplicates_dropped:<n>`); " +
         "`dedupe: false` keeps them all. `pulse` is the heart rate the same app recorded in " +
         "the reading's minute, when it recorded one. Separate from `get_vitals`, which " +
-        `holds what a clinic measured. ${AVAILABILITY_NOTE} ${BUDGET_NOTE}`,
+        `holds what a clinic measured. ${RANGE_NOTE} ${AVAILABILITY_NOTE} ${BUDGET_NOTE}`,
       schema: PRESSURE_SCHEMA,
     },
     async (args, run) => {

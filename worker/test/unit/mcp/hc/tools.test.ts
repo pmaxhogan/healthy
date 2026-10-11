@@ -1024,10 +1024,12 @@ describe("exercise_sessions", () => {
         durationMin: 40,
         hr: { min: 128, mean: 128, max: 128, n: 40 },
         energy: null,
+        energyOrigin: null,
         distance: 3000,
         steps: null,
         overThreeHours: false,
         likelyLeftRunning: false,
+        leftRunningReason: null,
         zeroLength: false,
         exactDuplicate: false,
         hasRoute: false,
@@ -1054,6 +1056,7 @@ describe("exercise_sessions", () => {
         durationMin: 240,
         overThreeHours: true,
         likelyLeftRunning: true,
+        leftRunningReason: "resting_tail",
         origin: PHONE,
       }),
     ]);
@@ -1189,7 +1192,7 @@ describe("daily_summary", () => {
       totalKcal: null,
       sleep: null,
       restingHr: null,
-      hrvRmssd: null,
+      hrvRmssdMean: null,
       respiratoryRate: null,
       bloodPressure: null,
       weight: null,
@@ -1207,7 +1210,7 @@ describe("daily_summary", () => {
       sleep: { asleepMin: 460, inBedMin: 480, naps: 0, origin: WEARABLE },
       // The wearable's 52, not the mean of it and the cuff's 68.
       restingHr: 52,
-      hrvRmssd: 43,
+      hrvRmssdMean: 43,
       respiratoryRate: 14,
       bloodPressure: { systolic: 119, diastolic: 78, readings: 2 },
       // The weighing, not the weight typed into a profile beside a height --
@@ -1277,7 +1280,11 @@ describe("daily_summary", () => {
       "Weight",
       "Height",
     ]);
-    expect(readers()).not.toContain("hourRollups");
+    // No hour of the day itself is opened. The hour rollups that are read are
+    // those of the two days BEFORE it, for the running counts: a record that
+    // started there and runs into the day is listed in them.
+    const hourly = world.state.hc.calls.filter((entry) => entry.reader === "hourRollups");
+    expect(hourly.every((entry) => entry.endMs === at(-24))).toBe(true);
     expect(readers()).not.toContain("hrMinutes");
   });
 });
@@ -1497,7 +1504,7 @@ describe("hc_coverage and hc_sync_status", () => {
       healthSystem: "Test phone",
       status: "active",
       lastUploadAt: zoned(NOW_MS - 600_000),
-      hoursSinceUpload: 0,
+      hoursSinceUpload: 0.2,
       appVersion: "0.1.1",
       backgroundRead: true,
       historyRead: true,
@@ -1581,7 +1588,7 @@ describe("get_health_summary's phone lines", () => {
         healthSystemId: SOURCE,
         status: "active",
         lastUploadAt: zoned(NOW_MS - 600_000),
-        hoursSinceUpload: 0,
+        hoursSinceUpload: 0.2,
       },
       {
         kind: "phone",

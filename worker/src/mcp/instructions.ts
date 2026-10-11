@@ -26,6 +26,16 @@ export const MCP_INSTRUCTIONS =
   "Their rows are tagged `device:<id>` and `hc:<Type>`, their " +
   "answers stop at a soft byte budget (`truncated` plus a `cursor`; raise " +
   "`max_bytes` or project with `jq`), and get_vitals does not include them. " +
+  "Phone data is only as current as the phone's last upload (about every " +
+  "fifteen minutes): each of these answers carries `freshness`, per phone, " +
+  "with `lastUploadAt`, `hoursSinceUpload` and `dataThrough` (the end of the " +
+  "newest stored record of each `hc:<Type>` it covers), and warns " +
+  "`hc_upload_stale:device:<id>:<hours>h` once the last upload is more than " +
+  "an hour old. Read that warning before treating a quiet stretch at the end " +
+  "of a range as rest, a missing night or a low day: it may simply not have " +
+  "arrived yet, and say so. In a `start`/`end` range an `end` written as a " +
+  "calendar date includes that whole local day, while an `end` written as an " +
+  "instant is exclusive. " +
   "Every tool that reads a resource " +
   "type returns { items, total, matched, coverage, warnings, truncated, " +
   "generatedAt } and accepts an optional `jq` argument: a real jq program run " +

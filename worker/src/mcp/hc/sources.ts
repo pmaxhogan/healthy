@@ -22,18 +22,30 @@
  * `mcpDeviceCoverage` in `worker/src/hc/coverage.ts` for the rule and why.
  */
 
-import { coverageResourceType, deviceSourceId, mcpDeviceCoverage } from "../../hc/coverage.ts";
+import {
+  coverageResourceType,
+  deviceSourceId,
+  hoursSince,
+  mcpDeviceCoverage,
+  uploadLateHours,
+} from "../../hc/coverage.ts";
 import { recordFieldsOf } from "../../hc/record-types.ts";
 import { daysTouched } from "../../hc/rollup/day.ts";
 import { isHealthSystemDenied } from "../../policy/rules.ts";
 import { respond } from "../respond.ts";
 
 import { DEFAULT_MAX_BYTES, writeCursor } from "./page.ts";
-import { isPlatformAggregate, policyResourceType, sourceTypeOf, typeAllowed } from "./policy.ts";
+import {
+  isPlatformAggregate,
+  policyResourceType,
+  sourceTypeOf,
+  typeAllowed,
+  typeDeniedWarning,
+} from "./policy.ts";
 import { SECOND_MS, zoneClock } from "./time.ts";
 
 import type { StampedPage } from "./page.ts";
-import type { HcDevice, StoreBacklog } from "./reads.ts";
+import type { HcDevice, StoreBacklog, SyncStateRow } from "./reads.ts";
 import type { ZoneClock } from "./time.ts";
 import type { PolicyRules } from "../../policy/rules.ts";
 import type { CoverageEntry } from "../coverage.ts";
@@ -90,6 +102,13 @@ export interface HcCall {
   clock: ZoneClock;
   /** True when that zone is the configured one, so day rollups may be used. */
   configuredZone: boolean;
+  /**
+   * `hc_sync_state` of each phone of this call, by device id: where the
+   * newest stored record of every type ends, which is what an answer's
+   * `freshness` is read from. Bookkeeping the coverage of every tool reads
+   * anyway (one memoised read a phone), never a measurement.
+   */
+  syncRows?: ReadonlyMap<string, readonly SyncStateRow[]>;
 }
 
 export async function beginHcCall(
@@ -99,8 +118,12 @@ export async function beginHcCall(
 ): Promise<HcCall> {
   const configured = await deps.timezone();
   const timeZone = args.tz ?? configured;
+  const devices = selectDevices(await deps.hc.devices(), run.rules, args.devices);
+  const syncRows = new Map<string, readonly SyncStateRow[]>();
+  for (const device of devices) syncRows.set(device.id, await deps.hc.syncRows(device.id));
   return {
-    devices: selectDevices(await deps.hc.devices(), run.rules, args.devices),
+    devices,
+    syncRows,
     rules: run.rules,
     now: run.now,
     nowMs: run.now * SECOND_MS,
@@ -135,9 +158,20 @@ function isKnownType(type: string): boolean {
 }
 
 /**
- * The warnings for the types a caller named and the store has nothing of:
- * `no_data:hc:<Type>:device:<id>` per phone for a type the wire knows, and
- * `unknown_type:hc:<Type>` once for a name that is no record type at all.
+ * The warnings that answer every type a caller NAMED and got no rows of, so a
+ * name is never dropped in silence:
+ *
+ *  - `no_data:hc:<Type>:device:<id>` per phone, for a type the wire knows and
+ *    the store has nothing of;
+ *  - `unknown_type:hc:<Type>` once, for a name that is no record type at all
+ *    -- an `Agg.<Metric>` this Worker maps to no record type included (a
+ *    misspelt one, or `Agg.` put before a type the platform does not
+ *    aggregate). That says nothing about the policy: there is no such type for
+ *    a rule to be on;
+ *  - `policy_resource_denied:hc:<Type>` once, for a known type the owner's
+ *    policy withholds. It has no coverage entry and no rows, by design, and
+ *    the warning is the one every tool gives for a type it may not read.
+ *
  * A type that is there needs none; a stale one is announced with the rest of
  * coverage's warnings.
  */
@@ -155,10 +189,78 @@ function emptyTypeWarnings(
   const covered = new Set(coverage.map((entry) => entry.resourceType));
   const asked = new Set(named);
   for (const type of asked) {
-    const unknown = !isKnownType(type) && !covered.has(coverageResourceType(type));
-    // An aggregate nothing maps to a source is announced where it is refused.
-    if (unknown && typeAllowed(call.rules, type)) {
-      out.push(`unknown_type:${coverageResourceType(type)}`);
+    if (covered.has(coverageResourceType(type))) continue;
+    if (!isKnownType(type)) out.push(`unknown_type:${coverageResourceType(type)}`);
+    else if (!typeAllowed(call.rules, type)) out.push(typeDeniedWarning(type));
+  }
+  return out;
+}
+
+/** What the envelope's `freshness` says of one phone. */
+interface PhoneFreshness {
+  healthSystemId: string;
+  /** When the phone last uploaded, in the answer's zone; null before the first upload. */
+  lastUploadAt: string | null;
+  /** Hours since then, to one decimal. */
+  hoursSinceUpload: number | null;
+  /**
+   * `hc:<Type>` -> the end of the newest stored record of that type, in the
+   * answer's zone: the answer holds nothing of the type after it.
+   */
+  dataThrough: Record<string, string>;
+}
+
+/**
+ * How fresh the data behind an answer is, per phone: when it last uploaded,
+ * and for every record type the answer's `coverage` lists with records, where
+ * the newest stored record of it ends.
+ *
+ * Read off `hc_sync_state` (`last_ms`, which the store recounts from its
+ * chunks whenever a batch is applied), so it costs no read of its own and
+ * opens no record. Only types in `coverage` are named: coverage has already
+ * been through the deny-list, and this envelope field is not filtered again.
+ */
+function freshnessOf(call: HcCall, coverage: readonly CoverageEntry[]): PhoneFreshness[] {
+  return call.devices.map((device) => {
+    const source = deviceSourceId(device.id);
+    const listed = new Set(
+      coverage
+        .filter((entry) => entry.healthSystemId === source)
+        .map((entry) => entry.resourceType),
+    );
+    const rows = call.syncRows?.get(device.id) ?? [];
+    const through: [string, string][] = [];
+    for (const row of rows) {
+      const resourceType = coverageResourceType(row.recordType);
+      if (row.lastMs !== null && row.recordCount > 0 && listed.has(resourceType)) {
+        through.push([resourceType, call.clock.iso(row.lastMs)]);
+      }
+    }
+    const dataThrough = Object.fromEntries(through);
+    return {
+      healthSystemId: source,
+      lastUploadAt:
+        device.lastUploadAt === null ? null : call.clock.iso(device.lastUploadAt * SECOND_MS),
+      hoursSinceUpload:
+        device.lastUploadAt === null ? null : hoursSince(call.now, device.lastUploadAt),
+      dataThrough,
+    };
+  });
+}
+
+/**
+ * `hc_upload_stale:<source>:<age>h` for every phone of the call whose last
+ * upload is more than an hour old (`HC_UPLOAD_LATE_AFTER_SECONDS`): the phone
+ * syncs every fifteen minutes, so whatever it measured since then is not in
+ * the answer. `<age>` is hours to one decimal. Said on every Health Connect
+ * answer, with or without rows -- a quiet gap is the thing being announced.
+ */
+function uploadStaleWarnings(call: HcCall): string[] {
+  const out: string[] = [];
+  for (const device of call.devices) {
+    const hours = uploadLateHours(device, call.now);
+    if (hours !== null) {
+      out.push(`hc_upload_stale:${deviceSourceId(device.id)}:${hours.toFixed(1)}h`);
     }
   }
   return out;
@@ -355,6 +457,45 @@ export interface HcAnswer {
    * time. Otherwise the cursor is a plain offset into the whole answer.
    */
   cursorFor?: (next: number, sent: readonly unknown[]) => string;
+  /**
+   * `data_quality` only: the stretch of the range this call read, when it
+   * walks the range a window at a time (`dataQualityPage`). `items` are then
+   * the rows of `[fromMs, untilMs)`, and unless `done` the answer is
+   * `truncated` with a cursor that goes on from `untilMs` -- whether or not
+   * the byte budget cut anything.
+   */
+  scan?: { fromMs: number; untilMs: number; done: boolean };
+}
+
+/**
+ * The cursors of an answer that covers one stretch of a longer walk: a cut
+ * inside its rows repeats the same stretch and skips what was sent, and the
+ * end of its rows moves on to the next stretch.
+ */
+function scanCursors(
+  page: StampedPage,
+  scan: NonNullable<HcAnswer["scan"]>,
+): {
+  cursorFor: (next: number) => string;
+  resume: ((rows: readonly unknown[]) => string) | undefined;
+} {
+  return {
+    cursorFor: (next) =>
+      writeCursor(page.digest, {
+        offset: next,
+        anchorMs: scan.fromMs,
+        untilMs: scan.untilMs,
+        before: page.before,
+      }),
+    resume: scan.done
+      ? undefined
+      : (rows) =>
+          writeCursor(page.digest, {
+            offset: 0,
+            anchorMs: scan.untilMs,
+            before: page.before + rows.length,
+          }),
+  };
 }
 
 /** The tools whose rows are ABOUT phones, one or more per phone by design. */
@@ -380,6 +521,7 @@ function multipleDevicesWarning(tool: string, items: readonly unknown[]): string
 /** Hand a Health Connect tool's rows to `respond()`, with coverage and the byte budget. */
 export function hcRespond(answer: HcAnswer): Promise<ToolOutcome> {
   const { call, args, page } = answer;
+  const scanned = answer.scan === undefined ? null : scanCursors(page, answer.scan);
   return respond({
     tool: answer.tool,
     rules: call.rules,
@@ -387,19 +529,31 @@ export function hcRespond(answer: HcAnswer): Promise<ToolOutcome> {
     limit: args.limit,
     jq: args.jq,
     healthSystemIds: call.devices.map((device) => deviceSourceId(device.id)),
+    // A tool that refused a type has usually said so itself: once is enough.
     warnings: [
-      ...(answer.warnings ?? []),
-      ...multipleDevicesWarning(answer.tool, answer.items),
-      ...emptyTypeWarnings(call, answer.coverage, answer.named ?? []),
+      ...new Set([
+        ...(answer.warnings ?? []),
+        ...multipleDevicesWarning(answer.tool, answer.items),
+        ...uploadStaleWarnings(call),
+        ...emptyTypeWarnings(call, answer.coverage, answer.named ?? []),
+      ]),
     ],
     coverage: answer.coverage,
-    extra: { timeZone: call.clock.timeZone, ...answer.extra },
+    extra: {
+      timeZone: call.clock.timeZone,
+      freshness: freshnessOf(call, answer.coverage),
+      ...answer.extra,
+    },
     page: {
       maxBytes: args.max_bytes ?? DEFAULT_MAX_BYTES,
       offset: page.offset,
       // Rows a resumed read did not read again still count in `total`.
       before: page.before,
-      cursorFor: answer.cursorFor ?? ((next) => writeCursor(page.digest, page.before + next)),
+      cursorFor:
+        answer.cursorFor ??
+        scanned?.cursorFor ??
+        ((next) => writeCursor(page.digest, page.before + next)),
+      resume: scanned?.resume,
     },
     now: call.now,
   });

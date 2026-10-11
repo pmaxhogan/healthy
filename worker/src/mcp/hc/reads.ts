@@ -143,6 +143,16 @@ export interface HcReads {
    * for it, so a session row can be joined to its raw record.
    */
   sessionRecordIds(window: DeviceWindow & { type: string }): Promise<Map<string, string>>;
+  /**
+   * Let go of what this call has memoised of the readers above that return
+   * stored data (records, rollups, heart-rate minutes, nights, sessions), when
+   * the implementation memoises at all. For a tool that walks a long range a
+   * window at a time: without it every window's rows stay alive until the call
+   * ends, and the walk holds the whole range after all. It changes no answer
+   * -- a reader asked again simply reads again -- and the bookkeeping readers
+   * (`devices`, `syncRows`, `backlog` ...) are left alone.
+   */
+  releaseReads?(): void;
 }
 
 export { type SyncStateRow } from "../../hc/device.ts";

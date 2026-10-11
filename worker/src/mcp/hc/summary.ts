@@ -10,7 +10,7 @@
  * the FHIR sections.
  */
 
-import { ageHours, deviceStatus } from "../../hc/coverage.ts";
+import { deviceStatus, hoursSince } from "../../hc/coverage.ts";
 import { dedupeBloodPressure } from "../../hc/rules.ts";
 import { recordStartMs } from "../../hc/wire.ts";
 
@@ -152,7 +152,7 @@ export async function phoneSummary(
         device.lastUploadAt === null ? null : device.lastUploadAt * SECOND_MS,
       ),
       hoursSinceUpload:
-        device.lastUploadAt === null ? null : ageHours(call.now, device.lastUploadAt),
+        device.lastUploadAt === null ? null : hoursSince(call.now, device.lastUploadAt),
     });
     const readable = (type: string): boolean =>
       typeAllowed(call.rules, type) && availability.has(coverageResourceType(type));

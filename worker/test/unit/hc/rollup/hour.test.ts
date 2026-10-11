@@ -15,6 +15,9 @@ import type { HcRecord } from "../../../../src/hc/wire.ts";
 
 const T0 = 1_790_000_000_000;
 const MIN = 60_000;
+const HOUR = 60 * MIN;
+/** The UTC hour `T0` is in, thirteen minutes past its start. */
+const H0 = Math.floor(T0 / HOUR);
 
 // Ids only have to be distinct; the rollup never reads them.
 const ids = { next: 0 };
@@ -138,6 +141,7 @@ describe("rollupBucket", () => {
     expect(rollup).toEqual({
       records: 3,
       durationMs: 5 * MIN,
+      hours: [H0],
       fields: {
         count: {
           n: 3,
@@ -230,7 +234,7 @@ describe("rollupBucket", () => {
     const rollup = rollupBucket("SleepSession", [
       interval("SleepSession", T0, T0 + 480 * MIN, { stages: [], title: "night" }),
     ]);
-    expect(rollup).toEqual({ records: 1, fields: {}, durationMs: 480 * MIN });
+    expect(rollup).toEqual({ records: 1, fields: {}, durationMs: 480 * MIN, hours: [H0] });
   });
 
   it("counts an unknown type without failing", () => {
@@ -239,14 +243,14 @@ describe("rollupBucket", () => {
         interval("SomethingNewer", T0, T0 + MIN, { reading: 5 }),
         interval("SomethingNewer", T0 + MIN, T0 + 3 * MIN, { reading: 6 }),
       ]),
-    ).toEqual({ records: 2, fields: {}, durationMs: 3 * MIN });
+    ).toEqual({ records: 2, fields: {}, durationMs: 3 * MIN, hours: [H0] });
     expect(rollupBucket("SomethingNewer", [instant("SomethingNewer", T0, { reading: 5 })])).toEqual(
-      { records: 1, fields: {} },
+      { records: 1, fields: {}, hours: [H0] },
     );
   });
 
   it("is empty for no records", () => {
-    expect(rollupBucket("Steps", [])).toEqual({ records: 0, fields: {} });
+    expect(rollupBucket("Steps", [])).toEqual({ records: 0, fields: {}, hours: [] });
   });
 
   it("skips a value that is missing, not a number, or not finite", () => {
@@ -297,7 +301,7 @@ describe("rollupBucket", () => {
 
 describe("mergeRollups", () => {
   it("is empty for no parts", () => {
-    expect(mergeRollups([])).toEqual({ records: 0, fields: {} });
+    expect(mergeRollups([])).toEqual({ records: 0, fields: {}, hours: [] });
   });
 
   it("returns a single part unchanged, as a copy", () => {
@@ -392,6 +396,61 @@ describe("mergeRollups", () => {
     const before = structuredClone([a, b]);
     mergeRollups([a, b]);
     expect([a, b]).toEqual(before);
+  });
+});
+
+describe("what a rollup says beyond its statistics", () => {
+  it("lists the UTC hours its records start in, and merges them", () => {
+    const first = rollupBucket("Steps", [steps(T0, 5), steps(T0 + MIN, 9)]);
+    const later = rollupBucket("Steps", [steps(T0 + 3 * HOUR, 7)]);
+
+    expect(first.hours).toEqual([H0]);
+    expect(mergeRollups([later, first]).hours).toEqual([H0, H0 + 3]);
+  });
+
+  it("does not claim to know the hours when a part with records does not say", () => {
+    const old: BucketRollup = { records: 2, fields: {} };
+    const merged = mergeRollups([rollupBucket("Steps", [steps(T0, 5)]), old]);
+
+    expect(merged.records).toBe(3);
+    expect(merged.hours).toBeUndefined();
+    // A part with nothing in it has no hours to be silent about.
+    const empty: BucketRollup = { records: 0, fields: {} };
+    const withEmpty = mergeRollups([rollupBucket("Steps", [steps(T0, 5)]), empty]);
+    expect(withEmpty.hours).toEqual([H0]);
+  });
+
+  it("lists a running count's records that run past the hour they start in", () => {
+    const within = steps(T0, 40, 10);
+    // Starts thirteen minutes into the hour and runs for ninety.
+    const past = steps(T0 + 20 * MIN, 900, 90);
+    const rollup = rollupBucket("Steps", [within, past]);
+
+    // Both are counted whole where they start.
+    expect(rollup.fields.count?.sum).toBe(940);
+    expect(rollup.crossing).toEqual([{ s: T0 + 20 * MIN, e: T0 + 110 * MIN, v: { count: 900 } }]);
+    expect(rollupBucket("Steps", [within]).crossing).toBeUndefined();
+  });
+
+  it("does not list a record that ends exactly on the hour, or one of another kind", () => {
+    const hourStart = H0 * HOUR;
+    const exact = interval("TotalCaloriesBurned", hourStart, hourStart + HOUR, { energy: 70 });
+    const night = interval("SleepSession", T0, T0 + 480 * MIN, {});
+    const drink = interval("Hydration", T0, T0 + 120 * MIN, { volume: 0.5 });
+
+    expect(rollupBucket("TotalCaloriesBurned", [exact]).crossing).toBeUndefined();
+    expect(rollupBucket("SleepSession", [night]).crossing).toBeUndefined();
+    expect(rollupBucket("Hydration", [drink]).crossing).toBeUndefined();
+  });
+
+  it("keeps the lists of the parts it merges", () => {
+    const early = rollupBucket("Steps", [steps(T0, 600, 120)]);
+    const late = rollupBucket("Steps", [steps(T0 + 5 * HOUR, 30, 70)]);
+
+    expect(mergeRollups([early, late]).crossing).toEqual([
+      { s: T0, e: T0 + 120 * MIN, v: { count: 600 } },
+      { s: T0 + 5 * HOUR, e: T0 + 5 * HOUR + 70 * MIN, v: { count: 30 } },
+    ]);
   });
 });
 

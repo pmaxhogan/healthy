@@ -41,7 +41,7 @@ import {
   defaultMetrics,
   parseOriginMode,
 } from "../hc/aggregate.ts";
-import { AVAILABILITY_NOTE, BUDGET_NOTE, hcArgs, rangeArgs } from "../hc/args.ts";
+import { AVAILABILITY_NOTE, BUDGET_NOTE, RANGE_NOTE, hcArgs, rangeArgs } from "../hc/args.ts";
 import { openStampedPage, writeCursor } from "../hc/page.ts";
 import { fieldHidden, typeAllowed, typeDeniedWarning } from "../hc/policy.ts";
 import { recordItem } from "../hc/records.ts";
@@ -124,8 +124,11 @@ const METRICS_ARG = z
   .optional()
   .describe(
     "What to compute per bucket. Default: `sum` for types that add up (steps, " +
-      "distance, energy), `duration` and `records` for sleep and exercise sessions, " +
-      "`mean`, `min`, `max`, `n` for measurements.",
+      "distance, energy), `duration` and `records` for exercise sessions, `duration`, " +
+      "`in_bed` and `records` for sleep, `mean`, `min`, `max`, `n` for measurements. " +
+      "For sleep `duration` (`durationMs`) is the time ASLEEP, which is what Health " +
+      "Connect calls a night's duration, and `in_bed` (`inBedMs`) is the night from " +
+      "start to end.",
   );
 
 /** The longest `<N>min` bucket: a day. Anything wider is `day`, `week`, `month` or `year`. */
@@ -336,6 +339,8 @@ interface AggregateAnswer {
   items: unknown[];
   warnings: string[];
   answeredFrom: Set<string>;
+  /** Rows whose total includes a share of a record longer than an hour. */
+  longRecordRows: number;
   duplicatesDropped: number;
   artefactsExcluded: number;
   /** Stable codes of artefact rules that could not run: their context type is withheld. */
@@ -380,6 +385,7 @@ async function aggregateDevice(
   });
   for (const level of result.sources) answer.answeredFrom.add(level);
   answer.duplicatesDropped += result.duplicatesDropped;
+  answer.longRecordRows += result.longRecordRows;
   answer.artefactsExcluded += result.artefactsExcluded;
   for (const code of result.rulesNotApplied) answer.rulesNotApplied.add(code);
   answer.bucketing = result.bucketing;
@@ -429,7 +435,7 @@ export function registerHcRecordTools(server: McpServer, deps: ToolDeps): void {
         "records are. Ordered by " +
         "start time. Without `jq`, a `cursor` resumes reading where the last page ended " +
         "instead of re-reading the range; `total` counts the whole answer on every page. " +
-        `${AVAILABILITY_NOTE} ${BUDGET_NOTE}`,
+        `${RANGE_NOTE} ${AVAILABILITY_NOTE} ${BUDGET_NOTE}`,
       schema: RECORDS_SCHEMA,
     },
     async (args, run) => {
@@ -493,27 +499,59 @@ export function registerHcRecordTools(server: McpServer, deps: ToolDeps): void {
         "day is a local day, 23 or 25 hours across a clock change). One row per bucket: " +
         "`bucket`, `start`, `end`, `hasData`, `origins`, `method`, and `values.<field>` " +
         "with the `metrics` asked for (`sum`, `mean`, `min`, `max`, `n`, `first`, `last`; " +
-        "plus row-level `records` and `duration`). Empty buckets are still returned, " +
+        "plus row-level `records`, `duration` and, for sleep, `in_bed`). Every bucket from " +
+        "`start` to the end of the range -- or to now -- is returned, the empty ones " +
         'filled with zero (or null with `fill: "null"`) and `hasData: false`, so a gap is ' +
-        "visible. A record counts in the bucket its start falls in; a night of sleep is " +
-        "the exception and counts in the bucket it ENDED in, the day you woke up, which is " +
+        "visible; if the answer is cut by the byte budget it says `truncated` and `total` " +
+        "still counts every bucket. A record counts in the bucket its start falls in, with " +
+        "two exceptions. A running count's record (steps, distance, energy, floors, " +
+        "elevation) that runs past the end of its bucket is divided: each bucket gets the " +
+        "share of its value that the time it spends there is of its length, as Health " +
+        "Connect's own aggregation does, so a day's total written as one record is a " +
+        "twenty-fourth in each hour and not all of it at midnight (only `sum` and " +
+        "`duration` are divided; `records`, `n` and the other statistics stay where the " +
+        "record starts; a record longer than two days is not divided). And a night of " +
+        "sleep counts in the bucket it ENDED in, the day you woke up, which is " +
         "the date `sleep_sessions` and `daily_summary` give it (`bucketing` says which: " +
-        "`start_time` or `end_time`). " +
+        "`start_time` or `end_time`). For sleep, `duration` (`durationMs`) is the time " +
+        "ASLEEP -- what Health Connect reports as a night's duration -- and `in_bed` " +
+        "(`inBedMs`) is the night from start to end; of copies of one night, the longest " +
+        "session's figures. " +
         "`origin_mode` decides whose numbers count when several apps record the same " +
         "thing: `hc_priority` (default) uses Health Connect's own priority-merged hourly " +
-        'aggregate where the phone uploaded one (row `method: "platform"`), and otherwise ' +
+        'aggregate (row `method: "platform"`) for a bucket in which the platform has a ' +
+        "figure for every hour something was recorded in, and otherwise " +
         "falls back by what the type is. A sensor's running count (steps, distance, " +
-        "energy, floors) is decided hour by hour: in each UTC hour the one app with the " +
-        "largest total is taken and the hours are summed (`max_origin`), so a month is " +
+        "energy, floors) is decided hour by hour: in each UTC hour one app is taken and " +
+        "the hours are summed (`max_origin`), so a month is " +
         "the sum of its days and of its hours, and only another app's records in an hour " +
-        "the chosen app also recorded count in `duplicatesDropped`. Sleep and exercise are " +
+        "the chosen app also recorded count in `duplicatesDropped`. The app taken is the " +
+        "one with the largest total among those that recorded something in or around the " +
+        "hour itself; an app that has only its share of a record longer than an hour " +
+        "there (a day's energy written as one record, often an estimate of basal energy) " +
+        "is taken only for an hour no other app recorded, so that record cannot be counted " +
+        "on top of a tracker's own total. What a row's total owes to such records is its " +
+        "`longRecordSum`, and the answer warns `hc_long_record_used:<rows>`. Sleep and " +
+        "exercise are " +
         "answered from the stored sessions, overlapping copies of one session counted " +
         "once and different sessions each counted (`merged_sessions`); for exercise " +
         "`duration` comes from the platform where it has it, `records` always from the " +
-        "stored sessions. Everything else -- a measurement, or an entry someone logs " +
+        'stored sessions. For "minutes of exercise" over a period this `duration` is the ' +
+        "figure to quote: it is Health Connect's own total, with time two different " +
+        "exercise types overlap counted once, where summing `durationMin` over " +
+        "`exercise_sessions` rows counts that time twice (those rows say what the sessions " +
+        "were). Everything else -- a measurement, or an entry someone logs " +
         "such as a drink or a meal -- is every app merged (`all_origins`). A bucket the " +
-        "platform covers only part of is composed hour by hour (`platform_and_max_origin`, " +
-        "`platform_and_all_origins`). Artefacts are left out unless `exclude_artefacts` is " +
+        "platform has a figure for only some hours of is composed hour by hour " +
+        "(`platform_and_max_origin`, `platform_and_all_origins`), so a day is always the " +
+        "sum of its hours, and a day still going on is only called `platform` when the " +
+        "platform has every hour recorded so far. Step, distance and other platform " +
+        "totals are therefore composed from the platform's HOURLY figures: they can " +
+        "differ from the daily figure the Health Connect or a tracker's app shows, by a " +
+        "few steps on an ordinary day (the platform rounds each hour to whole steps) and " +
+        "by far more on a day several apps wrote overlapping steps, where the platform's " +
+        "own daily figure is not the sum of its own hours. " +
+        "Artefacts are left out unless `exclude_artefacts` is " +
         "false, counted per row (`artefactsExcluded`) and in `hc_artefacts_excluded:<n>`; " +
         "the weight rule needs heights, and when the owner's policy withholds them it is " +
         "not applied and the answer warns `weight_artefact_rule_not_applied`. " +
@@ -522,7 +560,7 @@ export function registerHcRecordTools(server: McpServer, deps: ToolDeps): void {
         "`exclude_future` is false, and a bucket the range or now cuts short says " +
         "`partial`. Total calories are what was recorded: no basal-metabolic padding " +
         "unless `bmr_fill` is true, and then it is shown per row as `bmrFillKcal`. " +
-        `${AVAILABILITY_NOTE} ${BUDGET_NOTE}`,
+        `${RANGE_NOTE} ${AVAILABILITY_NOTE} ${BUDGET_NOTE}`,
       schema: AGGREGATE_SCHEMA,
     },
     async (args, run) => {
@@ -556,6 +594,7 @@ export function registerHcRecordTools(server: McpServer, deps: ToolDeps): void {
         items: [],
         warnings: allowed ? fillPlan.warnings : [typeDeniedWarning(type)],
         answeredFrom: new Set(),
+        longRecordRows: 0,
         duplicatesDropped: 0,
         artefactsExcluded: 0,
         rulesNotApplied: new Set(),
@@ -568,6 +607,9 @@ export function registerHcRecordTools(server: McpServer, deps: ToolDeps): void {
         answer.warnings.push(`hc_duplicates_dropped:${String(answer.duplicatesDropped)}`);
       }
       if (answer.usedFallback) answer.warnings.push("hc_priority_fallback");
+      if (answer.longRecordRows > 0) {
+        answer.warnings.push(`hc_long_record_used:${String(answer.longRecordRows)}`);
+      }
       if (answer.artefactsExcluded > 0) {
         answer.warnings.push(`hc_artefacts_excluded:${String(answer.artefactsExcluded)}`);
       }
@@ -582,7 +624,7 @@ export function registerHcRecordTools(server: McpServer, deps: ToolDeps): void {
         coverage,
         warnings: answer.warnings,
         extra: {
-          units: { ...unitsFor(type), durationMs: "ms", bmrFillKcal: "kcal" },
+          units: { ...unitsFor(type), durationMs: "ms", inBedMs: "ms", bmrFillKcal: "kcal" },
           bucket: query.bucket,
           bucketing: answer.bucketing,
           originMode: args.origin_mode ?? "hc_priority",

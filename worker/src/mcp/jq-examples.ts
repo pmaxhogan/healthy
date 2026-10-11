@@ -108,7 +108,7 @@ export const JQ_EXAMPLES = {
     ".[] | select(.lastRecordFrom != null) | {type, lastAt, lastSyncAt, lastRecordFrom}",
   ],
   hc_sync_status: [
-    '.[] | select(.kind == "device") | {healthSystem, status, lastUploadAt, phoneBacklog, queuedBatches, recentFailures}',
+    '.[] | select(.kind == "device") | {healthSystem, status, lastUploadAt, hoursSinceUpload, phoneBacklog, queuedBatches, recentFailures}',
     '.[] | select(.kind == "type_sync") | {type, recordCount, backlog, backfillComplete, backfillOldestAt}',
   ],
   hc_records: [
@@ -130,7 +130,7 @@ export const JQ_EXAMPLES = {
   ],
   exercise_sessions: [
     ".[] | {start, title, exerciseType, durationMin, hr, energy, distance}",
-    ".[] | select(.likelyLeftRunning) | {start, end, durationMin}",
+    ".[] | select(.likelyLeftRunning) | {start, end, durationMin, leftRunningReason}",
   ],
   blood_pressure: [
     '.[] | select(.kind == "session") | {start, systolic, diastolic, pulse, readingCount}',

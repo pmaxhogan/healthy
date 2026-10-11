@@ -19,6 +19,12 @@
  *    is then the number of rows already returned that share that start time,
  *    and `e` the number returned before them, which the continuation never
  *    reads again but still counts in `total`.
+ *  - `u`, `data_quality` only: where the page being continued STOPPED reading.
+ *    That tool walks a long range a window at a time and stops when a page is
+ *    full, so a page is the findings of `[a, u)`. A cursor cut inside those
+ *    rows carries both and `o` rows to skip, and the continuation reads
+ *    exactly that stretch again; a cursor issued after the last row of a page
+ *    carries only `a` (the old `u`) and starts a fresh page there.
  *
  * `limit` and `max_bytes` are not part of the digest: they decide how much of
  * the sequence one call carries, not what the sequence is, so a caller may
@@ -51,6 +57,8 @@ export interface OpenedCursor {
   anchorMs: number | null;
   /** Rows of the whole answer that come before this call's array. */
   before: number;
+  /** Epoch ms the page being continued stopped reading at, when the cursor carries it. */
+  untilMs?: number;
 }
 
 /** Where a call without a cursor starts. */
@@ -123,6 +131,8 @@ export interface CursorPosition {
   anchorMs?: number | null;
   /** Rows before the continuation's array, which it will not read again. */
   before?: number;
+  /** Epoch ms the continuation must read up to and no further, or null for no fixed end. */
+  untilMs?: number | null;
 }
 
 /** The cursor that resumes at `position` (a plain row offset when given a number). */
@@ -131,6 +141,7 @@ export function writeCursor(digest: string, position: number | CursorPosition): 
     offset,
     anchorMs = null,
     before = 0,
+    untilMs = null,
   } = typeof position === "number" ? { offset: position } : position;
   return toBase64Url(
     JSON.stringify({
@@ -139,6 +150,7 @@ export function writeCursor(digest: string, position: number | CursorPosition): 
       o: offset,
       ...(anchorMs !== null && { a: anchorMs }),
       ...(before > 0 && { e: before }),
+      ...(untilMs !== null && { u: untilMs }),
     }),
   );
 }
@@ -158,11 +170,19 @@ function decode(cursor: string): { q: string; position: OpenedCursor } | null {
     return null;
   }
   if (typeof parsed !== "object" || parsed === null) return null;
-  const { v, q, o, a, e } = parsed as Record<string, unknown>;
+  const { v, q, o, a, e, u } = parsed as Record<string, unknown>;
   if (v !== CURSOR_VERSION || typeof q !== "string" || !isCount(o)) return null;
-  return (a !== undefined && !isCount(a)) || (e !== undefined && !isCount(e))
-    ? null
-    : { q, position: { offset: o, anchorMs: a ?? null, before: e ?? 0 } };
+  const optional = [a, e, u];
+  if (optional.some((field) => field !== undefined && !isCount(field))) return null;
+  return {
+    q,
+    position: {
+      offset: o,
+      anchorMs: isCount(a) ? a : null,
+      before: isCount(e) ? e : 0,
+      ...(isCount(u) && { untilMs: u }),
+    },
+  };
 }
 
 /**

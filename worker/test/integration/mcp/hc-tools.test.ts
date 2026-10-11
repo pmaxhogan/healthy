@@ -444,7 +444,11 @@ describe("why an answer is empty", () => {
     expect(stale.items[0]).toMatchObject({ kind: "device", status: "stale", hoursSinceUpload: 7 });
     expect(steps.items).toHaveLength(20);
     expect(steps.coverage[0]).toMatchObject({ status: "stale", ageHours: 7 });
-    expect(steps.warnings).toStrictEqual([`stale:hc:Steps:${seeded.source}:7h`]);
+    // Late since the first hour, and stale since the sixth: both are said.
+    expect(steps.warnings).toStrictEqual([
+      `hc_upload_stale:${seeded.source}:7.0h`,
+      `stale:hc:Steps:${seeded.source}:7h`,
+    ]);
   });
 
   it("answers `no_data` for a phone that has never uploaded, and lists nothing for it", async () => {
@@ -658,7 +662,7 @@ describe("what the real store hands back", () => {
       sleep: { asleepMin: 460 },
       restingHr: 52,
       // The two readings after local midnight: the night's earlier ones were the day before.
-      hrvRmssd: 45.5,
+      hrvRmssdMean: 45.5,
       bloodPressure: { systolic: 119, diastolic: 78, readings: 2 },
       weight: 70.5,
     });
@@ -728,6 +732,27 @@ describe("what the real store hands back", () => {
       }),
     ]);
   });
+
+  it("names the app behind the newest record of an interval or series type too", async () => {
+    // The store's `last_ms` is where the newest record ENDS, and such a record
+    // has nothing in the millisecond that begins there.
+    const answer = await call("hc_coverage", {
+      devices: devices(),
+      types: ["ExerciseSession", "HeartRate", "SleepSession", "Steps"],
+      max_bytes: 1_000_000,
+    });
+    const sources = answer.items.map((item) => [
+      item.type,
+      (item.lastRecordFrom as { origin?: unknown } | null)?.origin ?? null,
+    ]);
+
+    expect(sources).toStrictEqual([
+      ["ExerciseSession", PHONE],
+      ["HeartRate", WEARABLE],
+      ["SleepSession", WEARABLE],
+      ["Steps", expect.stringMatching(/^com\.example\./u)],
+    ]);
+  }, 60_000);
 
   it("pages a long answer by the byte budget and resumes from the cursor", async () => {
     const args = { devices: devices(), type: "Steps", ...RANGE };

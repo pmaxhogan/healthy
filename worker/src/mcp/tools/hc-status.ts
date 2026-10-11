@@ -17,8 +17,8 @@
 
 import { z } from "zod";
 
-import { ageHours, deviceStatus } from "../../hc/coverage.ts";
-import { recordStartMs } from "../../hc/wire.ts";
+import { deviceStatus, hoursSince } from "../../hc/coverage.ts";
+import { recordEndMs } from "../../hc/wire.ts";
 import { AVAILABILITY_NOTE, BUDGET_NOTE, hcArgs } from "../hc/args.ts";
 import { openStampedPage } from "../hc/page.ts";
 import { mcpErrorCode } from "../hc/phone-errors.ts";
@@ -94,7 +94,27 @@ function at(call: HcCall, seconds: number | null): string | null {
   return seconds === null ? null : call.clock.iso(seconds * SECOND_MS);
 }
 
-/** Which app and hardware wrote a type's newest record. Null when there is none to open. */
+/**
+ * A bookkeeping instant in UTC (`...Z`), for the one time here that is not a
+ * moment in the owner's day: the phone walks its history back in UTC calendar
+ * months, and a UTC month start written in a local zone reads as the evening
+ * before.
+ */
+function utcIso(ms: number | null): string | null {
+  return ms === null ? null : new Date(ms).toISOString().replace(".000Z", "Z");
+}
+
+/**
+ * Which app and hardware wrote a type's newest record. Null when there is none
+ * to open.
+ *
+ * `lastMs` is where the newest record ENDS (`hc_sync_state.last_ms` is the
+ * greatest end time the store holds), and a read window is half-open: an
+ * interval or series record that ends exactly at `lastMs` has nothing in
+ * `[lastMs, lastMs + 1)` and only an instantaneous one does. So the window
+ * opens a millisecond earlier, which every record ending at `lastMs` reaches
+ * into, and the newest is chosen by its end.
+ */
 async function lastRecordFrom(
   deps: ToolDeps,
   device: HcDevice,
@@ -104,12 +124,12 @@ async function lastRecordFrom(
   const records = await deps.hc.records({
     deviceId: device.id,
     type: row.recordType,
-    startMs: row.lastMs,
+    startMs: row.lastMs - 1,
     endMs: row.lastMs + 1,
   });
   let newest = records.at(-1);
   for (const record of records) {
-    if (newest === undefined || recordStartMs(record) >= recordStartMs(newest)) newest = record;
+    if (newest === undefined || recordEndMs(record) >= recordEndMs(newest)) newest = record;
   }
   if (newest === undefined) return null;
   return {
@@ -258,7 +278,9 @@ async function deviceItem(
     revokedAt: at(call, device.revokedAt),
     lastSeenAt: at(call, device.lastSeenAt),
     lastUploadAt: at(call, device.lastUploadAt),
-    hoursSinceUpload: device.lastUploadAt === null ? null : ageHours(call.now, device.lastUploadAt),
+    // To one decimal: a whole hour hides most of an hour of missing data.
+    hoursSinceUpload:
+      device.lastUploadAt === null ? null : hoursSince(call.now, device.lastUploadAt),
     appVersion: device.appVersion,
     // What the phone last said about itself; null until it has said anything.
     backgroundRead: report?.backgroundRead ?? null,
@@ -302,7 +324,7 @@ function typeSyncItems(call: HcCall, view: DeviceView): Record<string, unknown>[
       tokenAgeS: row.tokenAgeS,
       backlog: row.backlog,
       backfillComplete: row.backfillComplete,
-      backfillOldestAt: call.clock.isoOrNull(row.backfillOldestMs),
+      backfillOldestAt: utcIso(row.backfillOldestMs),
       lastUploadAt: at(call, row.lastUploadAt),
     });
   }
@@ -321,10 +343,16 @@ export function registerHcStatusTools(server: McpServer, deps: ToolDeps): void {
         "for six hours), `recordCount`, `firstAt` " +
         "and `lastAt` (the oldest and newest record), `meanIntervalS` (typical cadence), " +
         "`origins` (the apps that wrote it, by package name), `lastRecordFrom` (the app and " +
-        "hardware behind the newest record), `lastSyncAt` and `staleHours`. Only record " +
+        "hardware behind the newest record -- the one that ends last: `origin`, and " +
+        "`device` and `recordingMethod` when the app recorded them; null only for a type " +
+        "with no records, or with `origins: false`), `lastSyncAt` and `staleHours`. Only record " +
         "types with at least one stored record are listed: a type that is not here has no " +
         "data, and appears by itself once it has some. A type named in `types` is always " +
-        "answered, as `no_data` when there is nothing of it. Call it first: " +
+        "answered: with its row; as a `no_data` row and `no_data:hc:<Type>:device:<id>` " +
+        "when there is nothing of it; as `unknown_type:hc:<Type>` when the name is no " +
+        "record type (an `Agg.<Metric>` that is no platform total included, e.g. `Agg.` " +
+        "before a type Health Connect does not total); or as " +
+        "`policy_resource_denied:hc:<Type>` when the owner's policy withholds it. Call it first: " +
         "it says which of the other Health Connect tools have anything to answer with, and " +
         "the `type` names they take. Health Connect's own hourly totals (`Agg.<Metric>`, " +
         "which `hc_aggregate` uses) are listed only when named in `types`. Phone data is " +
@@ -363,7 +391,10 @@ export function registerHcStatusTools(server: McpServer, deps: ToolDeps): void {
       description:
         "How the phone-to-server pipeline is doing. One `kind: device` row per paired " +
         "phone: `status` (`active`, `stale` after six hours without an upload, `revoked`, " +
-        "`never`), `lastUploadAt`, `lastSeenAt`, `hoursSinceUpload`, `appVersion`, " +
+        "`never`), `lastUploadAt`, `lastSeenAt`, `hoursSinceUpload` (to one decimal; the " +
+        "phone uploads about every fifteen minutes, so more than an hour means recent data " +
+        "is missing and the answer warns `hc_upload_stale:device:<id>:<hours>h` well before " +
+        "`status` turns `stale`), `appVersion`, " +
         "`backgroundRead`, `historyRead`, `batteryOptimisationExempt`, `backfillComplete`, " +
         "`lastPhoneError` (a stable pipeline code and when: `network`, `hc_rate_limited`, " +
         "`backlogged`, ..., or `phone_not_reading` when the phone is reading nothing at " +
@@ -375,7 +406,10 @@ export function registerHcStatusTools(server: McpServer, deps: ToolDeps): void {
         "are queued again, and the answer warns `hc_batches_parked:...`), and `recentFailures` " +
         "among the last `recent_batches` uploads. Then one `kind: type_sync` row per record " +
         "type that has stored records: `availability`, `tokenAgeS` (age of the phone's " +
-        "change token), `backlog`, `backfillComplete`, `backfillOldestAt`, `recordCount`. " +
+        "change token), `backlog`, `backfillComplete`, `backfillOldestAt` (how far back the " +
+        "phone has uploaded this type's history so far. A UTC instant, written `...Z` and " +
+        "not in the answer's zone: the phone walks back in UTC calendar months, so it is " +
+        "normally a UTC month start), `recordCount`. " +
         "`typesWithData` on the `device` row counts those rows. The queue, " +
         "rollup and upload figures on the `device` row are bookkeeping for the whole phone, " +
         "not per record type; `records`, `phoneBacklog` and the type counts cover only the " +

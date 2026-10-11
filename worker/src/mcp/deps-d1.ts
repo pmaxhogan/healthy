@@ -273,6 +273,22 @@ function parsePhoneReport(json: string | null): HcSyncState | null {
 }
 
 /**
+ * The memoised readers that hand back stored data, by the name they are
+ * memoised under: what `releaseReads` lets go of. One window of a long walk is
+ * megabytes of opened rows; the bookkeeping readers are a few rows each and
+ * stay.
+ */
+const STORED_DATA_READERS: ReadonlySet<string> = new Set([
+  "records",
+  "hourRollups",
+  "dayRollups",
+  "hrMinutes",
+  "sleepNights",
+  "exerciseSessions",
+  "sessionRecordIds",
+]);
+
+/**
  * The Health Connect half of the seam: thin, memoised calls into the store's
  * readers. A summary tool asks for the same day rollups several times in one
  * call, and every rollup read opens a chunk per origin to learn its name.
@@ -337,6 +353,13 @@ function makeHcReads(repos: Repos, cache: () => CallCache): HcReads {
         );
         return new Map(keyed);
       }),
+    releaseReads: () => {
+      const calls = cache().hc;
+      for (const id of calls.keys()) {
+        const reader = id.slice(0, id.indexOf(":"));
+        if (STORED_DATA_READERS.has(reader)) calls.delete(id);
+      }
+    },
   };
 }
 

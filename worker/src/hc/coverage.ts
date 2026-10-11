@@ -45,6 +45,19 @@ import type { ExplainedSyncWarning } from "../sync/sync-state-codes.ts";
  */
 export const HC_STALE_AFTER_SECONDS = 6 * 60 * 60;
 
+/**
+ * How long after its last upload a phone's data is called late to an MCP
+ * client: every Health Connect answer then carries a warning saying how old
+ * the newest upload is. One hour is four of the phone's fifteen-minute cycles
+ * missed, which is already hours of heart rate and steps an answer does not
+ * have. Exactly this long is still on time.
+ *
+ * This is a note on an answer and nothing else. `stale` -- the coverage
+ * status, the device status and what the Phone page shows -- stays at
+ * {@link HC_STALE_AFTER_SECONDS}, and nothing here raises an alert.
+ */
+export const HC_UPLOAD_LATE_AFTER_SECONDS = 60 * 60;
+
 /** The `coverage[].healthSystemId` of a device. */
 export function deviceSourceId(deviceId: string): string {
   return `device:${deviceId}`;
@@ -104,6 +117,29 @@ function ageSeconds(now: number, instant: number): number {
 /** Whole hours since `instant`, never negative. */
 export function ageHours(now: number, instant: number): number {
   return Math.floor(ageSeconds(now, instant) / 3600);
+}
+
+/**
+ * Hours since `instant` to one decimal, never negative: what a client is told
+ * of an upload's age. A floored hour hides up to an hour of missing data, at
+ * exactly the ages where the difference matters.
+ * {@link ageHours} stays whole: it is what `stale:...:<n>h` has always carried.
+ */
+export function hoursSince(now: number, instant: number): number {
+  return Math.round(ageSeconds(now, instant) / 360) / 10;
+}
+
+/**
+ * The age of a phone's last upload in hours, to one decimal, when it is late
+ * enough to say so on an answer ({@link HC_UPLOAD_LATE_AFTER_SECONDS}); null
+ * for a phone that is on time, has never uploaded, or is revoked -- a revoked
+ * phone will not upload again, and its types already read `stale`.
+ */
+export function uploadLateHours(device: DeviceTimes, now: number): number | null {
+  if (device.revokedAt !== null || device.lastUploadAt === null) return null;
+  return ageSeconds(now, device.lastUploadAt) > HC_UPLOAD_LATE_AFTER_SECONDS
+    ? hoursSince(now, device.lastUploadAt)
+    : null;
 }
 
 const NOT_PERMITTED: ExplainedSyncWarning = {

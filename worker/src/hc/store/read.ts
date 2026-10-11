@@ -27,7 +27,7 @@ import { openJson, payloadAad } from "./sealed.ts";
 
 import type { ChunkRow } from "./chunks.ts";
 import type { Ctx } from "../../db/client.ts";
-import type { HrMinutePoint } from "../rollup/hr.ts";
+import type { HrMinutePoint, HrSample } from "../rollup/hr.ts";
 import type {
   BucketRollup,
   ExerciseSummary,
@@ -87,9 +87,35 @@ export interface StoredExerciseSession {
 /** Chunk rows fetched per query: each carries a payload. */
 const CHUNK_PAGE = 200;
 
-/** The keyed digest of a zone name that `hc_rollup_day.tz_digest` holds. */
+/**
+ * Which making of the rollups this code writes. Raised whenever what a rollup
+ * holds changes in a way the rows already stored have to follow:
+ *
+ *   2  a rollup says which UTC hours its records start in (`hours`), and a
+ *      running count's lists the records that run past their hour
+ *      (`crossing`): worker/src/hc/rollup/types.ts.
+ *
+ * It is folded into `tz_digest`, so raising it does to every stored day rollup
+ * exactly what a change of the `timezone` setting does, by the same code:
+ * rows of an earlier revision are no longer returned by `readDayRollups`,
+ * `storeBacklog` reports `rezonePending`, and the runner marks every day of
+ * every type, deletes the old rows and rebuilds them, newest first, a budgeted
+ * slice at a time (worker/src/hc/store/rebuild.ts, which also writes afresh
+ * the hour rollups a day is built from when they are of an earlier making).
+ * Nothing has to be run by hand, and the answers are right throughout: while
+ * it lasts they are read from hour rollups and say `hc_store_pending`.
+ */
+const ROLLUP_REVISION = 2;
+
+/**
+ * The keyed digest that `hc_rollup_day.tz_digest` holds: of the zone a row was
+ * built for, and of the revision of the rollups it was built as.
+ */
 export function tzDigest(ctx: Pick<Ctx, "env">, timeZone: string): Promise<string> {
-  return blinderFor(ctx.env).digest("hc_rollup_day.tz_digest", timeZone);
+  return blinderFor(ctx.env).digest(
+    "hc_rollup_day.tz_digest",
+    `${timeZone}\u{0}r${String(ROLLUP_REVISION)}`,
+  );
 }
 
 /** The first hour that does not start before `endMs`. */
@@ -431,10 +457,14 @@ export async function readHrMinutes(
 }
 
 /**
- * One heart-rate reading per minute in `[startMs, endMs]`, for joining to a
+ * One heart-rate point per minute in `[startMs, endMs]`, for joining to a
  * night or a session: the minute means of the session's own origin when it
  * measured heart rate there, and of every origin otherwise. Mixing a watch's
  * minutes with a second device's would count the overlap twice.
+ *
+ * Each point carries its minute's lowest and highest sample and how many
+ * samples there were, so that what a summary calls the session's `min`, `max`
+ * and `n` are the samples' and not the minute means'.
  */
 export async function readHrPoints(
   ctx: Ctx,
@@ -442,7 +472,7 @@ export async function readHrPoints(
   startMs: number,
   endMs: number,
   preferOriginHash: string,
-): Promise<{ t: number; bpm: number }[]> {
+): Promise<HrSample[]> {
   const rows = await hrHours(ctx, deviceId, hourOf(startMs), hourOf(endMs) + 1, {
     sql: "",
     values: [],
@@ -453,7 +483,7 @@ export async function readHrPoints(
   );
   const inWindow = points
     .filter((point) => point.t >= startMs && point.t <= endMs)
-    .map((point) => ({ t: point.t, bpm: point.mean }));
+    .map(({ t, mean, min, max, n }) => ({ t, bpm: mean, min, max, n }));
   return sortedBy(inWindow, (left, right) => left.t - right.t);
 }
 

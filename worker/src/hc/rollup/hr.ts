@@ -17,10 +17,19 @@ import type { HrHour } from "./types.ts";
 const MINUTE_MS = 60_000;
 const HOUR_MS = 3_600_000;
 
-/** One heart-rate reading. */
+/**
+ * One heart-rate reading -- or a minute of them, as the store keeps heart rate
+ * for joining to a night or a workout: `bpm` is then the minute's mean, and
+ * `min`, `max` and `n` the lowest and highest sample of the minute and how
+ * many there were. Without them the point is one sample, and is its own
+ * extremes.
+ */
 export interface HrSample {
   t: number;
   bpm: number;
+  min?: number;
+  max?: number;
+  n?: number;
 }
 
 /** One minute of heart rate on the absolute timeline. */
@@ -71,15 +80,17 @@ export function heartRateSamples(records: readonly HcRecord[]): HrSample[] {
  */
 export function minuteSeries(samples: readonly HrSample[]): HrMinutePoint[] {
   const minutes = new Map<number, { n: number; sum: number; min: number; max: number }>();
-  for (const { t, bpm } of samples) {
+  for (const sample of samples) {
+    // A point that stands for several samples weighs as many: see `HrSample`.
+    const { t, bpm, n = 1, min = bpm, max = bpm } = sample;
     const minute = Math.floor(t / MINUTE_MS) * MINUTE_MS;
     const current = minutes.get(minute);
-    if (current === undefined) minutes.set(minute, { n: 1, sum: bpm, min: bpm, max: bpm });
+    if (current === undefined) minutes.set(minute, { n, sum: bpm * n, min, max });
     else {
-      current.n += 1;
-      current.sum += bpm;
-      if (bpm < current.min) current.min = bpm;
-      if (bpm > current.max) current.max = bpm;
+      current.n += n;
+      current.sum += bpm * n;
+      if (min < current.min) current.min = min;
+      if (max > current.max) current.max = max;
     }
   }
   return sortedBy(
@@ -105,7 +116,9 @@ export function hrHourToPoints(hourUtc: number, hour: HrHour): HrMinutePoint[] {
 /**
  * Summary of the samples in `[startMs, endMs]`, or null when there are none.
  *
- * `min`, `max` and `n` are over the samples. `mean` is the mean of the
+ * `min` and `max` are the lowest and highest SAMPLE and `n` the number of
+ * samples -- also when the input is one point a minute, which carries its
+ * minute's extremes and count (`HrSample`). `mean` is the mean of the
  * per-minute means, not of the samples: a wearable samples every second or so
  * while it thinks its wearer is active and far less often otherwise, so a plain
  * mean of samples would weight the busy minutes many times over.
@@ -121,12 +134,14 @@ export function summariseHeartRate(
   let min = Infinity;
   let max = -Infinity;
   let sum = 0;
+  let n = 0;
   for (const minute of minutes) {
     if (minute.min < min) min = minute.min;
     if (minute.max > max) max = minute.max;
     sum += minute.mean;
+    n += minute.n;
   }
-  return { min, mean: sum / minutes.length, max, n: inside.length };
+  return { min, mean: sum / minutes.length, max, n };
 }
 
 /** The resolutions a heart-rate series can be asked for. */

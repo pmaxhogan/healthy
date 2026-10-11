@@ -30,6 +30,7 @@ export const JOINED_FIELDS = {
   sleep_sessions: {
     hr: ["HeartRate"],
     hrWake: ["HeartRate"],
+    hrFirstRise: ["HeartRate"],
     hrv: ["HeartRateVariabilityRmssd"],
     respiratoryRate: ["RespiratoryRate"],
     skinTempDelta: ["SkinTemperature"],
@@ -40,7 +41,9 @@ export const JOINED_FIELDS = {
     steps: ["Steps"],
     distance: ["Distance"],
     energy: ["ActiveCaloriesBurned"],
+    energyOrigin: ["ActiveCaloriesBurned"],
     likelyLeftRunning: ["HeartRate", "Steps"],
+    leftRunningReason: ["HeartRate", "Steps"],
   },
   blood_pressure: {
     pulse: ["HeartRate"],
@@ -57,7 +60,7 @@ export const JOINED_FIELDS = {
     sleep: ["SleepSession"],
     "sleep.skinTempDelta": ["SkinTemperature"],
     restingHr: ["RestingHeartRate"],
-    hrvRmssd: ["HeartRateVariabilityRmssd"],
+    hrvRmssdMean: ["HeartRateVariabilityRmssd"],
     respiratoryRate: ["RespiratoryRate"],
     bloodPressure: ["BloodPressure"],
     weight: ["Weight"],

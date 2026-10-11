@@ -58,6 +58,20 @@
  *     answer for a night whose data stops while the pulse is still at its
  *     sleeping level, however many awakenings came before.
  *
+ * ### The first rise after the session (`hrFirstRiseMs`)
+ *
+ * `hrWakeMs` is the FINAL get-up: a pulse that rose on waking, settled again
+ * for five minutes or more (lying in, dozing) and rose a second time gives the
+ * second rise. The first is kept beside it. From the session's end to
+ * {@link HR_WAKE_SEARCH_AFTER_MS} after it, `hrFirstRiseMs` is the first risen
+ * minute that begins a rise lasting {@link HR_WAKE_SUSTAIN_MS} or more -- with
+ * the same baseline, the same two levels and the same tolerance of holes as
+ * above -- BEFORE the pulse next settles. Whether it settles afterwards does
+ * not matter, which is the difference. A pulse already up when the session
+ * ends is risen in the session's last minute, so the answer is then the first
+ * minute at or after the end. Null on the conditions of step 1, and when no
+ * such rise begins in that hour.
+ *
  * Because the wake may fall after the session's stated end, the caller should
  * pass heart rate up to {@link HR_WAKE_SEARCH_AFTER_MS} beyond it. With only
  * in-session samples the function still works, but a rise in the session's
@@ -80,7 +94,7 @@ import { recordEndMs, recordStartMs } from "../wire.ts";
 import { minuteSeries, summariseHeartRate } from "./hr.ts";
 import { mean, quantile, sortedBy } from "./stats.ts";
 
-import type { HrMinutePoint } from "./hr.ts";
+import type { HrMinutePoint, HrSample } from "./hr.ts";
 import type { HcRecord } from "../wire.ts";
 import type { SleepNight, SleepStage } from "./types.ts";
 
@@ -88,8 +102,11 @@ const MINUTE_MS = 60_000;
 
 /** What was measured around one sleep session. Each list may run wider than the session. */
 export interface SleepContext {
-  /** Heart-rate samples, ideally to `HR_WAKE_SEARCH_AFTER_MS` past the session's end. */
-  hr: readonly { t: number; bpm: number }[];
+  /**
+   * Heart rate, ideally to `HR_WAKE_SEARCH_AFTER_MS` past the session's end:
+   * samples, or one point a minute carrying that minute's extremes (`HrSample`).
+   */
+  hr: readonly HrSample[];
   /** HeartRateVariabilityRmssd records. */
   hrv: readonly HcRecord[];
   /** RespiratoryRate records. */
@@ -342,23 +359,85 @@ function firstSustainedRise(
   return null;
 }
 
-/** The heart-rate wake. See the module comment. `hr` need not be sorted. */
-export function hrWake(
-  hr: readonly { t: number; bpm: number }[],
+/** The night's minute series and the two levels a wake is judged by, or null without a baseline. */
+function wakeLevels(
+  hr: readonly HrSample[],
   startMs: number,
   endMs: number,
-): number | null {
+): { minutes: HrMinutePoint[]; risen: number; quietBelow: number } | null {
   const searchEnd = endMs + HR_WAKE_SEARCH_AFTER_MS;
   const minutes = minuteSeries(hr.filter((sample) => sample.t >= startMs && sample.t <= searchEnd));
   const overnight = minutes.filter((minute) => minute.t < endMs).map((minute) => minute.mean);
   if (overnight.length < HR_WAKE_MIN_OVERNIGHT_MINUTES) return null;
   const baseline = quantile(overnight, HR_WAKE_BASELINE_PERCENTILE);
   if (baseline === null) return null;
-  const risen = baseline + HR_WAKE_RISE_BPM;
-  const quietBelow = baseline + HR_WAKE_RISE_BPM * HR_WAKE_HOLD_FRACTION;
+  return {
+    minutes,
+    risen: baseline + HR_WAKE_RISE_BPM,
+    quietBelow: baseline + HR_WAKE_RISE_BPM * HR_WAKE_HOLD_FRACTION,
+  };
+}
 
+/** The heart-rate wake. See the module comment. `hr` need not be sorted. */
+export function hrWake(hr: readonly HrSample[], startMs: number, endMs: number): number | null {
+  const levels = wakeLevels(hr, startMs, endMs);
+  if (levels === null) return null;
+  const { minutes, risen, quietBelow } = levels;
   const wake = firstSustainedRise(afterLastSettled(minutes, quietBelow), risen, quietBelow);
   return wake !== null && wake >= endMs - HR_WAKE_SEARCH_BEFORE_MS ? wake : null;
+}
+
+/**
+ * The minutes from `minutes[0]` up to the pulse next being settled: up to,
+ * and not including, the first quiet stretch that lasts
+ * {@link HR_WAKE_SUSTAIN_MS}.
+ */
+function untilSettled(
+  minutes: readonly HrMinutePoint[],
+  quietBelow: number,
+): readonly HrMinutePoint[] {
+  let stretchFrom: number | null = null;
+  let previous = 0;
+  for (const [index, minute] of minutes.entries()) {
+    if (minute.mean >= quietBelow) {
+      stretchFrom = null;
+      continue;
+    }
+    if (stretchFrom === null || minute.t - previous > HR_WAKE_MAX_GAP_MS) stretchFrom = index;
+    previous = minute.t;
+    const from = minutes[stretchFrom]?.t ?? minute.t;
+    if (minute.t + MINUTE_MS - from >= HR_WAKE_SUSTAIN_MS) return minutes.slice(0, stretchFrom);
+  }
+  return minutes;
+}
+
+/**
+ * The first sustained rise at or after the session's end, whether or not the
+ * pulse settles again after it. See the module comment. `hr` need not be
+ * sorted.
+ */
+export function hrFirstRise(
+  hr: readonly HrSample[],
+  startMs: number,
+  endMs: number,
+): number | null {
+  const levels = wakeLevels(hr, startMs, endMs);
+  if (levels === null) return null;
+  const { risen, quietBelow } = levels;
+  // From the minute the session ends in: a pulse already up then is "at the end".
+  let minutes: readonly HrMinutePoint[] = levels.minutes.filter(
+    (minute) => minute.t + MINUTE_MS > endMs,
+  );
+  while (minutes.length > 0) {
+    // One stretch between two settlings at a time: a rise is sustained inside
+    // it or not at all.
+    const stretch = untilSettled(minutes, quietBelow);
+    const rise = firstSustainedRise(stretch, risen, quietBelow);
+    if (rise !== null) return Math.max(rise, endMs);
+    // Past the settled stretch that ended this one, which is at least a minute long.
+    minutes = minutes.slice(Math.max(stretch.length, 1));
+  }
+  return null;
 }
 
 /** Where a nightly reading is expected, and how far either side of it counts. */
@@ -487,8 +566,9 @@ function stageTotals(stages: SleepNight["stages"]): {
 /**
  * Summarise one SleepSession record against what was measured around it.
  *
- * - `hr`: samples inside the session; `mean` is the mean of per-minute means
- *   (see `summariseHeartRate`), `n` the sample count.
+ * - `hr`: heart rate inside the session; `min` and `max` are the lowest and
+ *   highest SAMPLE, `mean` is the mean of per-minute means (see
+ *   `summariseHeartRate`), `n` the sample count.
  * - `hrv`: median and quartiles (linear interpolation, see `quantile`) of the
  *   RMSSD readings timed inside the session -- the session's own origin's when
  *   it wrote any, otherwise every app's.
@@ -571,6 +651,7 @@ export function summariseSleep(session: HcRecord, context: SleepContext): SleepN
     onsetMs,
     stageWakeMs,
     hrWakeMs: hrWake(context.hr, startMs, endMs),
+    hrFirstRiseMs: hrFirstRise(context.hr, startMs, endMs),
     hr: summariseHeartRate(context.hr, startMs, endMs),
     hrv:
       rmssd.length === 0

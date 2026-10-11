@@ -84,7 +84,12 @@ export function hcArgs<Shape extends z.ZodRawShape>(tool: ToolName, shape: Shape
   return z.strictObject({ ...SHARED, ...jqArg(tool, "paged"), ...shape });
 }
 
-/** A half-open range, `[start, end)`. `subject` is what the range selects, for the description. */
+/**
+ * A range of instants, half-open: `[start, end)`. `subject` is what the range
+ * selects, for the description. An `end` given as a calendar date names the
+ * whole of that local day, so the instant the range ends at is the NEXT
+ * midnight: the date is included, the instant is not (`parseRange`).
+ */
 export function rangeArgs(subject: string) {
   return {
     start: moment.describe(
@@ -95,23 +100,42 @@ export function rangeArgs(subject: string) {
     end: moment
       .optional()
       .describe(
-        "End of the range (exclusive). A calendar date includes that whole local day. " +
-          "Omit for now.",
+        "End of the range. An instant (`2026-01-31T09:00:00-05:00`) is EXCLUSIVE: the " +
+          "range stops just before it. A calendar date is INCLUSIVE: it means the whole of " +
+          "that local day, so `start: 2026-01-30, end: 2026-01-31` is two days and the same " +
+          "date in both is one day. Omit for now.",
       ),
   } as const;
 }
 
+/**
+ * What a tool that takes a range says about `[start, end)` beside the
+ * notation, which on its own reads as "the end is never included".
+ */
+export const RANGE_NOTE =
+  "In `[start, end)` an `end` written as an instant is exclusive, and an `end` written " +
+  "as a calendar date includes that whole local day (two dates a day apart are two days).";
+
 /** What every Health Connect tool says about its answer's size. */
 export const BUDGET_NOTE =
   "Rows are JSON with units declared once in `units`, not per row. The answer stops at " +
-  `a soft budget of ${String(DEFAULT_MAX_BYTES)} bytes of rows -- the one place this server limits an ` +
-  "answer on its own, and it always says so: `truncated: true` plus a `cursor` to " +
-  "continue from. Raise `max_bytes` (no maximum) or project with `jq` to get more per call.";
+  `a soft budget of ${String(DEFAULT_MAX_BYTES)} bytes of rows, and it always says so: \`truncated: true\` ` +
+  "plus a `cursor` to continue from; nothing is dropped. Raise `max_bytes` (no maximum) " +
+  "or project with `jq` to get more per call. Whenever `truncated` is true the answer " +
+  "is NOT the whole of what was asked: follow the `cursor` before concluding anything " +
+  "from what is absent.";
 
 /** What every Health Connect tool says about an empty answer. */
 export const AVAILABILITY_NOTE =
   "`coverage` has one entry per phone and `hc:<Type>` that has stored records, and " +
   "`warnings` say when one is `stale` (the phone has not uploaded for six hours, so the " +
-  "newest data may be missing). A type with no stored records is simply not listed; " +
+  "newest data may be missing). `freshness` says how current the answer is, per phone: " +
+  "`lastUploadAt`, `hoursSinceUpload` (one decimal) and `dataThrough`, the end of the " +
+  "newest stored record of each `hc:<Type>` in `coverage` -- the answer holds nothing " +
+  "of that type after it. The phone uploads about every fifteen minutes; once its last " +
+  "upload is more than an hour old the answer warns " +
+  "`hc_upload_stale:device:<id>:<hours>h`, and whatever was measured since is missing: " +
+  "say so, and do not read the gap as inactivity. A type with no stored records is " +
+  "simply not listed; " +
   "asked for by name it answers empty with `no_data:hc:<Type>:device:<id>`, and a name " +
   "that is no record type answers `unknown_type:hc:<Type>`.";

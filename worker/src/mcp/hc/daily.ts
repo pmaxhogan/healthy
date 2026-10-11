@@ -8,8 +8,13 @@
  *
  *  - steps, distance, active and total energy: `aggregate()` by day under
  *    `hc_priority`. Total energy is what was recorded -- never padded with
- *    basal metabolic rate.
- *  - HRV and respiratory rate: the day's mean, every origin.
+ *    basal metabolic rate. When part of a day's total is the share of a
+ *    record longer than an hour (a day's energy written as one record, which
+ *    only counts in the hours nobody measured), the day is flagged
+ *    `long_record_used`.
+ *  - HRV and respiratory rate: the day's MEAN, every origin. The HRV field
+ *    says so in its name (`hrvRmssdMean`): `sleep_sessions` gives a night's
+ *    MEDIAN, over the night and not the day, and the two are not one figure.
  *  - sleep: the night that ENDED on the day -- the day you woke up, which is
  *    also where `hc_aggregate` files a night (the longest, when there are
  *    several; the others are counted as `naps`).
@@ -351,6 +356,7 @@ function dayFlags(
   const checks: [boolean, string][] = [
     [endMs > request.nowMs || totals.some((row) => row?.partial === true), "partial_day"],
     [totals.some((row) => (row?.duplicatesDropped ?? 0) > 0), "other_origins_dropped"],
+    [totals.some((row) => row?.longRecordSum !== undefined), "long_record_used"],
     [sessions.nights.some((group) => group.members.length > 1), "sleep_sessions_merged"],
     [
       sessions.nights.some((group) => group.primary.summary.stagesOverlap === true),
@@ -423,7 +429,7 @@ function dayRow(day: string, data: DailyData, request: DailyRequest): Record<str
     ...(has("totalKcal") && { totalKcal: sumOf(data.totals.totalKcal.get(day), "energy") }),
     ...(has("sleep") && { sleep: sleepSection(nights, clock) }),
     ...(has("restingHr") && { restingHr: meanOf(numbersOf(data.resting.get(day) ?? [], "bpm")) }),
-    ...(has("hrv") && { hrvRmssd: meanField(data.hrv.get(day), "rmssd") }),
+    ...(has("hrv") && { hrvRmssdMean: meanField(data.hrv.get(day), "rmssd") }),
     ...(has("respiratoryRate") && {
       respiratoryRate: meanField(data.respiratoryRate.get(day), "rate"),
     }),

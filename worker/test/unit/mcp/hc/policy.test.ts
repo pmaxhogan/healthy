@@ -211,7 +211,7 @@ describe("stripJoined", () => {
   it("names each denied type once", () => {
     const { fields, warnings } = deniedJoins(deny("HeartRate"), "sleep_sessions");
 
-    expect(fields).toStrictEqual(["hr", "hrWake"]);
+    expect(fields).toStrictEqual(["hr", "hrWake", "hrFirstRise"]);
     expect(warnings).toStrictEqual(["policy_resource_denied:hc:HeartRate"]);
   });
 });

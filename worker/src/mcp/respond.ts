@@ -259,6 +259,15 @@ interface PageInput {
    * it from what was sent, never from what was computed before the policy ran.
    */
   cursorFor: (next: number, rows: readonly unknown[]) => string;
+  /**
+   * For a tool that stopped READING before the end of what was asked (it walks
+   * a long range a stretch at a time): the cursor that goes on from where it
+   * stopped, given the final array. When every row of this call was sent but
+   * the range is not finished, the answer is `truncated` all the same and
+   * carries this cursor -- an answer that ended early must never read as the
+   * end. Omitted: the array is the whole answer.
+   */
+  resume?: ((rows: readonly unknown[]) => string) | undefined;
 }
 
 /** One policy-filtered item, and its policy-filtered raw resource when `raw` was asked for. */
@@ -340,13 +349,16 @@ function applyLimit(
   const rest = offset === 0 ? value : value.slice(offset);
   const limited = limit === undefined ? rest : rest.slice(0, limit);
   const kept = page === undefined ? limited : limited.slice(0, rowsWithin(limited, page.maxBytes));
-  const truncated = offset + kept.length < value.length;
+  const cut = offset + kept.length < value.length;
+  // Nothing cut, but the tool stopped reading early: still not the whole answer.
+  const unfinished = !cut && page?.resume !== undefined;
   return {
     items: kept,
     matched: value.length,
-    truncated,
+    truncated: cut || unfinished,
     returned: kept.length,
-    ...(page !== undefined && truncated && { cursor: page.cursorFor(offset + kept.length, value) }),
+    ...(page !== undefined && cut && { cursor: page.cursorFor(offset + kept.length, value) }),
+    ...(page?.resume !== undefined && unfinished && { cursor: page.resume(value) }),
   };
 }
 
