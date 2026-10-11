@@ -281,7 +281,7 @@ npm run deploy   # runs the remote migration, then wrangler deploy
 ```
 
 Or connect the repository to **Cloudflare Workers Builds** with build
-command `npm run check` and deploy command `npm run deploy` — see
+command `npm run build` and deploy command `npm run deploy` — see
 [docs/setup-cloudflare.md](docs/setup-cloudflare.md).
 
 Then, in the admin UI: add your health systems and connect each one
@@ -383,8 +383,8 @@ which is what lets the OAuth provider start at all. To run a second Worker on
 another port, set `DEV_ORIGIN=http://localhost:<port>` in that checkout's
 `worker/.dev.vars` and start Vite with `HEALTHY_DEV_WORKER` set to the same origin.
 
-`npm run check` is the only gate that matters: it is what CI runs, what the
-pre-push hook runs, and what Workers Builds runs before deploying. See
+`npm run check` is the only gate that matters: it is what CI runs and what the
+pre-push hook runs. Workers Builds only builds and deploys. See
 [docs/development.md](docs/development.md) for the rest.
 
 ## Licence
