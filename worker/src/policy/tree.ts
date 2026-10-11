@@ -28,7 +28,10 @@
 
 import { ARRAY_SEGMENT } from "@shared/policy-path.ts";
 
+import { HC_RECORD_TYPES } from "../hc/record-types.ts";
 import { TOOL_NAMES } from "../mcp/tool-names.ts";
+
+import { HC_TYPE_PREFIX, hcRuleCanReach, isHcResourceType } from "./hc-aliases.ts";
 
 import type {
   FieldAlias,
@@ -594,6 +597,16 @@ const DATATYPES: Readonly<Record<string, FieldSpecs>> = {
     body: ["string", "The message's full text"],
     attachments: ["N.MessageAttachment[]", "Attached files"],
     noLongerListed: ["boolean", "True when the portal stopped listing it"],
+  },
+  "HC.BpReading": {
+    id: "string",
+    time: "string",
+    systolic: "number",
+    diastolic: "number",
+    bodyPosition: "string",
+    measurementLocation: "string",
+    pulse: ["number", "The same app's heart rate in the reading's minute"],
+    origin: ["string", "The app that wrote it, by package name"],
   },
 };
 
@@ -1612,6 +1625,378 @@ const RESOURCE_SYNC_ROW = {
   warnings: ["N.SyncWarning[]", "What the health system reported on the last refresh"],
 } as const;
 
+// --- Health Connect (a paired phone) -----------------------------------------
+//
+// A phone's rows are tagged `healthSystemId: "device:<id>"` and
+// `resourceType: "hc:<Type>"`, the type being whichever record type the row
+// is about -- so these shapes belong to no one resource type (`resourceType:
+// null`) and are listed in `TYPED_ROWS`, which is what lets a rule scoped to
+// `hc:HeartRate` reach them. A record's `data` is whatever the phone sent for
+// its type, so it is an open node: any path below it is accepted.
+
+const HC_TAGS = {
+  resourceType: ["string", "hc:<Type>, the Health Connect record type the row is about"],
+  healthSystemId: ["string", "device:<id> of the phone it came from"],
+} as const;
+
+const HC_NAMED = {
+  healthSystem: ["string", "The phone's name"],
+  ...HC_TAGS,
+} as const;
+
+const HC_COVERAGE_ROW = {
+  kind: ["string", "Always type_coverage"],
+  ...HC_NAMED,
+  type: ["string", "The record type"],
+  availability: ["string", "ok, no_data, stale, never_synced, not_permitted or not_available"],
+  status: "string",
+  permission: "string",
+  recordCount: "integer",
+  firstAt: ["string", "The oldest record"],
+  lastAt: ["string", "The newest record"],
+  meanIntervalS: ["number", "Typical time between records"],
+  lastSyncAt: "string",
+  staleHours: "number",
+  origins: ["string[]", "The apps that wrote the type, by package name"],
+  lastRecordFrom: ["object?", "The app and hardware behind the newest record"],
+} as const;
+
+const HC_DEVICE_ROW = {
+  kind: ["string", "Always device"],
+  healthSystem: ["string", "The phone's name"],
+  healthSystemId: ["string", "device:<id>"],
+  status: ["string", "active, stale, revoked or never"],
+  pairedAt: "string",
+  revokedAt: "string",
+  lastSeenAt: "string",
+  lastUploadAt: "string",
+  hoursSinceUpload: "number",
+  appVersion: "string",
+  backgroundRead: "boolean",
+  historyRead: "boolean",
+  batteryOptimisationExempt: "boolean",
+  backfillComplete: "boolean",
+  androidSdk: "integer",
+  healthConnectVersion: "string",
+  lastPhoneError: ["object?", "The phone's own last error: a stable code and when"],
+  typesGranted: "integer",
+  typesNotPermitted: "integer",
+  records: "integer",
+  phoneBacklog: "integer",
+  queuedBatches: "integer",
+  rollupsPending: "integer",
+  parkedBatches: "integer",
+  recentBatches: "integer",
+  recentFailures: ["object?[]", "Failed uploads among the recent ones"],
+} as const;
+
+const HC_TYPE_SYNC_ROW = {
+  kind: ["string", "Always type_sync"],
+  ...HC_NAMED,
+  type: "string",
+  permission: "string",
+  availability: "string",
+  recordCount: "integer",
+  tokenAgeS: "number",
+  backlog: "integer",
+  backfillComplete: "boolean",
+  backfillOldestAt: "string",
+  lastUploadAt: "string",
+} as const;
+
+const HC_RECORD = {
+  ...HC_TAGS,
+  id: ["string", "Health Connect's id for the record"],
+  origin: ["string", "The app that wrote it, by package name"],
+  time: ["string", "When, for an instantaneous record"],
+  start: "string",
+  end: "string",
+  data: ["object?", "The record type's own fields, as the phone sent them"],
+  device: ["object?", "The hardware: type, manufacturer, model"],
+  recordingMethod: "string",
+  lastModified: "string",
+  offsetMin: "integer",
+  startOffsetMin: "integer",
+  endOffsetMin: "integer",
+  clientRecordId: "string",
+  clientRecordVersion: "integer",
+} as const;
+
+const HC_BUCKET = {
+  ...HC_TAGS,
+  bucket: ["string", "The bucket's label"],
+  start: "string",
+  end: "string",
+  hasData: "boolean",
+  artefactsExcluded: ["integer", "Values left out of the bucket as measurement artefacts"],
+  partial: "boolean",
+  method: ["string", "platform, max_origin, all_origins or origin"],
+  origins: ["string[]", "The apps whose records the numbers are"],
+  records: "integer",
+  durationMs: "number",
+  values: ["object?", "Per field of the type, the metrics asked for"],
+  duplicatesDropped: "integer",
+  bmrFillKcal: "number",
+} as const;
+
+const HC_HR_POINT = {
+  ...HC_TAGS,
+  origin: "string",
+  t: ["string", "Start of the point's bucket"],
+  mean: "number",
+  min: "number",
+  max: "number",
+  n: ["integer", "Samples behind the point"],
+} as const;
+
+const HC_HR_EVENT = {
+  ...HC_TAGS,
+  origin: "string",
+  start: "string",
+  end: "string",
+  peakAt: "string",
+  baselineBpm: "number",
+  peakBpm: "number",
+  deltaBpm: "number",
+  timeToPeakS: "number",
+  durationS: "number",
+  context: ["string", "exercise, wake, sleep or other"],
+} as const;
+
+/** What a merged group of sessions says about itself. */
+const HC_GROUP = {
+  origin: ["string", "The app behind the session the row describes"],
+  mergedSessions: ["integer", "How many stored sessions the row stands for"],
+  exactDuplicates: "integer",
+  origins: ["string[]", "Every app that wrote one of them"],
+  spanStart: ["string", "Start of the stretch the merged sessions cover together"],
+  spanEnd: "string",
+  spanMin: "number",
+  members: ["object?[]", "Every session the row stands for"],
+  contextClamped: ["boolean", "True when only part of an over-long session was joined"],
+} as const;
+
+const HC_SLEEP = {
+  ...HC_TAGS,
+  id: "string",
+  date: ["string", "The local date the sleep ended on"],
+  start: "string",
+  end: "string",
+  title: "string",
+  inBedMin: "number",
+  asleepMin: "number",
+  awakeMin: "number",
+  stageMin: ["object?", "Minutes per sleep stage"],
+  stagesOverlap: ["boolean", "True when the stages overlapped and were cut"],
+  onset: ["string", "First moment asleep"],
+  wearableWake: ["string", "End of the last sleep stage the wearable logged"],
+  hrWake: ["string", "Where the heart rate left its overnight baseline"],
+  hr: ["object?", "Overnight heart rate: min, mean, max, n"],
+  hrv: ["object?", "Overnight HRV: median, q1, q3, iqr, n"],
+  respiratoryRate: "number",
+  skinTempDelta: "number",
+  restingHr: "number",
+  ...HC_GROUP,
+  stages: ["object?[]", "The stage timeline (include_stages)"],
+} as const;
+
+const HC_EXERCISE = {
+  ...HC_TAGS,
+  id: "string",
+  title: "string",
+  exerciseType: "string",
+  start: "string",
+  end: "string",
+  durationMin: "number",
+  hr: ["object?", "Heart rate during the session: mean, max, min, n"],
+  energy: ["number", "Active kcal"],
+  distance: "number",
+  steps: "number",
+  likelyLeftRunning: "boolean",
+  overThreeHours: "boolean",
+  zeroLength: "boolean",
+  exactDuplicate: "boolean",
+  hasRoute: "boolean",
+  ...HC_GROUP,
+} as const;
+
+const HC_BP_READING = {
+  id: "string",
+  time: "string",
+  systolic: "number",
+  diastolic: "number",
+  bodyPosition: "string",
+  measurementLocation: "string",
+  pulse: ["number", "The same app's heart rate in the reading's minute"],
+  origin: "string",
+} as const;
+
+const HC_BP_READING_ROW = {
+  kind: ["string", "Always reading"],
+  ...HC_TAGS,
+  ...HC_BP_READING,
+} as const;
+
+const HC_BP_SESSION = {
+  kind: ["string", "Always session"],
+  ...HC_TAGS,
+  start: "string",
+  end: "string",
+  systolic: ["number", "Mean of the sitting"],
+  diastolic: ["number", "Mean of the sitting"],
+  pulse: "number",
+  readingCount: "integer",
+  origins: "string[]",
+  readings: ["HC.BpReading[]", "The sitting's readings"],
+} as const;
+
+const HC_DAY = {
+  ...HC_TAGS,
+  date: "string",
+  steps: "number",
+  distance: "number",
+  activeKcal: "number",
+  totalKcal: "number",
+  sleep: ["object?", "The night that ended on the day"],
+  restingHr: "number",
+  hrvRmssd: "number",
+  respiratoryRate: "number",
+  bloodPressure: ["object?", "Mean of the day's readings"],
+  weight: "number",
+  weighings: ["object?[]", "Every weighing of the day, each with its flag"],
+  exercises: ["object?[]", "The day's workouts"],
+  flags: ["string[]", "What to read with care"],
+} as const;
+
+const HC_FINDING = {
+  ...HC_TAGS,
+  kind: ["string", "duplicate, artefact, gap, source_switch, overlapping_origins, ..."],
+  reason: "string",
+  origin: "string",
+  origins: ["object?", "The apps involved"],
+  at: "string",
+  hour: "string",
+  date: "string",
+  start: "string",
+  end: "string",
+  from: "string",
+  to: "string",
+  resumed: "string",
+  previousShare: ["number", "Share of the day the earlier app still recorded at a source switch"],
+  days: "integer",
+  count: "integer",
+  value: "number",
+  maxValue: "number",
+  minValue: "number",
+  field: "string",
+  fromDecimals: "integer",
+  toDecimals: "integer",
+  decimals: "integer",
+  sessions: "integer",
+  exactDuplicates: "integer",
+  durationMin: "number",
+  duplicateOf: "string",
+  note: "string",
+} as const;
+
+/** The phone's lines in `get_health_summary`. */
+const HC_SUMMARY_ROW = {
+  kind: ["string", "Always phone"],
+  section: ["string", "sync, latest_blood_pressure or last_night_sleep"],
+  ...HC_NAMED,
+  status: "string",
+  lastUploadAt: "string",
+  hoursSinceUpload: "number",
+  time: "string",
+  systolic: "number",
+  diastolic: "number",
+  date: "string",
+  start: "string",
+  end: "string",
+  inBedMin: "number",
+  asleepMin: "number",
+  origin: "string",
+} as const;
+
+/**
+ * Every Health Connect shape, by id, with the record types its rows can be
+ * tagged as: `"any"` for a shape whose rows are about whichever type the
+ * caller named, a list for one that is always about the same types, and an
+ * empty list for a row that carries no `resourceType` at all. A rule scoped to
+ * a type reaches a shape only through a row that can carry that type -- or
+ * through a joined field, which `./hc-aliases.ts` knows about.
+ */
+const HC_SHAPES: readonly {
+  id: string;
+  label: string;
+  fields: FieldSpecs;
+  rows: "any" | readonly string[];
+}[] = [
+  {
+    id: "hc:coverage",
+    label: "Phone record-type coverage row",
+    fields: HC_COVERAGE_ROW,
+    rows: "any",
+  },
+  { id: "hc:device", label: "Phone sync row", fields: HC_DEVICE_ROW, rows: [] },
+  {
+    id: "hc:type_sync",
+    label: "Phone record-type sync row",
+    fields: HC_TYPE_SYNC_ROW,
+    rows: "any",
+  },
+  { id: "hc:record", label: "Health Connect record", fields: HC_RECORD, rows: "any" },
+  { id: "hc:bucket", label: "Health Connect aggregate bucket", fields: HC_BUCKET, rows: "any" },
+  {
+    id: "hc:hr_point",
+    label: "Heart-rate series point",
+    fields: HC_HR_POINT,
+    rows: ["HeartRate"],
+  },
+  { id: "hc:hr_event", label: "Heart-rate event", fields: HC_HR_EVENT, rows: ["HeartRate"] },
+  {
+    id: "hc:sleep",
+    label: "Sleep session (one night)",
+    fields: HC_SLEEP,
+    rows: ["SleepSession"],
+  },
+  { id: "hc:exercise", label: "Exercise session", fields: HC_EXERCISE, rows: ["ExerciseSession"] },
+  {
+    id: "hc:bp_session",
+    label: "Blood-pressure sitting",
+    fields: HC_BP_SESSION,
+    rows: ["BloodPressure"],
+  },
+  {
+    id: "hc:bp_reading",
+    label: "Blood-pressure reading",
+    fields: HC_BP_READING_ROW,
+    rows: ["BloodPressure"],
+  },
+  { id: "hc:day", label: "Daily summary row", fields: HC_DAY, rows: ["DailySummary"] },
+  { id: "hc:finding", label: "Data-quality finding", fields: HC_FINDING, rows: "any" },
+  {
+    id: "hc:summary",
+    label: "Phone lines of the health summary",
+    fields: HC_SUMMARY_ROW,
+    rows: ["BloodPressure", "SleepSession"],
+  },
+];
+
+/** What a `daily_summary` row is tagged as: a view over several record types. */
+const HC_DAILY_SUMMARY_TYPE = "DailySummary";
+
+/**
+ * The `hc:<Type>` resource types the rule builder offers: every record type
+ * the companion app maps (`worker/src/hc/record-types.ts`) -- the ones with
+ * nothing numeric to summarise included, which are the ones most worth hiding
+ * -- plus the daily summary's own.
+ */
+const HC_RESOURCE_TYPES: readonly string[] = [
+  ...HC_RECORD_TYPES.map((type) => `${HC_TYPE_PREFIX}${type}`),
+  `${HC_TYPE_PREFIX}${HC_DAILY_SUMMARY_TYPE}`,
+];
+
 // --- the shape registry ------------------------------------------------------
 
 /** Every resource type with a normalizer, a raw model and a vocabulary. */
@@ -1759,6 +2144,11 @@ const SHAPES: readonly ShapeDef[] = [
     vocabulary: "normalized",
     fields: RESOURCE_SYNC_ROW,
   },
+  ...HC_SHAPES.map(({ rows: _rows, ...shape }): ShapeDef => ({
+    ...shape,
+    resourceType: null,
+    vocabulary: "normalized",
+  })),
 ];
 
 const SHAPES_BY_ID: ReadonlyMap<string, ShapeDef> = new Map(
@@ -1785,6 +2175,7 @@ const TOOL_SHAPES = {
     CONDITION_GROUP_SHAPE,
     "normalized:MedicationRequest",
     "normalized:Observation",
+    "hc:summary",
   ],
   list_health_systems: ["system:health_system"],
   get_sync_status: ["system:health_system", "system:resource_sync"],
@@ -1812,6 +2203,17 @@ const TOOL_SHAPES = {
   get_devices: collectionShapes("Device"),
   get_coverage: collectionShapes("Coverage"),
   get_service_requests: collectionShapes("ServiceRequest"),
+  hc_coverage: ["hc:coverage"],
+  hc_sync_status: ["hc:device", "hc:type_sync"],
+  hc_records: ["hc:record"],
+  hc_aggregate: ["hc:bucket"],
+  hr_series: ["hc:hr_point"],
+  hr_events: ["hc:hr_event"],
+  sleep_sessions: ["hc:sleep"],
+  exercise_sessions: ["hc:exercise"],
+  blood_pressure: ["hc:bp_session", "hc:bp_reading"],
+  daily_summary: ["hc:day"],
+  data_quality: ["hc:finding"],
 } as const satisfies Record<ToolName, readonly string[]>;
 
 const TOOL_SHAPES_MAP: ReadonlyMap<string, readonly string[]> = new Map(
@@ -1834,6 +2236,7 @@ const VIEW_ONLY_RESOURCE_TYPES: readonly string[] = ["Communication"];
 export const MODELED_RESOURCE_TYPES: readonly string[] = [
   ...RESOURCES.map((resource) => resource.type),
   ...VIEW_ONLY_RESOURCE_TYPES,
+  ...HC_RESOURCE_TYPES,
 ];
 
 // --- building nodes ------------------------------------------------------------
@@ -1953,6 +2356,12 @@ function toNodes(fields: FieldSpecs, sensitive: ReadonlySet<string> = EMPTY): Po
 
 const EMPTY: ReadonlySet<string> = new Set();
 
+/** The resource types a rule can be scoped to and still meet a row of this shape. */
+function shapeScopeTypes(shape: ShapeDef): string[] {
+  if (!isPhoneShape(shape.id)) return shape.resourceType === null ? [] : [shape.resourceType];
+  return HC_RESOURCE_TYPES.filter((type) => phoneShapeReached(shape.id, null, type));
+}
+
 function shapeDto(shape: ShapeDef): PolicyShapeDto {
   const sensitive =
     shape.vocabulary === "normalized" && shape.resourceType !== null
@@ -1962,6 +2371,7 @@ function shapeDto(shape: ShapeDef): PolicyShapeDto {
     id: shape.id,
     label: shape.label,
     resourceType: shape.resourceType,
+    resourceTypes: shapeScopeTypes(shape),
     vocabulary: shape.vocabulary,
     fields: toNodes(shape.fields, sensitive),
   };
@@ -2111,11 +2521,59 @@ const TYPED_ROWS: ReadonlySet<string> = new Set([
   "system:resource_sync",
 ]);
 
+/** The Health Connect shapes, by id. Their rows carry an `hc:<Type>` and never a FHIR type. */
+const HC_SHAPES_BY_ID: ReadonlyMap<string, (typeof HC_SHAPES)[number]> = new Map(
+  HC_SHAPES.map((shape) => [shape.id, shape]),
+);
+
+/** True for one of the Health Connect shapes. */
+export function isPhoneShape(shapeId: string): boolean {
+  return HC_SHAPES_BY_ID.has(shapeId);
+}
+
+/**
+ * The `resourceType`s a row of one Health Connect shape can carry when `tool`
+ * answers with it, as far as a rule on `ruleType` is concerned: the shape's
+ * own fixed types, or -- for a shape about whichever type the caller named --
+ * the rule's own type and every type whose rows the tool joins it onto.
+ */
+export function phoneRowTypes(shapeId: string, tool: string, ruleType: string): string[] {
+  const rows = HC_SHAPES_BY_ID.get(shapeId)?.rows ?? [];
+  const candidates =
+    rows === "any" ? [ruleType, ...HC_RESOURCE_TYPES] : rows.map((type) => asPhoneType(type));
+  return [...new Set(candidates)].filter((rowType) => hcRuleCanReach(tool, rowType, ruleType));
+}
+
+function asPhoneType(type: string): string {
+  return `${HC_TYPE_PREFIX}${type}`;
+}
+
+/** The tools a scope names: the one, or every one. */
+function toolsInScope(tool: string | null): readonly string[] {
+  return tool === null ? TOOL_NAMES : [tool];
+}
+
+/** True when a rule on `ruleType` can meet a row of this shape in some tool of the scope. */
+function phoneShapeReached(shapeId: string, tool: string | null, ruleType: string): boolean {
+  return toolsInScope(tool).some(
+    (name) =>
+      (toolShapes(name) ?? []).includes(shapeId) &&
+      phoneRowTypes(shapeId, name, ruleType).length > 0,
+  );
+}
+
 /**
  * The shape ids a rule with this scope can reach. No tool: every shape. A
  * resource type narrows to that type's shapes, plus the tool-specific rows
  * that carry a `resourceType` of whatever they describe (summary counts, sync
  * rows), which the filter matches by that field.
+ *
+ * A phone's rows are typed `hc:<Type>`, so the two families never reach each
+ * other's shapes, and within the phone's a type reaches only the shapes whose
+ * rows can carry it or its data: `hc:HeartRate` reaches a heart-rate point
+ * and, through the joined overnight heart rate, a night -- but not a
+ * blood-pressure-only shape's own fields, and not the phone's sync row, which
+ * has no type at all.
  */
 export function shapesForScope(scope: {
   tool: string | null;
@@ -2123,13 +2581,16 @@ export function shapesForScope(scope: {
 }): string[] {
   const fromTool =
     scope.tool === null ? SHAPES.map((shape) => shape.id) : [...(toolShapes(scope.tool) ?? [])];
-  if (scope.resourceType === null) return fromTool;
+  const { resourceType } = scope;
+  if (resourceType === null) return fromTool;
+  const phoneType = isHcResourceType(resourceType);
   return fromTool.filter((id) => {
     const shape = SHAPES_BY_ID.get(id);
     if (shape === undefined) return false;
+    if (isPhoneShape(id)) return phoneType && phoneShapeReached(id, scope.tool, resourceType);
     return shape.resourceType === null
-      ? TYPED_ROWS.has(shape.id)
-      : shape.resourceType === scope.resourceType;
+      ? TYPED_ROWS.has(shape.id) && !phoneType
+      : shape.resourceType === resourceType;
   });
 }
 

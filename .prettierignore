@@ -21,3 +21,7 @@ package-lock.json
 
 # Gitignored scratch space (see CLAUDE.md) -- never shipped, never reviewed
 .local/
+
+# Written by the Android unit tests (PhoneBatchFixtureTest); a formatter must not
+# fight the generator over it.
+worker/test/fixtures/hc/phone-batches.json

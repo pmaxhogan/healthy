@@ -17,6 +17,13 @@ export const MCP_INSTRUCTIONS =
   "conversation with every message in full, and get_message_attachment one " +
   "attached file (text, or an image). get_documents holds clinical documents such as visit " +
   "notes, not messages. " +
+  "A paired phone's Health Connect data (steps, heart rate, sleep, workouts, " +
+  "blood pressure, weight) is a separate source with its own tools: start " +
+  "with hc_coverage, then daily_summary, hc_aggregate, hr_series, hr_events, " +
+  "sleep_sessions, exercise_sessions, blood_pressure, data_quality or " +
+  "hc_records. Their rows are tagged `device:<id>` and `hc:<Type>`, their " +
+  "answers stop at a soft byte budget (`truncated` plus a `cursor`; raise " +
+  "`max_bytes` or project with `jq`), and get_vitals does not include them. " +
   "Every tool that reads a resource " +
   "type returns { items, total, matched, coverage, warnings, truncated, " +
   "generatedAt } and accepts an optional `jq` argument: a real jq program run " +

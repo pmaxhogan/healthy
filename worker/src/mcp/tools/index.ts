@@ -16,6 +16,11 @@
 import { registerAppointmentTools } from "./appointments.ts";
 import { registerClinicalTools } from "./clinical.ts";
 import { registerDocumentTools } from "./documents.ts";
+import { registerHcDailyTools } from "./hc-daily.ts";
+import { registerHcHeartTools } from "./hc-heart.ts";
+import { registerHcRecordTools } from "./hc-records.ts";
+import { registerHcSessionTools } from "./hc-sessions.ts";
+import { registerHcStatusTools } from "./hc-status.ts";
 import { registerHealthSystemTools } from "./health-systems.ts";
 import { registerMessageTools } from "./messages.ts";
 import { registerSummaryTool } from "./summary.ts";
@@ -32,4 +37,9 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
   registerClinicalTools(server, deps);
   registerDocumentTools(server, deps);
   registerMessageTools(server, deps);
+  registerHcStatusTools(server, deps);
+  registerHcRecordTools(server, deps);
+  registerHcHeartTools(server, deps);
+  registerHcSessionTools(server, deps);
+  registerHcDailyTools(server, deps);
 }

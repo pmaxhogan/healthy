@@ -329,6 +329,22 @@ export function isSensitiveAllowed(rules: PolicyRules, scope: ItemScope, field: 
   return rules.allows.some((rule) => rule.path[0] === field && ruleReaches(rule, scope));
 }
 
+/**
+ * The hide rules that may reach one of a paired phone's rows (`hc:<Type>`):
+ * every rule in its tool and health-system scope that is on a Health Connect
+ * type or on every type. NOT only the rules on the row's own type: a phone's
+ * row can carry another type's data (a night's heart rate), and
+ * `worker/src/policy/hc-aliases.ts` decides, per rule, what on this row is
+ * that type's.
+ */
+export function phoneFieldRulesFor(rules: PolicyRules, scope: ItemScope): FieldRule[] {
+  return rules.fields.filter(
+    (rule) =>
+      (rule.resourceType === null || rule.resourceType.startsWith("hc:")) &&
+      ruleReaches({ ...rule, resourceType: null }, scope),
+  );
+}
+
 /** The hide rules that reach one item. */
 export function fieldRulesFor(rules: PolicyRules, scope: ItemScope): FieldRule[] {
   return rules.fields.filter((rule) => ruleReaches(rule, scope));

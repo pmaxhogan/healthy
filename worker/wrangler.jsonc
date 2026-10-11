@@ -41,6 +41,7 @@
       { "name": "HEALTHY_MCP", "class_name": "HealthyMcp" },
       { "name": "FULL_REFRESH", "class_name": "FullRefreshRunner" },
       { "name": "PORTAL_SIGNIN", "class_name": "PortalSignInRunner" },
+      { "name": "HC_INGEST", "class_name": "HcIngestRunner" },
     ],
   },
   "migrations": [
@@ -62,6 +63,13 @@
       // for it to arrive.
       "new_sqlite_classes": ["PortalSignInRunner"],
     },
+    {
+      "tag": "v4",
+      // Applies the Health Connect batches the ingest route queued, from an
+      // alarm, one budgeted slice per invocation: a batch of backfill is more
+      // D1 queries than one request may make.
+      "new_sqlite_classes": ["HcIngestRunner"],
+    },
   ],
   "triggers": {
     "crons": [
@@ -71,7 +79,8 @@
       // (UTC), at a minute the hourly sync never runs on.
       "23 2,6,10,14,18,22 * * *",
       // Every ten minutes (UTC): keep live patient-portal sessions from idling
-      // out between hourly runs. Never signs in.
+      // out between hourly runs. Never signs in. The same tick wakes the Health
+      // Connect ingest runner of every paired device, as a safety net.
       "*/10 * * * *",
     ],
   },

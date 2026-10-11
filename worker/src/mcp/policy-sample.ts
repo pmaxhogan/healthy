@@ -27,7 +27,9 @@
  * owner's own browser, behind Access, the password session and the CSRF check.
  */
 
+import { DAY_SECONDS, toIso } from "../lib/time.ts";
 import { applyPolicy } from "../policy/filter.ts";
+import { hcRuleCanReach, hcTypeOf, isHcResourceType } from "../policy/hc-aliases.ts";
 import { EMPTY_RULES, buildRules } from "../policy/rules.ts";
 import { shapesForScope, toolShapes } from "../policy/tree.ts";
 
@@ -82,6 +84,54 @@ function sampleArgs(tool: string): Record<string, unknown> {
     ...(raw && { raw: true }),
     // Upcoming-only is the default window; the past has most of the data.
     ...(tool === "get_appointments" && { includePast: true }),
+  };
+}
+
+/** How far back a Health Connect tool is sampled: a week holds a row of most things. */
+const PHONE_SAMPLE_DAYS = 7;
+
+/** The Health Connect tools that need a range to answer at all. */
+const PHONE_RANGE_TOOLS: ReadonlySet<string> = new Set([
+  "hc_records",
+  "hc_aggregate",
+  "hr_series",
+  "hr_events",
+  "sleep_sessions",
+  "exercise_sessions",
+  "blood_pressure",
+  "daily_summary",
+  "data_quality",
+]);
+
+/** The two that also need a record type. */
+const PHONE_TYPED_TOOLS: ReadonlySet<string> = new Set(["hc_records", "hc_aggregate"]);
+
+/** The type those two are sampled on when the rule names none: what a phone is likeliest to hold. */
+const PHONE_DEFAULT_TYPE = "Steps";
+
+/** What a `daily_summary` row is tagged as: not a record type a tool can be asked for. */
+const PHONE_SUMMARY_TYPE = "hc:DailySummary";
+
+/**
+ * The record type to sample a typed Health Connect tool on: the one the rule
+ * (or the structure request) is about, so that a rule on heart rate is
+ * previewed on heart-rate records and not on whatever the default holds.
+ */
+function phoneSampleType(resourceType: string | undefined): string {
+  if (resourceType === undefined || resourceType === PHONE_SUMMARY_TYPE) return PHONE_DEFAULT_TYPE;
+  return isHcResourceType(resourceType) ? hcTypeOf(resourceType) : PHONE_DEFAULT_TYPE;
+}
+
+/** The range (and type) a Health Connect tool is sampled over. Nothing for any other tool. */
+function phoneSampleArgs(
+  tool: string,
+  now: number,
+  resourceType: string | undefined,
+): Record<string, unknown> {
+  if (!PHONE_RANGE_TOOLS.has(tool)) return {};
+  return {
+    start: toIso(now - PHONE_SAMPLE_DAYS * DAY_SECONDS),
+    ...(PHONE_TYPED_TOOLS.has(tool) && { type: phoneSampleType(resourceType) }),
   };
 }
 
@@ -156,8 +206,11 @@ async function recordArgs(
   deps: ToolDeps,
   tool: string,
   rules: PolicyRules,
+  resourceType: string | undefined,
 ): Promise<Record<string, unknown> | null> {
-  if (!NEEDS_RECORD.has(tool)) return sampleArgs(tool);
+  if (!NEEDS_RECORD.has(tool)) {
+    return { ...sampleArgs(tool), ...phoneSampleArgs(tool, deps.now(), resourceType) };
+  }
   const idOnly = sampleDeps(deps, { ...rules, tools: new Set(), fields: [], allows: [] });
   const threads = (await listItems(idOnly, "get_messages", sampleArgs("get_messages"))) ?? [];
   const wanted = threads.find(
@@ -172,8 +225,13 @@ async function recordArgs(
 }
 
 /** Run one tool under `rules`. Null when the tool does not exist or answered an error. */
-async function runTool(deps: ToolDeps, tool: string, rules: PolicyRules): Promise<Answer | null> {
-  const args = await recordArgs(deps, tool, rules);
+async function runTool(
+  deps: ToolDeps,
+  tool: string,
+  rules: PolicyRules,
+  resourceType?: string,
+): Promise<Answer | null> {
+  const args = await recordArgs(deps, tool, rules, resourceType);
   if (args === null) return null;
   const result = await callMcpTool(sampleDeps(deps, rules), tool, args);
   if (result === null || result.isError === true) return null;
@@ -213,13 +271,29 @@ function syntheticDocumentText(): Answer {
   };
 }
 
-/** Keep only one resource type's items (and, index-aligned, their raw entries). */
-function onlyType(answer: Answer, resourceType: string | undefined): Answer {
+/**
+ * True when an item is one a rule on `resourceType` is about: an item of that
+ * type, or -- for a phone's data -- a row of another type that carries that
+ * type's data (a night's row, for a rule on heart rate).
+ */
+function ofType(tool: string, item: unknown, resourceType: string): boolean {
+  const ownType = isRecord(item) ? own(item, "resourceType") : undefined;
+  return (
+    typeof ownType === "string" &&
+    (ownType === resourceType ||
+      (isHcResourceType(resourceType) &&
+        isHcResourceType(ownType) &&
+        hcRuleCanReach(tool, ownType, resourceType)))
+  );
+}
+
+/** Keep only the items a resource type's rule is about (and, index-aligned, their raw entries). */
+function onlyType(tool: string, answer: Answer, resourceType: string | undefined): Answer {
   if (resourceType === undefined) return answer;
   const items: unknown[] = [];
   const raw: RawEntry[] = [];
   for (const [index, item] of answer.items.entries()) {
-    if (!isRecord(item) || own(item, "resourceType") !== resourceType) continue;
+    if (!ofType(tool, item, resourceType)) continue;
     items.push(item);
     const entry = answer.raw.at(index);
     if (entry !== undefined) raw.push(entry);
@@ -289,9 +363,9 @@ export async function sampleStructure(
   resourceType?: string,
 ): Promise<PolicyStructureDto | null> {
   if (tool === METERED_TOOL) return { tool, items: 0, item: [], raw: [] };
-  const answer = await runTool(deps, tool, EMPTY_RULES);
+  const answer = await runTool(deps, tool, EMPTY_RULES, resourceType);
   if (answer === null) return null;
-  const sample = onlyType(answer, resourceType);
+  const sample = onlyType(tool, answer, resourceType);
   const item = newTree();
   for (const entry of sample.items) mergeKeys(item, entry);
   const raw = newTree();
@@ -364,14 +438,15 @@ async function beforeAndAfter(
     };
     return { before: run(before), after: run(after) };
   }
-  const beforeAnswer = await runTool(deps, tool, before);
+  const sampledType = field.resourceType ?? undefined;
+  const beforeAnswer = await runTool(deps, tool, before, sampledType);
   if (beforeAnswer === null) return null;
   // An `allow` rule puts back a field the baseline run already stripped, which
   // only a run with the rule in place can show; a `hide` rule is applied to
   // the baseline answer, so each tool runs once.
   const afterAnswer =
     field.effect === "allow"
-      ? await runTool(deps, tool, after)
+      ? await runTool(deps, tool, after, sampledType)
       : applyDraft(tool, beforeAnswer, draftOnly(after));
   return afterAnswer === null ? null : { before: beforeAnswer, after: afterAnswer };
 }
@@ -392,8 +467,8 @@ async function previewOne(
   const answers = await beforeAndAfter(deps, input.tool, input.field, stored);
   if (answers === null) return null;
   const { before: beforeAnswer, after: afterAnswer } = answers;
-  const left = onlyType(beforeAnswer, input.resourceType);
-  const right = onlyType(afterAnswer, input.resourceType);
+  const left = onlyType(input.tool, beforeAnswer, input.resourceType);
+  const right = onlyType(input.tool, afterAnswer, input.resourceType);
 
   let affected = 0;
   let sampleIndex = -1;

@@ -1,5 +1,5 @@
 /**
- * Outbound re-auth alerts, one open row per subject.
+ * Outbound alerts, one open row per subject.
  *
  * The dedupe guarantee is what stops the hourly sync opening a new Trello card
  * every hour a connection stays broken. It is enforced by the partial unique
@@ -34,6 +34,14 @@ export function portalSubject(healthSystemId: string): string {
   return `portal:${healthSystemId}`;
 }
 
+/**
+ * 'device:<id>' for a paired phone: the subject of the alert that says some of
+ * its uploads could not be applied and are being kept.
+ */
+export function deviceSubject(deviceId: string): string {
+  return `device:${deviceId}`;
+}
+
 /** The subject the Google calendar account's alerts use. */
 export const GOOGLE_SUBJECT = "google";
 
@@ -50,19 +58,23 @@ export function makeAlertsRepo(ctx: Ctx) {
      * The open alert for a subject, creating one if there is none.
      *
      * Returns `{ alert, created }` so the caller knows whether it also needs to
-     * open a Trello card, which is the expensive half.
+     * open a Trello card, which is the expensive half. `kind` is only what a
+     * new row is given: one subject is one kind, and one open alert.
      */
-    async openOrGet(subject: string): Promise<{ alert: AlertRow; created: boolean }> {
+    async openOrGet(
+      subject: string,
+      kind: AlertRow["kind"],
+    ): Promise<{ alert: AlertRow; created: boolean }> {
       const existing = await openFor(subject);
       if (existing !== null) return { alert: existing, created: false };
 
       const { changes } = await run(
         ctx.db
           .prepare(
-            `INSERT INTO alerts (id, kind, subject, opened_at) VALUES (?, 'reconnect', ?, ?)
+            `INSERT INTO alerts (id, kind, subject, opened_at) VALUES (?, ?, ?, ?)
              ON CONFLICT (subject) WHERE resolved_at IS NULL DO NOTHING`,
           )
-          .bind(newId(), subject, ctx.now()),
+          .bind(newId(), kind, subject, ctx.now()),
       );
       const alert = await openFor(subject);
       if (alert === null) throw new Error("alert row disappeared after insert");

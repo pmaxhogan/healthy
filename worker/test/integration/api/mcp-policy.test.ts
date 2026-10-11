@@ -485,3 +485,57 @@ describe("the rule builder on the secure-message tools", () => {
     expect(attachment?.sample?.after).not.toHaveProperty("image");
   });
 });
+
+function resource(target: string): Promise<Response> {
+  return owner().send("POST", "/api/mcp/policy", { ruleType: "resource", target });
+}
+
+describe("Health Connect types in a rule", () => {
+  it("accepts a mapped type before any phone has reported it", async () => {
+    const response = await resource("hc:SexualActivity");
+
+    expect(response.status).toBe(201);
+  });
+
+  it("refuses the wrong case, naming the right spelling", async () => {
+    const response = await resource("hc:sexualactivity");
+    const body = await response.text();
+
+    expect(response.status).toBe(400);
+    expect(body).toContain("hc:SexualActivity");
+  });
+
+  it("refuses a type nothing is tagged as, and an aggregate, saying why", async () => {
+    const typo = await resource("hc:HeartRat");
+    const aggregate = await resource("hc:Agg.Steps");
+
+    expect(typo.status).toBe(400);
+    expect(await typo.text()).toContain("hc:HeartRate");
+    expect(aggregate.status).toBe(400);
+    expect(await aggregate.text()).toContain("hc:Steps");
+  });
+
+  it("holds a field rule's type to the same list, and refuses a rule that reaches nothing", async () => {
+    const wrongCase = await create(field(["bpm"], { resourceType: "hc:heartrate" }));
+    const inert = await create(field(["systolic"], { resourceType: "hc:Steps" }));
+    const real = await create(field(["bpm"], { resourceType: "hc:HeartRate" }));
+
+    expect(wrongCase.status).toBe(400);
+    expect(inert.status).toBe(400);
+    expect(await inert.text()).toContain("would hide nothing");
+    expect(real.status).toBe(201);
+  });
+
+  it("says which types reach each phone shape in the schema", async () => {
+    const schema = await json<PolicySchemaDto>(await owner().get("/api/mcp/policy/schema"));
+    const sleepTool = schema.tools.find((tool) => tool.name === "sleep_sessions");
+    const sleep = schema.shapes.find((shape) => sleepTool?.shapes.includes(shape.id) === true);
+    const care = schema.shapes.find((shape) => shape.resourceType === "CareTeam");
+
+    expect(sleep?.resourceTypes).toContain("hc:SleepSession");
+    expect(sleep?.resourceTypes).toContain("hc:HeartRate");
+    expect(sleep?.resourceTypes).not.toContain("hc:BloodPressure");
+    expect(care?.resourceTypes).toStrictEqual(["CareTeam"]);
+    expect(schema.resourceTypes).toContain("hc:MenstruationFlow");
+  });
+});

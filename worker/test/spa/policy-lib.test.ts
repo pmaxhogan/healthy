@@ -93,7 +93,7 @@ describe("the field tree", () => {
 describe("rule sentences", () => {
   it("reads a field rule as one sentence, arrays implied", () => {
     expect(ruleSentence(policyRule(), names)).toBe(
-      "Hide participants → name in get_care_team at all health systems",
+      "Hide participants → name in get_care_team at all sources",
     );
   });
 

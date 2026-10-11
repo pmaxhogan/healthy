@@ -73,6 +73,13 @@ export interface CoverageEntry {
   lastOkAt?: string;
   /** Hours since the last successful full refresh. Present for `stale`. */
   ageHours?: number;
+  /**
+   * How many records are stored for this pair. Only the Health Connect device
+   * rows (`healthSystemId` of the form `device:<id>`) set it: a `granted` row
+   * with `recordCount: 0` is "permitted, no data", which the status `ok` alone
+   * cannot say. FHIR rows leave it absent.
+   */
+  recordCount?: number;
 }
 
 /**

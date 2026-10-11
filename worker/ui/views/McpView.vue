@@ -3,7 +3,7 @@
 // policy denies, and what has been called.
 //
 // The audit log records the shape of a call and never its content -- tool,
-// client, health system ids, a result count, and a jq program's fingerprint. That is
+// client, source ids (health systems and phones), a result count, and a jq program's fingerprint. That is
 // why it can be shown here at all.
 
 import { computed, ref, watch } from "vue";
@@ -13,6 +13,7 @@ import McpToolTester from "../components/McpToolTester.vue";
 import PolicySection from "../components/PolicySection.vue";
 import StateBlock from "../components/StateBlock.vue";
 import { formatDateTime, formatDuration, relativeTime } from "../lib/format.ts";
+import { sourceNamer } from "../lib/policy.ts";
 import { toastSuccess } from "../lib/toasts.ts";
 import { useAction, useLoad } from "../lib/use-load.ts";
 
@@ -23,6 +24,9 @@ const AUDIT_LIMITS = [25, 50, 100, 250] as const;
 const settings = useLoad((signal) => endpoints.settings(signal));
 const grants = useLoad((signal) => endpoints.mcpGrants(signal));
 const healthSystems = useLoad((signal) => endpoints.healthSystems(signal));
+// Paired phones are sources too. A failure here only costs the phones their names,
+// so it is not shown as a page error: ids still resolve, to a plain "phone".
+const devices = useLoad((signal) => endpoints.devices(signal));
 const tools = useLoad((signal) => mcpToolsOrNone(signal));
 
 const auditLimit = ref<number>(50);
@@ -37,15 +41,11 @@ const mutate = useAction();
 const enabled = computed(() => settings.data.value?.mcpEnabled ?? false);
 const serverUrl = computed(() => `${location.origin}/mcp`);
 const timezone = computed(() => settings.data.value?.timezone ?? null);
-// A Map, not a record: the keys come from audit rows and indexing an object with
-// them is what security/detect-object-injection is there to flag.
-const healthSystemNames = computed(
-  () => new Map((healthSystems.data.value ?? []).map((p) => [p.id, p.displayName])),
+// A Map inside, not a record: the keys come from audit rows and indexing an object
+// with them is what security/detect-object-injection is there to flag.
+const nameSource = computed(() =>
+  sourceNamer(healthSystems.data.value ?? [], devices.data.value ?? []),
 );
-
-function nameHealthSystem(id: string): string {
-  return healthSystemNames.value.get(id) ?? id;
-}
 
 // A jq program is audited as a fingerprint, never its text (a filter can name
 // what the caller was looking for): the hash prefix, its length, and how many
@@ -157,6 +157,7 @@ async function onRevoke(id: string): Promise<void> {
     <PolicySection
       :tools="tools.data.value ?? []"
       :health-systems="healthSystems.data.value ?? []"
+      :devices="devices.data.value ?? []"
     />
 
     <McpToolTester />
@@ -186,7 +187,7 @@ async function onRevoke(id: string): Promise<void> {
                 <th>Tool</th>
                 <th>When</th>
                 <th>Client</th>
-                <th>Health systems</th>
+                <th>Sources</th>
                 <th class="num">Results</th>
                 <th>jq</th>
                 <th>Result</th>
@@ -200,7 +201,7 @@ async function onRevoke(id: string): Promise<void> {
                   {{ relativeTime(entry.ts) }}
                 </td>
                 <td>{{ entry.clientId }}</td>
-                <td>{{ entry.healthSystemIds.map(nameHealthSystem).join(", ") || "—" }}</td>
+                <td>{{ entry.healthSystemIds.map(nameSource).join(", ") || "—" }}</td>
                 <td class="num">{{ entry.resultCount }}</td>
                 <td
                   class="nowrap"

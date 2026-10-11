@@ -26,6 +26,7 @@ import { Hono } from "hono";
 
 import { formatPath } from "@shared/policy-path.ts";
 
+import { coverageResourceType, deviceSourceId } from "../../hc/coverage.ts";
 import { AppError } from "../../lib/errors.ts";
 import { adminCaller } from "../../mcp/admin-call.ts";
 import { makeToolDeps } from "../../mcp/deps-d1.ts";
@@ -33,7 +34,7 @@ import { previewDraft, sampleStructure } from "../../mcp/policy-sample.ts";
 import { TOOL_NAMES } from "../../mcp/tool-names.ts";
 import { ALLOW_PREFIX, parseFieldTarget } from "../../policy/rules.ts";
 import { policySchema } from "../../policy/tree.ts";
-import { checkFieldSpec, fieldSignature } from "../../policy/validate.ts";
+import { checkFieldSpec, checkPhoneType, fieldSignature } from "../../policy/validate.ts";
 import { toPolicyRuleDto } from "../dto.ts";
 import { NO_STORE, apiContext, readJson } from "../http.ts";
 import {
@@ -77,10 +78,42 @@ function legacySpec(target: string): FieldRuleSpec {
   };
 }
 
+/** Every record type any paired phone has reported, as `hc:<Type>`. */
+async function reportedPhoneTypes(api: ApiContext): Promise<Set<string>> {
+  const types = new Set<string>();
+  const devices = await api.repos.devices.list();
+  for (const device of devices) {
+    const rows = await api.repos.hcStatus.syncRows(device.id);
+    for (const row of rows) types.add(coverageResourceType(row.recordType));
+  }
+  return types;
+}
+
+/**
+ * Refuse an `hc:` type that no row is tagged as -- a typo, the wrong case, an
+ * aggregate -- with a 400 that says what the right spelling is. Anything that
+ * is not a Health Connect type passes: FHIR types are not this check's business.
+ */
+async function requireKnownPhoneType(api: ApiContext, target: string | null): Promise<void> {
+  if (!target?.toLowerCase().startsWith("hc:")) return;
+  const problem = checkPhoneType(target, await reportedPhoneTypes(api));
+  if (problem !== null) throw new AppError("bad_request", problem, { target });
+}
+
 /** Check a `field` rule against the tree and the health systems, or throw a 400 saying why. */
 async function checkedColumns(api: ApiContext, spec: FieldRuleSpec): Promise<FieldRuleColumns> {
+  await requireKnownPhoneType(api, spec.resourceType?.trim() ?? null);
   const healthSystems = await api.repos.healthSystems.list();
-  const check = checkFieldSpec(spec, new Set(healthSystems.map((row) => row.id)));
+  // A paired phone is a source too: a rule may be scoped to `device:<id>`, the
+  // id its Health Connect rows are tagged with.
+  const devices = await api.repos.devices.list();
+  const check = checkFieldSpec(
+    spec,
+    new Set([
+      ...healthSystems.map((row) => row.id),
+      ...devices.map((device) => deviceSourceId(device.id)),
+    ]),
+  );
   if (!check.ok) {
     // `problems`, not `issues`: the SPA shows `details.issues` appended to the
     // message, and these sentences already are the message.
@@ -125,6 +158,7 @@ mcpPolicyRouter.post("/", async (c) => {
   }
   const target = (body.target ?? "").trim();
   if (target === "") throw new AppError("bad_request", "the rule needs a target");
+  if (body.ruleType === "resource") await requireKnownPhoneType(api, target);
   const row = await api.repos.mcpPolicy.add(body.ruleType, target, body.note, enabled);
   return c.json(toPolicyRuleDto(row), 201, NO_STORE);
 });
@@ -144,6 +178,9 @@ mcpPolicyRouter.patch("/:id", async (c) => {
   }
   const field = body.field === undefined ? undefined : await checkedColumns(api, body.field);
   const target = field?.target ?? body.target?.trim();
+  if (existing.rule_type === "resource" && body.target !== undefined) {
+    await requireKnownPhoneType(api, body.target.trim());
+  }
   if (target !== undefined) {
     const clash = await api.repos.mcpPolicy.get(existing.rule_type, target);
     if (clash !== null && clash.id !== id) {

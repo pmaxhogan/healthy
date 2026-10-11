@@ -204,8 +204,9 @@ export interface CalendarEventDbRow extends Omit<CalendarEventRow, "calendar_id"
 
 export interface AlertRow {
   id: string;
-  kind: "reconnect";
-  /** 'health system:<id>' or 'google'. */
+  /** `reconnect`: a grant or session to renew. `hc_parked`: a phone's uploads set aside. */
+  kind: "reconnect" | "hc_parked";
+  /** 'health_system:<id>', 'portal:<id>', 'google' or 'device:<id>'. */
   subject: string;
   trello_card_id: string | null;
   opened_at: number;

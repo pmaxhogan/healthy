@@ -1,8 +1,58 @@
 # Healthy — notes for agents and contributors
 
 A single-user Cloudflare Worker that syncs medical appointments to Google
-Calendar and serves the same record read-only over MCP. Read `README.md` for the
+Calendar and serves the same record read-only over MCP, plus an Android companion
+app that uploads the owner's Health Connect data to it. Read `README.md` for the
 architecture and `SECURITY.md` for the threat model.
+
+## Monorepo
+
+- `worker/` is the whole Cloudflare project (`src/` the Worker, `ui/` the Vue SPA,
+  `shared/`, `migrations/`, `test/`, `scripts/`); the root `package.json` is an npm
+  workspace whose scripts fan into it. Run npm commands from the root, or from
+  `worker/` for a single vitest file.
+- `android/` is a Gradle project (Kotlin, Compose; application id
+  `dev.maxhogan.healthy.companion`). **Gradle is not part of `npm run check`**: it
+  has its own CI job and its own release workflow. A change under `android/` still
+  runs `npm run check`, which does not exercise it, so run `./gradlew
+testDebugUnitTest lintDebug` from `android/` yourself before pushing (JDK 21 and
+  Android SDK platform 37.2).
+- Health Connect on the Worker side is `worker/src/ingest/**` (the one route above
+  the owner gate, with its own device-token auth) and `worker/src/hc/**`. Read the
+  header of `worker/src/ingest/route.ts` before touching either: it is a security
+  boundary, and `worker/src/app.ts`'s registration order is what keeps it one.
+- The phone and the Worker share one wire contract, as a file:
+  `worker/test/fixtures/hc/phone-batches.json`. The Android unit test
+  `PhoneBatchFixtureTest` writes it (and fails when the checked-in copy is stale;
+  accept an intended change by running it with `HEALTHY_WRITE_FIXTURES=1`), and
+  `worker/test/unit/hc/phone-contract.test.ts` runs every batch in it through the
+  Worker's validator. A change to either side of the wire changes the file.
+- Workers Builds is unaffected by the monorepo: root directory `/`, build
+  `npm run check`, deploy `npm run deploy`.
+
+## Health Connect store: invariants
+
+The phone is told a batch was accepted and moves its cursor past it, so the queued
+body is the only copy of those records. These hold for `worker/src/hc/**`,
+`worker/src/db/repos/hc-ingest-queue.ts` and the MCP tools over them:
+
+- **Never delete a queued batch that was acknowledged.** One that cannot be applied
+  is parked (`hc_ingest_queue.parked_at`), which keeps it, takes it out of the
+  ordered queue and raises the `hc_parked` alert; the Phone page's Retry puts it
+  back (along with any rollup or summary mark that was parked). Only an applied batch, or a device wipe, removes queue rows.
+- **Sealed payload columns stay last** in every `hc_*` table (`payload_enc`,
+  `body_enc`). SQLite spills a large value to overflow pages, so any column after
+  it can only be read by walking it. New columns go before it.
+- **A chunk may span several `hc_chunks` rows** (`part` 0, 1, ...). Any query over
+  `hc_chunks` either goes through the store readers (`readChunks`, `read.ts`) or
+  filters `part = 0`.
+- **Every field a Health Connect tool emits is declared** in
+  `worker/src/policy/hc-fields.ts` (`JOINED_FIELDS` or `OWN_FIELDS`) and in
+  `worker/src/policy/tree.ts`; a unit test holds them to the tools' real output.
+  A field nobody placed is a field an exposure rule cannot find.
+- Applying a batch is replayable and bounded: a slice is one `db.batch` per chunk,
+  a slice that dies is run again, and the runner counts an attempt before each
+  slice (eight, then the head batch is parked as `apply_gave_up`).
 
 ## Privacy: the one rule that is never negotiable
 
@@ -17,6 +67,8 @@ That means none of:
 - email addresses, patient identifiers, or anything read from a real record
 - the Cloudflare Access team domain or application AUD
 - locations, timezones, Trello board or list ids
+- device serials, wireless-debugging addresses, or the package names of the apps
+  on anyone's phone
 
 Cloudflare **binding** ids in `worker/wrangler.jsonc` — the D1 database id, the KV
 namespace id, the account id — are allowed. They are not credentials.
@@ -53,6 +105,27 @@ sign-in attempts.
    of signing in again. Never copy those captures into tracked files.
 4. Only then add synthetic-fixture tests, run `npm run check`, commit and push.
 
+## Android: privacy rules
+
+The app reads the owner's most personal data, so the Worker's privacy rule holds
+for `android/` unchanged:
+
+- No personal data in the app, its fixtures, its tests, or a commit. Test
+  fixtures are synthetic; a record's origin is always a `com.example.*` package
+  (for instance `com.example.wearable` or `com.example.phone`), never a real
+  app's.
+- **No analytics, crash reporting, advertising id or any third-party SDK that
+  contacts a server.** The only host the app talks to is the Worker it was paired
+  with. Do not add a dependency that phones home.
+- A release build refuses cleartext traffic outright and takes only an `https`
+  pairing address; only a debug build (application id suffix `.debug`) may reach
+  the phone's own loopback over `http`, for the `adb reverse` development loop.
+- The device token is never logged, displayed or put in a log string; it is stored
+  only encrypted under the Android Keystore. Logs carry counts and stable error
+  codes.
+- The keystore and its passwords live in `.local/` or a password manager and in
+  repository secrets, never in the tree. Captured payloads go under `.local/`.
+
 ## Never cap what is fetched or stored
 
 Paginate every upstream read to the end and cache every page, however unlikely
@@ -62,6 +135,18 @@ fetched, parsed or stored, and no silent truncation anywhere. An MCP tool
 returns everything the caller asked for, even if that is megabytes of JSON; a
 `limit` is only ever applied when the caller passes one, and the response says
 so. Honest and noisy beats quietly incomplete.
+
+There is exactly one documented exception: the Health Connect MCP tools (heart-rate
+series, records, aggregates and the rest) can match far more than an assistant
+can read, so they apply a **soft byte budget**, `max_bytes`, default 25 KB. It cuts
+at a row boundary, always sets `truncated: true` and returns a cursor to continue
+from, and the caller can lift it by passing a larger `max_bytes`. It never
+applies to what is fetched from the phone or stored: the upload, the store and
+the rollups are uncapped in total. The upload route does bound a single request
+(8 MiB compressed, 16 MiB decompressed, 25,000 records, a rate limit and queue
+backpressure), but it refuses an oversize batch whole with 413 so the phone splits
+it, and never truncates one. Do not copy this pattern to another tool without
+recording it here.
 
 ## Naming: "health system", not "provider"
 
@@ -109,8 +194,9 @@ Also worth knowing:
   import `worker/src/**`; shared code goes in `worker/shared/`. eslint enforces this.
 - `agents` and `@modelcontextprotocol/sdk` are pinned to exact versions on
   purpose — their APIs churn between releases. Check the pinned version's own
-  types before writing against them, and do not let Dependabot bump them
-  silently.
+  types before writing against them. `.github/dependabot.yml` tells Dependabot to
+  ignore their minor and patch bumps, and never to propose `jq-wasm` at all; keep
+  it that way.
 - `jq-wasm` is pinned exactly too: `worker/src/mcp/jq/vendor/` (the fuel-metered
   jq wasm plus its glue) is generated from it by `node worker/scripts/build-jq-wasm.mjs`
   and checked in. After bumping it, re-run that script; a unit test fails until

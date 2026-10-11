@@ -50,3 +50,14 @@ Desktop.ini
 *.swo
 *~
 .gstack/
+
+# Android companion app (android/): Gradle and Kotlin build state, the local SDK
+# path, and signing material -- a keystore is NEVER committed
+android/.gradle/
+android/**/build/
+android/.kotlin/
+android/local.properties
+android/captures/
+*.iml
+*.jks
+*.keystore

@@ -47,6 +47,7 @@ import type { Env } from "./env.ts";
 export { HealthyMcp } from "./mcp/server.ts";
 export { FullRefreshRunner } from "./sync/runner.ts";
 export { PortalSignInRunner } from "./sync/portal-runner.ts";
+export { HcIngestRunner } from "./hc/runner.ts";
 
 /**
  * The library requires a non-optional `fetch` on the handlers it is given, while

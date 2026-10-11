@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// Open (and, on /alerts, recently resolved) reconnect alerts.
+// Open (and, on /alerts, recently resolved) alerts: a connection to sign in to
+// again, or a phone whose uploads were set aside.
 //
 // An alert's subject is `health_system:<id>` or `google`, so the list needs the
 // health system names to say anything useful; it takes a lookup rather than fetching
@@ -20,6 +21,9 @@ const props = withDefaults(
 );
 
 function subjectLabel(alert: AlertDto): string {
+  // The subject of a phone's alert is this app's own device id, which says
+  // nothing to the owner; the Phone page names the phone.
+  if (alert.kind === "hc_parked") return "Phone uploads";
   if (alert.healthSystemId === null)
     return alert.subject === "google" ? "Google Calendar" : alert.subject;
   return Object.hasOwn(props.healthSystemNames, alert.healthSystemId)
@@ -36,7 +40,12 @@ function subjectLabel(alert: AlertDto): string {
         <span class="chip">{{ alert.resolvedAt === null ? "open" : "resolved" }}</span>
       </div>
       <p class="muted">
-        needs re-auth · opened {{ relativeTime(alert.openedAt) }}
+        <template v-if="alert.kind === 'hc_parked'">
+          could not be applied and are being kept ·
+          <RouterLink to="/phone">see the Phone page</RouterLink> ·
+        </template>
+        <template v-else>needs re-auth ·</template>
+        opened {{ relativeTime(alert.openedAt) }}
         <span :title="formatDateTime(alert.openedAt, timezone)" />
         <template v-if="alert.resolvedAt !== null">
           · resolved {{ relativeTime(alert.resolvedAt) }}

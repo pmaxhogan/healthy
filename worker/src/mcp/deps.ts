@@ -16,6 +16,7 @@
 
 import type { ConnectionStatus, HealthSystemEnvironment } from "../db/rows.ts";
 import type { SyncWarning } from "../db/schemas.ts";
+import type { HcReads } from "./hc/reads.ts";
 import type { PortalMessage, PortalThread, PortalVisit } from "../ehr/mychart/index.ts";
 import type { Logger } from "../lib/log.ts";
 import type { PolicyRules } from "../policy/rules.ts";
@@ -287,6 +288,17 @@ export interface ToolDeps {
   portalAttachmentContent(healthSystemId: string, attachmentId: string): Promise<Uint8Array | null>;
   counts(): Promise<CacheCount[]>;
   syncStatus(): Promise<SyncStatusEntry[]>;
+  /**
+   * The zone the owner's days are counted in: the sealed `timezone` setting,
+   * or UTC when none is stored. What a Health Connect tool buckets by unless
+   * the caller passes `tz`.
+   */
+  timezone(): Promise<string>;
+  /**
+   * The Health Connect store: paired phones, their sync bookkeeping, raw
+   * records and the rollups beside them. Read-only; see `./hc/reads.ts`.
+   */
+  readonly hc: HcReads;
   /**
    * Decode one clinical document to text, fetching and caching the Binary if
    * needed. The only tool path that talks to an organisation at request time.

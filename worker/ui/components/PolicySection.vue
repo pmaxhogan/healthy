@@ -9,7 +9,7 @@
 import { computed, ref } from "vue";
 
 import { endpoints } from "../api/endpoints.ts";
-import { ruleSentence } from "../lib/policy.ts";
+import { ruleSentence, sourceNamer } from "../lib/policy.ts";
 import { toastSuccess } from "../lib/toasts.ts";
 import { useAction, useLoad } from "../lib/use-load.ts";
 
@@ -18,9 +18,17 @@ import PolicyRuleBuilder from "./PolicyRuleBuilder.vue";
 import PolicyRuleList from "./PolicyRuleList.vue";
 import StateBlock from "./StateBlock.vue";
 
-import type { HealthSystemDto, McpToolInfoDto, PolicyRuleDto } from "@shared/types.ts";
+import type { DeviceDto, HealthSystemDto, McpToolInfoDto, PolicyRuleDto } from "@shared/types.ts";
 
-const props = defineProps<{ tools: McpToolInfoDto[]; healthSystems: HealthSystemDto[] }>();
+const props = withDefaults(
+  defineProps<{
+    tools: McpToolInfoDto[];
+    healthSystems: HealthSystemDto[];
+    /** The paired phones: a phone is a source a rule can name, like a health system. */
+    devices?: DeviceDto[];
+  }>(),
+  { devices: () => [] },
+);
 
 const rules = useLoad((signal) => endpoints.policyRules(signal));
 const schema = useLoad((signal) => endpoints.policySchema(signal));
@@ -29,13 +37,7 @@ const mutate = useAction();
 const editing = ref<PolicyRuleDto | null>(null);
 const removing = ref<PolicyRuleDto | null>(null);
 
-const names = computed(
-  () => new Map(props.healthSystems.map((entry) => [entry.id, entry.displayName])),
-);
-
-function healthSystemName(id: string): string {
-  return names.value.get(id) ?? id;
-}
+const sourceName = computed(() => sourceNamer(props.healthSystems, props.devices));
 
 // A rule the policy engine cannot parse is stored, listed, and enforcing nothing.
 // That is the one way this page can mislead -- the owner reads the row and
@@ -96,6 +98,7 @@ async function confirmRemove(): Promise<void> {
           :schema="schema.data.value"
           :tools="tools"
           :health-systems="healthSystems"
+          :devices="devices"
           :editing="editing"
           @saved="onSaved"
           @cancel="editing = null"
@@ -121,6 +124,8 @@ async function confirmRemove(): Promise<void> {
         :rules="rules.data.value ?? []"
         :schema="schema.data.value"
         :health-systems="healthSystems"
+        :devices="devices"
+        :tools="tools"
         :busy="mutate.busy.value"
         :editing-id="editing?.id ?? null"
         @toggle="onToggle"
@@ -132,7 +137,7 @@ async function confirmRemove(): Promise<void> {
     <ConfirmDialog
       v-if="removing !== null"
       title="Delete this rule?"
-      :body="`${ruleSentence(removing, healthSystemName)}. Whatever it removes is exposed again as soon as it is gone.`"
+      :body="`${ruleSentence(removing, sourceName)}. Whatever it removes is exposed again as soon as it is gone.`"
       confirm-label="Delete rule"
       :busy="mutate.busy.value"
       @confirm="confirmRemove"

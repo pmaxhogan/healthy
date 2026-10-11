@@ -16,7 +16,18 @@
 
 import { reposFor } from "../db/index.ts";
 import { parseJsonColumn, healthSystemConfigSchema } from "../db/schemas.ts";
-import { getSetting } from "../db/settings.ts";
+import { getSetting, getTimezone } from "../db/settings.ts";
+import {
+  listOrigins,
+  readDayRollups,
+  readExerciseSessions,
+  readHourRollups,
+  readHrMinutes,
+  readRecords,
+  readSleepNights,
+  storeBacklog,
+} from "../hc/store/read.ts";
+import { parseBatch } from "../hc/wire.ts";
 import { makeLogger } from "../lib/log.ts";
 import { nowSeconds } from "../lib/time.ts";
 import { buildRules } from "../policy/rules.ts";
@@ -39,10 +50,12 @@ import type {
   SyncStatusEntry,
   ToolDeps,
 } from "./deps.ts";
+import type { HcReads } from "./hc/reads.ts";
 import type { Repos } from "../db/index.ts";
 import type { StoredAttachment } from "../db/repos/portal-message-attachments.ts";
 import type { ConnectionRow, HealthSystemRow, PortalAccountRow } from "../db/rows.ts";
 import type { Env } from "../env.ts";
+import type { HcSyncState } from "../hc/wire.ts";
 import type { Logger } from "../lib/log.ts";
 import type { PolicyRules } from "../policy/rules.ts";
 
@@ -67,6 +80,9 @@ interface CallCache {
   visits: Map<string, Promise<PortalVisitRecord[]>>;
   messages: Map<string, Promise<LoadedMessages>>;
   messageSync: Promise<PortalMessageSyncEntry[]> | null;
+  timezone: Promise<string> | null;
+  /** Health Connect reads, by reader name and arguments. */
+  hc: Map<string, Promise<unknown>>;
 }
 
 /** One health system's messages, and its attachments' storage keys by public id. */
@@ -87,6 +103,8 @@ function emptyCache(): CallCache {
     visits: new Map(),
     messages: new Map(),
     messageSync: null,
+    timezone: null,
+    hc: new Map(),
   };
 }
 
@@ -227,6 +245,86 @@ async function loadHealthSystems(repos: Repos): Promise<HealthSystemInfo[]> {
   return rows.map((row) => healthSystemInfo(row, byHealthSystem.get(row.id), portalBy.get(row.id)));
 }
 
+/**
+ * The phone's last sync report, as the wire schema reads it.
+ *
+ * It was validated when it arrived, but it is read back through the same
+ * schema rather than cast: a report stored by an older Worker must not reach a
+ * tool in a shape the tool was not written against.
+ */
+function parsePhoneReport(json: string | null): HcSyncState | null {
+  if (json === null) return null;
+  let syncState: unknown;
+  try {
+    syncState = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  const batch = parseBatch({
+    v: 1,
+    deviceId: "report",
+    appVersion: "report",
+    batchId: "report-0000",
+    phoneTime: 0,
+    syncState,
+  });
+  return batch?.syncState ?? null;
+}
+
+/**
+ * The Health Connect half of the seam: thin, memoised calls into the store's
+ * readers. A summary tool asks for the same day rollups several times in one
+ * call, and every rollup read opens a chunk per origin to learn its name.
+ */
+function makeHcReads(repos: Repos, cache: () => CallCache): HcReads {
+  const { ctx } = repos;
+  const once = <T>(name: string, key: unknown, load: () => Promise<T>): Promise<T> => {
+    const id = `${name}:${JSON.stringify(key)}`;
+    const calls = cache().hc;
+    let pending = calls.get(id) as Promise<T> | undefined;
+    if (pending === undefined) {
+      pending = load();
+      calls.set(id, pending);
+    }
+    return pending;
+  };
+  return {
+    devices: () =>
+      once("devices", null, async () => {
+        const devices = await repos.devices.list();
+        return devices.map((device) => ({
+          id: device.id,
+          name: device.name,
+          createdAt: device.createdAt,
+          revokedAt: device.revokedAt,
+          lastSeenAt: device.lastSeenAt,
+          lastUploadAt: device.lastUploadAt,
+          appVersion: device.appVersion,
+        }));
+      }),
+    syncRows: (deviceId) => once("syncRows", deviceId, () => repos.hcStatus.syncRows(deviceId)),
+    phoneReport: (deviceId) =>
+      once("phoneReport", deviceId, async () =>
+        parsePhoneReport(await repos.devices.syncStateJson(deviceId)),
+      ),
+    backlog: (deviceId) => once("backlog", deviceId, () => storeBacklog(ctx, deviceId)),
+    ingestLog: (deviceId, limit) =>
+      once("ingestLog", [deviceId, limit], () => repos.hcStatus.ingestLog(deviceId, limit)),
+    origins: (deviceId, type) =>
+      once("origins", [deviceId, type], async () => {
+        const refs = await listOrigins(ctx, deviceId, type);
+        return refs.map((ref) => ref.origin);
+      }),
+    records: (window) => once("records", window, () => readRecords(ctx, window)),
+    hourRollups: (window) => once("hourRollups", window, () => readHourRollups(ctx, window)),
+    dayRollups: (window) => once("dayRollups", window, () => readDayRollups(ctx, window)),
+    hrMinutes: (window) => once("hrMinutes", window, () => readHrMinutes(ctx, window)),
+    sleepNights: (window) => once("sleepNights", window, () => readSleepNights(ctx, window)),
+    exerciseSessions: (window) =>
+      once("exerciseSessions", window, () => readExerciseSessions(ctx, window)),
+  };
+}
+
 export function makeToolDeps(options: ToolDepsOptions): ToolDeps {
   const log = options.log ?? makeLogger({ src: "mcp" });
   const now = options.now ?? ((): number => nowSeconds());
@@ -242,9 +340,17 @@ export function makeToolDeps(options: ToolDepsOptions): ToolDeps {
     return pending;
   };
 
+  const hc = makeHcReads(repos, () => cache);
+
   return {
     log,
     caller: options.caller,
+    hc,
+
+    timezone(): Promise<string> {
+      cache.timezone ??= getTimezone(repos.ctx);
+      return cache.timezone;
+    },
 
     beginCall(): void {
       cache = emptyCache();

@@ -8,19 +8,34 @@
 import { computed } from "vue";
 
 import { relativeTime } from "../lib/format.ts";
-import { reachesNothing, ruleGroup, ruleSentence, toolsAffected } from "../lib/policy.ts";
+import {
+  reachesNothing,
+  ruleGroup,
+  ruleSentence,
+  sourceNamer,
+  toolsAffected,
+} from "../lib/policy.ts";
 
-import type { HealthSystemDto, PolicyRuleDto, PolicySchemaDto } from "@shared/types.ts";
+import type {
+  DeviceDto,
+  HealthSystemDto,
+  McpToolInfoDto,
+  PolicyRuleDto,
+  PolicySchemaDto,
+} from "@shared/types.ts";
 
 const props = withDefaults(
   defineProps<{
     rules: PolicyRuleDto[];
     schema: PolicySchemaDto | null;
     healthSystems: HealthSystemDto[];
+    devices?: DeviceDto[];
+    /** The tool catalogue: which tools a phone's `hc:<Type>` rows come from. */
+    tools?: McpToolInfoDto[];
     busy?: boolean;
     editingId?: string | null;
   }>(),
-  { busy: false, editingId: null },
+  { devices: () => [], tools: () => [], busy: false, editingId: null },
 );
 
 const emit = defineEmits<{
@@ -29,13 +44,9 @@ const emit = defineEmits<{
   remove: [rule: PolicyRuleDto];
 }>();
 
-const names = computed(
-  () => new Map(props.healthSystems.map((entry) => [entry.id, entry.displayName])),
+const healthSystemName = computed(() =>
+  sourceNamer(props.healthSystems, props.devices, "a health system that no longer exists"),
 );
-
-function healthSystemName(id: string): string {
-  return names.value.get(id) ?? "a health system that no longer exists";
-}
 
 /** How many tool chips a row shows before it says "and N more". */
 const SHOWN_TOOLS = 4;
@@ -50,7 +61,7 @@ const groups = computed(() => {
 });
 
 function affected(rule: PolicyRuleDto): { shown: string[]; more: number; all: boolean } {
-  const tools = toolsAffected(rule, props.schema);
+  const tools = toolsAffected(rule, props.schema, props.tools);
   const total = props.schema?.tools.length ?? 0;
   return {
     shown: tools.slice(0, SHOWN_TOOLS),
@@ -95,9 +106,9 @@ function affected(rule: PolicyRuleDto): { shown: string[]; more: number; all: bo
               </span>
             </p>
             <p class="tools muted">
-              <template v-if="reachesNothing(rule, schema) !== ''">
+              <template v-if="reachesNothing(rule, schema, tools) !== ''">
                 <span class="nothing" data-test="reaches-nothing">{{
-                  reachesNothing(rule, schema)
+                  reachesNothing(rule, schema, tools)
                 }}</span>
               </template>
               <template v-else-if="affected(rule).all">Changes every tool's answers</template>

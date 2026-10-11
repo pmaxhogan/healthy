@@ -113,6 +113,7 @@ export async function testRouter(initial = "/"): Promise<Router> {
     routes: [
       { path: "/", component: blank },
       { path: "/health-systems", component: blank },
+      { path: "/phone", component: blank },
       { path: "/calendar", component: blank },
       { path: "/connectors", component: blank },
       { path: "/alerts", component: blank },

@@ -24,12 +24,17 @@ import {
   buildTree,
   changedTools,
   fieldSentence,
+  groupTools,
+  groupTypes,
+  isPhoneType,
   keptSelection,
   noChangeReason,
   overlayStructure,
   previewLabel,
   readablePath,
   shapesFor,
+  sourceGroups,
+  sourceNamer,
 } from "../lib/policy.ts";
 import { toastSuccess } from "../lib/toasts.ts";
 
@@ -37,6 +42,7 @@ import FieldTree from "./FieldTree.vue";
 import PolicyPreview from "./PolicyPreview.vue";
 
 import type {
+  DeviceDto,
   FieldRuleSpec,
   HealthSystemDto,
   McpToolInfoDto,
@@ -53,10 +59,12 @@ const props = withDefaults(
     schema: PolicySchemaDto;
     tools: McpToolInfoDto[];
     healthSystems: HealthSystemDto[];
+    /** The paired phones: a source a rule can name, like a health system. */
+    devices?: DeviceDto[];
     /** The rule being edited, or null to build a new one. */
     editing?: PolicyRuleDto | null;
   }>(),
-  { editing: null },
+  { devices: () => [], editing: null },
 );
 
 const emit = defineEmits<{ saved: [rule: PolicyRuleDto]; cancel: [] }>();
@@ -68,7 +76,7 @@ const KINDS: { value: Kind; label: string }[] = [
   { value: "field", label: "Hide fields" },
   { value: "tool", label: "Block a tool" },
   { value: "resource", label: "Hide a resource type" },
-  { value: "health_system", label: "Hide a health system" },
+  { value: "health_system", label: "Hide a source" },
   { value: "allow", label: "Show a withheld field" },
 ];
 
@@ -89,17 +97,33 @@ const note = ref("");
 const saving = ref(false);
 const problems = ref<string[]>([]);
 
-const toolNames = computed(() => props.schema.tools.map((entry) => entry.name));
 const descriptions = computed(
   () => new Map(props.tools.map((entry) => [entry.name, entry.description])),
 );
-const healthSystemNames = computed(
-  () => new Map(props.healthSystems.map((entry) => [entry.id, entry.displayName])),
-);
-
-function healthSystemName(id: string): string {
-  return healthSystemNames.value.get(id) ?? id;
-}
+const sourceName = computed(() => sourceNamer(props.healthSystems, props.devices));
+/**
+ * The sources on offer. A rule being edited may name one that is gone (a phone
+ * that was removed): it stays selectable, named for what it is, so the select
+ * never shows a blank for a value the rule really holds.
+ */
+const sources = computed(() => {
+  const groups = sourceGroups(props.healthSystems, props.devices);
+  const held = [healthSystemId.value, target.value].filter((id) => id !== "");
+  const listed = new Set(groups.flatMap((group) => group.options.map((option) => option.value)));
+  const gone = [...new Set(held)].filter(
+    (id) => !listed.has(id) && (kind.value === "health_system" || id === healthSystemId.value),
+  );
+  if (gone.length === 0) return groups;
+  return [
+    ...groups,
+    {
+      label: "No longer listed",
+      options: gone.map((id) => ({ value: id, label: sourceName.value(id) })),
+    },
+  ];
+});
+const toolGroups = computed(() => groupTools(props.schema));
+const typeGroups = computed(() => groupTypes(props.schema.resourceTypes));
 
 const isField = computed(() => kind.value === "field" || kind.value === "allow");
 
@@ -122,7 +146,10 @@ const typesOfTool = computed(() => {
   const types = shapesFor(props.schema, { tool: tool.value, resourceType: null })
     .map((shape) => shape.resourceType)
     .filter((type): type is string => type !== null);
-  return [...new Set(types)];
+  // A phone's shapes carry no type: the catalogue lists the `hc:` types a tool's rows can be.
+  const phoneTypes =
+    props.tools.find((entry) => entry.name === tool.value)?.resourceTypes.filter(isPhoneType) ?? [];
+  return [...new Set([...types, ...phoneTypes])];
 });
 
 const spec = computed<FieldRuleSpec>(() => ({
@@ -144,6 +171,13 @@ const structures = ref(new Map<string, PolicyStructureDto>());
 const structureTool = computed(() => {
   if (scope.value.tool !== null) return scope.value.tool;
   if (scope.value.resourceType === null) return "";
+  if (isPhoneType(scope.value.resourceType)) {
+    // The phone's shapes carry no type; read the sample from a tool whose rows can be it.
+    const carrying = props.tools.filter((entry) =>
+      entry.resourceTypes.includes(scope.value.resourceType ?? ""),
+    );
+    return (carrying.find((entry) => entry.name === "hc_records") ?? carrying[0])?.name ?? "";
+  }
   const typed = new Set(
     props.schema.shapes
       .filter((shape) => shape.resourceType === scope.value.resourceType)
@@ -335,25 +369,37 @@ watch(
 
 // --- saving ----------------------------------------------------------------
 
-const targetOptions = computed<{ value: string; label: string }[]>(() => {
-  switch (kind.value) {
-    case "tool": {
-      return toolNames.value.map((name) => ({ value: name, label: name }));
+const plain = (items: string[]): { value: string; label: string }[] =>
+  items.map((item) => ({ value: item, label: item }));
+
+/** The target dropdown's options, grouped so a phone is never taken for a health system. */
+const targetGroups = computed<{ label: string; options: { value: string; label: string }[] }[]>(
+  () => {
+    switch (kind.value) {
+      case "tool": {
+        return toolGroups.value.map((group) => ({
+          label: group.label,
+          options: plain(group.items),
+        }));
+      }
+      case "resource": {
+        return typeGroups.value.map((group) => ({
+          label: group.label,
+          options: plain(group.items),
+        }));
+      }
+      case "health_system": {
+        return sources.value;
+      }
+      default: {
+        return [];
+      }
     }
-    case "resource": {
-      return props.schema.resourceTypes.map((type) => ({ value: type, label: type }));
-    }
-    case "health_system": {
-      return props.healthSystems.map((entry) => ({ value: entry.id, label: entry.displayName }));
-    }
-    default: {
-      return [];
-    }
-  }
-});
+  },
+);
 
 const sentence = computed(() =>
-  paths.value.length === 0 ? "" : fieldSentence(spec.value, healthSystemName),
+  paths.value.length === 0 ? "" : fieldSentence(spec.value, sourceName.value),
 );
 
 const valid = computed(() => (isField.value ? paths.value.length > 0 : target.value !== ""));
@@ -420,12 +466,20 @@ function setKind(next: Kind): void {
 
     <template v-if="!isField">
       <label class="field">
-        {{ kind === "tool" ? "Tool" : kind === "resource" ? "Resource type" : "Health system" }}
+        {{
+          kind === "tool"
+            ? "Tool"
+            : kind === "resource"
+              ? "Resource type"
+              : "Source (a health system or a phone)"
+        }}
         <select v-model="target" data-test="target">
           <option value="" disabled>Choose…</option>
-          <option v-for="option in targetOptions" :key="option.value" :value="option.value">
-            {{ option.label }}
-          </option>
+          <optgroup v-for="group in targetGroups" :key="group.label" :label="group.label">
+            <option v-for="option in group.options" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </optgroup>
         </select>
       </label>
       <p v-if="kind === 'tool' && target !== ''" class="muted">
@@ -453,7 +507,9 @@ function setKind(next: Kind): void {
             Tool
             <select v-model="tool" data-test="scope-tool">
               <option value="" disabled>Choose a tool…</option>
-              <option v-for="name in toolNames" :key="name" :value="name">{{ name }}</option>
+              <optgroup v-for="group in toolGroups" :key="group.label" :label="group.label">
+                <option v-for="name in group.items" :key="name" :value="name">{{ name }}</option>
+              </optgroup>
             </select>
           </label>
           <label v-if="scopeKind === 'tool' && typesOfTool.length > 1" class="field">
@@ -467,18 +523,22 @@ function setKind(next: Kind): void {
             Resource type
             <select v-model="resourceType" data-test="scope-resource">
               <option value="" disabled>Choose a type…</option>
-              <option v-for="type in schema.resourceTypes" :key="type" :value="type">
-                {{ type }}
-              </option>
+              <optgroup v-for="group in typeGroups" :key="group.label" :label="group.label">
+                <option v-for="type in group.items" :key="type" :value="type">
+                  {{ type }}
+                </option>
+              </optgroup>
             </select>
           </label>
           <label class="field">
-            Health system
+            Source
             <select v-model="healthSystemId" data-test="scope-health-system">
-              <option value="">All health systems</option>
-              <option v-for="entry in healthSystems" :key="entry.id" :value="entry.id">
-                {{ entry.displayName }}
-              </option>
+              <option value="">All sources</option>
+              <optgroup v-for="group in sources" :key="group.label" :label="group.label">
+                <option v-for="option in group.options" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </optgroup>
             </select>
           </label>
         </div>

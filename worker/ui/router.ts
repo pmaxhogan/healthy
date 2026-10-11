@@ -13,6 +13,7 @@ import type { RouteRecordRaw } from "vue-router";
 export const NAV: { path: string; label: string }[] = [
   { path: "/", label: "Overview" },
   { path: "/health-systems", label: "Health systems" },
+  { path: "/phone", label: "Phone" },
   { path: "/calendar", label: "Calendar" },
   { path: "/connectors", label: "MCP" },
   { path: "/alerts", label: "Alerts" },
@@ -28,6 +29,7 @@ const routes: RouteRecordRaw[] = [
     name: "health_systems",
     component: () => import("./views/HealthSystemsView.vue"),
   },
+  { path: "/phone", name: "phone", component: () => import("./views/PhoneView.vue") },
   { path: "/calendar", name: "calendar", component: () => import("./views/CalendarView.vue") },
   // Not /mcp: worker/src/mcp/oauth-config.ts's MCP_API_ROUTE claims that exact path
   // for the MCP transport itself, ahead of this Hono/SPA app (see

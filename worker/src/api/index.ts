@@ -27,6 +27,7 @@ import { healthSystemsRouter, syncRouter } from "./routes/health-systems.ts";
 import { mailRouter } from "./routes/mail.ts";
 import { mcpRouter } from "./routes/mcp.ts";
 import { overviewRouter } from "./routes/overview.ts";
+import { phoneRouter } from "./routes/phone.ts";
 import { portalRouter } from "./routes/portal.ts";
 import { runsRouter } from "./routes/runs.ts";
 import { settingsRouter } from "./routes/settings.ts";
@@ -63,6 +64,7 @@ apiRouter.route("/alerts", alertsRouter);
 apiRouter.route("/runs", runsRouter);
 apiRouter.route("/brands", brandsRouter);
 apiRouter.route("/mail", mailRouter);
+apiRouter.route("/phone", phoneRouter);
 
 /**
  * An unknown /api path must be a JSON 404, never the SPA's index.html: the SPA

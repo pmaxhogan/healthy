@@ -8,6 +8,11 @@
 //   1. securityHeaders  -- CSP nonce in, hardening headers out. Everything.
 //   2. publicRouter     -- /health /about /privacy /terms. Terminal, so the gate
 //                          below never runs for them.
+//   2b. ingestRouter   -- POST /ingest/health-connect, the paired phone's upload.
+//                          Above the gate ON PURPOSE: it authenticates with its
+//                          own device bearer token (worker/src/ingest/route.ts)
+//                          and can only add to that device's queue. Terminal for
+//                          every method on its one path.
 //   3. csrfGuard        -- /api/*, /auth/*, /authorize; mutating methods only.
 //   4. ownerGate        -- Access, then (login routes aside) the password session.
 //   5. /auth/login, /auth/logout
@@ -15,7 +20,8 @@
 //   7. /api, /oauth     -- routers other changes fill in.
 //   8. SPA fallback     -- env.ASSETS, last, so no asset is ever served ungated.
 //
-// Inserting a route above line 4 publishes it to the internet. Do not.
+// Inserting a route above line 4 publishes it to the internet. Do not -- the
+// ingest route is the one exception, and it carries its own authentication.
 
 import { Hono } from "hono";
 
@@ -34,6 +40,7 @@ import {
 } from "./auth/ratelimit.ts";
 import { securityHeaders } from "./auth/security-headers.ts";
 import { clearSessionCookie, issueSession } from "./auth/session.ts";
+import { ingestRouter } from "./ingest/route.ts";
 import { isAppError } from "./lib/errors.ts";
 import { errorFields, logLine } from "./lib/log.ts";
 import { consentDecision, consentPage } from "./mcp/consent-page.ts";
@@ -50,6 +57,9 @@ app.use("*", securityHeaders);
 
 // --- 2. Public routes, before the gate --------------------------------------
 app.route("/", publicRouter);
+
+// --- 2b. The phone's upload: its own bearer check, before the gate -----------
+app.route("/", ingestRouter);
 
 // --- 3. CSRF, on every state-changing surface -------------------------------
 app.use("/api/*", csrfGuard);

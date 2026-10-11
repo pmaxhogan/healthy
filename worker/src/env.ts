@@ -8,6 +8,7 @@
 
 // Type-only, so this stays a declaration file in effect: the class is needed to
 // type the Durable Object stub's RPC methods, not at runtime.
+import type { HcIngestRunner } from "./hc/runner.ts";
 import type { PortalSignInRunner } from "./sync/portal-runner.ts";
 import type { FullRefreshRunner } from "./sync/runner.ts";
 
@@ -37,6 +38,12 @@ export interface Env {
    * request's `waitUntil` cannot wait for an email.
    */
   PORTAL_SIGNIN: DurableObjectNamespace<PortalSignInRunner>;
+  /**
+   * One object per paired phone, applying the Health Connect batches the ingest
+   * route queued, in order, across as many alarm invocations as they take. See
+   * `worker/src/hc/runner.ts`.
+   */
+  HC_INGEST: DurableObjectNamespace<HcIngestRunner>;
 
   // --- Var (wrangler.jsonc) ------------------------------------------------
   /**

@@ -3,7 +3,7 @@
 // exactly is about to be removed, and on a phone it is indistinguishable from a
 // browser warning.
 
-import { onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref } from "vue";
 
 const props = withDefaults(
   defineProps<{
@@ -22,6 +22,14 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>();
 const typed = ref("");
 const confirmButton = ref<HTMLButtonElement | null>(null);
 const textInput = ref<HTMLInputElement | null>(null);
+
+// Whatever had focus when the dialog opened (the button that opened it) gets it
+// back when the dialog goes, however it closed.
+const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+onBeforeUnmount(() => {
+  opener?.focus();
+});
 
 onMounted(() => {
   // Focus lands inside the dialog so Escape and Enter do the obvious thing and
@@ -48,7 +56,9 @@ function satisfied(): boolean {
       <p v-if="body" class="muted">{{ body }}</p>
 
       <label v-if="requireText !== null" class="field">
-        Type <code>{{ requireText }}</code> to confirm
+        <span class="prompt"
+          >Type <code>{{ requireText }}</code> to confirm</span
+        >
         <input
           ref="textInput"
           v-model="typed"
@@ -97,6 +107,14 @@ function satisfied(): boolean {
 
 .dialog h2 {
   font-size: 1.05rem;
+}
+
+.prompt code {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--text);
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .confirm {

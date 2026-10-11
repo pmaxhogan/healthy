@@ -161,6 +161,19 @@ const TABLES = [
   "connections",
   "health_systems",
   "settings",
+  // Health Connect: children first, then the device rows they hang off.
+  "hc_ingest_queue",
+  "hc_ingest_log",
+  "hc_chunks",
+  "hc_record_index",
+  "hc_rollup_hour",
+  "hc_rollup_day",
+  "hc_hr_minute",
+  "hc_sleep_night",
+  "hc_exercise_session",
+  "hc_dirty",
+  "hc_sync_state",
+  "devices",
 ];
 
 /**

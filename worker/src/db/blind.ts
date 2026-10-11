@@ -217,3 +217,28 @@ export function isBlindedEventKey(key: string): boolean {
   const rest = key.slice(separator + 1);
   return isBlinded(rest.startsWith(PORTAL_KEY_INFIX) ? rest.slice(PORTAL_KEY_INFIX.length) : rest);
 }
+
+// ---------------------------------------------------------------------------
+// Health Connect (worker/migrations/0016_health_connect.sql). Both blinds are
+// scoped to the device row, for the same reason the ones above are scoped to a
+// health system: two phones holding the same record id, or running the same
+// app, share nothing a snapshot can join on.
+// ---------------------------------------------------------------------------
+
+/** `hc_record_index.record_id_blind`, and the key of a sleep or exercise summary. */
+export function blindHcRecordId(
+  blinder: Blinder,
+  deviceId: string,
+  recordId: string,
+): Promise<string> {
+  return blinder.id("hc.record_id", `${deviceId}\u{0}${recordId}`);
+}
+
+/** `origin_hash`: the package name of the app that wrote a record. */
+export function blindHcOrigin(
+  blinder: Blinder,
+  deviceId: string,
+  packageName: string,
+): Promise<string> {
+  return blinder.id("hc.origin", `${deviceId}\u{0}${packageName}`);
+}

@@ -29,10 +29,10 @@ describe("GET /api/alerts", () => {
 
   it("lists open and resolved alerts, newest first", async () => {
     const repos = testRepos();
-    const opened = await repos.alerts.openOrGet("google");
+    const opened = await repos.alerts.openOrGet("google", "reconnect");
     await repos.alerts.setCard(opened.alert.id, "card-1");
     await repos.alerts.resolve("google");
-    await repos.alerts.openOrGet("health_system:PROV1");
+    await repos.alerts.openOrGet("health_system:PROV1", "reconnect");
 
     const alerts = await json<AlertDto[]>(await owner().get("/api/alerts"));
 
@@ -48,7 +48,7 @@ describe("GET /api/alerts", () => {
 
   it("honours ?limit=", async () => {
     const repos = testRepos();
-    for (const subject of ["a", "b", "c"]) await repos.alerts.openOrGet(subject);
+    for (const subject of ["a", "b", "c"]) await repos.alerts.openOrGet(subject, "reconnect");
 
     expect(await json<AlertDto[]>(await owner().get("/api/alerts?limit=2"))).toHaveLength(2);
   });

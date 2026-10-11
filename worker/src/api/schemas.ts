@@ -18,9 +18,11 @@ import { isHttpsUrl } from "@shared/url.ts";
 import { ORG_ID_PATTERN } from "../db/org-secret.ts";
 
 import type {
+  CreateDeviceRequest,
   PortalDiscoverRequest,
   PutPortalAccountRequest,
   SetHealthSystemSecretRequest,
+  WipeDeviceRequest,
 } from "@shared/types.ts";
 
 // Re-exported so `worker/test/unit/api/schemas.test.ts` -- and anything else that
@@ -301,4 +303,17 @@ export const portalDiscoverSchema: z.ZodType<PortalDiscoverRequest> = z.strictOb
 /** `PUT /api/mail/settings`. Replaces the whole allowlist -- there is only one field. */
 export const mailAllowlistSchema = z.strictObject({
   allowlist: z.array(senderDomain).min(1).max(50),
+});
+
+/**
+ * `POST /api/phone/devices` and `PATCH /api/phone/devices/:id`: the owner's name
+ * for a phone. Trimmed first, so a name of spaces is refused rather than stored.
+ */
+export const deviceNameSchema: z.ZodType<CreateDeviceRequest> = z.strictObject({
+  name: z.string().trim().min(1).max(60),
+});
+
+/** `POST /api/phone/devices/:id/wipe`. `confirm` must equal the device's id; the route checks. */
+export const wipeDeviceSchema: z.ZodType<WipeDeviceRequest> = z.strictObject({
+  confirm: z.string().min(1).max(64),
 });

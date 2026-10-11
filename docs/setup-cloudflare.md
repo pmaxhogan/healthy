@@ -19,10 +19,14 @@ Put the resulting ids into `worker/wrangler.jsonc`:
   and it is not configurable.
 - `account_id` — your Cloudflare account id.
 
-The Durable Object binding (`HEALTHY_MCP`, class `HealthyMcp`) and its
-`new_sqlite_classes` migration are already correct in `worker/wrangler.jsonc` and
-do not need editing — the class name and binding name are fixed by the v1
-migration tag and must not change.
+The Durable Object bindings — `HEALTHY_MCP` (`HealthyMcp`), `FULL_REFRESH`
+(`FullRefreshRunner`), `PORTAL_SIGNIN` (`PortalSignInRunner`) and `HC_INGEST`
+(`HcIngestRunner`) — and their `new_sqlite_classes` migrations are already
+correct in `worker/wrangler.jsonc` and do not need editing. The class and binding
+names are fixed by their migration tags and must not change. `HC_INGEST` (the
+`v4` tag) is the one added for the Android companion app: one object per paired
+phone, applying that phone's queued uploads from an alarm. It is created by the
+deploy; there is nothing to provision.
 
 Then apply the schema:
 
@@ -63,7 +67,34 @@ versions.)** The paths:
 /privacy
 /terms
 /health
+/ingest/health-connect
 ```
+
+`/ingest/health-connect` is the Android companion app's upload endpoint. It is
+the one path on this list that is not for an AI client or the public: a paired
+phone has no Access identity, so Access cannot gate it, and the Worker
+authenticates it instead with a per-device bearer token (see
+[SECURITY.md](../SECURITY.md#device-upload)). Add it as an **exact path**, with
+no wildcard, so the bypass covers that one URL and nothing under or beside it.
+Until it is on the list, a phone's upload is redirected to the Access login and
+the app reports an error. A quick check once it is in place:
+
+```sh
+curl -i -X POST https://<your-host>/ingest/health-connect
+```
+
+must answer `401` with `{"error":"unauthorized"}`, not a redirect to Cloudflare
+Access.
+
+Two things about how that exact-path entry behaves, observed against a production
+Access application (this is Access's behaviour, not the Worker's, so check it again
+if Cloudflare changes it). Access matches the bypass path **case-insensitively**,
+while the Worker's router is case-sensitive: a request for the same path in other
+letter case (`/Ingest/Health-Connect`) passes Access, does not match the upload route,
+falls through to the Worker's own owner gate, and is refused there for lack of an
+Access identity. That fails closed, but do not be surprised that a differently-cased
+path gets the gate's answer rather than Access's. The trailing-slash variant,
+`/ingest/health-connect/`, is not matched by the exact entry and stays behind Access.
 
 Everything else — including the MCP consent page at `/authorize`, both
 OAuth callback paths, and the whole admin API — stays behind Access. The
@@ -72,8 +103,8 @@ email claim, in `worker/src/auth/access.ts`) rather than trusting a header
 Cloudflare attaches, so a bypass policy that is accidentally too wide does
 not by itself grant access to anything sensitive — it only removes Access
 as one of the two required gates, and the password session is still
-required for every path in this list except the MCP surface and the four
-public pages.
+required for every path in this list except the MCP surface, the four
+public pages, and the phone's upload path (which has its device token).
 
 Two secrets come from this application's settings:
 
@@ -92,6 +123,14 @@ Connect the GitHub repository to Cloudflare Workers Builds, with:
 
 - **Build command:** `npm run check`
 - **Deploy command:** `npm run deploy`
+
+The repository is a monorepo, and that changes nothing here: leave the
+Workers Builds **root directory** at `/` (the repository root), because the root
+`package.json` is an npm workspace whose `check` and `deploy` scripts fan into
+`worker/`. Build with `npm run check` and deploy with `npm run deploy`, as above.
+The Android app in `android/` is not part of either: it has its own CI job and
+release workflow in GitHub Actions, and a push that changes only `android/`
+still runs `npm run check`, which does not touch Gradle.
 
 `npm run deploy` runs, inside `worker/`, `npm run migrate:remote && wrangler deploy`, so
 the remote D1 migration always runs immediately before the new code that

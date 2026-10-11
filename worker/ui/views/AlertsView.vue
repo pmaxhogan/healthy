@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// Reconnect alerts, and a way to prove the alert channel works without waiting
-// for something to break.
+// Alerts -- connections to sign in to again, phone uploads set aside -- and a
+// way to prove the alert channel works without waiting for something to break.
 
 import { computed, ref } from "vue";
 
@@ -52,7 +52,7 @@ async function archiveTest(): Promise<void> {
         :loading="alerts.loading.value"
         :error="alerts.error.value"
         :empty="open.length === 0"
-        empty-text="Nothing needs re-authenticating."
+        empty-text="Nothing needs attention."
         @retry="alerts.reload()"
       >
         <AlertsList :alerts="open" :timezone="timezone" :health-system-names="healthSystemNames" />

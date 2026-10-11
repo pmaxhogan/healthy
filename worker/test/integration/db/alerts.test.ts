@@ -11,7 +11,10 @@ describe("alerts.openOrGet", () => {
     const repos = testRepos();
     const healthSystemId = await seedHealthSystem(repos);
 
-    const { alert, created } = await repos.alerts.openOrGet(healthSystemSubject(healthSystemId));
+    const { alert, created } = await repos.alerts.openOrGet(
+      healthSystemSubject(healthSystemId),
+      "reconnect",
+    );
 
     expect(created).toBe(true);
     expect(alert.kind).toBe("reconnect");
@@ -26,8 +29,8 @@ describe("alerts.openOrGet", () => {
     const repos = testRepos();
     const subject = healthSystemSubject(await seedHealthSystem(repos));
 
-    const first = await repos.alerts.openOrGet(subject);
-    const second = await repos.alerts.openOrGet(subject);
+    const first = await repos.alerts.openOrGet(subject, "reconnect");
+    const second = await repos.alerts.openOrGet(subject, "reconnect");
 
     expect(second.created).toBe(false);
     expect(second.alert.id).toBe(first.alert.id);
@@ -39,8 +42,8 @@ describe("alerts.openOrGet", () => {
     const subject = healthSystemSubject(await seedHealthSystem(repos));
 
     const results = await Promise.all([
-      repos.alerts.openOrGet(subject),
-      repos.alerts.openOrGet(subject),
+      repos.alerts.openOrGet(subject, "reconnect"),
+      repos.alerts.openOrGet(subject, "reconnect"),
     ]);
 
     expect(results.filter((result) => result.created)).toHaveLength(1);
@@ -56,9 +59,9 @@ describe("alerts.openOrGet", () => {
       await seedHealthSystem(repos, { displayName: "B Example Health" }),
     );
 
-    await repos.alerts.openOrGet(first);
-    await repos.alerts.openOrGet(second);
-    await repos.alerts.openOrGet(GOOGLE_SUBJECT);
+    await repos.alerts.openOrGet(first, "reconnect");
+    await repos.alerts.openOrGet(second, "reconnect");
+    await repos.alerts.openOrGet(GOOGLE_SUBJECT, "reconnect");
 
     expect(await repos.alerts.listOpen()).toHaveLength(3);
   });
@@ -69,7 +72,7 @@ describe("alerts.resolve", () => {
     const time = clock();
     const repos = testRepos({ now: time.now });
     const subject = healthSystemSubject(await seedHealthSystem(repos));
-    const { alert } = await repos.alerts.openOrGet(subject);
+    const { alert } = await repos.alerts.openOrGet(subject, "reconnect");
     await repos.alerts.setCard(alert.id, "trello-card-1");
 
     time.advance(3600);
@@ -93,10 +96,10 @@ describe("alerts.resolve", () => {
     // what makes a second cycle possible while still deduping within one.
     const repos = testRepos();
     const subject = healthSystemSubject(await seedHealthSystem(repos));
-    const { alert: first } = await repos.alerts.openOrGet(subject);
+    const { alert: first } = await repos.alerts.openOrGet(subject, "reconnect");
     await repos.alerts.resolve(subject);
 
-    const { alert: second, created } = await repos.alerts.openOrGet(subject);
+    const { alert: second, created } = await repos.alerts.openOrGet(subject, "reconnect");
 
     expect(created).toBe(true);
     expect(second.id).not.toBe(first.id);

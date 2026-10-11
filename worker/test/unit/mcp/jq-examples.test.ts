@@ -16,6 +16,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { JQ_EXAMPLES } from "../../../src/mcp/jq-examples.ts";
 import { TOOL_NAMES } from "../../../src/mcp/tools/index.ts";
 
+import { hcWorld } from "./hc-fake.ts";
 import {
   HEALTH_SYSTEM_A,
   HEALTH_SYSTEM_B,
@@ -329,6 +330,8 @@ beforeAll(async () => {
       text: "Seen for allergies. Follow up in three months.",
       cached: false,
     },
+    // A paired phone holding one invented day of every Health Connect type.
+    hc: hcWorld(NOW),
   });
   // A health system that needs attention, and sync rows in every state the
   // get_sync_status examples filter for.
@@ -367,11 +370,27 @@ beforeAll(async () => {
   world.client = await connectTools(fakeDeps(state));
 });
 
+/** The fake clock's last two UTC days, as the Health Connect tools take a range. */
+const HC_RANGE = {
+  start: new Date((NOW - 2 * 86_400) * 1000).toISOString().slice(0, 10),
+  end: new Date((NOW - 1) * 1000).toISOString().slice(0, 10),
+};
+
 /** The arguments each example runs with, beyond `jq`. */
 const EXTRA_ARGS: Partial<Record<(typeof TOOL_NAMES)[number], Record<string, unknown>>> = {
   get_document_text: { healthSystem: NAME_A, id: "doc-1" },
   get_message_thread: { threadId: "thread-1" },
   get_message_attachment: { attachmentId: "att-1" },
+  // The two days up to the fake clock: the phone's invented day and the one before.
+  hc_records: { type: "Steps", ...HC_RANGE },
+  hc_aggregate: { type: "Steps", ...HC_RANGE },
+  hr_series: HC_RANGE,
+  hr_events: HC_RANGE,
+  sleep_sessions: HC_RANGE,
+  exercise_sessions: HC_RANGE,
+  blood_pressure: HC_RANGE,
+  daily_summary: HC_RANGE,
+  data_quality: HC_RANGE,
 };
 
 describe("jq examples", () => {

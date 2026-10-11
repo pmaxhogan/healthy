@@ -17,7 +17,11 @@ import type {
   CalendarOptionDto,
   ConnectionDto,
   ColorOptionDto,
+  CreateDeviceRequest,
   CreatePolicyRuleRequest,
+  DeviceCoverageRowDto,
+  DeviceDto,
+  DeviceIngestLogDto,
   CreateHealthSystemRequest,
   GoogleAccountDto,
   MailInboxEntryDto,
@@ -28,6 +32,8 @@ import type {
   McpToolInfoDto,
   McpToolSchemaDto,
   OverviewDto,
+  PairedDeviceDto,
+  RetryFailedResponse,
   PolicyPreviewDto,
   PolicyPreviewRequest,
   PolicyRuleDto,
@@ -45,6 +51,8 @@ import type {
   SettingsPatch,
   UpdateHealthSystemRequest,
   UpdatePolicyRuleRequest,
+  WipeDeviceRequest,
+  WipeDeviceResponse,
 } from "@shared/types.ts";
 
 /** The 202 body of every route whose work outlives the response. */
@@ -68,6 +76,27 @@ export const endpoints = {
   whoami: (): Promise<{ ok: boolean }> => api.get("/api/whoami"),
 
   overview: (signal?: AbortSignal): Promise<OverviewDto> => api.get("/api/overview", signal),
+
+  devices: (signal?: AbortSignal): Promise<DeviceDto[]> => api.get("/api/phone/devices", signal),
+  /** The one response that carries the pairing code (QR text, token inside). Never available again. */
+  createDevice: (body: CreateDeviceRequest): Promise<PairedDeviceDto> =>
+    api.post("/api/phone/devices", body),
+  renameDevice: (id: string, name: string): Promise<DeviceDto> =>
+    api.patch(`/api/phone/devices/${encodeURIComponent(id)}`, { name }),
+  /** Replaces the token: the old one stops working at once. Carries the new pairing code once. */
+  rotateDevice: (id: string): Promise<PairedDeviceDto> =>
+    api.post(`/api/phone/devices/${encodeURIComponent(id)}/rotate`),
+  revokeDevice: (id: string): Promise<DeviceDto> =>
+    api.post(`/api/phone/devices/${encodeURIComponent(id)}/revoke`),
+  /** `done: false` means more remains: call again. `confirm` is the device's id. */
+  wipeDevice: (id: string, body: WipeDeviceRequest): Promise<WipeDeviceResponse> =>
+    api.post(`/api/phone/devices/${encodeURIComponent(id)}/wipe`, body),
+  retryFailedUploads: (id: string): Promise<RetryFailedResponse> =>
+    api.post(`/api/phone/devices/${encodeURIComponent(id)}/retry-failed`),
+  deviceCoverage: (id: string, signal?: AbortSignal): Promise<DeviceCoverageRowDto[]> =>
+    api.get(`/api/phone/devices/${encodeURIComponent(id)}/coverage`, signal),
+  deviceIngestLog: (id: string, signal?: AbortSignal): Promise<DeviceIngestLogDto[]> =>
+    api.get(`/api/phone/devices/${encodeURIComponent(id)}/ingest-log`, signal),
 
   healthSystems: (signal?: AbortSignal): Promise<HealthSystemDto[]> =>
     api.get("/api/health-systems", signal),

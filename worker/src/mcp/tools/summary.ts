@@ -27,6 +27,7 @@ import {
 import { collapseConditions } from "../conditions.ts";
 import { buildCoverage, mergeCoverage } from "../coverage.ts";
 import { BINARY_TEXT_TYPE } from "../deps.ts";
+import { phoneSummary } from "../hc/summary.ts";
 import { LABORATORY, hasCategory } from "../match.ts";
 import { respond } from "../respond.ts";
 
@@ -256,7 +257,12 @@ export function registerSummaryTool(server: McpServer, deps: ToolDeps): void {
         "`get_conditions`, ...) for the complete list. `coverage` reports " +
         "whether the appointments, conditions, medications and labs sections are " +
         "each current, so a section with nothing in it can be told apart from " +
-        "one whose last sync failed or has not happened yet.",
+        "one whose last sync failed or has not happened yet. A paired phone adds " +
+        "`kind: phone` items -- its last upload (`section: sync`), its newest " +
+        "blood-pressure reading and last night's sleep -- from Health Connect, " +
+        "which the `hc_*`, `hr_*`, `sleep_sessions`, `exercise_sessions`, " +
+        "`blood_pressure`, `daily_summary` and `data_quality` tools read in full; " +
+        "start those with `hc_coverage`.",
       // No `from`/`to`: the summary is always "nearest to now", and a window
       // it accepted but ignored would be a filter the caller only believed in.
       schema: sharedOnlyArgs(SUMMARY_TOOL),
@@ -301,6 +307,13 @@ export function registerSummaryTool(server: McpServer, deps: ToolDeps): void {
         items.push(entry.item);
         sources.push(entry.source);
       }
+      // The paired phone's Health Connect data, kept apart from the health
+      // systems' records: its own items, last, and its own coverage entries.
+      const phone = await phoneSummary(deps, run, args.healthSystems);
+      for (const item of phone.items) {
+        items.push(item);
+        sources.push(undefined);
+      }
 
       return respond({
         tool: SUMMARY_TOOL,
@@ -310,8 +323,11 @@ export function registerSummaryTool(server: McpServer, deps: ToolDeps): void {
         sources,
         limit: effectiveLimit(args.limit),
         jq: args.jq,
-        coverage: recent.coverage,
-        healthSystemIds: healthSystems.map((healthSystem) => healthSystem.id),
+        coverage: mergeCoverage(recent.coverage, phone.coverage),
+        healthSystemIds: [
+          ...healthSystems.map((healthSystem) => healthSystem.id),
+          ...phone.sourceIds,
+        ],
         now: run.now,
       });
     },

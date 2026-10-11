@@ -19,12 +19,18 @@
 
 import { ARRAY_SEGMENT, formatPath, parsePath } from "@shared/policy-path.ts";
 
+import { recordFieldsOf } from "../hc/record-types.ts";
+import { rollupFieldsFor } from "../hc/rollup/hour.ts";
 import { TOOL_NAMES } from "../mcp/tool-names.ts";
 
 import { expandPath } from "./aliases.ts";
+import { hcCandidates, hcTypeOf, isHcResourceType } from "./hc-aliases.ts";
+import { joinedFieldsOf } from "./hc-fields.ts";
 import {
   MODELED_RESOURCE_TYPES,
   SENSITIVE_FIELDS,
+  isPhoneShape,
+  phoneRowTypes,
   resolveInShape,
   shapeResourceType,
   shapeVocabulary,
@@ -208,11 +214,97 @@ function parseAll(texts: readonly string[]): { parsed: string[][]; issues: strin
   return { parsed, issues };
 }
 
+/**
+ * True when one candidate path names something a row of `rowType` can really
+ * carry in this shape. The tree alone cannot say: a record's `data` and a
+ * bucket's `values` are open nodes, since their keys depend on the record
+ * type, so those two are checked against the type's own field lists.
+ */
+function phoneCandidateResolves(
+  shape: string,
+  rowType: string,
+  candidate: readonly string[],
+): boolean {
+  if (!resolveInShape(shape, candidate).ok) return false;
+  const [container, field] = candidate.filter((segment) => segment !== ARRAY_SEGMENT);
+  if (field === undefined) return true;
+  const type = hcTypeOf(rowType);
+  return container === "data"
+    ? (recordFieldsOf(type)?.includes(field) ?? true)
+    : container !== "values" || rollupFieldsFor(type).some((spec) => spec.name === field);
+}
+
+/**
+ * True when a rule on a Health Connect type, with this path, removes
+ * something from at least one tool's rows: in some tool of the scope, on some
+ * row that can carry the type or its data, one of the path's spellings
+ * (`./hc-aliases.ts`) names a real field.
+ */
+function phonePathReaches(spec: FieldRuleSpec, ruleType: string, path: readonly string[]): boolean {
+  const tools = spec.tool === null ? TOOL_NAMES : [spec.tool];
+  for (const tool of tools) {
+    const shapes = shapesForScope({ tool, resourceType: ruleType }).filter((id) =>
+      isPhoneShape(id),
+    );
+    for (const shape of shapes) {
+      for (const rowType of phoneRowTypes(shape, tool, ruleType)) {
+        const candidates = hcCandidates({ tool, rowType, ruleType, path });
+        if (candidates.some((candidate) => phoneCandidateResolves(shape, rowType, candidate))) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/** The sentence for a Health Connect path that would hide nothing, with what would. */
+function phoneUnmatched(text: string, spec: FieldRuleSpec, ruleType: string): string {
+  const type = hcTypeOf(ruleType);
+  const where = spec.tool === null ? "no tool returns" : `${spec.tool} does not return`;
+  const own = [...(recordFieldsOf(type) ?? [])];
+  const joined = TOOL_NAMES.flatMap((tool) => joinedFieldsOf(tool, type));
+  const known = [...new Set([...own, ...joined])];
+  const near = suggestion(text, known);
+  const hint = near === undefined ? "" : ` Did you mean "${near}"?`;
+  const list =
+    known.length === 0 ? "" : ` ${type} data appears as: ${known.slice(0, 24).join(", ")}.`;
+  return (
+    `"${text}" would hide nothing: ${where} a field of that name carrying ${ruleType} data, ` +
+    `under any of its spellings.${hint}${list}`
+  );
+}
+
+/** Resolve every path of a rule on a Health Connect type, or say which would be inert. */
+function resolvePhone(
+  spec: FieldRuleSpec,
+  ruleType: string,
+  parsed: readonly (readonly string[])[],
+): { canonical: Set<string>; issues: string[] } {
+  const canonical = new Set<string>();
+  const issues: string[] = [];
+  for (const [index, path] of parsed.entries()) {
+    if (phonePathReaches(spec, ruleType, path)) canonical.add(formatPath(path));
+    else issues.push(phoneUnmatched(spec.paths.at(index) ?? "", spec, ruleType));
+  }
+  return { canonical, issues };
+}
+
 /** Resolve every path in scope; the canonical spellings, or why each one failed. */
 function resolveAll(
   spec: FieldRuleSpec,
   parsed: readonly (readonly string[])[],
 ): { canonical: Set<string>; issues: string[] } {
+  // A paired phone's data: one field has several spellings and lands on rows of
+  // several types, so "does this path exist" is asked of every one of them.
+  const { resourceType } = spec;
+  if (
+    spec.effect !== "allow" &&
+    isHcResourceType(resourceType) &&
+    MODELED_RESOURCE_TYPES.includes(resourceType)
+  ) {
+    return resolvePhone(spec, resourceType, parsed);
+  }
   const canonical = new Set<string>();
   const issues: string[] = [];
   // A resource type this server has no model for cannot be proven wrong, and an
@@ -258,6 +350,43 @@ export function checkFieldSpec(
   // eslint-disable-next-line unicorn/no-array-sort -- Array#toSorted is ES2023 and the Worker compiles against the ES2022 lib; the array is fresh from the spread.
   const paths = [...canonical].sort((a, b) => a.localeCompare(b));
   return { ok: true, spec: { ...spec, paths } };
+}
+
+/** What an aggregate's type name starts with, after `hc:`. */
+const PHONE_AGGREGATE_PREFIX = "hc:Agg.";
+
+/**
+ * Check an `hc:<Type>` named by a `resource` rule (or a `field` rule's scope).
+ * Null when it is fine, or when the target is not a Health Connect type at
+ * all; otherwise the sentence that says what is wrong.
+ *
+ * A resource rule matches a row's tag exactly, so a mistyped type is a rule
+ * that silently denies nothing -- and the types most worth denying are the
+ * ones least likely to have a record yet to check the spelling against. So
+ * the type must be one the companion app maps, or one a paired phone has
+ * actually reported (`reported`, as `hc:<Type>`), spelled as it is tagged.
+ */
+export function checkPhoneType(target: string, reported: ReadonlySet<string>): string | null {
+  if (!target.toLowerCase().startsWith("hc:")) return null;
+  if (target.toLowerCase().startsWith(PHONE_AGGREGATE_PREFIX.toLowerCase())) {
+    return (
+      `"${target}" is one of Health Connect's own totals, which is not a type of its own: ` +
+      "it is data of the type it totals, and a rule on that type covers it " +
+      "(deny hc:Steps to withhold Agg.Steps)."
+    );
+  }
+  const known = [...MODELED_RESOURCE_TYPES.filter((type) => isHcResourceType(type)), ...reported];
+  if (known.includes(target)) return null;
+  const spelled = known.find((type) => type.toLowerCase() === target.toLowerCase());
+  if (spelled !== undefined) {
+    return `there is no "${target}": the type is spelled "${spelled}", and a rule matches it exactly.`;
+  }
+  const near = suggestion(target, known);
+  const hint = near === undefined ? "" : ` Did you mean "${near}"?`;
+  return (
+    `"${target}" is not a Health Connect record type this server knows or a paired phone ` +
+    `has reported, so the rule would withhold nothing.${hint}`
+  );
 }
 
 /** The `target` a `field` row is stored under: one string per distinct rule. */

@@ -16,7 +16,9 @@
  *     signed-in page load per live portal session, so the portal's idle timeout
  *     (shorter than an hour) never sees an hour of silence. It never signs in;
  *     see `portal-keepalive.ts`. Its minutes never coincide with the hourly
- *     run's.
+ *     run's. The same tick wakes the Health Connect ingest runner of every
+ *     paired device (`worker/src/hc/store/poke.ts`): a safety net under the
+ *     wake the ingest route does itself, and what notices a changed zone.
  *
  * An unrecognised cron string is logged and ignored rather than guessed at: a
  * schedule added to `wrangler.jsonc` without a branch here is then a visible
@@ -31,6 +33,7 @@
 
 import { makeCtx } from "../db/client.ts";
 import { makeRepos } from "../db/index.ts";
+import { pokeIngestRunners } from "../hc/store/poke.ts";
 import { errorFields, makeLogger } from "../lib/log.ts";
 
 import { runCalendarSync } from "./calendar-sync.ts";
@@ -82,6 +85,9 @@ export async function handleScheduled(
         return;
       }
       case CRON_PORTAL_KEEPALIVE: {
+        // First, and it never throws: a portal that is slow to answer must not
+        // delay a phone's queued batches.
+        await pokeIngestRunners(ctx);
         await runPortalKeepalive(ctx, deps);
         return;
       }

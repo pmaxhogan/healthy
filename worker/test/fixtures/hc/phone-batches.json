@@ -1,0 +1,2806 @@
+{
+  "generatedBy": "android/app/src/test/java/dev/maxhogan/healthy/companion/sync/PhoneBatchFixtureTest.kt",
+  "note": "Generated, do not edit. Batches exactly as the companion app builds them, from synthetic records. Regenerate with HEALTHY_WRITE_FIXTURES=1 gradlew testDebugUnitTest.",
+  "batches": [
+    {
+      "name": "changes",
+      "description": "One page of changes: every mapped record type, platform aggregates for the hours they touch (one total, one hour left empty and so deleted), two deletions, and the state report.",
+      "expect": {
+        "upserts": 42,
+        "deletes": 3,
+        "rejected": 0,
+        "hasSyncState": true
+      },
+      "body": {
+        "v": 1,
+        "deviceId": "01HZZZZZZZZZZZZZZZZZZZZZZZ",
+        "appVersion": "0.1.0",
+        "batchId": "w51ZrsQP2o42TdyEnFTgkDLWuKXdkHrIbFg09oyecLg",
+        "phoneTime": 1790000600000,
+        "upserts": [
+          {
+            "id": "rec-Steps",
+            "type": "Steps",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000060000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "count": 1234
+            }
+          },
+          {
+            "id": "rec-Distance",
+            "type": "Distance",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000060000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "distance": 1500.5
+            }
+          },
+          {
+            "id": "rec-ActiveCaloriesBurned",
+            "type": "ActiveCaloriesBurned",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000060000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "energy": 250.5
+            }
+          },
+          {
+            "id": "rec-TotalCaloriesBurned",
+            "type": "TotalCaloriesBurned",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000060000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "energy": 2100
+            }
+          },
+          {
+            "id": "rec-FloorsClimbed",
+            "type": "FloorsClimbed",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000060000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "floors": 4.5
+            }
+          },
+          {
+            "id": "rec-ElevationGained",
+            "type": "ElevationGained",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000060000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "elevation": 12.5
+            }
+          },
+          {
+            "id": "rec-WheelchairPushes",
+            "type": "WheelchairPushes",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000060000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "count": 80
+            }
+          },
+          {
+            "id": "rec-Hydration",
+            "type": "Hydration",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000060000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "volume": 0.5
+            }
+          },
+          {
+            "id": "rec-HeartRate",
+            "type": "HeartRate",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000120000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "samples": [
+                {
+                  "t": 1790000000000,
+                  "bpm": 60
+                },
+                {
+                  "t": 1790000060000,
+                  "bpm": 64
+                }
+              ]
+            }
+          },
+          {
+            "id": "rec-Speed",
+            "type": "Speed",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000120000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "samples": [
+                {
+                  "t": 1790000000000,
+                  "speed": 2.5
+                }
+              ]
+            }
+          },
+          {
+            "id": "rec-Power",
+            "type": "Power",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000120000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "samples": [
+                {
+                  "t": 1790000000000,
+                  "power": 200
+                }
+              ]
+            }
+          },
+          {
+            "id": "rec-StepsCadence",
+            "type": "StepsCadence",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000120000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "samples": [
+                {
+                  "t": 1790000000000,
+                  "rate": 90
+                }
+              ]
+            }
+          },
+          {
+            "id": "rec-CyclingPedalingCadence",
+            "type": "CyclingPedalingCadence",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000120000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "samples": [
+                {
+                  "t": 1790000000000,
+                  "rate": 80.5
+                }
+              ]
+            }
+          },
+          {
+            "id": "rec-RestingHeartRate",
+            "type": "RestingHeartRate",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "time": 1790000000000,
+            "offsetMin": -300,
+            "data": {
+              "bpm": 52
+            }
+          },
+          {
+            "id": "rec-HeartRateVariabilityRmssd",
+            "type": "HeartRateVariabilityRmssd",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "time": 1790000000000,
+            "offsetMin": -300,
+            "data": {
+              "rmssd": 45.5
+            }
+          },
+          {
+            "id": "rec-RespiratoryRate",
+            "type": "RespiratoryRate",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "time": 1790000000000,
+            "offsetMin": -300,
+            "data": {
+              "rate": 14.5
+            }
+          },
+          {
+            "id": "rec-OxygenSaturation",
+            "type": "OxygenSaturation",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "time": 1790000000000,
+            "offsetMin": -300,
+            "data": {
+              "percentage": 97.5
+            }
+          },
+          {
+            "id": "rec-BloodPressure",
+            "type": "BloodPressure",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "time": 1790000000000,
+            "offsetMin": -300,
+            "data": {
+              "systolic": 120,
+              "diastolic": 80,
+              "bodyPosition": "SITTING_DOWN",
+              "measurementLocation": "LEFT_UPPER_ARM"
+            }
+          },
+          {
+            "id": "rec-BloodGlucose",
+            "type": "BloodGlucose",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "time": 1790000000000,
+            "offsetMin": -300,
+            "data": {
+              "level": 5.5,
+              "specimenSource": "CAPILLARY_BLOOD",
+              "mealType": "LUNCH",
+              "relationToMeal": "AFTER_MEAL"
+            }
+          },
+          {
+            "id": "rec-BodyTemperature",
+            "type": "BodyTemperature",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "time": 1790000000000,
+            "offsetMin": -300,
+            "data": {
+              "temperature": 36.6,
+              "measurementLocation": "MOUTH"
+            }
+          },
+          {
+            "id": "rec-BasalBodyTemperature",
+            "type": "BasalBodyTemperature",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "time": 1790000000000,
+            "offsetMin": -300,
+            "data": {
+              "temperature": 36.4,
+              "measurementLocation": "FINGER"
+            }
+          },
+          {
+            "id": "rec-SkinTemperature",
+            "type": "SkinTemperature",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000120000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "baseline": 33,
+              "measurementLocation": "WRIST",
+              "deltas": [
+                {
+                  "t": 1790000000000,
+                  "delta": -0.5
+                },
+                {
+                  "t": 1790000060000,
+                  "delta": 0.25
+                }
+              ]
+            }
+          },
+          {
+            "id": "rec-Weight",
+            "type": "Weight",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "time": 1790000000000,
+            "offsetMin": -300,
+            "data": {
+              "weight": 70.5
+            }
+          },
+          {
+            "id": "rec-Height",
+            "type": "Height",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "time": 1790000000000,
+            "offsetMin": -300,
+            "data": {
+              "height": 1.8
+            }
+          },
+          {
+            "id": "rec-BodyFat",
+            "type": "BodyFat",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "time": 1790000000000,
+            "offsetMin": -300,
+            "data": {
+              "percentage": 20.5
+            }
+          },
+          {
+            "id": "rec-LeanBodyMass",
+            "type": "LeanBodyMass",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "time": 1790000000000,
+            "offsetMin": -300,
+            "data": {
+              "mass": 55
+            }
+          },
+          {
+            "id": "rec-BoneMass",
+            "type": "BoneMass",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "time": 1790000000000,
+            "offsetMin": -300,
+            "data": {
+              "mass": 3
+            }
+          },
+          {
+            "id": "rec-BodyWaterMass",
+            "type": "BodyWaterMass",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "time": 1790000000000,
+            "offsetMin": -300,
+            "data": {
+              "mass": 40
+            }
+          },
+          {
+            "id": "rec-BasalMetabolicRate",
+            "type": "BasalMetabolicRate",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "time": 1790000000000,
+            "offsetMin": -300,
+            "data": {
+              "bmr": 1700
+            }
+          },
+          {
+            "id": "rec-Vo2Max",
+            "type": "Vo2Max",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "time": 1790000000000,
+            "offsetMin": -300,
+            "data": {
+              "vo2": 45.5,
+              "measurementMethod": "COOPER_TEST"
+            }
+          },
+          {
+            "id": "rec-Nutrition",
+            "type": "Nutrition",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000060000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "energy": 99.9999999842,
+              "energyFromFat": 90,
+              "name": "Example meal",
+              "mealType": "LUNCH",
+              "biotin": 1,
+              "caffeine": 2,
+              "calcium": 3,
+              "chloride": 4,
+              "cholesterol": 5,
+              "chromium": 6,
+              "copper": 7,
+              "dietaryFiber": 8,
+              "folate": 9,
+              "folicAcid": 10,
+              "iodine": 11,
+              "iron": 12,
+              "magnesium": 13,
+              "manganese": 14,
+              "molybdenum": 15,
+              "monounsaturatedFat": 16,
+              "niacin": 17,
+              "pantothenicAcid": 18,
+              "phosphorus": 19,
+              "polyunsaturatedFat": 20,
+              "potassium": 21,
+              "protein": 22,
+              "riboflavin": 23,
+              "saturatedFat": 24,
+              "selenium": 25,
+              "sodium": 26,
+              "sugar": 27,
+              "thiamin": 28,
+              "totalCarbohydrate": 29,
+              "totalFat": 30,
+              "transFat": 31,
+              "unsaturatedFat": 32,
+              "vitaminA": 33,
+              "vitaminB12": 34,
+              "vitaminB6": 35,
+              "vitaminC": 36,
+              "vitaminD": 37,
+              "vitaminE": 38,
+              "vitaminK": 39,
+              "zinc": 40
+            }
+          },
+          {
+            "id": "rec-SleepSession",
+            "type": "SleepSession",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000120000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "title": "Night",
+              "notes": "Slept ok",
+              "stages": [
+                {
+                  "start": 1790000000000,
+                  "end": 1790000060000,
+                  "stage": "DEEP"
+                },
+                {
+                  "start": 1790000060000,
+                  "end": 1790000120000,
+                  "stage": "REM"
+                }
+              ]
+            }
+          },
+          {
+            "id": "rec-ExerciseSession",
+            "type": "ExerciseSession",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000120000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "exerciseType": "BIKING",
+              "title": "Morning ride",
+              "notes": "Felt fine",
+              "segments": [
+                {
+                  "start": 1790000000000,
+                  "end": 1790000060000,
+                  "segmentType": "BIKING",
+                  "repetitions": 0
+                }
+              ],
+              "laps": [
+                {
+                  "start": 1790000000000,
+                  "end": 1790000060000,
+                  "length": 1609.34
+                }
+              ],
+              "route": [
+                {
+                  "t": 1790000000000,
+                  "lat": 10.5,
+                  "lon": 20.25,
+                  "alt": 30.48,
+                  "hAcc": 5,
+                  "vAcc": 6
+                },
+                {
+                  "t": 1790000060000,
+                  "lat": 10.5,
+                  "lon": 20.5
+                }
+              ],
+              "plannedExerciseSessionId": "plan-1"
+            }
+          },
+          {
+            "id": "rec-PlannedExerciseSession",
+            "type": "PlannedExerciseSession",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000060000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "hasExplicitTime": true,
+              "exerciseType": "BIKING",
+              "title": "Plan title",
+              "notes": "Plan notes",
+              "blocks": [
+                {
+                  "repetitions": 2,
+                  "description": "Main set",
+                  "steps": [
+                    {
+                      "exerciseType": "BIKING",
+                      "exercisePhase": "ACTIVE",
+                      "description": "Hard",
+                      "completionGoal": {
+                        "type": "DISTANCE",
+                        "distance": 5000
+                      },
+                      "performanceTargets": [
+                        {
+                          "type": "POWER",
+                          "minPower": 100,
+                          "maxPower": 200
+                        },
+                        {
+                          "type": "HEART_RATE",
+                          "minHeartRate": 120,
+                          "maxHeartRate": 150
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "completedExerciseSessionId": "done-1"
+            }
+          },
+          {
+            "id": "rec-MindfulnessSession",
+            "type": "MindfulnessSession",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000060000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "mindfulnessSessionType": "MEDITATION",
+              "title": "Sit",
+              "notes": "Quiet"
+            }
+          },
+          {
+            "id": "rec-MenstruationFlow",
+            "type": "MenstruationFlow",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "time": 1790000000000,
+            "offsetMin": -300,
+            "data": {
+              "flow": "MEDIUM"
+            }
+          },
+          {
+            "id": "rec-MenstruationPeriod",
+            "type": "MenstruationPeriod",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000060000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {}
+          },
+          {
+            "id": "rec-CervicalMucus",
+            "type": "CervicalMucus",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "time": 1790000000000,
+            "offsetMin": -300,
+            "data": {
+              "appearance": "EGG_WHITE",
+              "sensation": "LIGHT"
+            }
+          },
+          {
+            "id": "rec-OvulationTest",
+            "type": "OvulationTest",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "time": 1790000000000,
+            "offsetMin": -300,
+            "data": {
+              "result": "POSITIVE"
+            }
+          },
+          {
+            "id": "rec-IntermenstrualBleeding",
+            "type": "IntermenstrualBleeding",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "time": 1790000000000,
+            "offsetMin": -300,
+            "data": {}
+          },
+          {
+            "id": "rec-SexualActivity",
+            "type": "SexualActivity",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "time": 1790000000000,
+            "offsetMin": -300,
+            "data": {
+              "protectionUsed": "PROTECTED"
+            }
+          },
+          {
+            "id": "agg:Steps:1789999200000",
+            "type": "Agg.Steps",
+            "origin": "healthconnect",
+            "lastModified": 1790000600000,
+            "start": 1789999200000,
+            "end": 1790002800000,
+            "data": {
+              "value": 1234.0,
+              "unit": "count",
+              "origins": [
+                "com.example.phone",
+                "com.example.wearable"
+              ]
+            }
+          }
+        ],
+        "deletes": [
+          "agg:Steps:1790002800000",
+          "rec-gone-1",
+          "rec-gone-2"
+        ],
+        "syncState": {
+          "types": [
+            {
+              "type": "ActiveCaloriesBurned",
+              "permission": "granted",
+              "tokenAgeS": 600,
+              "backlog": 3,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": true,
+                "oldestDoneMs": 1788220800000
+              }
+            },
+            {
+              "type": "BasalBodyTemperature",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "BasalMetabolicRate",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "BloodGlucose",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "BloodPressure",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "BodyFat",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "BodyTemperature",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "BodyWaterMass",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "BoneMass",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "CervicalMucus",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "CyclingPedalingCadence",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Distance",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "ElevationGained",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "ExerciseSession",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "FloorsClimbed",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "HeartRate",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "HeartRateVariabilityRmssd",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Height",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Hydration",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "IntermenstrualBleeding",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "LeanBodyMass",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "MenstruationFlow",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "MenstruationPeriod",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "MindfulnessSession",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Nutrition",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "OvulationTest",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "OxygenSaturation",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "PlannedExerciseSession",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Power",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "RespiratoryRate",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "RestingHeartRate",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "SexualActivity",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "SkinTemperature",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "SleepSession",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Speed",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "StepsCadence",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Steps",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "TotalCaloriesBurned",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Vo2Max",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Weight",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "WheelchairPushes",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            }
+          ],
+          "exerciseRoutes": "denied",
+          "backgroundRead": true,
+          "historyRead": false,
+          "batteryExempt": true,
+          "hibernationExempt": true,
+          "hcProviderVersion": "2026.01.01",
+          "androidSdk": 37,
+          "backfillComplete": false,
+          "lastError": {
+            "errorCode": "network",
+            "at": 1790000000000
+          }
+        }
+      }
+    },
+    {
+      "name": "backfill-month",
+      "description": "The last page of a backfilled month: records, then the totals of the hours that have one. No deletes.",
+      "expect": {
+        "upserts": 5,
+        "deletes": 0,
+        "rejected": 0,
+        "hasSyncState": true
+      },
+      "body": {
+        "v": 1,
+        "deviceId": "01HZZZZZZZZZZZZZZZZZZZZZZZ",
+        "appVersion": "0.1.0",
+        "batchId": "hUjaTQfAsdig_d4K527Gc1Q81j-4_3DwNbY-f_9Kmf8",
+        "phoneTime": 1790000600000,
+        "upserts": [
+          {
+            "id": "rec-Steps",
+            "type": "Steps",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000060000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "count": 1234
+            }
+          },
+          {
+            "id": "rec-Distance",
+            "type": "Distance",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000060000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "distance": 1500.5
+            }
+          },
+          {
+            "id": "rec-ActiveCaloriesBurned",
+            "type": "ActiveCaloriesBurned",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000060000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "energy": 250.5
+            }
+          },
+          {
+            "id": "agg:Steps:1789999200000",
+            "type": "Agg.Steps",
+            "origin": "healthconnect",
+            "lastModified": 1790000600000,
+            "start": 1789999200000,
+            "end": 1790002800000,
+            "data": {
+              "value": 1234.0,
+              "unit": "count",
+              "origins": [
+                "com.example.phone",
+                "com.example.wearable"
+              ]
+            }
+          },
+          {
+            "id": "agg:SleepDuration:1789995600000",
+            "type": "Agg.SleepDuration",
+            "origin": "healthconnect",
+            "lastModified": 1790000600000,
+            "start": 1789995600000,
+            "end": 1789999200000,
+            "data": {
+              "value": 3540000.0,
+              "unit": "ms",
+              "origins": [
+                "com.example.wearable"
+              ]
+            }
+          }
+        ],
+        "deletes": [],
+        "syncState": {
+          "types": [
+            {
+              "type": "ActiveCaloriesBurned",
+              "permission": "granted",
+              "tokenAgeS": 600,
+              "backlog": 3,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": true,
+                "oldestDoneMs": 1788220800000
+              }
+            },
+            {
+              "type": "BasalBodyTemperature",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "BasalMetabolicRate",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "BloodGlucose",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "BloodPressure",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "BodyFat",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "BodyTemperature",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "BodyWaterMass",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "BoneMass",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "CervicalMucus",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "CyclingPedalingCadence",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Distance",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "ElevationGained",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "ExerciseSession",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "FloorsClimbed",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "HeartRate",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "HeartRateVariabilityRmssd",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Height",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Hydration",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "IntermenstrualBleeding",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "LeanBodyMass",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "MenstruationFlow",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "MenstruationPeriod",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "MindfulnessSession",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Nutrition",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "OvulationTest",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "OxygenSaturation",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "PlannedExerciseSession",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Power",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "RespiratoryRate",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "RestingHeartRate",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "SexualActivity",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "SkinTemperature",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "SleepSession",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Speed",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "StepsCadence",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Steps",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "TotalCaloriesBurned",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Vo2Max",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Weight",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "WheelchairPushes",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            }
+          ],
+          "exerciseRoutes": "denied",
+          "backgroundRead": true,
+          "historyRead": false,
+          "batteryExempt": true,
+          "hibernationExempt": true,
+          "hcProviderVersion": "2026.01.01",
+          "androidSdk": 37,
+          "backfillComplete": false,
+          "lastError": {
+            "errorCode": "network",
+            "at": 1790000000000
+          }
+        }
+      }
+    },
+    {
+      "name": "unmapped-records",
+      "description": "Record classes without a hand-written mapper, through the reflection fallback: one with a time of its own, one with none (it is filed under its lastModified).",
+      "expect": {
+        "upserts": 2,
+        "deletes": 0,
+        "rejected": 0,
+        "hasSyncState": false
+      },
+      "body": {
+        "v": 1,
+        "deviceId": "01HZZZZZZZZZZZZZZZZZZZZZZZ",
+        "appVersion": "0.1.0",
+        "batchId": "jNsVEvLnOXLg1rL39CBpUFssK8jHKALlO6ygy1kgAv8",
+        "phoneTime": 1790000600000,
+        "upserts": [
+          {
+            "id": "rec-unmapped-point",
+            "type": "FixturePoint",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "time": 1790000060000,
+            "offsetMin": null,
+            "data": {
+              "reading": 7.5
+            }
+          },
+          {
+            "id": "rec-unmapped-timeless",
+            "type": "FixtureTimeless",
+            "origin": "com.example.wearable",
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "time": 1790000005000,
+            "offsetMin": null,
+            "data": {
+              "label": "x"
+            }
+          }
+        ],
+        "deletes": []
+      }
+    },
+    {
+      "name": "oversize-stub",
+      "description": "What goes up in place of a record too large to send: its envelope, with data replaced by {oversize, bytes}.",
+      "expect": {
+        "upserts": 1,
+        "deletes": 0,
+        "rejected": 0,
+        "hasSyncState": false
+      },
+      "body": {
+        "v": 1,
+        "deviceId": "01HZZZZZZZZZZZZZZZZZZZZZZZ",
+        "appVersion": "0.1.0",
+        "batchId": "0lfUQhAqaqLryyJDmvGM4qzik96qhrMmEspk32O9j0Q",
+        "phoneTime": 1790000600000,
+        "upserts": [
+          {
+            "id": "rec-oversize",
+            "type": "ExerciseSession",
+            "origin": "com.example.wearable",
+            "device": {
+              "type": "WATCH",
+              "manufacturer": "Example Co",
+              "model": "Model 1"
+            },
+            "recordingMethod": "AUTOMATICALLY_RECORDED",
+            "lastModified": 1790000005000,
+            "clientRecordId": "client-1",
+            "clientRecordVersion": 3,
+            "start": 1790000000000,
+            "end": 1790000120000,
+            "startOffsetMin": -300,
+            "endOffsetMin": -240,
+            "data": {
+              "oversize": true,
+              "bytes": 761
+            }
+          }
+        ],
+        "deletes": []
+      }
+    },
+    {
+      "name": "deletes-only",
+      "description": "Deletions and nothing else.",
+      "expect": {
+        "upserts": 0,
+        "deletes": 1,
+        "rejected": 0,
+        "hasSyncState": false
+      },
+      "body": {
+        "v": 1,
+        "deviceId": "01HZZZZZZZZZZZZZZZZZZZZZZZ",
+        "appVersion": "0.1.0",
+        "batchId": "GwbDCxIQBoLptR0jz90GidcG5ksp4cRE7N-XnosyRd8",
+        "phoneTime": 1790000600000,
+        "upserts": [],
+        "deletes": [
+          "rec-gone-3"
+        ]
+      }
+    },
+    {
+      "name": "state-only",
+      "description": "The batch that closes every run: no records, only the state report.",
+      "expect": {
+        "upserts": 0,
+        "deletes": 0,
+        "rejected": 0,
+        "hasSyncState": true
+      },
+      "body": {
+        "v": 1,
+        "deviceId": "01HZZZZZZZZZZZZZZZZZZZZZZZ",
+        "appVersion": "0.1.0",
+        "batchId": "fixture-state-only-0001",
+        "phoneTime": 1790000600000,
+        "upserts": [],
+        "deletes": [],
+        "syncState": {
+          "types": [
+            {
+              "type": "ActiveCaloriesBurned",
+              "permission": "granted",
+              "tokenAgeS": 600,
+              "backlog": 3,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": true,
+                "oldestDoneMs": 1788220800000
+              }
+            },
+            {
+              "type": "BasalBodyTemperature",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "BasalMetabolicRate",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "BloodGlucose",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "BloodPressure",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "BodyFat",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "BodyTemperature",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "BodyWaterMass",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "BoneMass",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "CervicalMucus",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "CyclingPedalingCadence",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Distance",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "ElevationGained",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "ExerciseSession",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "FloorsClimbed",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "HeartRate",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "HeartRateVariabilityRmssd",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Height",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Hydration",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "IntermenstrualBleeding",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "LeanBodyMass",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "MenstruationFlow",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "MenstruationPeriod",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "MindfulnessSession",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Nutrition",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "OvulationTest",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "OxygenSaturation",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "PlannedExerciseSession",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Power",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "RespiratoryRate",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "RestingHeartRate",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "SexualActivity",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "SkinTemperature",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "SleepSession",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Speed",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "StepsCadence",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Steps",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "TotalCaloriesBurned",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Vo2Max",
+              "permission": "denied",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "Weight",
+              "permission": "unavailable",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            },
+            {
+              "type": "WheelchairPushes",
+              "permission": "granted",
+              "tokenAgeS": null,
+              "backlog": 0,
+              "rejected": 0,
+              "stubbed": 0,
+              "backfill": {
+                "complete": false,
+                "oldestDoneMs": null
+              }
+            }
+          ],
+          "exerciseRoutes": "denied",
+          "backgroundRead": true,
+          "historyRead": false,
+          "batteryExempt": true,
+          "hibernationExempt": true,
+          "hcProviderVersion": "2026.01.01",
+          "androidSdk": 37,
+          "backfillComplete": false,
+          "lastError": {
+            "errorCode": "network",
+            "at": 1790000000000
+          }
+        }
+      }
+    }
+  ]
+}

@@ -19,7 +19,12 @@ The server registers (in `worker/src/mcp/tools/index.ts`): `get_health_summary`,
 `get_coverage`, `get_service_requests`. Most accept an optional
 `health_systems[]` filter and an optional `raw` flag that additionally returns
 the underlying FHIR resource (filtered by the same policy as the normalised
-one). The admin UI's MCP page (`/connectors`) lists the live catalogue.
+one). Eleven more read a paired phone's Health Connect data — `hc_coverage`,
+`hc_sync_status`, `hc_records`, `hc_aggregate`, `hr_series`, `hr_events`,
+`sleep_sessions`, `exercise_sessions`, `blood_pressure`, `daily_summary`,
+`data_quality` — and are described under
+[Health Connect](#health-connect-the-paired-phone) below. The admin UI's MCP
+page (`/connectors`) lists the live catalogue.
 
 Every answer is the same envelope:
 `{ items, total, matched, coverage, warnings, truncated, generatedAt }` (plus `raw` when
@@ -27,7 +32,9 @@ asked for). `total` is how many items the exposure policy let through;
 `matched` is the output count — how many values `jq` emitted (below), before
 `limit`; without `jq`, the number of items `limit` applies to (`total`, or
 `groups` after `get_conditions`' `collapse`). `truncated` is true only when a
-caller-supplied `limit` cut something.
+caller-supplied `limit` cut something — or, on the Health Connect tools alone,
+when their soft byte budget did, in which case a `cursor` says where to
+continue.
 
 ### Filtering server-side with `jq`
 
@@ -449,6 +456,323 @@ makes the useful view one argument away:
 `get_health_summary`'s conditions section is the same collapse: problem-list
 entries first, then the most recently seen encounter diagnoses, then anything
 else, each labelled `source: "problem_list" | "encounter_diagnosis" | "other"`.
+
+### Health Connect: the paired phone
+
+A phone paired on the admin UI's **Phone** page uploads its Health Connect
+records in the background ([setup-android.md](setup-android.md)). They are a
+source of their own, beside the health systems and never merged into them:
+`get_vitals` stays what a clinic measured, and eleven tools read the phone.
+
+| Tool                | What it answers                                                                                                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hc_coverage`       | Per record type: `availability`, permission, first and last record, count, typical cadence, the apps that wrote it. Call it first.                                        |
+| `hc_sync_status`    | Per phone: last upload, backlog, backfill, battery-optimisation exemption, queue depth, recent failed uploads. Then one row per type.                                     |
+| `hc_records`        | Raw records of one `type` in a range, exactly as stored.                                                                                                                  |
+| `hc_aggregate`      | One `type` in calendar buckets (`hour`, `day`, `week`, `month`, `year`, `<N>min`), duplicates between apps handled.                                                       |
+| `hr_series`         | Heart rate as a series: `resolution` `raw`, `5s`, `1min` (default), `5min`, `1h`.                                                                                         |
+| `hr_events`         | Sustained rises in heart rate, with baseline, peak, time to peak and a `context`.                                                                                         |
+| `sleep_sessions`    | One row per night: stage minutes, the wearable's wake and the heart-rate-checked wake, overnight heart rate, HRV, respiratory rate, skin temperature, resting heart rate. |
+| `exercise_sessions` | Workouts, overlaps merged, with heart rate, energy, distance, steps and `likelyLeftRunning`.                                                                              |
+| `blood_pressure`    | Readings, duplicates dropped, grouped into sittings with their means and the cuff's pulse.                                                                                |
+| `daily_summary`     | One row per local day joining all of the above.                                                                                                                           |
+| `data_quality`      | Duplicates, artefacts, gaps, source switches and precision changes in a range, with every threshold.                                                                      |
+
+`get_health_summary` carries three `kind: "phone"` items per phone: its last
+upload (`section: "sync"`), its newest blood-pressure reading and last night's
+sleep.
+
+**Rows and the envelope.** The envelope is the usual one, plus `timeZone`,
+`units` and, when rows were cut, `cursor`. Every row is tagged
+`healthSystemId: "device:<id>"` and `resourceType: "hc:<Type>"` (the Health
+Connect record class without `Record`: `hc:HeartRate`, `hc:SleepSession`),
+which is what `coverage`, the warnings and the exposure policy key on. Numbers
+are numbers; a unit is declared once per field in `units`, never on a row.
+These tools take `devices` (a `device:<id>` or part of the phone's name) where
+the others take `health_systems`, and have no `raw` flag: `hc_records` is the
+raw view. Without `devices`, every paired phone answers, revoked ones
+included: revoking a phone keeps its data. So a phone that was paired again
+without the old pairing's data being wiped answers twice and doubles every
+total; an answer whose rows come from more than one phone warns
+`multiple_devices:<n>`, and `devices` is the way to pick one.
+
+**Times.** `start` and `end` are a calendar date (`2026-01-31`, that whole
+local day) or an instant that carries its offset (`2026-01-31T09:00:00-05:00`,
+`...Z`); a date-time with no offset is refused, not guessed at. Ranges are
+half-open, `[start, end)`, and `end` defaults to now. "Local" means the zone
+of the `tz` argument, or the owner's `timezone` setting when it is omitted;
+the answer names the zone it used in `timeZone`, day, week and month buckets
+begin at that zone's midnight (so a day is 23 or 25 hours across a clock
+change), and every returned time is ISO-8601 with that zone's offset: the
+times of records and buckets, and the bookkeeping instants of `hc_coverage`
+and `hc_sync_status` (`lastUploadAt`, `pairedAt`, `receivedAt`) and the
+phone's `sync` item in `get_health_summary` alike. Every tool that takes a
+range refuses one whose `end` is before its `start` (`invalid_range`) rather
+than answer it empty. `daily_summary` takes `date` for one day or `start` and
+`end` for a range, and today with neither; `end` without `start`, `date`
+beside a range and an `end` that is not after `start` are `invalid_range`
+too, with `detail` saying which.
+
+**The byte budget.** These eleven tools stop at a soft budget of 25,000 bytes
+of serialised rows. This is the one place the server limits an answer on its
+own, a deliberate exception to "a tool returns everything it was asked for":
+a day of heart rate at one-minute resolution is megabytes. It is soft in both
+senses. It cuts at a row boundary and never below one row; it always says so,
+with `truncated: true` and a `cursor`; and the caller lifts it by passing a
+larger `max_bytes`, which has no maximum. To continue, repeat the call
+changing only `cursor` (`limit` and `max_bytes` may change too). A cursor is
+bound to the question that produced it, and is refused (`invalid_cursor`) if
+anything else changes. It is also bound to the phone's data as it stood: a
+continuation recomputes the answer and skips what was already sent, which
+only lines up while nothing moved. All eleven tools check that: once an
+upload has arrived or been applied, or a rollup rebuilt, a cursor is refused
+with `cursor_expired` and the caller starts again without one.
+`hc_records` is the exception to "recomputes": its cursor carries the start
+time of the next row, so a continuation reads the store from there, returns
+exactly the rows a single call would have, and reports the whole answer's
+`total` and `matched` on every page. An answer from these tools is sent as
+compact JSON (no indentation), and the budget counts those bytes: what is
+measured is what is sent. The budget is measured on what `jq` emits, so a
+projection such as `.[] | [.t, .mean]` fits several times as many rows in a
+page; there is no columnar or CSV mode, because that is what `jq` is for.
+`hr_series` has a second, separate ceiling, `max_points` (default 2000 per
+series): a longer series is made coarser rather than cut short, by moving it
+to the next width of a fixed ladder that fits (2, 5, 10, 15, 30 minutes; 1,
+2, 3, 6, 12 hours; 1, 2, 7, 14, 28 days), always a whole multiple of the
+resolution asked for. Each series (one per phone and app) is resampled on its
+own, and `series` in the answer lists each one's `bucketMs`, `decimated`,
+`decimation`, `totalPoints` and `points`, in the order the series appear in
+the rows. The top-level `bucketMs` and `decimation` are given only when every
+series shares them and are null otherwise; `hr_series_decimated:<factor>`
+warns with the largest factor.
+
+**Why an answer is empty.** An empty `items` never means "nothing happened"
+on its own. `coverage` has one entry per phone and record type, and
+`hc_coverage`'s `availability` spells the cases out:
+
+| `availability`  | Coverage `status`                              | Meaning                                                        |
+| --------------- | ---------------------------------------------- | -------------------------------------------------------------- |
+| `ok`            | `ok`                                           | Permitted, uploaded recently, and there are records.           |
+| `no_data`       | `ok` with `recordCount: 0`                     | Permitted, current, and the phone holds no such records.       |
+| `not_permitted` | `unsupported`, notice `permission_denied`      | The companion app has not been granted this type on the phone. |
+| `not_available` | `unsupported`, notice `permission_unavailable` | The phone's Health Connect does not offer this type.           |
+| `stale`         | `stale`                                        | No upload for six hours; what is stored is still returned.     |
+| `never_synced`  | `never`                                        | The phone has not reported this type, or has never uploaded.   |
+
+`stale` and `never_synced` produce the usual `stale:hc:<Type>:device:<id>:<n>h`
+and `never_synced:...` warnings; the three that coverage is otherwise quiet
+about get `no_data:hc:<Type>:device:<id>`, `not_permitted:...` and
+`not_available:...`. `hc_store_pending:device:<id>` means uploads are still
+being applied (or rollups rebuilt), so the newest one may not be in the answer
+yet. `hc_batches_parked:device:<id>:<n>` means `n` uploads could not be
+applied and are set aside: their records are missing from every answer until
+they are queued again, and `hc_sync_status` reports the count as
+`parkedBatches`. `hc_rollups_parked:device:<id>:<n>` means `n` rollups or
+session summaries could not be rebuilt and are set aside; a figure answered
+from them may be missing or out of date. That is not "pending" (nothing is
+working on them) and does not stop the day rollups being used.
+
+**Whose numbers: `origin_mode`.** Several apps write the same thing to one
+Health Connect store, and adding everything up counts a walk twice.
+`hc_aggregate` (and `daily_summary`, which uses it) therefore says whose
+numbers each bucket holds, in the row's `method` and `origins`:
+
+- `hc_priority` (the default). The phone uploads Health Connect's own
+  priority-merged hourly totals for the types the platform aggregates (steps,
+  distance, active calories, floors, elevation, wheelchair pushes, hydration,
+  exercise and sleep duration). A bucket that has them is answered with them
+  (`method: "platform"`). Where there are none the answer falls back, by what
+  the type is:
+  - A sensor's running count (steps, distance, active and total energy,
+    floors, elevation, wheelchair pushes) is decided **hour by hour**: in each
+    UTC hour the one app with the largest total is taken, and the hours are
+    summed into the bucket (`"max_origin"`). The hour is the unit whatever the
+    bucket size, so a month is the sum of its days and of its hours in every
+    zone, and an app that recorded the first half of a month does not erase
+    the app that recorded the second. `duplicatesDropped` counts only another
+    app's records in an hour the chosen app also recorded in.
+  - Sleep and exercise are answered from the stored sessions, grouped by the
+    session rules (`"merged_sessions"`): two apps writing the same workout
+    are one and the extra copies are counted in `duplicatesDropped`, two
+    different workouts are two. For exercise, `duration` is the platform's
+    where its hours span every session of the bucket; `records` is always the
+    number of stored sessions.
+  - Everything else is every app merged (`"all_origins"`): a measurement such
+    as heart rate or weight, and an entry someone logs (a drink, a meal),
+    since two entries from two apps are two entries.
+
+  A bucket the platform covers only part of is composed hour by hour
+  (`"platform_and_max_origin"`, `"platform_and_all_origins"`). The answer
+  warns `hc_priority_fallback` when any bucket fell back and
+  `hc_duplicates_dropped:<n>` with the total.
+
+- `origin:<package>`: that app's records alone.
+- `all_separately`: one row per bucket per app.
+
+A record counts in the bucket its **start** falls in, whole (`bucketing:
+"start_time"`). A night of sleep is the one exception: it counts in the
+bucket it **ended** in, the day you woke up (`bucketing: "end_time"`), which
+is the `date` `sleep_sessions` gives it and the day `daily_summary` puts it
+on. For that reason sleep is never answered from the platform's hourly
+figure, which would split a night at midnight. Empty buckets are returned with `hasData: false`, filled with
+zero or, with `fill: "null"`, null (a mean or an extreme of nothing is null
+either way). Nothing dated after now is counted unless `exclude_future` is
+false. Total calories are what was recorded: Health Connect pads unrecorded
+hours with basal metabolic rate, which turns "no data" into a plausible
+number, so that padding is off unless `bmr_fill: true`, and then shown per row
+as `bmrFillKcal`. `answeredFrom` says which level of the store was read:
+whole local days come from day rollups, whole hours from hour rollups, and
+only a sub-hour bucket or the ragged edge of a range opens raw records
+(`session_summary` for sleep and exercise). Day rollups answer a type unless
+that type's days in the range are waiting to be rebuilt or a change of zone
+is under way.
+
+`hc_aggregate` applies the artefact rules below to the types that have one
+(heart rate, speed, weight) unless `exclude_artefacts` is false. It never
+does so silently: each row says how many values were left out
+(`artefactsExcluded`) and the answer warns `hc_artefacts_excluded:<n>`. Only
+the hours a rollup shows could hold an artefact are opened to find them.
+
+**Rules applied when answering.** The store keeps everything the phone sends;
+duplicates and artefacts are handled when a question is answered, and counted
+in the answer. They live in one module, `worker/src/hc/rules.ts`: a
+blood-pressure reading written twice (the same time to the nearest second, the
+same values to 0.1 mmHg) is counted once; heart-rate samples above 200 or
+below 20 bpm and speeds above 15 m/s are left out; a weight written within a
+minute of a height record by the same app is a profile screen, not a weighing;
+overlapping sleep or exercise sessions are one row; an exercise session over
+three hours is `overThreeHours`, and one of those that also ends in resting
+heart rate and no steps is `likelyLeftRunning`. A flag takes a value out of a figure, never out of a
+listing: `daily_summary`'s `weight` is the last weighing that was not flagged,
+and its `weighings` lists every one with the `flag` it earned. `daily_summary`
+adds one rule of its own: a "resting heart rate" written by an app within a
+minute of its own blood-pressure reading is the cuff's pulse and is excluded.
+`data_quality` lists what each rule found.
+
+A merged session row is described by ONE session, the longest of its group
+(among equally long ones the one carrying the most figures, then the lower
+app name): `start`, `end`, `durationMin` (or `inBedMin`), heart rate, steps
+and energy are all that session's, so they describe the same span. The
+stretch the whole group covers is beside them in `spanStart`, `spanEnd` and
+`spanMin`, and `members` lists every session the row stands for, so nothing a
+merge absorbed disappears. Not everything that overlaps is merged: two
+exercise sessions of different `exerciseType` are two activities, and a
+session that is `likelyLeftRunning`, an exercise session longer than 12 hours
+or a sleep session longer than 18 is never merged with anything but an exact
+copy of itself. A session nobody stopped would otherwise absorb every real
+workout recorded while it ran. `contextClamped` is true when a session
+claimed so long a span that only its first 48 hours of surrounding data were
+read for the joined figures.
+
+A rule that needs a second record type to tell an artefact by applies only
+when the exposure policy lets that type be read: the cuff rule needs the
+blood-pressure readings, the profile-weight rule the heights. A withheld type
+is never read to apply a rule. The rule is then not applied, the figure is as
+recorded, and the answer says so with a warning that names the rule and
+nothing else: `resting_hr_cuff_rule_not_applied` (`daily_summary`'s
+`restingHr` may include a cuff's pulse) or `weight_artefact_rule_not_applied`
+(`daily_summary`'s `weight`, or an `hc_aggregate` of weight, may include a
+profile entry). `daily_summary` counts what it left out per kind:
+`hc_bp_duplicates_dropped:<n>`, `hc_other_origins_dropped:<n>` and
+`resting_hr_cuff_pulse_excluded:<n>`.
+
+`data_quality`'s `types` narrows which findings are reported, never what a
+rule may read: asked about `Weight` alone it still tells a profile weight by
+the height beside it, and asked about `ExerciseSession` alone it still reports
+`likely_left_running`. Only the policy withholds context. Its `long_session`
+finding is every exercise session over three hours; `source_switch` is
+reported only when the app that supplied a type is absent, or nearly (at most
+a tenth of the day's total, weighed by the field's sum and not by record
+counts), on the day another takes over, so two apps recording side by side
+are not a switch.
+
+**Which mean.** Heart rate is sampled unevenly, every second during activity
+and every few minutes at rest, so "the mean" depends on what is averaged:
+
+| Field                                                      | What it is                                                                         |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `hr_series` `mean` at `1min`                               | The plain mean of that minute's samples.                                           |
+| `hr_series` `mean` at `5min`, `1h`, or decimated           | The mean of the minute means in the bucket.                                        |
+| `hr_series` `mean` at `5s`                                 | Time-weighted: each reading counts for as long as it stood.                        |
+| `hr_series` `mean` at `raw`                                | The reading itself.                                                                |
+| `sleep_sessions` `hr.mean`, `exercise_sessions` `hr.mean`  | The mean of per-minute means over the session; `min` and `max` are of the samples. |
+| `hc_aggregate` `values.bpm.mean`                           | The plain mean of the samples of the records that start in the bucket.             |
+| `daily_summary` `hrvRmssd`, `respiratoryRate`, `restingHr` | The plain mean of the day's records.                                               |
+
+`hr_events` works on the minute means. An event's baseline is the 10th
+percentile of the quiet minutes in the `window_s` seconds before it, with the
+minutes of an earlier event left out. With the defaults (30 bpm over a
+ten-minute window) a slow climb of a couple of beats a minute is **not**
+reported, because the baseline climbs with it: lengthen `window_s` or lower
+`min_delta_bpm` to look for one. `sleep_sessions`' `hrWake` is the first
+sustained rise after the pulse was last settled, so an awakening the sleeper
+went back to sleep from is not the wake; `stagesOverlap` says the wearable's
+stages overlapped and were cut so that no stretch counts twice. An exercise
+session's `steps`, `distance` and `energy` count a record that only partly
+overlaps the session in proportion to the overlap.
+
+**The exposure policy.** All four rule kinds apply to phone data. A
+`health_system` rule on `device:<id>` removes that phone from every tool,
+`hc_sync_status` and the summary included, and it is never queried; a
+`resource` rule on `hc:<Type>` removes the type from every tool and from
+`coverage`; a `field` rule removes one measurement, as described below.
+
+A `tool` rule denies one of the eleven tools and nothing else. **It does not
+hide that tool's data from the other ten:** with `sleep_sessions` denied, the
+same nights are still in `hc_records`, `daily_summary` and the summary. To
+withhold data, deny the type (`resource`) or the measurement (`field`); a
+tool rule only removes one way of asking.
+
+`hc_sync_status` reports two kinds of thing. Its per-type rows (and the
+`records`, `phoneBacklog` and type counts on the phone's row) cover only the
+types the policy lets the call see; a denied type has no row and is in no
+count. The queue, rollup and upload figures on the phone's row (`backlog`,
+`lastUploadAt`, `recentFailures`) are bookkeeping for the whole phone, are
+not per type, and are shown whenever the phone is.
+
+A `resource` rule's type is checked when the rule is saved: it must be one of
+the record types the companion app maps (all of them, including the ones with
+nothing numeric to summarise, such as `hc:SexualActivity` or
+`hc:MenstruationFlow`) or one a paired phone has reported, spelled exactly as
+rows are tagged. `hc:sexualactivity` is refused with the right spelling, not
+stored as a rule that matches nothing. A type nothing maps
+(`Agg.<Something>` from a newer app) answers `unknown_type:hc:<Type>`, not a
+policy warning.
+
+**Field rules on phone data.** One measurement appears under several names:
+a record's `data.systolic`, an aggregate's `values.systolic.mean`, a
+session's `readings[].systolic`, a day's `bloodPressure.systolic`. A field
+rule on a type names the measurement, not one spelling of it: written as any
+of those (or as plain `systolic`), it removes all of them, in every tool the
+rule's scope covers. That includes the places the measurement is joined onto
+another type's row -- a rule on `hc:HeartRate` `bpm` removes a night's `hr`
+and `hrWake`, a workout's `hr` and a reading's `pulse` -- and numbers derived
+from it (`bmr_fill` is not applied, and says
+`policy_field_removed:hc:BasalMetabolicRate.bmr`, when the rate is hidden). A
+value computed from two types (`likelyLeftRunning`) is not reached by a field
+rule on either; deny a type to remove it. One table of names
+(`worker/src/policy/hc-aliases.ts`, over `JOINED_FIELDS` in
+`worker/src/policy/hc-fields.ts`) drives this, and a test plants every
+numeric field of every type and checks it is gone from every tool's answer.
+A field rule that could remove nothing -- a field the type does not have, in
+a tool that never carries that type -- is refused when it is saved, with the
+reason and the names that would work.
+
+Two things follow a type across rows of another type:
+
+- A figure measured as one type but shown on another type's row belongs to
+  the type it was measured as. A night's `hr` and `hrWake` are heart-rate
+  data, its `skinTempDelta` is skin-temperature data, a reading's `pulse` is
+  heart rate, a workout's `likelyLeftRunning` was read off heart rate and
+  steps, a day's `weighings` are weight data. Denying `hc:HeartRate` removes those fields from `sleep_sessions`,
+  `exercise_sessions`, `blood_pressure` and `daily_summary` as well, with a
+  `policy_resource_denied:hc:HeartRate` warning. The field is removed, not
+  recomputed and not nulled. One table (`JOINED_FIELDS` in
+  `worker/src/policy/hc-fields.ts`) says which field comes from which type, and a
+  test fails if a tool emits a field the table does not name.
+- The platform totals are stored as `Agg.<Metric>` types (`Agg.Steps`).
+  They are not policy objects of their own: `Agg.Steps` is step data, is
+  denied whenever `hc:Steps` is, and its rows are tagged `hc:Steps`.
 
 A single settings toggle, **MCP enabled**, is a kill switch: when it is off,
 every tool call answers `mcp_disabled` immediately, without reading

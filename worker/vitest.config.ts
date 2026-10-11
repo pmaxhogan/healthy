@@ -144,6 +144,28 @@ export default defineConfig({
           name: "integration",
           include: ["test/integration/**/*.test.ts"],
           setupFiles: ["./test/integration/setup.ts"],
+          // Not a matter of taste: with interception on, a test file can hang
+          // for ever after its last test has passed.
+          //
+          // Vitest turns every `console.*` call into an RPC to the main
+          // process and, when a file is done, waits for every such call to be
+          // answered before it reports the file finished. The pool sends those
+          // RPCs over a WebSocket owned by its runner object, and a line
+          // logged from inside another Durable Object (an alarm of
+          // `HcIngestRunner` or `FullRefreshRunner`, say) cannot use that
+          // socket: @cloudflare/vitest-pool-workers 0.22.0 catches the "I/O on
+          // behalf of a different Durable Object" error and holds the line
+          // back until the runner next sends something. If the alarm logs
+          // after the runner's last message, nothing is ever sent again: the
+          // file waits on an answer to a line that never left, at 0% CPU,
+          // with no timeout. An alarm chain still working when the last test
+          // returns is exactly that.
+          //
+          // Uninstrumented, `console.*` is workerd's own and Miniflare prints
+          // it, so the lines still appear; they are just not grouped under the
+          // test that caused them. Drop this once the pool flushes held lines
+          // by itself.
+          disableConsoleIntercept: true,
         },
       },
     ],

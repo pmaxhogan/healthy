@@ -2,8 +2,9 @@
 
 Running day-to-day: what the three cron triggers do, how a rate limit is
 handled, what the reconnect-alert lifecycle looks like, what "needs
-re-auth" actually means, how ghosted calendar events behave, how to rotate
-every secret, and how to wipe the deployment's data.
+re-auth" actually means, how ghosted calendar events behave, how to run the
+phone's Health Connect upload, how to rotate every secret, and how to wipe the
+deployment's data.
 
 ## Cron cadence
 
@@ -29,7 +30,9 @@ deployment owner's timezone in a public repository.
   hourly run is dead at every run -- and re-establishing it can mean an
   emailed code. The keepalive never signs in and never spends an attempt; a
   dead session is left for the hourly run. It writes no `run_log` row, only a
-  `portal.keepalive` log line per account.
+  `portal.keepalive` log line per account. The same tick also wakes the
+  Health Connect ingest runner of every paired phone, as a safety net under the
+  wake the upload route does itself (see below).
 
 An unrecognised cron string is logged and ignored, not guessed at, so a
 schedule added to `worker/wrangler.jsonc` without matching code is a visible
@@ -96,6 +99,20 @@ sign-in page, and the reconnect is done in one pass.
 The card **auto-completes** — marked done and moved to the "done" list —
 the next time a sync sees that connection succeed again. There is nothing
 to dismiss manually.
+
+A second kind of alert, `hc_parked`, is about a paired phone rather than a
+connection. When an upload the Worker had accepted cannot be applied it is set
+aside, not deleted (see [When the queue backs up](#when-the-queue-backs-up)), and
+the first one set aside opens an alert for that phone, with a Trello card where
+Trello is configured. There is
+one open alert per phone (the subject is `device:<id>`, under the same unique
+index), however many uploads are parked. The card says that uploads from the phone
+are waiting, how many and which stable error code at the moment it opened, and links
+to the Phone page; it carries the name you gave the phone (as a reconnect card
+carries a health system's display name) and no id, record type or value. It
+**completes itself** when nothing from the phone is parked any more: after an
+upload that was retried is applied, or when the phone is deleted. The Alerts page
+lists it as "Phone uploads", with a link to the Phone page.
 
 **Not every OAuth failure opens a card.** Only `invalid_grant` on a
 _refresh_ attempt means "the owner must reconnect": the refresh token
@@ -199,6 +216,151 @@ one the owner has taken over is merely forgotten. If the better copy later
 goes away (its organisation is disconnected), the remaining copy is
 calendared again on the next run.
 
+## The phone and Health Connect
+
+A paired phone uploads on its own (see [setup-android.md](setup-android.md));
+the Worker accepts a batch, queues it, and applies it in the background. Day to
+day the only thing to look at is the admin UI's **Phone** page.
+
+### Reading the Phone page
+
+Each paired phone has a card:
+
+- **The status pill.** _revoked_: its token has been revoked (this wins over the
+  rest). _never uploaded_: paired, but nothing has
+  arrived yet. _active_: it uploaded within the last six hours. _stale_: it has not
+  (see below).
+- **A warning, when uploads or rebuilds are parked.** "N uploads could not be
+  applied and are being kept", with their total size and the error codes, and/or "N
+  summary rebuilds could not run", and a **Retry** button that puts both back. It
+  appears only while something is set aside; see
+  [When the queue backs up](#when-the-queue-backs-up).
+- **Last upload / Last seen.** When the Worker last accepted a batch from the
+  phone, and when it last heard from it (any authenticated request, even one it
+  then refused). **Paired** shows when the phone was paired, rotated or revoked; the
+  card heading carries the app version it last reported.
+- **Records and Types.** Records stored, and how many record types are granted
+  or denied on the phone.
+- **Waiting to apply.** The queue: batches the Worker has accepted and not yet
+  applied. It is empty at rest. Parked batches are not in it.
+- **What the phone last reported:** the battery exemption, background read,
+  exercise routes (once the phone has reported them), history read, whether the backfill is complete, and the last error code. A
+  red _no_ on the battery exemption or background read is the usual reason a
+  phone goes stale.
+
+**Show details** adds two tables. _Record types_ is one row per type with its
+permission, record count, first and last record time, backlog on the phone,
+backfill state and coverage status (a denied type reads `unsupported` with a
+"not permitted" notice; a granted type with no records reads "permitted, no
+data"). _Recent uploads_ is the ingest log, newest first: when it arrived, its
+status (`queued`, `applying`, `applied` or `failed`; a `failed` row is a parked
+batch), counts of upserts, deletes and rejected records, size, how long applying
+took, and an error code. Both are counts, instants and stable codes; nothing on this
+page is a health value. The card's other buttons are **Rename**, **Rotate token**,
+**Revoke** and **Delete phone and data**.
+
+### Staleness
+
+A phone is **stale** when no batch has arrived for six hours. The phone syncs
+every 15 minutes, so that is many missed cycles: it is off, offline, has lost
+its background permission, or was revoked. Staleness changes how the data is
+reported, not what is served: the MCP still answers from the stored copy and says
+the source is stale, so an assistant does not take an old reading for a current
+one. A revoked phone also reads as stale in coverage.
+
+### Rotate, revoke, delete
+
+| Action                    | Effect on the token                     | Effect on stored data                                                         | Reversible                       |
+| ------------------------- | --------------------------------------- | ----------------------------------------------------------------------------- | -------------------------------- |
+| **Rotate token**          | New token; the old one is dead at once. | None.                                                                         | Yes: rotate again.               |
+| **Revoke**                | The token stops working.                | Kept, and still served (as stale). Batches already queued are still applied.  | No: pair the phone again as new. |
+| **Delete phone and data** | The device row is deleted.              | Everything deleted, in slices, the queue (parked batches too) and upload log. | No.                              |
+
+Rotate token to hand a phone a fresh one (a lost QR code, a suspected leak): the
+phone must then pair again by scanning the new code, and answers 401 until it
+does. Revoke a phone you no longer have; its history stays, and so does anything
+it had already queued, which the Worker keeps applying. Delete phone and data to
+remove a phone and everything it uploaded, queue included: the Phone page asks
+you to type the phone's name, deletes a bounded amount per call and repeats until
+it is done. A phone's
+history is far more rows than one request may delete, so do not try to delete it
+by hand with one `DELETE`. Wiping never touches the phone's own Health Connect
+data.
+
+### When the queue backs up
+
+Applying a batch is background work: an alarm-driven Durable Object (one per
+phone) applies batches strictly in order, a bounded slice at a time, so a month
+of backfill can take several minutes to drain after the phone has finished
+sending. A short queue is normal during a backfill. If it does not shrink:
+
+1. Look at the card for the parked-uploads warning, then open **Show details** and
+   read the **Recent uploads** table. A `failed` batch with an error code is one
+   the Worker **parked**: kept, set aside and no longer in the queue, so it cannot
+   block the batches behind it (the queue is strictly ordered). Either it could not
+   be read (`batch_unreadable`, `batch_invalid`, `batch_mismatch`,
+   `queue_parts_missing`, `crypto`, `payload_too_large`, `payload_malformed`,
+   `chunk_malformed`), or applying it kept failing and the Worker gave up on it
+   (`apply_gave_up`). Anything else is retried.
+2. **A parked batch is never deleted.** The phone was told it was accepted and has
+   moved on, so the queued body is the only copy of those records. Fix the cause
+   (the Worker's logs name it: `npx wrangler tail`, from `worker/`, shows the
+   runner's lines, which carry the device id, counts and an `errorCode`), then
+   press **Retry**. That puts every parked batch back in the queue in its original
+   order, and every parked rollup or summary mark back in the rebuild list (`POST /api/phone/devices/:id/retry-failed`) and wakes the runner.
+   Applying an old batch after newer ones is safe: an upload only replaces a stored
+   record with an older `lastModified`, and a record deleted since stays deleted. A
+   batch that is parked again after a retry reopens nothing new: the phone's alert
+   is already open. The batch's log row stays (only `applied` rows are pruned, after
+   30 days).
+3. A slice that throws (D1 unavailable, a timeout) is retried after a growing
+   delay, from five seconds up to ten minutes. The runner counts an attempt, and
+   writes the count down, **before** each slice runs, so a slice that never
+   returns (an invocation killed for CPU or memory) is counted too. After eight
+   attempts on the same batch without one finishing, about ten minutes of trying,
+   it is parked as `apply_gave_up`; its count starts again if it is queued again.
+   The ten-minute cron tick wakes the runner regardless. Each slice also logs one
+   `hc.slice` line: the device id, which phase it was in (`apply` or `rebuild`),
+   the statements and milliseconds it spent, the units of work finished, what ended
+   it (`done`, `statements` or `time`) and how many batches are still queued.
+4. When a phone already has more than 96 MiB or 400 batches waiting, the Worker
+   answers its uploads with 429 `backlogged` and `retry-after`; the app waits and
+   retries. Parked batches are not counted. Leave the phone charging and online and
+   it catches up.
+
+Applying keeps its promises under a retry: each chunk is written, with its hourly
+rollup, heart-rate minutes and index rows, in one transaction; a record whose edit
+moved it to another hour is taken out of the old chunk in the same transaction that
+puts it in the new one, so it is in exactly one place; and an hour with more records
+than one database value can hold is split across several rows, never cut short.
+While a backfill is still arriving, each applied batch is followed by a fifth of a
+slice of rebuilding, so daily rollups, nights and sessions start to appear before
+the last batch has landed, and the rest are rebuilt once the queue is empty. A
+rollup row that no longer opens is rebuilt from the stored records (logged as
+`hc.rollup_repaired` or `hc.hr_minute_repaired`). A rollup or summary whose source
+records cannot be read cannot be rebuilt: its mark is parked (`hc.mark_parked`)
+rather than retried for ever with every other mark behind it. That raises no alert;
+an assistant sees it as the warning `hc_rollups_parked:<source>:<n>` on an answer,
+and **Retry** on the Phone page puts these marks back to be rebuilt along with any
+parked uploads.
+
+Nothing here needs a manual fix beyond **Retry**, and **deleting the phone is not a
+way to clear a queue**: it deletes the phone's history, not just its backlog.
+
+### After changing the `timezone` setting
+
+Hourly rollups are in UTC and do not care. **Daily rollups are calendar days in
+the zone of the sealed `timezone` setting**, resolved when a day is rebuilt, not
+when its records arrived, so changing the setting means every daily row was built
+for the wrong zone. The Worker notices the change (the ten-minute tick wakes each
+phone's runner, which compares a keyed digest of the zone against the one each row
+was built for) and rebuilds the daily rollups, one record type at a time, from the
+stored hourly rollups (opening the one chunk at a day's edge only where the zone's
+offset puts the edge inside a UTC hour). Nothing has to be uploaded again. While it runs, daily answers read only rows of the current zone,
+so they may be incomplete for a little while; hourly answers and the raw records
+are unaffected. There is no
+button for it and no default zone in source: the setting is the only input.
+
 ## Rotating secrets
 
 - **`PASSWORD_HASH`** — `npm run set-password` (prompts twice, uploads the
@@ -247,6 +409,10 @@ npx wrangler d1 execute healthy --remote --command "DELETE FROM mcp_audit"
 
 A few things this does **not** do, worth knowing before you rely on it:
 
+- **It does not touch Health Connect data.** A paired phone's records live in
+  the `hc_*` tables, hanging off `devices`. Remove them from the **Phone** page
+  (**Delete phone and data**), which deletes in slices; a bare `DELETE` over a phone's history is
+  too large for D1 to finish in one statement.
 - **`google_account` is a seeded singleton row** (`CHECK (id = 1)`) that
   the code assumes always exists. Reset it with an `UPDATE` back to
   `status = 'disconnected'` rather than deleting the row — deleting it

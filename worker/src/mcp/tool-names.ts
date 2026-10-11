@@ -33,6 +33,19 @@ export const TOOL_NAMES = [
   "get_devices",
   "get_coverage",
   "get_service_requests",
+  // The paired phone's Health Connect data: a source of its own, beside the
+  // health systems. Names as the tool specification fixed them.
+  "hc_coverage",
+  "hc_sync_status",
+  "hc_records",
+  "hc_aggregate",
+  "hr_series",
+  "hr_events",
+  "sleep_sessions",
+  "exercise_sessions",
+  "blood_pressure",
+  "daily_summary",
+  "data_quality",
 ] as const;
 
 /** One tool's name. */

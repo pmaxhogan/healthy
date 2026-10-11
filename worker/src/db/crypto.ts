@@ -283,3 +283,69 @@ export async function sealShort(
 ): Promise<string> {
   return seal(source, plaintext, aad, { pad: true });
 }
+
+// ---------------------------------------------------------------------------
+// Bytes. The Health Connect store seals compressed payloads, and a gzip stream
+// is not text: pushing it through `seal` would mean base64 inside base64.
+// ---------------------------------------------------------------------------
+
+/** The byte envelope: the same AES-GCM frame as `v1:`, around bytes instead of UTF-8. */
+const VERSION_BYTES = "v3";
+
+/**
+ * Encrypt bytes for one cell. A `v3:` envelope, unpadded -- it is for bulk
+ * payloads, whose size class is an accepted leak (see the module comment).
+ *
+ * The version is bound into the AAD exactly as for `v1:` and `v2:`, so a `v3:`
+ * value relabelled as text (or text relabelled as bytes) fails to open; and
+ * `open` refuses a `v3:` envelope outright, as `openBytes` refuses the others.
+ */
+export async function sealBytes(
+  source: KeySource,
+  plaintext: Uint8Array<ArrayBuffer>,
+  aad: string,
+): Promise<string> {
+  const key = await keyFor(source);
+  const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
+  let ciphertext: ArrayBuffer;
+  try {
+    ciphertext = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv, additionalData: boundAad(VERSION_BYTES, aad) },
+      key,
+      plaintext,
+    );
+  } catch (error) {
+    throw cryptoError("seal failed", error);
+  }
+  const envelope = new Uint8Array(IV_BYTES + ciphertext.byteLength);
+  envelope.set(iv, 0);
+  envelope.set(new Uint8Array(ciphertext), IV_BYTES);
+  return `${VERSION_BYTES}:${toBase64Url(envelope)}`;
+}
+
+/** Decrypt a `v3:` cell. One error code for every failure, as with `open`. */
+export async function openBytes(
+  source: KeySource,
+  sealed: string,
+  aad: string,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const key = await keyFor(source);
+  const prefix = `${VERSION_BYTES}:`;
+  if (!sealed.startsWith(prefix)) throw cryptoError("unrecognised sealed envelope");
+  const bytes = fromBase64(sealed.slice(prefix.length), "sealed envelope");
+  if (bytes.length <= IV_BYTES) throw cryptoError("sealed envelope is too short");
+  try {
+    const plaintext = await crypto.subtle.decrypt(
+      {
+        name: "AES-GCM",
+        iv: bytes.subarray(0, IV_BYTES),
+        additionalData: boundAad(VERSION_BYTES, aad),
+      },
+      key,
+      bytes.subarray(IV_BYTES),
+    );
+    return new Uint8Array(plaintext);
+  } catch (error) {
+    throw cryptoError("open failed: wrong key, wrong AAD, or tampered ciphertext", error);
+  }
+}

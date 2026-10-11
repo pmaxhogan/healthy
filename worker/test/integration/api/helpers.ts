@@ -77,8 +77,17 @@ const overrides: Partial<Env> = {
  * `DurableObjectNamespace<HealthyMcp>`, which is not assignable to the
  * unparameterised `DurableObjectNamespace` that worker/src/env.ts declares. `overrides`
  * is typed, so the cast cannot hide a typo in one of them.
+ *
+ * No `HC_INGEST`. The Durable Object behind it reads the runtime's own
+ * `DATA_KEY`, not the one above, so it cannot open a batch these requests queue:
+ * left bound, the ingest route wakes a real runner that fails each batch as
+ * `crypto` from its alarm, some time later, while a test is asserting on the
+ * queue (`phone.test.ts` does). Without it the wake fails, which the route
+ * treats as harmless (`worker/src/hc/kick.ts`), and so does a wipe's last step
+ * (`worker/src/hc/store/wipe.ts`). The runner behind the real route is
+ * `mcp/hc-tools.test.ts`'s job, and a wipe resetting it `hc/runner.test.ts`'s.
  */
-const TEST_ENV = { ...env, ...overrides } as unknown as Env;
+const TEST_ENV = { ...env, ...overrides, HC_INGEST: undefined } as unknown as Env;
 
 export function testCtx(): Ctx {
   return makeCtx(env.DB, TEST_ENV);

@@ -21,6 +21,7 @@ export const JQ_EXAMPLES = {
   get_health_summary: [
     '.[] | select(.kind == "count") | {healthSystem, resourceType, count}',
     '.[] | select(.kind == "recent" and .section == "labs") | {code, value, effective}',
+    '.[] | select(.kind == "phone") | {section, lastUploadAt, time, systolic, diastolic, asleepMin}',
   ],
   list_health_systems: [
     ".[] | {healthSystem, healthSystemId, status, lastSyncAt}",
@@ -101,5 +102,46 @@ export const JQ_EXAMPLES = {
   get_service_requests: [
     ".[] | {code, status, occurrence, requester, reasons}",
     '.[] | select(.status == "active") | {code, occurrence}',
+  ],
+  hc_coverage: [
+    ".[] | {type, availability, recordCount, firstAt, lastAt, origins}",
+    '.[] | select(.availability != "ok") | {type, availability, permission}',
+  ],
+  hc_sync_status: [
+    '.[] | select(.kind == "device") | {healthSystem, status, lastUploadAt, phoneBacklog, queuedBatches, recentFailures}',
+    '.[] | select(.kind == "type_sync" and .backfillComplete == false) | {type, backlog, backfillOldestAt}',
+  ],
+  hc_records: [
+    ".[] | {time: (.time // .start), origin, data}",
+    '.[] | select(.origin | test("wearable")) | .data',
+  ],
+  hc_aggregate: [
+    ".[] | select(.hasData) | {bucket, values, origins, method}",
+    ".[] | [.bucket, (.values | to_entries[0].value.sum)]",
+  ],
+  hr_series: [".[] | [.t, .mean]", ".[] | select(.max > 120) | {t, max, origin}"],
+  hr_events: [
+    ".[] | {start, deltaBpm, peakBpm, timeToPeakS, context}",
+    '.[] | select(.context != "exercise") | {start, baselineBpm, peakBpm}',
+  ],
+  sleep_sessions: [
+    ".[] | {date, asleepMin, awakeMin, wearableWake, hrWake, restingHr}",
+    ".[] | {date, deep: .stageMin.DEEP, rem: .stageMin.REM, hrv: .hrv.median}",
+  ],
+  exercise_sessions: [
+    ".[] | {start, title, exerciseType, durationMin, hr, energy, distance}",
+    ".[] | select(.likelyLeftRunning) | {start, end, durationMin}",
+  ],
+  blood_pressure: [
+    '.[] | select(.kind == "session") | {start, systolic, diastolic, pulse, readingCount}',
+    ".[] | .readings[]? | [.time, .systolic, .diastolic, .origin]",
+  ],
+  daily_summary: [
+    ".[] | {date, steps, totalKcal, asleep: .sleep.asleepMin, restingHr, flags}",
+    ".[] | select(.flags | length > 0) | {date, flags}",
+  ],
+  data_quality: [
+    ".[] | {resourceType, kind, reason, date, at, hour}",
+    "group_by(.kind)[] | {kind: .[0].kind, findings: length}",
   ],
 } as const satisfies Record<ToolName, readonly string[]>;

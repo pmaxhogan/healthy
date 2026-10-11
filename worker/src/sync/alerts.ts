@@ -1,6 +1,6 @@
 /**
- * Re-auth alerts: the D1 row, the Trello card, and the promise that neither can
- * break a sync.
+ * Alerts -- a connection to renew, a phone's uploads set aside: the D1 row, the
+ * Trello card, and the promise that neither can break a sync.
  *
  * Two guarantees this module exists to make.
  *
@@ -20,10 +20,16 @@
  * never a card body, which contains one.
  */
 
+import { buildParkedCard } from "../alerts/parked.ts";
 import { buildReconnectCard } from "../alerts/reconnect.ts";
 import { createTrelloAlerts } from "../alerts/trello.ts";
 import { makeRepos } from "../db/index.ts";
-import { GOOGLE_SUBJECT, portalSubject, healthSystemSubject } from "../db/repos/alerts.ts";
+import {
+  GOOGLE_SUBJECT,
+  deviceSubject,
+  portalSubject,
+  healthSystemSubject,
+} from "../db/repos/alerts.ts";
 import { errorFields } from "../lib/log.ts";
 
 import { DEFAULT_PUBLIC_ORIGIN, resolveDeps } from "./deps.ts";
@@ -126,7 +132,7 @@ export async function openReconnectAlert(
   const key = subjectKey(subject);
   try {
     const repos = makeRepos(ctx);
-    const { alert, created } = await repos.alerts.openOrGet(key);
+    const { alert, created } = await repos.alerts.openOrGet(key, "reconnect");
     if (!created && alert.trello_card_id !== null) {
       ctx.log.debug("alert.already_open", { subject: key });
       return;
@@ -189,6 +195,97 @@ export async function resolveReconnectAlert(
     const repos = makeRepos(ctx);
     const open = await repos.alerts.getOpen(key);
     if (open === null) return;
+    const resolved = await repos.alerts.resolve(key);
+    const cardId = resolved?.trello_card_id ?? null;
+    if (cardId === null) return;
+    const trello = trelloFor(ctx, resolveDeps(deps).trelloFetch);
+    if (trello === null) return;
+    await trello.completeCard(cardId);
+    ctx.log.info("alert.card_completed", { subject: key });
+  } catch (error) {
+    ctx.log.error("alert.resolve_failed", { subject: key, ...errorFields(error) });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// A phone whose uploads were set aside (worker/src/hc/apply.ts). The same two
+// guarantees as above, for the same reasons: nothing here throws into the
+// apply, and the row is the truth while the card is a convenience.
+// ---------------------------------------------------------------------------
+
+/** What the card calls a phone whose row has gone by the time the card is built. */
+const UNNAMED_DEVICE = "a phone";
+
+/**
+ * Open (or re-find) the alert for a device with uploads set aside, and make
+ * sure a Trello card tracks it.
+ *
+ * One alert per device, however many batches are parked: called for every
+ * batch that is set aside, it creates one row and one card, and an alert that
+ * is already open with its card is left exactly as it is. The card carries the
+ * count and the error code as they were when it was opened; the Phone page has
+ * the current ones.
+ */
+export async function openParkedAlert(
+  ctx: Ctx,
+  deviceId: string,
+  errorCode: string,
+  deps: SyncDeps = {},
+): Promise<void> {
+  const key = deviceSubject(deviceId);
+  try {
+    const repos = makeRepos(ctx);
+    const { alert, created } = await repos.alerts.openOrGet(key, "hc_parked");
+    if (!created && alert.trello_card_id !== null) {
+      ctx.log.debug("alert.already_open", { subject: key });
+      return;
+    }
+    const resolved = resolveDeps(deps);
+    const trello = trelloFor(ctx, resolved.trelloFetch);
+    if (trello === null) return;
+
+    const device = await repos.devices.get(deviceId);
+    const parked = await repos.hcIngestQueue.parked(deviceId);
+    // The path only: a URL that named the device would put its id in Trello.
+    const url = `${resolved.origin ?? DEFAULT_PUBLIC_ORIGIN}/phone`;
+    const card = buildParkedCard({
+      deviceName: device?.name ?? UNNAMED_DEVICE,
+      phoneUrl: url,
+      batches: Math.max(1, parked.batches),
+      errorCodes: [errorCode],
+      occurredAt: new Date(alert.opened_at * 1000),
+    });
+    const { cardId } = await trello.openReconnectCard({
+      title: card.title,
+      description: card.description,
+      url,
+    });
+    await repos.alerts.setCard(alert.id, cardId);
+    ctx.log.info("alert.opened", { subject: key, reasonCode: errorCode });
+  } catch (error) {
+    // Never rethrow: an apply that failed because the alert about a parked
+    // batch failed would turn one batch's problem into the whole queue's.
+    ctx.log.error("alert.open_failed", { subject: key, ...errorFields(error) });
+  }
+}
+
+/**
+ * Close a device's alert and complete its card, once it has nothing set aside
+ * any more: its parked batches were queued again and applied, or it was wiped.
+ * Called after every applied batch; with no alert open that is one SELECT.
+ */
+export async function resolveParkedAlert(
+  ctx: Ctx,
+  deviceId: string,
+  deps: SyncDeps = {},
+): Promise<void> {
+  const key = deviceSubject(deviceId);
+  try {
+    const repos = makeRepos(ctx);
+    const open = await repos.alerts.getOpen(key);
+    if (open === null) return;
+    const parked = await repos.hcIngestQueue.parked(deviceId);
+    if (parked.batches > 0) return;
     const resolved = await repos.alerts.resolve(key);
     const cardId = resolved?.trello_card_id ?? null;
     if (cardId === null) return;

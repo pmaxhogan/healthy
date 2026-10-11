@@ -42,6 +42,7 @@
 import { ARRAY_SEGMENT, isChoiceSegment, matchesChoice } from "@shared/policy-path.ts";
 
 import { expandPath } from "./aliases.ts";
+import { hcCandidates, isHcResourceType } from "./hc-aliases.ts";
 import {
   containedTypes,
   isUnrestricted,
@@ -55,6 +56,7 @@ import {
   isHealthSystemDenied,
   isSensitiveAllowed,
   isToolDenied,
+  phoneFieldRulesFor,
   type ItemScope,
   type PolicyRules,
 } from "./rules.ts";
@@ -220,12 +222,21 @@ function applyFieldRules(
   warnings: Set<string>,
 ): unknown {
   let current = value;
-  for (const rule of fieldRulesFor(rules, scope)) {
+  // A paired phone's row: one measurement has several spellings, and a row
+  // can carry another record type's data, so both which rules apply and what
+  // each one names on this row come from `./hc-aliases.ts`.
+  const phone = shape === "normalized" && isHcResourceType(scope.resourceType);
+  const reaching = phone ? phoneFieldRulesFor(rules, scope) : fieldRulesFor(rules, scope);
+  for (const rule of reaching) {
     let ruleChanged = false;
-    const candidates =
-      shape === "normalized"
-        ? normalizedCandidates(scope.resourceType, rule.path)
-        : expandPath(scope.resourceType, rule.path, "toRaw");
+    const candidates = phone
+      ? hcCandidates({
+          tool: scope.tool,
+          rowType: scope.resourceType,
+          ruleType: rule.resourceType,
+          path: rule.path,
+        })
+      : fhirCandidates(scope.resourceType, rule.path, shape);
     for (const candidate of candidates) {
       const next = prune(current, candidate);
       // `remove` is unreachable for a parsed (or alias-translated) rule: every
@@ -242,6 +253,17 @@ function applyFieldRules(
     }
   }
   return current;
+}
+
+/** A FHIR rule's path in the vocabulary of the shape being filtered. */
+function fhirCandidates(
+  resourceType: string,
+  path: readonly string[],
+  shape: "normalized" | "raw",
+): readonly (readonly string[])[] {
+  return shape === "normalized"
+    ? normalizedCandidates(resourceType, path)
+    : expandPath(resourceType, path, "toRaw");
 }
 
 /**

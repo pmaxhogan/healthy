@@ -15,9 +15,12 @@ import { makeCtx } from "./client.ts";
 import { makeAlertsRepo } from "./repos/alerts.ts";
 import { makeCalendarEventsRepo } from "./repos/calendar-events.ts";
 import { makeConnectionsRepo } from "./repos/connections.ts";
+import { makeDevicesRepo } from "./repos/devices.ts";
 import { makeFhirCacheRepo } from "./repos/fhir-cache.ts";
 import { makeFhirSyncStateRepo } from "./repos/fhir-sync-state.ts";
 import { makeGoogleAccountRepo } from "./repos/google-account.ts";
+import { makeHcIngestQueueRepo } from "./repos/hc-ingest-queue.ts";
+import { makeHcStatusRepo } from "./repos/hc-status.ts";
 import { makeHealthSystemsRepo } from "./repos/health-systems.ts";
 import { makeLoginAttemptsRepo } from "./repos/login-attempts.ts";
 import { makeMailInboxRepo } from "./repos/mail-inbox.ts";
@@ -53,6 +56,9 @@ export function makeRepos(ctx: Ctx) {
     portalMessages: makePortalMessagesRepo(ctx),
     portalMessageAttachments: makePortalMessageAttachmentsRepo(ctx),
     mailInbox: makeMailInboxRepo(ctx),
+    devices: makeDevicesRepo(ctx),
+    hcIngestQueue: makeHcIngestQueueRepo(ctx),
+    hcStatus: makeHcStatusRepo(ctx),
   };
 }
 

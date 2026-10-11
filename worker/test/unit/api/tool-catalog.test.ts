@@ -37,6 +37,17 @@ const EXPECTED_NAMES = [
   "get_coverage",
   "get_service_requests",
   "get_health_summary",
+  "hc_coverage",
+  "hc_sync_status",
+  "hc_records",
+  "hc_aggregate",
+  "hr_series",
+  "hr_events",
+  "sleep_sessions",
+  "exercise_sessions",
+  "blood_pressure",
+  "daily_summary",
+  "data_quality",
 ];
 
 describe("TOOL_CATALOG", () => {
@@ -63,9 +74,24 @@ describe("TOOL_CATALOG", () => {
     for (const tool of TOOL_CATALOG) {
       for (const type of tool.resourceTypes) {
         // Upper camel: a lower-case entry would never match a rule the owner wrote
-        // against a FHIR resource type.
-        expect(type, tool.name).toMatch(/^[A-Z][A-Za-z]+$/);
+        // against a FHIR resource type. A phone's Health Connect types are the
+        // same names behind `hc:`, which is how its rows are tagged.
+        expect(type, tool.name).toMatch(/^(?:[A-Z][A-Za-z]+|hc:[A-Z][A-Za-z0-9]+)$/);
       }
+    }
+  });
+
+  it("gives every Health Connect tool hc: types and no FHIR ones", () => {
+    const phoneTools = TOOL_CATALOG.filter((tool) => !tool.name.startsWith("get_")).filter(
+      (tool) => tool.name !== "list_health_systems",
+    );
+
+    expect(phoneTools).toHaveLength(11);
+    for (const tool of phoneTools) {
+      expect(
+        tool.resourceTypes.every((type) => type.startsWith("hc:")),
+        tool.name,
+      ).toBe(true);
     }
   });
 

@@ -20,6 +20,7 @@
  *    `Intl` formats.
  */
 
+import { deviceStatus } from "../hc/coverage.ts";
 import { toIso } from "../lib/time.ts";
 import { parseAllowlistCsv } from "../mail/classify.ts";
 import { buildRules, fieldSpecOf } from "../policy/rules.ts";
@@ -37,8 +38,13 @@ import type {
   RunSummary as DbRunSummary,
   Settings,
 } from "../db/schemas.ts";
+import type { IngestLogRow, SyncStateRow, Device } from "../hc/device.ts";
 import type {
   ClientSecretSource,
+  DeviceCoverageRowDto,
+  DeviceDto,
+  DeviceIngestLogDto,
+  DeviceReportDto,
   AlertDto,
   ConnectionDto,
   GoogleAccountDto,
@@ -102,7 +108,7 @@ export interface AuditEntryLike {
 
 /** A unix second as an ISO instant, passing null through. */
 function isoOrNull(seconds: number | null): string | null {
-  return seconds === null ? null : toIso(seconds);
+  return seconds === null ? null : isoFromMs(seconds * 1000);
 }
 
 /**
@@ -485,5 +491,97 @@ export function toAuditDto(entry: AuditEntryLike): McpAuditDto {
     errorCode: entry.errorCode,
     durationMs: entry.durationMs ?? 0,
     jq: entry.jq ?? null,
+  };
+}
+
+/**
+ * A paired phone. `queue`, `report` and `totals` are read elsewhere (the queue
+ * and status repos, the sealed sync report) and passed in already projected, so
+ * this stays a pure function of its argument.
+ */
+export function toDeviceDto(input: {
+  device: Device;
+  now: number;
+  queue: { batches: number; bytes: number };
+  parked: { batches: number; bytes: number; errorCodes: string[] };
+  parkedMarks: number;
+  report: DeviceReportDto | null;
+  totals: DeviceDto["totals"];
+}): DeviceDto {
+  const { device } = input;
+  return {
+    id: device.id,
+    name: device.name,
+    status: deviceStatus(device, input.now),
+    createdAt: isoOrNull(device.createdAt) ?? new Date(0).toISOString(),
+    rotatedAt: isoOrNull(device.rotatedAt),
+    revokedAt: isoOrNull(device.revokedAt),
+    lastSeenAt: isoOrNull(device.lastSeenAt),
+    lastUploadAt: isoOrNull(device.lastUploadAt),
+    appVersion: device.appVersion,
+    queue: input.queue,
+    parked: input.parked,
+    parkedMarks: input.parkedMarks,
+    report: input.report,
+    totals: input.totals,
+  };
+}
+
+/**
+ * Epoch milliseconds as an ISO instant, or null for anything that is not one: a
+ * non-finite number or one outside the range a `Date` holds. Total on purpose:
+ * this page is how the owner revokes a misbehaving phone, so a bad stored value
+ * must render as "unknown", never throw.
+ */
+export function isoFromMs(ms: number | null): string | null {
+  if (ms === null || !Number.isFinite(ms)) return null;
+  const date = new Date(ms);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+/** One record type of a phone: its stored bookkeeping plus the status coverage computed for it. */
+export function toDeviceCoverageRowDto(
+  row: SyncStateRow,
+  coverage: Pick<CoverageEntryLike, "status" | "ageHours" | "notices">,
+): DeviceCoverageRowDto {
+  return {
+    recordType: row.recordType,
+    permission: row.permissionState,
+    recordCount: row.recordCount,
+    firstAt: isoFromMs(row.firstMs),
+    lastAt: isoFromMs(row.lastMs),
+    lastUploadAt: isoOrNull(row.lastUploadAt),
+    tokenAgeS: row.tokenAgeS,
+    backlog: row.backlog,
+    backfillComplete: row.backfillComplete,
+    backfillOldestAt: isoFromMs(row.backfillOldestMs),
+    status: coverage.status,
+    notice: coverage.notices?.[0]?.meaning ?? null,
+    ageHours: coverage.ageHours ?? null,
+  };
+}
+
+/** The part of a `CoverageEntry` the Phone page shows. */
+interface CoverageEntryLike {
+  status: DeviceCoverageRowDto["status"];
+  ageHours?: number | undefined;
+  notices?: readonly { meaning: string }[] | undefined;
+}
+
+export function toDeviceIngestLogDto(row: IngestLogRow): DeviceIngestLogDto {
+  return {
+    receivedAt: toIso(row.receivedAt),
+    appliedAt: isoOrNull(row.appliedAt),
+    status: row.status,
+    errorCode: row.errorCode,
+    upserts: row.upserts,
+    deletes: row.deletes,
+    rejected: row.rejected,
+    applied: row.applied,
+    superseded: row.superseded,
+    removed: row.removed,
+    bodyBytes: row.bodyBytes,
+    rawBytes: row.rawBytes,
+    applyMs: row.applyMs,
   };
 }

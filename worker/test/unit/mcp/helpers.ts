@@ -16,6 +16,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerTools } from "../../../src/mcp/tools/index.ts";
 import { EMPTY_RULES } from "../../../src/policy/rules.ts";
 
+import { emptyHc, fakeHcReads } from "./hc-fake.ts";
+
+import type { FakeHc } from "./hc-fake.ts";
 import type { Logger } from "../../../src/lib/log.ts";
 import type {
   AuditRecord,
@@ -242,6 +245,8 @@ export interface FakeState {
   counts: CacheCount[];
   syncStatus: SyncStatusEntry[];
   document: DocumentTextResult;
+  /** The Health Connect store. No phone is paired unless a test adds one. */
+  hc: FakeHc;
   /** Every audit row the tools wrote, in order. */
   audits: AuditRecord[];
   prunes: number;
@@ -257,6 +262,7 @@ export interface FakeOverrides {
   portalMessages?: Map<string, PortalMessageRecord[]>;
   messageSync?: PortalMessageSyncEntry[];
   document?: DocumentTextResult;
+  hc?: FakeHc;
 }
 
 /** The two-health system world every tool test starts from. */
@@ -303,6 +309,7 @@ export function fakeState(overrides: FakeOverrides = {}): FakeState {
       text: "Patient reports seasonal symptoms.",
       cached: false,
     },
+    hc: overrides.hc ?? emptyHc(),
     audits: [],
     prunes: 0,
     beginCalls: 0,
@@ -370,6 +377,8 @@ export function fakeDeps(state: FakeState): ToolDeps {
       Promise.resolve(state.attachmentContent.get(`${healthSystemId}:${attachmentId}`) ?? null),
     counts: () => Promise.resolve(state.counts),
     syncStatus: () => Promise.resolve(state.syncStatus),
+    timezone: () => Promise.resolve(state.hc.timezone),
+    hc: fakeHcReads(state.hc),
     documentText: () => Promise.resolve(state.document),
     recordAudit: (entry) => {
       state.audits.push(entry);

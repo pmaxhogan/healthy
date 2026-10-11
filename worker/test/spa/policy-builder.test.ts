@@ -144,7 +144,7 @@ describe("PolicyRuleBuilder", () => {
     expect(picked).toContain("participants → name");
     expect(picked).toContain("name");
     expect(wrapper.find('[data-test="draft-sentence"]').text()).toBe(
-      "Hide participants → name and name in get_care_team at all health systems",
+      "Hide participants → name and name in get_care_team at all sources",
     );
 
     await vi.advanceTimersByTimeAsync(600);

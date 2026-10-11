@@ -196,7 +196,7 @@ describe("DELETE /api/google", () => {
   it("completes the open reconnect card, so a disconnect does not leave a stale one", async () => {
     await connectGoogle();
     const repos = testRepos();
-    const alert = await repos.alerts.openOrGet("google");
+    const alert = await repos.alerts.openOrGet("google", "reconnect");
     await repos.alerts.setCard(alert.alert.id, "card-7");
     const stub = stubFetch([
       { match: "oauth2.googleapis.com/revoke", method: "POST", body: {} },

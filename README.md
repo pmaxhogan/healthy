@@ -6,8 +6,15 @@ appointments in sync on their own Google Calendar, and serves the whole
 aggregated record read-only to an AI assistant over MCP. It talks to health
 systems the same way MyChart's own app does — patient-facing SMART on FHIR,
 authorised by the account owner — so it can only ever read what that person
-has already consented to share about themselves. There is no multi-tenancy,
-no sign-up, and no shared database: one deployment is one person's data.
+has already consented to share about themselves. A small Android companion
+app adds a second kind of source: the person's own Health Connect data
+(heart rate, sleep, steps, blood pressure and the rest), pushed from their
+phone in the background and served over the same MCP. There is no
+multi-tenancy, no sign-up, and no shared database: one deployment is one
+person's data.
+
+This is a monorepo: the Cloudflare Worker and its admin UI are in
+[`worker/`](worker), the Android companion app in [`android/`](android).
 
 **Status: early.** The toolchain, schema, sync engine, MCP server and admin UI
 are largely in place; hardening and the first real deployment are ongoing.
@@ -28,7 +35,11 @@ are largely in place; hardening and the first real deployment are ongoing.
   questions about medications, labs, conditions, and appointments across
   every connected health system — without ever being handed a credential.
   A server-side deny-list can withhold whole tools, resource types,
-  health systems, or individual fields before anything is serialised.
+  health systems, phones, or individual fields before anything is serialised.
+  It covers a phone's Health Connect data the same way: a rule can name a
+  Health Connect tool, an `hc:<Type>` resource type, a phone as a source, or a
+  field, and a field rule removes that measurement under every name it has in
+  every tool, including the values joined or derived from it.
 - **Secure messages.** Where a patient portal is connected, the hourly portal
   pass also reads its Message Center -- every folder, every conversation, every
   message -- with the session it already holds, and the MCP serves them
@@ -37,22 +48,39 @@ are largely in place; hardening and the first real deployment are ongoing.
   `get_message_attachment` returns an attached file the pass fetched and
   sealed), deduplicated across health systems, sealed at rest like everything
   else.
-- **Re-auth alerts.** When a connection's refresh token stops working, opens
-  a Trello card with a one-click reconnect link, and closes it automatically
-  once the connection is restored.
+- **Health Connect from your phone.** The Android companion app
+  ([docs/setup-android.md](docs/setup-android.md)) reads every Health Connect
+  record type it is granted, in the background every 15 minutes, plus a
+  full-history backfill you start from the app, and uploads it to this Worker. The Worker keeps every
+  record sealed, with sealed rollups for fast queries, so an assistant can
+  answer from the cloud copy with the phone off, through its own set of MCP
+  tools (heart-rate series, sleep, exercise, blood pressure, daily summaries,
+  data-quality flags — see [docs/mcp.md](docs/mcp.md)). Each phone has its own
+  revocable token, paired by scanning a QR code (or pasting the same pairing
+  code) from the admin UI's **Phone** page. An upload the Worker accepted but
+  cannot apply is never deleted: it is set aside, the Phone page shows it with
+  its error code and a **Retry** button, and the batches behind it carry on.
+  Install the app with Obtainium:
+  `obtainium://add/https://github.com/pmaxhogan/healthy`.
+- **Alerts.** When a connection's refresh token stops working, opens a Trello
+  card with a one-click reconnect link, and closes it automatically once the
+  connection is restored. A phone whose uploads have been set aside gets a card
+  of its own, which completes itself when nothing from the phone is waiting.
 - **Admin UI.** A small Vue SPA, served by the Worker, for adding
-  connections, choosing the target calendar, tuning how events look, and
-  reviewing what the MCP has been asked and what it withheld.
+  connections, choosing the target calendar, tuning how events look,
+  pairing and managing phones (the **Phone** page), and reviewing what the
+  MCP has been asked and what it withheld.
 
 ## Architecture
 
 ```
-   owner's browser                              claude.ai / Claude Code
-         |                                          (MCP client)
-   Cloudflare Access (SSO)                              |
-         |                                     OAuth (health:read), HTTPS
-   password session                                     |
-         v                                              v
+   owner's browser        Android phone              claude.ai / Claude Code
+         |            (companion app,                    (MCP client)
+   Cloudflare Access   Health Connect)                        |
+         |                   |                      OAuth (health:read), HTTPS
+   password session   device bearer token                     |
+         |            POST /ingest/health-connect             |
+         v                   v                                v
   +---------------------------------------------------------------------+
   |                     Cloudflare Worker  "healthy"                    |
   |                                                                     |
@@ -61,21 +89,30 @@ are largely in place; hardening and the first real deployment are ongoing.
   |   - SPA (assets)      /*              - /oauth/token       (Durable |
   |   - OAuth callbacks  /oauth/*         - /oauth/register     Object, |
   |   - public pages     /about /health   - /.well-known/*      SQLite) |
+  |   - ingest  /ingest/health-connect                                  |
   |         |                  |                              |         |
   +---------|------------------|------------------------------|---------+
             |                  |                              |
             v                  v                              v
       Epic FHIR APIs     Google Calendar                MCP tools
    (patient SMART on     (owner's primary          -> policy filter (deny-list)
-    FHIR, per org)     calendar, its own events)   -> normalized or raw FHIR
+    FHIR, per org)     calendar, its own events)   -> normalized or raw FHIR,
+                                                      and Health Connect data
 
                  Trello  (re-auth alert cards, opened by the sync engine)
 
-  Storage:  D1 "healthy"      — health_systems, connections, FHIR cache, audit, run log, settings
+  Health Connect pipeline (phone -> Worker -> MCP):
+     phone --gzip JSON--> /ingest/health-connect --> sealed queue (D1)
+        --> HcIngestRunner (Durable Object, alarm-driven)
+        --> sealed hour chunks + sealed rollups (D1) --> MCP tools
+
+  Storage:  D1 "healthy"      — health_systems, connections, FHIR cache, audit, run log, settings,
+                                devices and the sealed Health Connect store
             Workers KV "OAUTH_KV" — MCP OAuth client registrations and grants
   Cron:     hourly  "7 * * * *"   — token keepalive, then an Encounter-only appointment sync
             4 hours "23 2,6,10,14,18,22 * * *" — full-scope FHIR refresh that repopulates the MCP cache
-            10 min  "*/10 * * * *" — patient-portal session keepalive (never signs in)
+            10 min  "*/10 * * * *" — patient-portal session keepalive (never signs in);
+                                     also wakes the Health Connect ingest runners
 ```
 
 One Worker does everything. Requests arrive at a custom domain behind
@@ -86,9 +123,26 @@ sits in front of the same Worker and owns the MCP-facing OAuth surface
 client — which cannot complete an interactive Access login — never has to.
 The MCP server itself lives in a SQLite-backed Durable Object.
 
+The phone's upload is the one other machine-facing route. `POST
+/ingest/health-connect` sits above the owner gate, bypasses Access, and is
+authenticated by its own per-device bearer token instead; all that token can do
+is queue batches (records, deletions by id and a sync report) for that one
+device, and read nothing back. See [SECURITY.md](SECURITY.md).
+
 - **Storage.** Cloudflare D1 for everything durable; Workers KV for MCP OAuth
-  state; Durable Objects for the MCP session and for driving a manual full
-  refresh.
+  state; Durable Objects for the MCP session, for driving a manual full
+  refresh, and for applying a phone's uploads.
+- **Health Connect.** The route validates and seals a batch into a queue and
+  acknowledges it; an alarm-driven Durable Object (one per device) then applies
+  it, in order, into sealed hour chunks (every record, losslessly) and sealed
+  rollups (hourly, daily, per-minute heart rate, sleep nights, exercise
+  sessions); an hour too large for one row is split across rows, and rollups
+  start to appear while a backfill is still arriving. A request cannot do that
+  work itself: a backfill batch touches more rows than one request may. A batch
+  that cannot be applied is parked, not deleted: the phone has already moved
+  past it, so the queued copy is the only one. No new Worker secret is needed
+  — a device's token lives in D1 as a hash, and its data is sealed with the
+  existing `DATA_KEY`.
 - **Long work.** A calendar sync fits in the request's `waitUntil`. A full
   refresh of a large record does not — `waitUntil` is cancelled about thirty
   seconds after the response — so the manual refresh button queues the work on
@@ -96,11 +150,27 @@ The MCP server itself lives in a SQLite-backed Durable Object.
   invocation and re-arms until the record is walked. The nightly refresh runs
   straight through, because a cron invocation has the wall clock for it.
 - **Encryption.** Tokens, per-organisation client secrets, patient
-  identifiers and every cached clinical payload are AES-GCM-256 encrypted by
+  identifiers, every cached clinical payload and every Health Connect record
+  and rollup are AES-GCM-256 encrypted by
   the application before they reach D1, with the AAD bound to the table,
   column and row. See [SECURITY.md](SECURITY.md).
 - **Vendor abstraction.** Health systems sit behind a `EhrAdapter`
   interface, with two implementations: Epic and ModMed's certified FHIR API.
+
+## Repository layout
+
+```
+worker/    The Cloudflare project: src/ (Worker), ui/ (Vue admin SPA), shared/,
+           migrations/, test/, scripts/, wrangler.jsonc, and its own package.json
+android/   The companion app: a Gradle project (Kotlin, Compose), module app/
+docs/      Setup, operations and development guides
+.github/   CI (the Worker gate, gitleaks and the Android job), the Android release
+           workflow, Dependabot and its auto-merge, the brands job
+```
+
+The repository root is an npm workspace over `worker/`: `npm run check`, `npm
+run deploy` and the other scripts there fan into it. Gradle is separate and is
+not part of `npm run check`; see [docs/development.md](docs/development.md).
 
 ## Quick start
 
@@ -132,7 +202,8 @@ bypass Access, is in **[docs/setup-cloudflare.md](docs/setup-cloudflare.md)**.
 
 ### 3. Secrets
 
-None of these live in the repository. Set them with
+None of these live in the repository. The Health Connect pipeline adds none: a
+paired phone's token is minted in the admin UI and stored hashed in D1. Set them with
 `wrangler secret put <NAME>`, or in a gitignored `worker/.dev.vars` for local
 development (one `NAME=value` line each).
 
@@ -218,6 +289,17 @@ Then, in the admin UI: add your health systems and connect each one
 ([docs/setup-google.md](docs/setup-google.md)), and wire up Trello alerts
 ([docs/setup-trello.md](docs/setup-trello.md)).
 
+### Phone (optional)
+
+To bring in Health Connect data, install the companion app on an Android 17+
+phone with Obtainium (`obtainium://add/https://github.com/pmaxhogan/healthy`),
+then open the admin UI's **Phone** page, pair the phone by scanning the QR code
+it shows (or pasting the **Pairing code** under it into the app), and grant the
+Health Connect permissions. The path
+`/ingest/health-connect` must bypass Cloudflare Access
+([docs/setup-cloudflare.md](docs/setup-cloudflare.md)); everything else is in
+**[docs/setup-android.md](docs/setup-android.md)**.
+
 ### Patient portal (optional)
 
 Two portal vendors are supported: Epic's MyChart and ModMed's patient portal.
@@ -272,12 +354,17 @@ does FHIR encounters.
   custom domain, Access apps, Workers Builds.
 - **[docs/setup-trello.md](docs/setup-trello.md)** — the board, key/token,
   and list ids the alert flow needs.
+- **[docs/setup-android.md](docs/setup-android.md)** — the Android companion
+  app: installing it with Obtainium, pairing, Health Connect permissions,
+  backfill, building and releasing it.
 - **[docs/mcp.md](docs/mcp.md)** — connecting a claude.ai connector, the
   consent flow, and the exposure policy's deny-list syntax.
 - **[docs/operations.md](docs/operations.md)** — cron cadence, backoff,
-  alerts, re-auth, ghost events, rotating secrets, wiping data.
+  alerts, re-auth, ghost events, the phone and Health Connect (including
+  uploads set aside and how to retry them), rotating secrets, wiping data.
 - **[docs/development.md](docs/development.md)** — repo layout, `npm run
-check`, tests, fixtures, and the dependency-update pipeline.
+check`, tests (including the Android unit tests and the phone-to-Worker contract
+  fixture), fixtures, and the dependency-update pipeline.
 - **[SECURITY.md](SECURITY.md)** — the threat model.
 
 ## Development

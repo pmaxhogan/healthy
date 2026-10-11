@@ -34,6 +34,12 @@
  * therefore only ever true when the caller passed a `limit` and it actually cut
  * something -- it is never how a tool quietly caps its own answer.
  *
+ * The Health Connect tools add one thing after `limit`: a soft byte budget
+ * (`PageInput`), the single caller-liftable exception to that rule. It cuts
+ * at a row boundary, always says so (`truncated`, plus a `cursor` to continue
+ * from), and is absent from every other tool. A paged answer is sent as
+ * compact JSON, so the budget is the size of the rows as they travel.
+ *
  * `jq` sees only what the policy released: it runs on the filtered items, so a
  * denied field is not there to be selected, and a denied resource type or health
  * system is not in the array at all. `items` after `jq` is always the array of
@@ -77,6 +83,9 @@ export type ToolErrorCode =
   | "unsupported_document"
   | "upstream_error"
   | "internal_error"
+  | "invalid_cursor"
+  | "cursor_expired"
+  | "invalid_range"
   | JqFailureCode;
 
 /**
@@ -95,6 +104,17 @@ const ERROR_MESSAGES = new Map<ToolErrorCode, string>([
   ["unsupported_document", "the document is not in a format this server can turn into text"],
   ["upstream_error", "the health system could not be reached or refused the request"],
   ["internal_error", "the request failed"],
+  [
+    "invalid_cursor",
+    "that cursor is not one this tool issued for these arguments; repeat the call that " +
+      "returned it, changing nothing but `cursor`",
+  ],
+  [
+    "cursor_expired",
+    "the phone's data changed after that cursor was issued, so the remaining pages would " +
+      "not line up with the ones already read; repeat the call without `cursor` to start again",
+  ],
+  ["invalid_range", "`end` is before `start`; a range runs from `start` up to `end`"],
   ["jq_error", "the jq program failed; `detail` has jq's message"],
   ["jq_budget_exceeded", "the jq program exceeded its step budget"],
   ["jq_out_of_memory", "the jq program exceeded its memory ceiling"],
@@ -121,9 +141,14 @@ export interface ToolOutcome {
   jq?: JqAudit | undefined;
 }
 
-function textResult(payload: unknown, isError: boolean): CallToolResult {
+/**
+ * One text block. Indented for reading, except a paged answer: its byte budget
+ * is a promise about the bytes actually sent, and indentation would double
+ * them, so a paged answer is compact JSON and the budget counts what it sends.
+ */
+function textResult(payload: unknown, isError: boolean, compact = false): CallToolResult {
   return {
-    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+    content: [{ type: "text", text: JSON.stringify(payload, null, compact ? undefined : 2) }],
     ...(isError && { isError: true }),
   };
 }
@@ -186,8 +211,54 @@ export interface RespondInput {
    * derives (a count, a date range, a group) can carry a withheld value.
    */
   reshape?: ((rows: readonly ReshapeRow[]) => Reshaped) | undefined;
+  /**
+   * Extra envelope fields that describe the answer and not the record: a
+   * `units` map, the zone the times are written in, the method an aggregate
+   * was computed by. Nothing here passes through the exposure policy, so
+   * nothing here may be read from a record -- an origin app's name or a count
+   * of what was dropped belongs in `items` or in a warning.
+   */
+  extra?: Readonly<Record<string, unknown>> | undefined;
+  /**
+   * The byte budget, on the Health Connect tools. Applied last -- after the
+   * policy, `jq` and `limit` -- to the array that is about to become `items`.
+   */
+  page?: PageInput | undefined;
   /** Unix seconds. */
   now: number;
+}
+
+/**
+ * A soft byte budget and the cursor that continues past it.
+ *
+ * The one documented exception to "a tool never caps its own answer": a
+ * minute-level series is megabytes, and a caller that did not ask for
+ * megabytes is better served by the first page and a way to get the next.
+ * It is soft twice over. The caller lifts it by passing a larger `maxBytes`
+ * (there is no ceiling), and it never hides that it cut: `truncated` is true
+ * and `cursor` continues from the first row left out. The cut is always at a
+ * row boundary, and a page always carries at least one row, so a single row
+ * larger than the budget still comes back whole.
+ */
+interface PageInput {
+  /** Bytes of serialised `items` this answer may carry, as they are sent (compact JSON). */
+  maxBytes: number;
+  /** Rows of the final array to skip: where the caller's cursor left off. */
+  offset: number;
+  /**
+   * Rows of the whole answer that come before this call's array and were not
+   * read again: a continuation that resumes by time hands over only the rows
+   * from its cursor on. Added to `total` and `matched`, so both mean "the
+   * whole answer" on every page. Omitted: none.
+   */
+  before?: number | undefined;
+  /**
+   * The cursor that resumes at row `next` of the final array. `rows` is that
+   * array -- what the policy and `jq` left, the rows a caller actually
+   * receives -- so a cursor that anchors itself on a row's own content reads
+   * it from what was sent, never from what was computed before the policy ran.
+   */
+  cursorFor: (next: number, rows: readonly unknown[]) => string;
 }
 
 /** One policy-filtered item, and its policy-filtered raw resource when `raw` was asked for. */
@@ -238,16 +309,53 @@ interface Shaped {
   truncated: boolean;
   /** Items returned after `limit`, for the audit row. */
   returned: number;
+  /** Where to continue, when a `page` was given and something was left out. */
+  cursor?: string;
 }
 
-/** Apply `limit` to the array that is about to become `items`. */
-function applyLimit(value: readonly unknown[], limit: number | undefined): Shaped {
-  const kept = limit === undefined ? value : value.slice(0, limit);
+const encoder = new TextEncoder();
+
+/** How many of `rows` fit in `maxBytes` of compact JSON. Never fewer than one. */
+function rowsWithin(rows: readonly unknown[], maxBytes: number): number {
+  let used = 0;
+  for (const [index, row] of rows.entries()) {
+    // The separating comma counts: the budget is the size of the array's contents.
+    used += encoder.encode(JSON.stringify(row)).length + (index === 0 ? 0 : 1);
+    if (used > maxBytes && index > 0) return index;
+  }
+  return rows.length;
+}
+
+/**
+ * Apply the cursor's offset, `limit` and the byte budget to the array that is
+ * about to become `items`. Without a `page` this is `limit` alone, as it has
+ * always been.
+ */
+function applyLimit(
+  value: readonly unknown[],
+  limit: number | undefined,
+  page?: PageInput,
+): Shaped {
+  const offset = Math.min(page?.offset ?? 0, value.length);
+  const rest = offset === 0 ? value : value.slice(offset);
+  const limited = limit === undefined ? rest : rest.slice(0, limit);
+  const kept = page === undefined ? limited : limited.slice(0, rowsWithin(limited, page.maxBytes));
+  const truncated = offset + kept.length < value.length;
   return {
     items: kept,
     matched: value.length,
-    truncated: kept.length < value.length,
+    truncated,
     returned: kept.length,
+    ...(page !== undefined && truncated && { cursor: page.cursorFor(offset + kept.length, value) }),
+  };
+}
+
+/** The envelope's last fields: whether rows were cut, where to continue, when it was built. */
+function closing(shaped: Shaped, now: number): Record<string, unknown> {
+  return {
+    truncated: shaped.truncated,
+    ...(shaped.cursor !== undefined && { cursor: shaped.cursor }),
+    generatedAt: toIso(now),
   };
 }
 
@@ -331,23 +439,25 @@ export async function respond(input: RespondInput): Promise<ToolOutcome> {
     ...(incomplete ? [INCOMPLETE_WARNING] : []),
   ];
 
+  const before = input.page?.before ?? 0;
+  const paged = input.page !== undefined;
   if (input.jq === undefined) {
-    const shaped = applyLimit(items, limit);
+    const shaped = applyLimit(items, limit, input.page);
     const payload: Record<string, unknown> = {
       items: shaped.items,
-      total,
+      total: total + before,
       ...envelope,
-      matched: items.length,
+      matched: items.length + before,
+      ...input.extra,
       ...(input.coverage !== undefined && { coverage: input.coverage }),
       ...(wantsRaw && {
         raw: limit === undefined ? rawItems : rawItems.slice(0, limit),
       }),
       warnings: sortedWarnings(baseWarnings),
-      truncated: shaped.truncated,
-      generatedAt: toIso(input.now),
+      ...closing(shaped, input.now),
     };
     return {
-      result: textResult(payload, false),
+      result: textResult(payload, false, paged),
       resultCount: shaped.returned,
       healthSystemIds: input.healthSystemIds,
       errorCode: null,
@@ -367,20 +477,20 @@ export async function respond(input: RespondInput): Promise<ToolOutcome> {
   // Every value the program emits becomes one element of `items`, even a
   // single one -- the caller chooses whether that is one match (a stream,
   // `.[] | select(...)`) or one shaped answer (a single non-array output).
-  const shaped = applyLimit(run.outputs, limit);
+  const shaped = applyLimit(run.outputs, limit, input.page);
   const empty = items.length > 0 && looksEmpty(run.outputs);
   const payload: Record<string, unknown> = {
     items: shaped.items,
-    total,
+    total: total + before,
     ...envelope,
-    matched: shaped.matched,
+    matched: shaped.matched + before,
+    ...input.extra,
     ...(input.coverage !== undefined && { coverage: input.coverage }),
     warnings: sortedWarnings([...baseWarnings, ...(empty ? [JQ_RESULT_EMPTY] : [])]),
-    truncated: shaped.truncated,
-    generatedAt: toIso(input.now),
+    ...closing(shaped, input.now),
   };
   return {
-    result: textResult(payload, false),
+    result: textResult(payload, false, paged),
     resultCount: shaped.returned,
     healthSystemIds: input.healthSystemIds,
     errorCode: null,

@@ -52,7 +52,7 @@ describe("McpView policy rules", () => {
     const text = wrapper.text();
 
     expect(text).toContain("Fields in get_care_team");
-    expect(text).toContain("Hide participants → name in get_care_team at all health systems");
+    expect(text).toContain("Hide participants → name in get_care_team at all sources");
     expect(text).toContain("Blocked tools");
     expect(text).toContain("Block the tool get_patient_profile");
     expect(text).toContain("Fields on CareTeam");

@@ -183,7 +183,8 @@ export interface RunDto {
 
 export interface AlertDto {
   id: string;
-  kind: "reconnect";
+  /** `reconnect`: something to sign in to again. `hc_parked`: a phone's uploads set aside. */
+  kind: "reconnect" | "hc_parked";
   subject: string;
   healthSystemId: string | null;
   trelloCardId: string | null;
@@ -296,6 +297,14 @@ export interface PolicyShapeDto {
   label: string;
   /** The resource type it belongs to, or null for a tool-specific row. */
   resourceType: string | null;
+  /**
+   * Every resource type a rule can be scoped to and still meet a row of this
+   * shape. A FHIR shape: its own type. A Health Connect shape: the `hc:<Type>`
+   * tags its rows can carry, plus the types whose joined or derived values
+   * appear in it (heart rate, on a night's row). Empty for a row no type reaches.
+   * The server always sends it; optional so an older cached schema still types.
+   */
+  resourceTypes?: string[];
   vocabulary: "normalized" | "raw";
   fields: PolicyFieldNode[];
 }
@@ -762,6 +771,123 @@ export interface PortalAccountStatusDto extends PortalAccountDto {
    * answered. Null when it never has.
    */
   lastVisitCount: number | null;
+}
+
+/**
+ * A paired phone, as `/api/phone/devices` shows it.
+ *
+ * `active` (uploaded within the last 6 hours), `stale` (not for longer than
+ * that), `revoked` (its token no longer works) or `never` (paired, nothing
+ * uploaded yet). Instants are ISO; a device id is this app's own row id.
+ */
+export type DeviceStatus = "active" | "stale" | "revoked" | "never";
+
+/** The phone's own sync report, as it last sent it. Every field is the phone's claim. */
+export interface DeviceReportDto {
+  batteryExempt: boolean | null;
+  backgroundRead: boolean | null;
+  historyRead: boolean | null;
+  backfillComplete: boolean | null;
+  /** Permission to read exercise routes (GPS), as the phone reports it. */
+  exerciseRoutes: "granted" | "denied" | "unavailable" | null;
+  lastErrorCode: string | null;
+  lastErrorAt: string | null;
+}
+
+export interface DeviceDto {
+  id: string;
+  name: string;
+  status: DeviceStatus;
+  createdAt: string;
+  rotatedAt: string | null;
+  revokedAt: string | null;
+  lastSeenAt: string | null;
+  lastUploadAt: string | null;
+  appVersion: string | null;
+  /** Batches accepted and not yet applied. */
+  queue: { batches: number; bytes: number };
+  /**
+   * Uploads that could not be applied and are being kept (the phone has moved
+   * past them, so the stored body is the only copy), with the distinct failing
+   * error codes from the ingest log.
+   */
+  parked: { batches: number; bytes: number; errorCodes: string[] };
+  /** Rollup and summary rebuilds set aside because their source would not open. */
+  parkedMarks: number;
+  /** Null until the phone has sent a sync report. */
+  report: DeviceReportDto | null;
+  totals: { recordCount: number; typesGranted: number; typesDenied: number };
+}
+
+/**
+ * The answer to minting or rotating a device's token.
+ *
+ * `token` and `pairing` appear in this response and nowhere else, ever: only the
+ * token's digest is stored. `pairing` is exactly the text the QR code encodes,
+ * a JSON object `{"v":1,"url":"https://…","deviceId":"…","token":"…"}`.
+ */
+export interface PairedDeviceDto {
+  device: DeviceDto;
+  pairing: string;
+}
+
+export interface CreateDeviceRequest {
+  name: string;
+}
+
+/** `POST /api/phone/devices/:id/wipe`: `confirm` must be the device's id. */
+export interface WipeDeviceRequest {
+  confirm: string;
+}
+
+/** `POST /api/phone/devices/:id/retry-failed`: how many parked uploads were put back in the queue. */
+export interface RetryFailedResponse {
+  requeued: number;
+  /** Parked rebuild marks put back. */
+  remarked: number;
+}
+
+/** `done: false` means more remains to delete: call again. */
+export interface WipeDeviceResponse {
+  done: boolean;
+}
+
+export type DeviceCoverageStatus = "ok" | "partial" | "stale" | "failed" | "never" | "unsupported";
+
+/** One record type of one phone: what it may read, what is stored, how fresh. */
+export interface DeviceCoverageRowDto {
+  recordType: string;
+  permission: "granted" | "denied" | "unavailable" | "unknown";
+  recordCount: number;
+  firstAt: string | null;
+  lastAt: string | null;
+  lastUploadAt: string | null;
+  tokenAgeS: number | null;
+  backlog: number | null;
+  backfillComplete: boolean;
+  /** The oldest instant the backfill has reached, when it reports one. */
+  backfillOldestAt: string | null;
+  status: DeviceCoverageStatus;
+  /** Plain words for `unsupported`: "not permitted" or "not available on this phone". */
+  notice: string | null;
+  ageHours: number | null;
+}
+
+/** One uploaded batch. Counts and a stable code only. */
+export interface DeviceIngestLogDto {
+  receivedAt: string;
+  appliedAt: string | null;
+  status: "queued" | "applying" | "applied" | "failed";
+  errorCode: string | null;
+  upserts: number;
+  deletes: number;
+  rejected: number;
+  applied: number;
+  superseded: number;
+  removed: number;
+  bodyBytes: number;
+  rawBytes: number;
+  applyMs: number | null;
 }
 
 export interface ApiError {

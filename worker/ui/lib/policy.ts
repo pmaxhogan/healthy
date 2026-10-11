@@ -13,7 +13,10 @@
 import { ARRAY_SEGMENT, humanPath, parsePath } from "@shared/policy-path.ts";
 
 import type {
+  DeviceDto,
   FieldRuleSpec,
+  HealthSystemDto,
+  McpToolInfoDto,
   PolicyFieldNode,
   PolicyKeyNode,
   PolicyPreviewDto,
@@ -22,6 +25,95 @@ import type {
   PolicyShapeDto,
   PolicyToolPreviewDto,
 } from "@shared/types.ts";
+
+// --- sources: health systems and paired phones ---------------------------------
+
+/** A paired phone's source id in tool output and in rules: `device:<id>`. */
+const PHONE_SOURCE_PREFIX = "device:";
+/** A Health Connect record type in tool output and in rules: `hc:<Type>`. */
+const PHONE_TYPE_PREFIX = "hc:";
+
+function isPhoneSource(id: string): boolean {
+  return id.startsWith(PHONE_SOURCE_PREFIX);
+}
+
+/** True for a Health Connect record type (`hc:Steps`), as opposed to a FHIR one. */
+export function isPhoneType(type: string): boolean {
+  return type.startsWith(PHONE_TYPE_PREFIX);
+}
+
+/**
+ * Names a source id for a sentence: a health system by its name, a phone as
+ * `Name (phone)`. A phone nobody lists any more says so; a health system the
+ * caller has no wording for falls back to `unknownHealthSystem`, else its id.
+ */
+export function sourceNamer(
+  healthSystems: readonly HealthSystemDto[],
+  devices: readonly DeviceDto[],
+  unknownHealthSystem?: string,
+): (id: string) => string {
+  const names = new Map<string, string>([
+    ...healthSystems.map((entry): [string, string] => [entry.id, entry.displayName]),
+    ...devices.map((device): [string, string] => [
+      `${PHONE_SOURCE_PREFIX}${device.id}`,
+      `${device.name} (phone)`,
+    ]),
+  ]);
+  return (id) => {
+    const known = names.get(id);
+    if (known !== undefined) return known;
+    return isPhoneSource(id) ? "a phone that no longer exists" : (unknownHealthSystem ?? id);
+  };
+}
+
+/** The sources a rule can name, in two groups so a phone is never taken for a health system. */
+export function sourceGroups(
+  healthSystems: readonly HealthSystemDto[],
+  devices: readonly DeviceDto[],
+): { label: string; options: { value: string; label: string }[] }[] {
+  const groups = [
+    {
+      label: "Health systems",
+      options: healthSystems.map((entry) => ({ value: entry.id, label: entry.displayName })),
+    },
+    {
+      label: "Phones",
+      options: devices.map((device) => ({
+        value: `${PHONE_SOURCE_PREFIX}${device.id}`,
+        label: device.name,
+      })),
+    },
+  ];
+  return groups.filter((group) => group.options.length > 0);
+}
+
+/** Resource types split into the FHIR ones and the phone's, for `<optgroup>`s. */
+export function groupTypes(types: readonly string[]): { label: string; items: string[] }[] {
+  const phone = types.filter((type) => isPhoneType(type));
+  const fhir = types.filter((type) => !isPhoneType(type));
+  if (phone.length === 0) return [{ label: "FHIR resource types", items: fhir }];
+  return [
+    { label: "FHIR resource types", items: fhir },
+    { label: "Phone (Health Connect)", items: phone },
+  ];
+}
+
+/** True for a tool every shape of which is a phone's: it answers from a paired phone only. */
+function isPhoneTool(schema: PolicySchemaDto, name: string): boolean {
+  const shapes = schema.tools.find((tool) => tool.name === name)?.shapes ?? [];
+  return shapes.length > 0 && shapes.every((id) => id.startsWith("hc:"));
+}
+
+/** Tool names split into the health record's and the phone's, for `<optgroup>`s. */
+export function groupTools(schema: PolicySchemaDto): { label: string; items: string[] }[] {
+  const names = schema.tools.map((tool) => tool.name);
+  const phone = names.filter((name) => isPhoneTool(schema, name));
+  if (phone.length === 0) return [{ label: "Health record", items: names }];
+  return [
+    { label: "Health record", items: names.filter((name) => !phone.includes(name)) },
+    { label: "Phone (Health Connect)", items: phone },
+  ];
+}
 
 // --- the tree ---------------------------------------------------------------
 
@@ -109,9 +201,16 @@ export function shapesFor(
       ? null
       : new Set(schema.tools.find((tool) => tool.name === scope.tool)?.shapes);
   const inTool = (id: string): boolean => toolShapes === null || toolShapes.has(id);
-  const ofType = (type: string | null): boolean =>
-    scope.resourceType === null || type === scope.resourceType;
-  return schema.shapes.filter((shape) => inTool(shape.id) && ofType(shape.resourceType));
+  const ofType = (shape: PolicyShapeDto): boolean => {
+    if (scope.resourceType === null) return true;
+    // A phone's shapes carry no resource type of their own (their rows are tagged
+    // `hc:<Type>` at runtime), so a phone type reaches every shape of the phone in
+    // scope; the Worker refuses, with a reason, a path none of the rows can carry.
+    return isPhoneType(scope.resourceType)
+      ? shape.id.startsWith("hc:")
+      : shape.resourceType === scope.resourceType;
+  };
+  return schema.shapes.filter((shape) => inTool(shape.id) && ofType(shape));
 }
 
 /** The picker's groups for one scope, straight from the schema. */
@@ -285,10 +384,12 @@ function list(parts: readonly string[]): string {
 function whereClause(spec: FieldRuleSpec, healthSystemName: (id: string) => string): string {
   const what = spec.resourceType === null ? "" : ` on ${spec.resourceType} items`;
   const tool = spec.tool === null ? " in every tool" : ` in ${spec.tool}`;
+  let everywhere = " at all sources";
+  if (spec.resourceType !== null) {
+    everywhere = isPhoneType(spec.resourceType) ? " from every phone" : " at all health systems";
+  }
   const at =
-    spec.healthSystemId === null
-      ? " at all health systems"
-      : ` at ${healthSystemName(spec.healthSystemId)}`;
+    spec.healthSystemId === null ? everywhere : ` at ${healthSystemName(spec.healthSystemId)}`;
   return `${what}${tool}${at}`;
 }
 
@@ -313,7 +414,9 @@ export function ruleSentence(
       return `Block the tool ${rule.target}`;
     }
     case "resource": {
-      return `Hide every ${rule.target} record, in every tool`;
+      return isPhoneType(rule.target)
+        ? `Hide every Health Connect ${rule.target.slice(PHONE_TYPE_PREFIX.length)} record (${rule.target}), in every tool`
+        : `Hide every ${rule.target} record, in every tool`;
     }
     case "health_system": {
       return `Hide everything from ${healthSystemName(rule.target)}`;
@@ -336,7 +439,7 @@ export function ruleGroup(rule: PolicyRuleDto): string {
       return "Hidden resource types";
     }
     case "health_system": {
-      return "Hidden health systems";
+      return "Hidden sources";
     }
     case "field": {
       if (rule.field?.tool != null) return `Fields in ${rule.field.tool}`;
@@ -348,7 +451,11 @@ export function ruleGroup(rule: PolicyRuleDto): string {
 }
 
 /** The tools a rule changes the answers of, from the schema's tool shapes. */
-export function toolsAffected(rule: PolicyRuleDto, schema: PolicySchemaDto | null): string[] {
+export function toolsAffected(
+  rule: PolicyRuleDto,
+  schema: PolicySchemaDto | null,
+  catalog: readonly McpToolInfoDto[] = [],
+): string[] {
   if (rule.ruleType === "tool") return [rule.target];
   const tool = rule.ruleType === "field" ? (rule.field?.tool ?? null) : null;
   if (tool !== null) return [tool];
@@ -356,6 +463,13 @@ export function toolsAffected(rule: PolicyRuleDto, schema: PolicySchemaDto | nul
     rule.ruleType === "resource" ? rule.target : (rule.field?.resourceType ?? null);
   if (schema === null || resourceType === null || rule.ruleType === "health_system") {
     return schema?.tools.map((entry) => entry.name) ?? [];
+  }
+  // A phone type: the schema's phone shapes carry no type, so the tool catalogue
+  // (which lists the `hc:` types each tool's rows can carry) is the authority.
+  if (isPhoneType(resourceType)) {
+    return catalog.length > 0
+      ? catalog.filter((entry) => entry.resourceTypes.includes(resourceType)).map((e) => e.name)
+      : schema.tools.filter((entry) => isPhoneTool(schema, entry.name)).map((e) => e.name);
   }
   const typed = new Set(
     schema.shapes.filter((shape) => shape.resourceType === resourceType).map((shape) => shape.id),
@@ -510,8 +624,12 @@ const REFERENCE_ONLY: ReadonlySet<string> = new Set([
 ]);
 
 /** Why a rule affects no tool's output, for the rule list; "" when it affects some. */
-export function reachesNothing(rule: PolicyRuleDto, schema: PolicySchemaDto | null): string {
-  if (schema === null || toolsAffected(rule, schema).length > 0) return "";
+export function reachesNothing(
+  rule: PolicyRuleDto,
+  schema: PolicySchemaDto | null,
+  catalog: readonly McpToolInfoDto[] = [],
+): string {
+  if (schema === null || toolsAffected(rule, schema, catalog).length > 0) return "";
   const type = rule.ruleType === "resource" ? rule.target : (rule.field?.resourceType ?? null);
   if (type !== null && REFERENCE_ONLY.has(type)) {
     return `Affects no tool's output right now: ${type} items are only used to look up references, and no tool returns them.`;

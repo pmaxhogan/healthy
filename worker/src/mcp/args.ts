@@ -33,11 +33,15 @@ const instant = z.string().refine(isIsoDateOrInstant, {
  * One sentence: `MCP_INSTRUCTIONS` (worker/src/mcp/instructions.ts) explains the
  * rest once for every tool.
  */
-const JQ_SEMANTICS =
+const JQ_CORE =
   "Optional jq program (jq 1.8) run server-side on the `items` array, after the " +
   "owner's exposure policy and before `limit`; each value it emits becomes one item, " +
-  "so stream with `.[] | ...` rather than wrapping the result in `[...]`. With " +
-  "`raw: true` each item carries its FHIR resource under `.raw`.";
+  "so stream with `.[] | ...` rather than wrapping the result in `[...]`.";
+
+const JQ_SEMANTICS = `${JQ_CORE} With \`raw: true\` each item carries its FHIR resource under \`.raw\`.`;
+
+/** The same sentence for a tool with no `raw` argument and a byte budget after `limit`. */
+const JQ_SEMANTICS_PAGED = `${JQ_CORE} The byte budget (\`max_bytes\`) is applied to what the program emits.`;
 
 function jqSchema(description: string) {
   return z.string().min(1).max(JQ_MAX_LENGTH).optional().describe(description);
@@ -54,9 +58,10 @@ function jqSchema(description: string) {
  * has already filtered, and before `limit`. The length ceiling bounds the
  * caller's program, not any data; worker/src/mcp/jq/engine.ts has the other bounds.
  */
-export function jqArg(tool: ToolName) {
+export function jqArg(tool: ToolName, semantics: "raw" | "paged" = "raw") {
   const examples = JQ_EXAMPLES[tool].map((example) => `\`${example}\``).join("; ");
-  return { jq: jqSchema(`${JQ_SEMANTICS} Examples for this tool: ${examples}.`) } as const;
+  const lead = semantics === "raw" ? JQ_SEMANTICS : JQ_SEMANTICS_PAGED;
+  return { jq: jqSchema(`${lead} Examples for this tool: ${examples}.`) } as const;
 }
 
 /**
