@@ -22,6 +22,10 @@
  *     index rows and its dirty marks in ONE `db.batch`, which D1 runs as a
  *     transaction. A chunk and the index never disagree. (The mark of a day
  *     this batch has already marked is not written again: see `BatchRun`.)
+ *     Several chunks share one `db.batch` where they can (`Buffered`): a
+ *     round trip to D1 costs far more than the statements in it, and a batch
+ *     of sparse records is one chunk a record. The cursor moves past a chunk
+ *     only when the transaction holding it has committed.
  *   - A write is by record id and keeps the copy with the greater
  *     `lastModified`, so applying the same records again changes nothing; and
  *     an unchanged chunk is recognised by its digest and not rewritten.
@@ -51,6 +55,7 @@
 import { blindHcOrigin, blindHcRecordId, blinderFor } from "../db/blind.ts";
 import { batch as runBatch, one, chunk as pages } from "../db/client.ts";
 import { makeHcIngestQueueRepo } from "../db/repos/hc-ingest-queue.ts";
+import { errorFields } from "../lib/log.ts";
 import { openParkedAlert, resolveParkedAlert } from "../sync/alerts.ts";
 
 import { unpackJson } from "./codec.ts";
@@ -190,6 +195,66 @@ const GROUP_PAGE_RECORDS = 3000;
 const CHUNK_COST = 10;
 /** Head of queue, zone, status, and the closing statements of a batch. */
 const BATCH_OVERHEAD = 8;
+/**
+ * Statements one `db.batch` of chunk writes carries before it is sent. The
+ * limit is checked between chunks, never inside one: a chunk's statements are
+ * one transaction whatever their number, so a chunk with more than this many
+ * (one that outgrew a row) is sent alone.
+ */
+const COMMIT_STATEMENTS = 50;
+
+/**
+ * Chunk writes built and not yet sent: the statements of one `db.batch`.
+ *
+ * In production every `db.batch` is a network round trip from the runner to
+ * D1, and it costs about the same whether it carries one chunk or twenty. So
+ * the units of a page (a group of upserts, a slot of deletes) are collected
+ * here and committed together -- still one transaction, only a larger one.
+ *
+ * Three rules keep that equal to committing each unit by itself:
+ *
+ *   - Nothing is built from the database while a write it would read is still
+ *     in here. `makeRoom` sends the buffer first when a unit touches a chunk a
+ *     buffered unit also touches (a record moving between two groups of one
+ *     page), or reads heart-rate spill while a heart-rate chunk is buffered
+ *     (the minute row of an hour is built from the hour before it).
+ *   - What a unit counts -- the cursor's offset, `applied`, `removed` -- is
+ *     counted by `settle`, which runs only after the commit. A slice that
+ *     stops, or dies, never carries a cursor past work that is not durable.
+ *   - The buffer is sent before a slice yields, at the end of every page, and
+ *     before a batch is closed or set aside. A buffer that is lost instead (a
+ *     slice that threw) is work the cursor never counted: it is done again.
+ *
+ * The units keep their edges in here, because sharing a commit is only ever a
+ * saving. A `db.batch` D1 will not take -- the chunks of a page can be large,
+ * and a request has a size -- is sent again a unit at a time, which is exactly
+ * what was done before any of this (`flush`).
+ */
+interface Buffered {
+  /** The units, in the order they were built. */
+  units: BufferedUnit[];
+  /** Statements in all of them. */
+  statements: number;
+  /** Every chunk a buffered unit reads or writes, by `keyId`. */
+  chunks: Set<string>;
+  /** True when one of them is a heart-rate chunk. */
+  heartRate: boolean;
+  /** Day marks among the statements, whichever unit's. */
+  days: Set<string>;
+}
+
+/** One unit in the buffer: what is committed, and what follows from that. */
+interface BufferedUnit {
+  statements: D1PreparedStatement[];
+  /** Day marks among its statements: `BatchRun.marked` once they are committed. */
+  days: string[];
+  /** What the unit counts once it is durable. */
+  settle: () => void;
+}
+
+function emptyBuffer(): Buffered {
+  return { units: [], statements: 0, chunks: new Set(), heartRate: false, days: new Set() };
+}
 
 /** One batch being applied in one slice: what every step needs. */
 interface BatchRun {
@@ -215,8 +280,10 @@ interface BatchRun {
    * it simply writes the marks again.
    */
   marked: Set<string>;
-  /** Day marks in the statements now being built: `marked` once they are committed. */
+  /** Day marks in the statements of the unit now being built: the buffer's once it is queued. */
   pending: string[];
+  /** Units built and not yet committed: see `Buffered`. */
+  buffer: Buffered;
 }
 
 /** The stable code for a failure that retrying cannot fix, or null. */
@@ -252,7 +319,8 @@ async function marksFor(
   const marks: DirtyMark[] = [];
   const day = dayMarkKey(key.type, key.hourUtc);
   // Not again, if this batch has written it: see `BatchRun.marked`.
-  if (touched.length > 0 && !job.marked.has(day) && !job.pending.includes(day)) {
+  const written = job.marked.has(day) || job.buffer.days.has(day) || job.pending.includes(day);
+  if (!written && touched.length > 0) {
     marks.push(["day", day]);
     job.pending.push(day);
   }
@@ -338,8 +406,98 @@ async function commit(job: BatchRun, statements: D1PreparedStatement[]): Promise
   if (statements.length === 0) return;
   job.meter.spend(statements.length);
   await runBatch(job.ctx.db, statements);
-  // Only now are the day marks among them in the table.
-  for (const day of job.pending) job.marked.add(day);
+}
+
+/** Count a unit that is now durable: its day marks are `marked`, and its `settle` moves the cursor. */
+function settled(job: BatchRun, unit: BufferedUnit): void {
+  for (const day of unit.days) job.marked.add(day);
+  unit.settle();
+}
+
+/**
+ * Commit everything buffered, in one transaction, and only then count it.
+ *
+ * If D1 will not take the units together, they are committed one at a time, in
+ * order, each counted as it lands: what applying a batch did before units
+ * shared a commit. A request can be refused for its size alone, and a refusal
+ * that came back every time would otherwise fail the slice identically until
+ * the batch was given up on. An error from a unit's own commit is thrown, as
+ * it always was.
+ *
+ * Sending them again is safe whatever became of the first attempt. A `db.batch`
+ * is one transaction, so either none of it was applied, or all of it was and
+ * only the reply was lost -- and every statement here writes what a row is to
+ * be, not a change to it, so writing it twice leaves what writing it once
+ * does. The counts do not depend on which: a unit's `settle` adds what was
+ * worked out when the unit was built, once, after the commit that covers it.
+ */
+async function flush(job: BatchRun): Promise<void> {
+  const { units } = job.buffer;
+  if (units.length === 0) return;
+  // Emptied first: if a commit throws, what was buffered and not yet counted
+  // is not known to be durable, and must not be counted by a later flush.
+  job.buffer = emptyBuffer();
+  const { ctx, deviceId, meter } = job;
+  const statements = units.flatMap((unit) => unit.statements);
+  try {
+    // Counted when they were queued (`defer`), so the budget saw them coming.
+    await runBatch(ctx.db, statements);
+  } catch (error) {
+    // One unit is already as small as a commit gets.
+    if (units.length === 1) throw error;
+    ctx.log.warn("hc.commit_split", {
+      deviceId,
+      units: units.length,
+      statements: statements.length,
+      ...errorFields(error),
+    });
+    for (const unit of units) {
+      meter.spend(unit.statements.length);
+      await runBatch(ctx.db, unit.statements);
+      settled(job, unit);
+    }
+    return;
+  }
+  for (const unit of units) settled(job, unit);
+}
+
+/**
+ * Send the buffer first if building a unit over `touching` would read
+ * something a buffered write is about to change: see `Buffered`.
+ */
+async function makeRoom(job: BatchRun, touching: readonly ChunkKey[]): Promise<void> {
+  const { buffer } = job;
+  const heartRate = touching.some((key) => key.type === TYPE_HEART_RATE);
+  const shared = touching.some((key) => buffer.chunks.has(keyId(key)));
+  if (shared || (heartRate && buffer.heartRate)) await flush(job);
+}
+
+/** One unit of work, built: what `defer` queues. */
+interface Unit {
+  statements: D1PreparedStatement[];
+  /** Every chunk it read or writes. */
+  chunks: readonly ChunkKey[];
+  /** What to count once the statements are durable. */
+  settle: () => void;
+}
+
+/**
+ * Queue a unit's statements to be committed with its neighbours'. The buffer
+ * is sent first when the unit would take it past `COMMIT_STATEMENTS`, so a
+ * `db.batch` is cut between units and never inside one.
+ */
+async function defer(job: BatchRun, unit: Unit): Promise<void> {
+  const queued = job.buffer.statements;
+  if (queued > 0 && queued + unit.statements.length > COMMIT_STATEMENTS) await flush(job);
+  const { buffer } = job;
+  job.meter.spend(unit.statements.length);
+  buffer.units.push({ statements: unit.statements, days: job.pending, settle: unit.settle });
+  buffer.statements += unit.statements.length;
+  for (const key of unit.chunks) {
+    buffer.chunks.add(keyId(key));
+    if (key.type === TYPE_HEART_RATE) buffer.heartRate = true;
+  }
+  for (const day of job.pending) buffer.days.add(day);
   job.pending = [];
 }
 
@@ -390,6 +548,11 @@ class HeldChunks {
   }
 }
 
+/** The `settle` of a unit that moves no count: a tombstone for an id that was never stored. */
+function countNothing(): void {
+  // Nothing was removed, and the page's offset is the caller's to move.
+}
+
 /** Note a type whose stored count may have gone down. A tombstone of an id never seen has none. */
 function noteShrunk(cursor: ApplyCursor, type: string): void {
   if (type !== "" && !cursor.shrunk.includes(type)) cursor.shrunk.push(type);
@@ -436,14 +599,18 @@ function slotsOf(
 
 /**
  * Take one chunk's deleted records out and tombstone their ids, in one
- * transaction. `stored` is the chunk as it is now, if there is one.
+ * transaction (shared with its neighbours: see `Buffered`). `stored` is the
+ * chunk as it is now, if there is one.
  */
 async function deleteSlot(
   job: BatchRun,
   slot: DeleteSlot,
   stored: StoredChunk | undefined,
 ): Promise<void> {
-  const { ctx, deviceId, cursor } = job;
+  const { ctx, deviceId, cursor, meter } = job;
+  // A slot rewrites its own chunk and no other, so `stored` is still the truth
+  // after this; what it guards is the heart-rate spill read.
+  await makeRoom(job, [slot.key]);
   const statements: D1PreparedStatement[] = [];
   if (stored !== undefined) {
     const { records, removed } = removeFromChunk(stored.records, slot.ids);
@@ -451,9 +618,19 @@ async function deleteSlot(
     statements.push(...rewrite);
   }
   statements.push(tombstoneStatement(ctx, deviceId, slot.blinds));
-  await commit(job, statements);
-  cursor.removed += slot.blinds.length;
+  // Noted at once, durable or not: a type noted too often is only recounted.
   noteShrunk(cursor, slot.key.type);
+  const removed = slot.blinds.length;
+  await defer(job, {
+    statements,
+    chunks: [slot.key],
+    settle: () => {
+      cursor.removed += removed;
+    },
+  });
+  // Built, and from here either committed or thrown away with the slice: every
+  // way out of a slice that does not throw sends the buffer first.
+  meter.done();
 }
 
 /**
@@ -472,22 +649,34 @@ async function deletePage(job: BatchRun, page: readonly string[]): Promise<boole
   for (const entry of index.values()) noteShrunk(job.cursor, entry.key.type);
 
   const unknown = every.filter((blind) => !index.has(blind));
-  if (unknown.length > 0) await commit(job, [unknownTombstoneStatement(ctx, deviceId, unknown)]);
+  if (unknown.length > 0) {
+    const statements = [unknownTombstoneStatement(ctx, deviceId, unknown)];
+    await defer(job, { statements, chunks: [], settle: countNothing });
+  }
 
-  // A slot's transaction rewrites its own chunk and no other, so the chunks of
-  // several slots can be read together before any of them is written.
+  // A slot's transaction rewrites its own chunk and no other, and a page names
+  // each chunk once, so the chunks of several slots can be read together
+  // before any of them is written.
   const paged = pages(slotsOf(blinds, index), READ_AHEAD);
   for (const slots of paged) {
-    if (!meter.mayStart(CHUNK_COST)) return false;
+    if (!meter.mayStart(CHUNK_COST)) return yieldPage(job);
     const keys = slots.map((slot) => slot.key);
     const chunks = await readChunks(ctx, deviceId, keys, meter);
     for (const slot of slots) {
-      if (!meter.mayStart(CHUNK_COST)) return false;
+      if (!meter.mayStart(CHUNK_COST)) return yieldPage(job);
       await deleteSlot(job, slot, chunks.get(keyId(slot.key)));
-      meter.done();
     }
   }
+  // Before the caller counts the page as done, and before the next page looks
+  // anything up.
+  await flush(job);
   return true;
+}
+
+/** Stop part way through a page: what was built is committed, then the slice yields. */
+async function yieldPage(job: BatchRun): Promise<false> {
+  await flush(job);
+  return false;
 }
 
 /** True when every delete of the batch has been applied. */
@@ -612,9 +801,12 @@ function chunksOf(work: GroupJob): ChunkKey[] {
   return [work.key, ...sourcesOf(work).values()];
 }
 
-/** Apply one group: its chunk, the chunks its records left, and the index, in one transaction. */
+/**
+ * Apply one group: its chunk, the chunks its records left, and the index, in
+ * one transaction (shared with its neighbours: see `Buffered`).
+ */
 async function applyGroup(job: BatchRun, work: GroupJob, held: HeldChunks): Promise<void> {
-  const { ctx, deviceId, cursor } = job;
+  const { ctx, deviceId, cursor, meter } = job;
   const { group, key } = work;
   for (const record of group.records) {
     const entry = work.entryOf(record);
@@ -624,6 +816,9 @@ async function applyGroup(job: BatchRun, work: GroupJob, held: HeldChunks): Prom
     if (entry !== undefined && !sameKey(entry.key, key)) noteShrunk(cursor, entry.key.type);
   }
   const touching = chunksOf(work);
+  // Before anything is read: a buffered write to one of these chunks has to be
+  // in the table first. (`held` forgot them when that write was built.)
+  await makeRoom(job, touching);
   const chunks = await held.read(touching);
   const { incoming, leaving } = planGroup(work, chunks);
   const moved = await sourceStatements(job, chunks, leaving);
@@ -648,11 +843,20 @@ async function applyGroup(job: BatchRun, work: GroupJob, held: HeldChunks): Prom
   // Forgotten before the write, not after: if it fails part way, what is held
   // must not be taken for what is stored.
   held.forget(touching);
-  await commit(job, statements);
-  cursor.applied += merged.accepted.length;
-  if (key.type === TYPE_HEART_RATE) {
-    cursor.outOfInterval += samplesInInterval(merged.accepted).outOfInterval;
-  }
+  const accepted = merged.accepted.length;
+  const outOfInterval =
+    key.type === TYPE_HEART_RATE ? samplesInInterval(merged.accepted).outOfInterval : 0;
+  await defer(job, {
+    statements,
+    chunks: touching,
+    settle: () => {
+      cursor.applied += accepted;
+      cursor.outOfInterval += outOfInterval;
+      cursor.offset += 1;
+    },
+  });
+  // See `deleteSlot`: a unit that is built is as good as done for the budget.
+  meter.done();
 }
 
 /** True when every upsert group of the batch has been applied. */
@@ -667,9 +871,11 @@ async function applyUpserts(job: BatchRun, groups: readonly UpsertGroup[]): Prom
     return hash;
   };
 
-  while (cursor.offset < groups.length) {
+  // Where the building has got to. The cursor follows it a commit behind.
+  let next = cursor.offset;
+  while (next < groups.length) {
     if (!meter.mayStart(CHUNK_COST + 1)) return false;
-    const page = nextPage(groups, cursor.offset);
+    const page = nextPage(groups, next);
     const ids = page.flatMap((group) => group.records.map((record) => record.id));
     const blinds = await blindIds(job, ids);
     const blindOf = (record: HcRecord): string => blinds.get(record.id) ?? "";
@@ -687,11 +893,13 @@ async function applyUpserts(job: BatchRun, groups: readonly UpsertGroup[]): Prom
     const held = new HeldChunks(job);
     await held.read(jobs.flatMap((work) => chunksOf(work)));
     for (const work of jobs) {
-      if (!meter.mayStart(CHUNK_COST)) return false;
+      if (!meter.mayStart(CHUNK_COST)) return yieldPage(job);
       await applyGroup(job, work, held);
-      cursor.offset += 1;
-      meter.done();
+      next += 1;
     }
+    // A page is durable before the next one is looked up: its index rows and
+    // chunks are what that lookup reads.
+    await flush(job);
   }
   return true;
 }
@@ -914,6 +1122,7 @@ async function applyHead(
     deps,
     marked: head.marked,
     pending: [],
+    buffer: emptyBuffer(),
   };
   meter.spend();
 
@@ -943,6 +1152,10 @@ async function applyHead(
   } catch (error) {
     const errorCode = permanentCode(error);
     if (errorCode === null) throw error;
+    // What was built before the unit that cannot be is whole, and is kept: the
+    // batch is set aside with as much of it applied as could be.
+    job.pending = [];
+    await flush(job);
     await failBatch(ctx, deviceId, batch.batchId, errorCode, cursor, deps);
     meter.done();
     return null;
