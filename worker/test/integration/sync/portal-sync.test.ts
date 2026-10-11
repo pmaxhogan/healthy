@@ -990,7 +990,9 @@ describe("portal sessions", () => {
     expect(stored).toHaveLength(many);
     const runs = await syncRepos(fix.ctx).runLog.listRecent({ limit: 1 });
     expect(runs[0]?.summary.warnings).not.toContain("portal_visits_truncated");
-  });
+    // 300 visits is several seconds of writes when the whole suite is running
+    // beside it; the default five-second limit is not a property being tested.
+  }, 30_000);
 
   it("passes the shell API base and the MFA contact to the adapter when signing in", async () => {
     const ctx = syncCtx();
