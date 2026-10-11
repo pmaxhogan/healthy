@@ -65,7 +65,7 @@ import { toIso } from "../lib/time.ts";
 import { applyPolicy, sortedWarnings } from "../policy/filter.ts";
 
 import { INCOMPLETE_WARNING, coverageIncomplete, coverageWarnings } from "./coverage.ts";
-import { runJq } from "./jq/engine.ts";
+import { runJqOverItems } from "./jq/engine.ts";
 
 import type { CoverageEntry } from "./coverage.ts";
 import type { JqFailureCode } from "./jq/engine.ts";
@@ -117,7 +117,7 @@ const ERROR_MESSAGES = new Map<ToolErrorCode, string>([
   ["invalid_range", "`end` is before `start`; a range runs from `start` up to `end`"],
   ["jq_error", "the jq program failed; `detail` has jq's message"],
   ["jq_budget_exceeded", "the jq program exceeded its step budget"],
-  ["jq_out_of_memory", "the jq program exceeded its memory ceiling"],
+  ["jq_out_of_memory", "the jq program exceeded its memory ceiling; `detail` says what to do"],
 ]);
 
 /** What `jq` did on one call, for the audit row. Counts only, never the program. */
@@ -465,7 +465,9 @@ export async function respond(input: RespondInput): Promise<ToolOutcome> {
   }
 
   const jqInput = wantsRaw ? withRaw(items, rawItems) : items;
-  const run = await runJq(input.jq, JSON.stringify(jqInput));
+  // In pieces when the program is `.[] | ...`, so items larger than jq can
+  // hold at once are still projected; the whole array otherwise (the engine).
+  const run = await runJqOverItems(input.jq, jqInput);
   if (!run.ok) {
     return toolError(run.code, {
       healthSystemIds: input.healthSystemIds,

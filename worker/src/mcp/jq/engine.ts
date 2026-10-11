@@ -28,14 +28,29 @@
  *    seconds of CPU: ~4 s in Node, ~6-7 s in workerd). Parsing the input costs ~7-15 units per byte and a
  *    `group_by` over it ~16, so an honest filter uses a small fraction of it.
  *  - Memory. The wasm's linear memory stops at 64 MiB. jq's parsed form of a
- *    document is ~6x its JSON text, so that holds ~10 MB of input -- more than
- *    any single tool response this server produces for one record, and far
- *    more than a model's context. Past it the call fails `jq_out_of_memory`;
- *    it never truncates. Dropping `jq`, or narrowing with `from`/`to` or
- *    `health_systems`, returns the data unfiltered.
+ *    document is 6-10x its JSON text (ten for rows that are mostly numbers,
+ *    such as a GPS route: 5.8 MB of them parse to 58 MiB), so that holds
+ *    roughly 6 MB of input at once. Past it the call fails
+ *    `jq_out_of_memory`; it never truncates.
  *  - A fresh instance per call, thrown away afterwards: an aborted or
  *    out-of-fuel jq leaves its heap mid-operation, and a new instance from the
  *    already-compiled module costs under a millisecond.
+ *
+ * Items larger than that go through a piece at a time ({@link runJqOverItems}).
+ * A tool's items can be far more than 6 MB -- a few hundred exercise sessions
+ * with GPS routes are tens of megabytes -- while the program a caller writes
+ * over them is nearly always the one every tool description teaches,
+ * `.[] | f`: take each item, emit something small. Such a program never needs
+ * the array, so it is handed the array in consecutive pieces of about
+ * {@link PIECE_CHARS} of JSON and its outputs are concatenated. The program is
+ * NOT rewritten: each piece is itself an array, and the caller's text runs on
+ * it as written. What makes that the same answer is jq's grammar and nothing
+ * else -- `|` binds loosest of all, so a program that starts `.[] |` is `.[]`
+ * piped into everything after it, and `.[] | f` over an array is the
+ * concatenation of `.[] | f` over any split of it, as long as `f` cannot see
+ * or stop anything beyond its own item. {@link streamsPerItem} is that test,
+ * and it errs towards "no": a program it is not sure of runs on the whole
+ * array, where the ceiling above applies and the error says what to do.
  */
 
 import { makeLoadJq } from "./vendor/jq-glue.mjs";
@@ -134,23 +149,60 @@ const BUDGET_EXCEEDED: JqRunResult = {
     "(e.g. `repeat`, `recurse` or `range` without a bound)",
 };
 
+/** The whole array did not fit: say which programs do not need it to. */
 const OUT_OF_MEMORY: JqRunResult = {
   ok: false,
   code: "jq_out_of_memory",
   message:
-    "the filter needed more than the 64 MiB jq may use; narrow the input " +
-    "(from/to, health_systems) or drop `jq` to get the unfiltered data",
+    "the program needed more than the 64 MiB jq may use, which holds roughly 6 MB of " +
+    "items at once. A program that starts with `.[] | ...` (and uses none of `input`, " +
+    "`halt`, `debug`, `stderr`) is run over the items a piece at a time and has no such " +
+    "limit, so project or filter that way and count or sort the small result yourself. " +
+    "One that needs the whole array (`length`, `sort_by`, `group_by`, `map(...)`, " +
+    "`[.[] | ...]`) has to fit: narrow the call (a shorter date range, fewer sources, " +
+    "or fewer fields where the tool can leave some out), or drop `jq` to get the " +
+    "unfiltered data",
+};
+
+/** One piece did not fit, so one item (or what the program built from it) is too large. */
+const PIECE_OUT_OF_MEMORY: JqRunResult = {
+  ok: false,
+  code: "jq_out_of_memory",
+  message:
+    "the program needed more than the 64 MiB jq may use while it was run over the " +
+    "items a piece at a time, so a single item is larger than jq can hold (roughly 6 MB) " +
+    "or the program builds something that large from one. Leave the large field out " +
+    "before jq sees it where the tool has an argument for that (`fields` on `hc_records`), " +
+    "or drop `jq` to get the unfiltered data",
 };
 
 const CRASHED: JqRunResult = { ok: false, code: "jq_error", message: "jq stopped unexpectedly" };
 
 /** Why jq threw rather than returned, from the fuel left and the error. */
-function classifyThrow(error: unknown, fuelLeft: number): JqRunResult {
+function classifyThrow(error: unknown, fuelLeft: number, outOfMemory: JqRunResult): JqRunResult {
   if (fuelLeft < 0) return BUDGET_EXCEEDED;
   // A bare `abort()` is how jq reacts to malloc failing (`memory_exhausted`),
   // which at the memory ceiling is the only way it fails. An assertion
   // failure reads "Aborted(Assertion failed: ...)" and is not this.
-  return error instanceof Error && error.message.startsWith("Aborted()") ? OUT_OF_MEMORY : CRASHED;
+  return error instanceof Error && error.message.startsWith("Aborted()") ? outOfMemory : CRASHED;
+}
+
+/** One run of `program` over `inputJson`, on an instance whose fuel is already set. */
+function runOnce(
+  loaded: Loaded,
+  program: string,
+  inputJson: string,
+  outOfMemory: JqRunResult,
+): JqRunResult {
+  try {
+    // `--` ends option parsing: a program that begins with `-` is a program.
+    const result = loaded.handle.raw(inputJson, program, ["-c", "--"]);
+    return result.exitCode === 0
+      ? { ok: true, outputs: parseOutputs(result.stdout) }
+      : { ok: false, code: "jq_error", message: cleanMessage(result.stderr, result.exitCode) };
+  } catch (error) {
+    return classifyThrow(error, loaded.fuel.value, outOfMemory);
+  }
 }
 
 /**
@@ -159,15 +211,113 @@ function classifyThrow(error: unknown, fuelLeft: number): JqRunResult {
  * itself cannot be loaded.
  */
 export async function runJq(program: string, inputJson: string): Promise<JqRunResult> {
-  const { handle, fuel } = await instantiate(jqWasm);
-  fuel.value = fuelFor(inputJson.length);
-  try {
-    // `--` ends option parsing: a program that begins with `-` is a program.
-    const result = handle.raw(inputJson, program, ["-c", "--"]);
-    return result.exitCode === 0
-      ? { ok: true, outputs: parseOutputs(result.stdout) }
-      : { ok: false, code: "jq_error", message: cleanMessage(result.stderr, result.exitCode) };
-  } catch (error) {
-    return classifyThrow(error, fuel.value);
+  const loaded = await instantiate(jqWasm);
+  loaded.fuel.value = fuelFor(inputJson.length);
+  return runOnce(loaded, program, inputJson, OUT_OF_MEMORY);
+}
+
+/**
+ * JSON characters of items one piece carries, at most (a single larger item is
+ * a piece of its own). 2 MiB parses to about 20 MiB, a third of the ceiling,
+ * which leaves the program room to build things from an item; a piece costs
+ * one more call on the same instance, well under a millisecond of overhead.
+ */
+export const PIECE_CHARS = 2 * 1024 * 1024;
+
+/** `.[]` (or `.[]?`), then a pipe that is not the `|=` operator. */
+const PER_ITEM_PREFIX = /^\s*\.\[\s*\]\??\s*\|(?!=)/u;
+
+/**
+ * Names that let the rest of a program see or stop something beyond its own
+ * item: `input`/`inputs` (and `input_line_number`) read the input stream,
+ * `halt`/`halt_error` end the whole run with what was emitted so far, and
+ * `debug`/`stderr` write to the stream a later error's message is read from.
+ * Matched as bare substrings, comments and string literals included: a false
+ * match only sends a program the whole-array way, which is always correct.
+ */
+const NOT_PER_ITEM = /input|halt|debug|stderr/u;
+
+/**
+ * True when `program` gives the same answer run over the items a piece at a
+ * time as over all of them at once: it starts `.[] |`, and nothing after that
+ * can see or stop anything beyond the item it was handed.
+ *
+ * `|` binds loosest in jq's grammar (looser than `,`, than an `as` binding,
+ * than `def`, `reduce` or `label`), so everything after that first pipe is one
+ * filter applied to each item in turn, and a jq filter keeps no state between
+ * the inputs it is applied to. Everything else -- `length`, `sort_by(...)`,
+ * `group_by(...)`, `map(...)`, `[.[] | ...]`, `first(.[] | ...)`,
+ * `limit(3; .[])`, `.[] as $x | ...` (where `.` is still the array),
+ * `def f: ...; .[] | f`, a program with a leading comment -- answers false.
+ */
+export function streamsPerItem(program: string): boolean {
+  const prefix = PER_ITEM_PREFIX.exec(program);
+  return prefix !== null && !NOT_PER_ITEM.test(program.slice(prefix[0].length));
+}
+
+/** `items` as consecutive JSON arrays of about `pieceChars` each; one empty array for none. */
+function* pieces(items: readonly unknown[], pieceChars: number): Generator<string> {
+  let parts: string[] = [];
+  let size = 0;
+  for (const item of items) {
+    // `null` is what `JSON.stringify` writes for an array element with no JSON form.
+    const text = (JSON.stringify(item) as string | undefined) ?? "null";
+    if (parts.length > 0 && size + text.length > pieceChars) {
+      yield `[${parts.join(",")}]`;
+      parts = [];
+      size = 0;
+    }
+    parts.push(text);
+    size += text.length;
   }
+  // Always at least one piece: an empty array still compiles the program, so a
+  // syntax error is reported whether or not there was anything to run it on.
+  yield `[${parts.join(",")}]`;
+}
+
+/**
+ * Run `program` over `items` and collect every output: what every tool's `jq`
+ * argument goes through.
+ *
+ * A program that {@link streamsPerItem} is run over the items in pieces, in
+ * order, on one instance, and the outputs are concatenated; any other program
+ * is run once over the whole array. Items that fit in one piece are one run
+ * over the whole array either way, so nothing about a small answer changes.
+ *
+ * In pieces, what stays exactly as it is in one run:
+ *
+ *  - Errors. jq stops at the first error and a failed run returns no outputs,
+ *    so the first piece that fails is the answer: the same message, about the
+ *    same item, and nothing after it is run.
+ *  - Fuel. One budget for the call, not one per piece: the same 100 million
+ *    units plus 100 per byte, counted over the JSON handed over so far, less
+ *    what the pieces before this one burned. The 2^31 - 1 ceiling of the wasm's
+ *    counter then bounds one piece and not the call: parsing alone is ~8 units
+ *    a byte, so a single clamped budget would run out near 250 MB of items
+ *    and call an honest projection a runaway. A program that loops for ever
+ *    still stops inside the piece it loops in, on what is left of the budget.
+ *
+ * `pieceChars` is for tests; callers leave it alone.
+ */
+export async function runJqOverItems(
+  program: string,
+  items: readonly unknown[],
+  pieceChars: number = PIECE_CHARS,
+): Promise<JqRunResult> {
+  if (!streamsPerItem(program)) return runJq(program, JSON.stringify(items));
+  const loaded = await instantiate(jqWasm);
+  const outputs: unknown[] = [];
+  let chars = 0;
+  let burned = 0;
+  for (const piece of pieces(items, pieceChars)) {
+    chars += piece.length;
+    const granted = Math.min(FUEL_MAX, FUEL_BASE + FUEL_PER_INPUT_BYTE * chars - burned);
+    loaded.fuel.value = granted;
+    const run = runOnce(loaded, program, piece, PIECE_OUT_OF_MEMORY);
+    // A failed run is left on the instance's heap, and the instance is dropped with it.
+    if (!run.ok) return run;
+    burned += granted - loaded.fuel.value;
+    for (const output of run.outputs) outputs.push(output);
+  }
+  return { ok: true, outputs };
 }

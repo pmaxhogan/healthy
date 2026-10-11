@@ -440,7 +440,13 @@ can now make this Worker execute code of its choosing. What limits it:
   memory is capped at 64 MiB, so an allocation bomb fails that call with
   `jq_out_of_memory` instead of taking the isolate's 128 MB with it. Each call
   gets a fresh instance, discarded afterwards, so a trapped run leaves no state
-  behind. Because fuel makes the engine interruptible, no static pattern-matching
+  behind. A program of the form `.[] | ...` over items too large to parse at
+  once is run over them a piece at a time on that one instance (docs/mcp.md);
+  the bounds do not multiply: the memory cap is the instance's, and the fuel is
+  still one budget for the call (the same 100 million units plus 100 per input
+  byte, counted across the pieces), with the 2³¹−1 cap then applying to each
+  piece, since parsing alone would otherwise exhaust it near 250 MB of items.
+  Because fuel makes the engine interruptible, no static pattern-matching
   of "dangerous" programs is attempted — that would be both incomplete and
   wrong about legitimate uses such as `limit(3; repeat(.))`. The program itself
   is capped at 4096 characters. The Worker's own CPU limit remains the last

@@ -76,6 +76,34 @@ history. For example, on `get_lab_results`:
   it runs out — in practice only a filter that never terminates, like
   `[repeat(1)]`) and a 64 MiB memory ceiling (`jq_out_of_memory`); nothing is
   ever truncated. See [SECURITY.md](../SECURITY.md#jq-cost-bounds).
+- **Large answers.** jq's parsed form of JSON is six to ten times its text, so
+  64 MiB holds roughly 6 MB of items at once, and a few hundred exercise
+  sessions with GPS routes are several times that. A program that starts with
+  `.[] |` — the form above — does not need the array: it is run over the items
+  a piece at a time (about 2 MiB of JSON each, never splitting an item) and its
+  outputs are concatenated, so it has no such limit and
+  `.[] | [.start, .end]` over any number of records of any size returns one
+  element per record. The program is not rewritten (each piece is itself an
+  array and the caller's text runs on it as written), and the answer is the one
+  a single run would give: the same outputs in the same order, the same
+  `matched`, `limit`, byte budget and `jq_result_empty`, and on an error the
+  same message about the same item with nothing returned. The step budget is
+  one for the call, not one per piece (100 million units plus 100 per byte of
+  items, of which parsing uses about 8; measured in Node, 290 MB of
+  route-bearing items in 150 pieces took 7.5 s with jq's memory flat at
+  19 MiB). A program is run this way only when
+  everything after that first pipe stays inside its own item, which is decided
+  conservatively from its text: the names `input`, `halt`, `debug` and `stderr`
+  anywhere after the pipe (they read the input stream, stop the whole run, or
+  write to the stream an error is read from) send it the other way, as does
+  anything that does not start `.[] |`.
+  A program that needs the whole array — `length`, `sort_by(...)`,
+  `group_by(...)`, `map(...)`, `[.[] | ...]`, `first(.[] | ...)`,
+  `.[] as $x | ...` — is run once over all of it, exactly as before, and has to
+  fit: past the ceiling it fails `jq_out_of_memory`, whose `detail` says to
+  project with `.[] | ...` and count or sort the small result, to narrow the
+  call, or (on `hc_records`) to leave the large field out with `fields`. A
+  single item too large for jq on its own fails the same way and says so.
 - **Examples, per tool.** Each tool's `jq` argument description carries one
   shared sentence and then one to three examples written against that tool's
   own item fields (`worker/src/mcp/jq-examples.ts`). A unit test

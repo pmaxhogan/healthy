@@ -35,7 +35,11 @@ export const MCP_INSTRUCTIONS =
   "element of items -- so write " +
   '`.[] | select(.effective >= "2026-01-01") | {code, value}`, not that ' +
   "wrapped in `[...]` (which would emit one output, itself an array, giving " +
-  "you a one-element items). ISO dates compare correctly as strings. A jq " +
+  "you a one-element items). A program that starts `.[] |` also works on a " +
+  "result of any size (it is run over the items a piece at a time); one that " +
+  "needs the whole array (`length`, `sort_by`, `[.[] | ...]`) fails " +
+  "`jq_out_of_memory` on a result past a few megabytes, so project with " +
+  "`.[] | ...` first. ISO dates compare correctly as strings. A jq " +
   "error comes back as a tool error carrying jq's message; a `jq_result_empty` " +
   "warning means your filter matched nothing in a non-empty input, so check it " +
   "before concluding there is no data. `coverage` says, per health system and " +

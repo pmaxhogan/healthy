@@ -423,7 +423,10 @@ export function registerHcRecordTools(server: McpServer, deps: ToolDeps): void {
         "`route`, `deltas`), their times converted the same way. Nothing is deduplicated " +
         "or dropped here; `blood_pressure`, `sleep_sessions` and `data_quality` apply the " +
         "rules. Prefer `hc_aggregate` or `hr_series` for anything over a few hours of a " +
-        "dense type: a day of raw heart rate is tens of thousands of samples. Ordered by " +
+        "dense type: a day of raw heart rate is tens of thousands of samples. An exercise " +
+        "session's `route` can be megabytes on its own: leave it out with `fields`, or " +
+        "project with a `jq` program that starts `.[] |`, which works however large the " +
+        "records are. Ordered by " +
         "start time. Without `jq`, a `cursor` resumes reading where the last page ended " +
         "instead of re-reading the range; `total` counts the whole answer on every page. " +
         `${AVAILABILITY_NOTE} ${BUDGET_NOTE}`,
