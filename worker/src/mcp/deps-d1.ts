@@ -1,0 +1,455 @@
+/**
+ * The real {@link ToolDeps}: D1, the FHIR read cache, and one door to the sync
+ * engine for document bodies.
+ *
+ * Everything is memoised for the length of one tool call and dropped at the start
+ * of the next (`beginCall`). That is what makes a twenty-four-row summary one
+ * query per resource type rather than one per item, while still letting the owner
+ * switch the MCP off and have it take effect on the very next call rather than
+ * whenever the client happens to reconnect.
+ *
+ * Note what this file does NOT expose upward: no `Env`, no `Repos`, no `fetch`, no
+ * token, no write path except the audit row. The `ToolDeps` interface is the
+ * whole of what a tool can do, and this is the only place that decides what that
+ * means.
+ */
+
+import { reposFor } from "../db/index.ts";
+import { parseJsonColumn, healthSystemConfigSchema } from "../db/schemas.ts";
+import { getSetting, getTimezone } from "../db/settings.ts";
+import {
+  listOrigins,
+  readDayRollups,
+  readExerciseSessions,
+  readHourRollups,
+  readHrMinutes,
+  readRecords,
+  readSleepNights,
+  storeBacklog,
+} from "../hc/store/read.ts";
+import { parseBatch } from "../hc/wire.ts";
+import { makeLogger } from "../lib/log.ts";
+import { nowSeconds } from "../lib/time.ts";
+import { buildRules } from "../policy/rules.ts";
+
+import { documentText } from "./binary.ts";
+import { REFERENCE_TYPES } from "./collect.ts";
+
+import type {
+  AuditRecord,
+  CacheCount,
+  CachedRow,
+  CallerIdentity,
+  DocumentTextRequest,
+  DocumentTextResult,
+  MessageAttachmentFile,
+  PortalMessageRecord,
+  PortalMessageSyncEntry,
+  PortalVisitRecord,
+  HealthSystemInfo,
+  SyncStatusEntry,
+  ToolDeps,
+} from "./deps.ts";
+import type { HcReads } from "./hc/reads.ts";
+import type { Repos } from "../db/index.ts";
+import type { StoredAttachment } from "../db/repos/portal-message-attachments.ts";
+import type { ConnectionRow, HealthSystemRow, PortalAccountRow } from "../db/rows.ts";
+import type { Env } from "../env.ts";
+import type { HcSyncState } from "../hc/wire.ts";
+import type { Logger } from "../lib/log.ts";
+import type { PolicyRules } from "../policy/rules.ts";
+
+export interface ToolDepsOptions {
+  env: Env;
+  /** Taken from the OAuth grant's props. Recorded on every audit row. */
+  caller: CallerIdentity;
+  log?: Logger;
+  /** Unix seconds. Overridden by tests. */
+  now?: () => number;
+}
+
+/** Everything memoised for one tool call. Replaced wholesale by `beginCall`. */
+interface CallCache {
+  enabled: Promise<boolean> | null;
+  rules: Promise<PolicyRules> | null;
+  healthSystems: Promise<HealthSystemInfo[]> | null;
+  counts: Promise<CacheCount[]> | null;
+  syncStatus: Promise<SyncStatusEntry[]> | null;
+  pools: Map<string, Promise<unknown[]>>;
+  resources: Map<string, Promise<CachedRow[]>>;
+  visits: Map<string, Promise<PortalVisitRecord[]>>;
+  messages: Map<string, Promise<LoadedMessages>>;
+  messageSync: Promise<PortalMessageSyncEntry[]> | null;
+  timezone: Promise<string> | null;
+  /** Health Connect reads, by reader name and arguments. */
+  hc: Map<string, Promise<unknown>>;
+}
+
+/** One health system's messages, and its attachments' storage keys by public id. */
+interface LoadedMessages {
+  records: PortalMessageRecord[];
+  keys: Map<string, string>;
+}
+
+function emptyCache(): CallCache {
+  return {
+    enabled: null,
+    rules: null,
+    healthSystems: null,
+    counts: null,
+    syncStatus: null,
+    pools: new Map(),
+    resources: new Map(),
+    visits: new Map(),
+    messages: new Map(),
+    messageSync: null,
+    timezone: null,
+    hc: new Map(),
+  };
+}
+
+function healthSystemInfo(
+  row: HealthSystemRow,
+  connection: ConnectionRow | undefined,
+  portal: PortalAccountRow | undefined,
+): HealthSystemInfo {
+  const config = parseJsonColumn(
+    healthSystemConfigSchema,
+    row.config_json,
+    `health_systems.config_json.${row.id}`,
+  );
+  return {
+    id: row.id,
+    displayName: row.display_name,
+    environment: row.environment,
+    portalUrl: row.portal_url,
+    enabled: config.enabled,
+    status: connection?.status ?? "not_connected",
+    lastSyncAt: connection?.last_sync_at ?? null,
+    lastFullRefreshAt: connection?.last_full_refresh_at ?? null,
+    lastErrorCode: connection?.last_error_code ?? null,
+    needsReauthSince: connection?.needs_reauth_since ?? null,
+    portal:
+      portal === undefined
+        ? null
+        : {
+            state: portal.session_state,
+            lastOkAt: portal.last_ok_at,
+            lastErrorCode: portal.last_error_code,
+            needsReauthSince: portal.needs_reauth_since,
+          },
+  };
+}
+
+async function loadRules(repos: Repos): Promise<PolicyRules> {
+  return buildRules(await repos.mcpPolicy.list());
+}
+
+/** One resource type for one health system, projected to what the tools read. */
+async function loadRows(
+  repos: Repos,
+  healthSystemId: string,
+  resourceType: string,
+): Promise<CachedRow[]> {
+  const rows = await repos.fhirCache.listByType(healthSystemId, resourceType);
+  return rows.map((row) => ({
+    resource: row.resource,
+    lastUpdated: row.lastUpdated,
+    fetchedAt: row.fetchedAt,
+  }));
+}
+
+/** Everything one health system's references can resolve against, in one pool. */
+async function loadReferencePool(repos: Repos, healthSystemId: string): Promise<unknown[]> {
+  const groups = await Promise.all(
+    REFERENCE_TYPES.map((resourceType) => repos.fhirCache.listByType(healthSystemId, resourceType)),
+  );
+  return groups.flat().map((row) => row.resource);
+}
+
+/** One health system's stored portal visits, projected to what the tools read. */
+async function loadPortalVisits(
+  repos: Repos,
+  healthSystemId: string,
+): Promise<PortalVisitRecord[]> {
+  const rows = await repos.portalVisits.list(healthSystemId);
+  return rows.map((row) => ({
+    visit: row.visit,
+    missing: row.state === "missing",
+    fetchedAt: row.fetchedAt,
+  }));
+}
+
+/** Where one attachment's file stands, from its row (or the lack of one). */
+function fileOf(
+  id: string,
+  row: StoredAttachment | undefined,
+  unread: boolean | undefined,
+): MessageAttachmentFile {
+  if (row === undefined) {
+    return { id, status: unread === true ? "waiting_until_read" : "not_fetched" };
+  }
+  if (row.state === "failed") {
+    return { id, status: "failed", ...(row.errorCode !== null && { errorCode: row.errorCode }) };
+  }
+  return {
+    id,
+    status: "stored",
+    ...(row.meta.contentType !== undefined && { contentType: row.meta.contentType }),
+    ...(row.meta.size !== undefined && { size: row.meta.size }),
+  };
+}
+
+/** One health system's stored secure messages, projected to what the tools read. */
+async function loadPortalMessages(repos: Repos, healthSystemId: string): Promise<LoadedMessages> {
+  const [rows, files] = await Promise.all([
+    repos.portalMessages.list(healthSystemId),
+    repos.portalMessageAttachments.list(healthSystemId),
+  ]);
+  const byKey = new Map(files.map((file) => [file.attachmentKey, file]));
+  const keys = new Map<string, string>();
+  const records = rows.map((row) => {
+    for (const ids of row.attachments) keys.set(ids.id, ids.key);
+    return {
+      threadId: row.threadId,
+      messageId: row.messageId,
+      fingerprint: row.fingerprint,
+      thread: row.thread,
+      message: row.message,
+      files: row.attachments.map((ids) => fileOf(ids.id, byKey.get(ids.key), row.message.unread)),
+      missing: row.missing,
+    };
+  });
+  return { records, keys };
+}
+
+async function loadMessageSync(repos: Repos): Promise<PortalMessageSyncEntry[]> {
+  const rows = await repos.portalMessages.listSync();
+  return rows.map((row) => ({
+    healthSystemId: row.healthSystemId,
+    lastAttemptAt: row.lastAttemptAt,
+    lastOkAt: row.lastOkAt,
+    lastErrorCode: row.lastErrorCode,
+    complete: row.complete,
+  }));
+}
+
+async function loadHealthSystems(repos: Repos): Promise<HealthSystemInfo[]> {
+  const [rows, connections, portals] = await Promise.all([
+    repos.healthSystems.list(),
+    repos.connections.list(),
+    repos.portalAccounts.list(),
+  ]);
+  const byHealthSystem = new Map(connections.map((row) => [row.health_system_id, row]));
+  const portalBy = new Map(portals.map((row) => [row.health_system_id, row]));
+  return rows.map((row) => healthSystemInfo(row, byHealthSystem.get(row.id), portalBy.get(row.id)));
+}
+
+/**
+ * The phone's last sync report, as the wire schema reads it.
+ *
+ * It was validated when it arrived, but it is read back through the same
+ * schema rather than cast: a report stored by an older Worker must not reach a
+ * tool in a shape the tool was not written against.
+ */
+function parsePhoneReport(json: string | null): HcSyncState | null {
+  if (json === null) return null;
+  let syncState: unknown;
+  try {
+    syncState = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  const batch = parseBatch({
+    v: 1,
+    deviceId: "report",
+    appVersion: "report",
+    batchId: "report-0000",
+    phoneTime: 0,
+    syncState,
+  });
+  return batch?.syncState ?? null;
+}
+
+/**
+ * The Health Connect half of the seam: thin, memoised calls into the store's
+ * readers. A summary tool asks for the same day rollups several times in one
+ * call, and every rollup read opens a chunk per origin to learn its name.
+ */
+function makeHcReads(repos: Repos, cache: () => CallCache): HcReads {
+  const { ctx } = repos;
+  const once = <T>(name: string, key: unknown, load: () => Promise<T>): Promise<T> => {
+    const id = `${name}:${JSON.stringify(key)}`;
+    const calls = cache().hc;
+    let pending = calls.get(id) as Promise<T> | undefined;
+    if (pending === undefined) {
+      pending = load();
+      calls.set(id, pending);
+    }
+    return pending;
+  };
+  return {
+    devices: () =>
+      once("devices", null, async () => {
+        const devices = await repos.devices.list();
+        return devices.map((device) => ({
+          id: device.id,
+          name: device.name,
+          createdAt: device.createdAt,
+          revokedAt: device.revokedAt,
+          lastSeenAt: device.lastSeenAt,
+          lastUploadAt: device.lastUploadAt,
+          appVersion: device.appVersion,
+        }));
+      }),
+    syncRows: (deviceId) => once("syncRows", deviceId, () => repos.hcStatus.syncRows(deviceId)),
+    phoneReport: (deviceId) =>
+      once("phoneReport", deviceId, async () =>
+        parsePhoneReport(await repos.devices.syncStateJson(deviceId)),
+      ),
+    backlog: (deviceId) => once("backlog", deviceId, () => storeBacklog(ctx, deviceId)),
+    ingestLog: (deviceId, limit) =>
+      once("ingestLog", [deviceId, limit], () => repos.hcStatus.ingestLog(deviceId, limit)),
+    origins: (deviceId, type) =>
+      once("origins", [deviceId, type], async () => {
+        const refs = await listOrigins(ctx, deviceId, type);
+        return refs.map((ref) => ref.origin);
+      }),
+    records: (window) => once("records", window, () => readRecords(ctx, window)),
+    hourRollups: (window) => once("hourRollups", window, () => readHourRollups(ctx, window)),
+    dayRollups: (window) => once("dayRollups", window, () => readDayRollups(ctx, window)),
+    hrMinutes: (window) => once("hrMinutes", window, () => readHrMinutes(ctx, window)),
+    sleepNights: (window) => once("sleepNights", window, () => readSleepNights(ctx, window)),
+    exerciseSessions: (window) =>
+      once("exerciseSessions", window, () => readExerciseSessions(ctx, window)),
+  };
+}
+
+export function makeToolDeps(options: ToolDepsOptions): ToolDeps {
+  const log = options.log ?? makeLogger({ src: "mcp" });
+  const now = options.now ?? ((): number => nowSeconds());
+  const repos = reposFor(options.env.DB, options.env, { log, now });
+  let cache = emptyCache();
+
+  const loadedMessages = (healthSystemId: string): Promise<LoadedMessages> => {
+    let pending = cache.messages.get(healthSystemId);
+    if (pending === undefined) {
+      pending = loadPortalMessages(repos, healthSystemId);
+      cache.messages.set(healthSystemId, pending);
+    }
+    return pending;
+  };
+
+  const hc = makeHcReads(repos, () => cache);
+
+  return {
+    log,
+    caller: options.caller,
+    hc,
+
+    timezone(): Promise<string> {
+      cache.timezone ??= getTimezone(repos.ctx);
+      return cache.timezone;
+    },
+
+    beginCall(): void {
+      cache = emptyCache();
+    },
+
+    now,
+
+    mcpEnabled(): Promise<boolean> {
+      cache.enabled ??= getSetting(repos.ctx, "mcp_enabled");
+      return cache.enabled;
+    },
+
+    rules(): Promise<PolicyRules> {
+      cache.rules ??= loadRules(repos);
+      return cache.rules;
+    },
+
+    healthSystems(): Promise<HealthSystemInfo[]> {
+      cache.healthSystems ??= loadHealthSystems(repos);
+      return cache.healthSystems;
+    },
+
+    resources(healthSystemId: string, resourceType: string): Promise<CachedRow[]> {
+      const key = `${healthSystemId}:${resourceType}`;
+      let pending = cache.resources.get(key);
+      if (pending === undefined) {
+        pending = loadRows(repos, healthSystemId, resourceType);
+        cache.resources.set(key, pending);
+      }
+      return pending;
+    },
+
+    referencePool(healthSystemId: string): Promise<unknown[]> {
+      let pending = cache.pools.get(healthSystemId);
+      if (pending === undefined) {
+        pending = loadReferencePool(repos, healthSystemId);
+        cache.pools.set(healthSystemId, pending);
+      }
+      return pending;
+    },
+
+    portalVisits(healthSystemId: string): Promise<PortalVisitRecord[]> {
+      let pending = cache.visits.get(healthSystemId);
+      if (pending === undefined) {
+        pending = loadPortalVisits(repos, healthSystemId);
+        cache.visits.set(healthSystemId, pending);
+      }
+      return pending;
+    },
+
+    async portalMessages(healthSystemId: string): Promise<PortalMessageRecord[]> {
+      const loaded = await loadedMessages(healthSystemId);
+      return loaded.records;
+    },
+
+    async portalAttachmentContent(
+      healthSystemId: string,
+      attachmentId: string,
+    ): Promise<Uint8Array | null> {
+      const loaded = await loadedMessages(healthSystemId);
+      const key = loaded.keys.get(attachmentId);
+      return key === undefined ? null : repos.portalMessageAttachments.content(healthSystemId, key);
+    },
+
+    portalMessageSync(): Promise<PortalMessageSyncEntry[]> {
+      cache.messageSync ??= loadMessageSync(repos);
+      return cache.messageSync;
+    },
+
+    counts(): Promise<CacheCount[]> {
+      cache.counts ??= repos.fhirCache.countsByType();
+      return cache.counts;
+    },
+
+    syncStatus(): Promise<SyncStatusEntry[]> {
+      cache.syncStatus ??= repos.fhirSyncState.list();
+      return cache.syncStatus;
+    },
+
+    documentText(input: DocumentTextRequest): Promise<DocumentTextResult> {
+      return documentText({ repos, log }, input.healthSystemId, input.documentId);
+    },
+
+    async recordAudit(entry: AuditRecord): Promise<void> {
+      await repos.mcpAudit.insert({
+        tool: entry.tool,
+        clientId: entry.clientId,
+        grantId: entry.grantId,
+        healthSystems: entry.healthSystemIds,
+        resultCount: entry.resultCount,
+        ok: entry.ok,
+        errorCode: entry.errorCode,
+        durationMs: entry.durationMs,
+        jq: entry.jq,
+      });
+    },
+
+    async pruneAudit(): Promise<void> {
+      await repos.mcpAudit.prune();
+    },
+  };
+}

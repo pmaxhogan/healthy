@@ -1,0 +1,23 @@
+name: Dependency review
+
+# Fails a pull request that adds or upgrades to a dependency with a known
+# advisory of severity high or critical. High matches the code scanning merge
+# threshold; moderate advisories still surface as Dependabot alerts and get
+# security-update PRs, but do not stall the Dependabot auto-merge flow.
+# `dependency-review` is a required status check on main.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/dependency-review-action@v5
+        with:
+          fail-on-severity: high

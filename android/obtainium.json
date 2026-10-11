@@ -1,0 +1,8 @@
+{
+  "id": "dev.maxhogan.healthy.companion",
+  "url": "https://github.com/pmaxhogan/healthy",
+  "author": "pmaxhogan",
+  "name": "Healthy Companion",
+  "preferredApkIndex": 0,
+  "additionalSettings": "{\"includePrereleases\":false,\"fallbackToOlderReleases\":true,\"filterReleaseTitlesByRegEx\":\"\",\"filterReleaseNotesByRegEx\":\"\",\"verifyLatestTag\":false,\"dontSortReleasesList\":false,\"useLatestAssetDateAsReleaseDate\":false,\"releaseTitleAsVersion\":false,\"trackOnly\":false,\"versionExtractionRegEx\":\"\",\"matchGroupToUse\":\"\",\"versionDetection\":true,\"releaseDateAsVersion\":false,\"useVersionCodeAsOSVersion\":false,\"apkFilterRegEx\":\"healthy-companion-.*\\\\.apk\",\"invertAPKFilter\":false,\"autoApkFilterByArch\":true,\"appName\":\"Healthy Companion\",\"appAuthor\":\"pmaxhogan\",\"shizukuPretendToBeGooglePlay\":false,\"allowInsecure\":false,\"exemptFromBackgroundUpdates\":false,\"skipUpdateNotifications\":false,\"about\":\"Uploads Health Connect records in the background to a Healthy server you run.\",\"refreshBeforeDownload\":false}"
+}

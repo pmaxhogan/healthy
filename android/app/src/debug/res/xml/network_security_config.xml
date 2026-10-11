@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Debug builds only. TLS everywhere, with one exception: this device's own loopback, which is
+    how a development build reaches a server on the workstation through `adb reverse`. No other
+    host may be reached in cleartext, and the pairing parser refuses an http URL for any other
+    host. The release build's file (src/main/res/xml) has no exception at all.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>

@@ -1,0 +1,23 @@
+-- Healthy: keep the whole discovery result for a portal account, not just the
+-- two fields the first version of the scrape needed.
+--
+-- Apply with `npm run migrate:local` (Miniflare) or `npm run migrate:remote`
+-- (production) BEFORE deploying code that depends on it.
+--
+-- `portal_accounts.base_url` and `mount_path` describe where the portal is.
+-- They turned out not to describe *how to sign in to it*: a deployment may put
+-- its login and emailed-code steps in a separate application that bridges into
+-- the portal session, so the endpoint the adapter hands back carries a flavour
+-- (and may carry more later) that decides which login strategy to drive.
+--
+-- Rather than one column per field discovered -- each needing a migration, and
+-- each a chance for the stored endpoint to disagree with the adapter that
+-- produced it -- the endpoint is stored as the adapter's own JSON, opaquely.
+-- `worker/providers/mychart/**` owns its shape; everything outside reads the
+-- two fields it depends on and passes the rest straight back.
+--
+-- Nullable, with no default: a row written before this migration (or by
+-- `npm run set-portal-credentials`) has NULL here, and the sign-in falls back to
+-- building an endpoint from `base_url` and `mount_path`. The next discovery
+-- fills it in.
+ALTER TABLE portal_accounts ADD COLUMN endpoint_json TEXT;

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- aapt2 only resolves adaptive icons from a -v26 folder, whatever minSdk says. -->
+    <issue id="ObsoleteSdkInt">
+        <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+    <!--
+        Lint's list of permissions that qualify a "health" foreground service predates the
+        Android 16 change that moved it from BODY_SENSORS to the Health Connect read
+        permissions (heart rate, skin temperature, oxygen saturation), which this app declares.
+        The service handles a refusal at run time rather than assuming the type is allowed.
+    -->
+    <issue id="ForegroundServicePermission">
+        <ignore path="src/main/AndroidManifest.xml" />
+    </issue>
+    <!--
+        The Tasker fire receiver has to be reachable by whichever host app the owner uses, and
+        the plugin protocol defines no permission for it. All a caller can do is ask for a sync.
+    -->
+    <issue id="ExportedReceiver">
+        <ignore path="src/main/AndroidManifest.xml" />
+    </issue>
+</lint>

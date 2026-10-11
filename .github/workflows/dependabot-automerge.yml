@@ -1,8 +1,22 @@
 name: Dependabot auto-merge
 
-# Minor and patch bumps merge themselves once CI passes. Majors are left alone:
-# `agents` and `@modelcontextprotocol/sdk` are pinned exactly because their APIs
-# churn between majors, and a silent major there would break the MCP server.
+# A Dependabot pull request merges itself, with no human approval, once CI
+# passes, in exactly two cases:
+#
+#   1. nothing in it is a major bump (minor and patch only), or
+#   2. everything in it is a development dependency, whatever the bump.
+#
+# A major bump of anything that ships -- a runtime dependency of the Worker or
+# of the Android app -- is left for a person. `agents` and
+# `@modelcontextprotocol/sdk` are pinned exactly because their APIs churn, and a
+# silent major there would break the MCP server; see `.github/dependabot.yml`
+# for the bumps Dependabot is told not to propose at all.
+#
+# "Once CI passes" is GitHub's doing, not this workflow's: `gh pr merge --auto`
+# waits for the branch's required status checks and never bypasses them. So the
+# guarantee is only as strong as that list -- every CI job that should gate a
+# dependency bump (the Worker check AND the Android job) must be a required
+# check on `main`.
 on: pull_request
 
 permissions:
@@ -20,19 +34,46 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      # A grouped pull request carries several dependencies. `update-type` is
+      # already the highest bump among them; "development only" has to hold for
+      # every one, so it is decided from the full list rather than from the
+      # single `dependency-type` output.
+      - name: Decide
+        id: decide
+        env:
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+          UPDATED: ${{ steps.metadata.outputs.updated-dependencies-json }}
+        run: |
+          non_major=false
+          case "$UPDATE_TYPE" in
+            version-update:semver-minor | version-update:semver-patch) non_major=true ;;
+          esac
+          dev_only=$(jq -r 'length > 0 and all(.[]; .dependencyType == "direct:development")' <<<"$UPDATED")
+          # The exact-pinned packages never merge themselves, whatever the bump.
+          # `.github/dependabot.yml` already tells Dependabot not to propose
+          # them, but an `ignore` entry does not apply to SECURITY updates, and
+          # one of those is exactly the bump that needs a person: `agents`
+          # peer-depends on one exact SDK version, so moving either alone
+          # installs two copies and breaks the typecheck.
+          pinned=$(jq -r 'any(.[]; .dependencyName == "agents" or .dependencyName == "@modelcontextprotocol/sdk" or .dependencyName == "jq-wasm")' <<<"$UPDATED")
+          if [ "$pinned" = true ]; then
+            echo "merge=false" >>"$GITHUB_OUTPUT"
+          elif [ "$non_major" = true ] || [ "$dev_only" = true ]; then
+            echo "merge=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "merge=false" >>"$GITHUB_OUTPUT"
+          fi
+          echo "non_major=$non_major dev_only=$dev_only pinned=$pinned"
+
       - name: Approve
-        if: >-
-          steps.metadata.outputs.update-type == 'version-update:semver-minor' ||
-          steps.metadata.outputs.update-type == 'version-update:semver-patch'
+        if: steps.decide.outputs.merge == 'true'
         run: gh pr review --approve "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Enable auto-merge
-        if: >-
-          steps.metadata.outputs.update-type == 'version-update:semver-minor' ||
-          steps.metadata.outputs.update-type == 'version-update:semver-patch'
+        if: steps.decide.outputs.merge == 'true'
         # --auto means GitHub waits for the required checks; it never bypasses
         # them.
         run: gh pr merge --auto --squash "$PR_URL"

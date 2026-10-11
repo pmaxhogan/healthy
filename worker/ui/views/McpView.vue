@@ -1,0 +1,251 @@
+<script setup lang="ts">
+// The MCP side: is it on, how to connect a client, who is connected, what the
+// policy denies, and what has been called.
+//
+// The audit log records the shape of a call and never its content -- tool,
+// client, source ids (health systems and phones), a result count, and a jq program's fingerprint. That is
+// why it can be shown here at all.
+
+import { computed, ref, watch } from "vue";
+
+import { endpoints, mcpToolsOrNone } from "../api/endpoints.ts";
+import McpToolTester from "../components/McpToolTester.vue";
+import PolicySection from "../components/PolicySection.vue";
+import StateBlock from "../components/StateBlock.vue";
+import { formatDateTime, formatDuration, relativeTime } from "../lib/format.ts";
+import { sourceNamer } from "../lib/policy.ts";
+import { toastSuccess } from "../lib/toasts.ts";
+import { useAction, useLoad } from "../lib/use-load.ts";
+
+import type { McpAuditJqDto } from "@shared/types.ts";
+
+const AUDIT_LIMITS = [25, 50, 100, 250] as const;
+
+const settings = useLoad((signal) => endpoints.settings(signal));
+const grants = useLoad((signal) => endpoints.mcpGrants(signal));
+const healthSystems = useLoad((signal) => endpoints.healthSystems(signal));
+// Paired phones are sources too. A failure here only costs the phones their names,
+// so it is not shown as a page error: ids still resolve, to a plain "phone".
+const devices = useLoad((signal) => endpoints.devices(signal));
+const tools = useLoad((signal) => mcpToolsOrNone(signal));
+
+const auditLimit = ref<number>(50);
+const audit = useLoad((signal) => endpoints.mcpAudit(auditLimit.value, signal));
+watch(auditLimit, () => {
+  void audit.reload();
+});
+
+const toggle = useAction();
+const mutate = useAction();
+
+const enabled = computed(() => settings.data.value?.mcpEnabled ?? false);
+const serverUrl = computed(() => `${location.origin}/mcp`);
+const timezone = computed(() => settings.data.value?.timezone ?? null);
+// A Map inside, not a record: the keys come from audit rows and indexing an object
+// with them is what security/detect-object-injection is there to flag.
+const nameSource = computed(() =>
+  sourceNamer(healthSystems.data.value ?? [], devices.data.value ?? []),
+);
+
+// A jq program is audited as a fingerprint, never its text (a filter can name
+// what the caller was looking for): the hash prefix, its length, and how many
+// items went in and came out.
+function describeJq(jq: McpAuditJqDto | null): string {
+  if (jq === null) return "—";
+  const head = `${jq.sha256.slice(0, 8)} · ${String(jq.length)} ch`;
+  if (jq.inputCount === null) return head;
+  const out = jq.outputCount === null ? "failed" : String(jq.outputCount);
+  return `${head} · ${String(jq.inputCount)} → ${out}`;
+}
+
+async function setEnabled(next: boolean): Promise<void> {
+  const ok = await toggle.run(async () => {
+    const saved = await endpoints.saveSettings({ mcpEnabled: next });
+    settings.set(saved);
+    toastSuccess(next ? "MCP enabled." : "MCP disabled.");
+  });
+  if (!ok) await settings.reload();
+}
+
+async function onRevoke(id: string): Promise<void> {
+  const ok = await mutate.run(async () => {
+    await endpoints.revokeMcpGrant(id);
+    toastSuccess("Client revoked.");
+  });
+  if (ok) await grants.reload();
+}
+</script>
+
+<template>
+  <div class="page">
+    <section class="card">
+      <div class="row">
+        <h2>Model Context Protocol</h2>
+        <label class="toggle spacer">
+          <input
+            type="checkbox"
+            :checked="enabled"
+            :disabled="toggle.busy.value || settings.loading.value"
+            @change="setEnabled(($event.target as HTMLInputElement).checked)"
+          />
+          {{ enabled ? "enabled" : "disabled" }}
+        </label>
+      </div>
+      <p class="muted">
+        When it is off the endpoint stops answering, existing links included. Nothing is revoked.
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>Connecting a client</h2>
+      <p class="muted">Server URL — add it as a custom connector in claude.ai:</p>
+      <pre>{{ serverUrl }}</pre>
+      <ol class="steps">
+        <li>In claude.ai, add a custom connector and paste the URL above.</li>
+        <li>
+          The consent page is behind Cloudflare Access and then the admin password: complete both,
+          then approve the connection.
+        </li>
+        <li>The client appears below, and every call it makes is logged.</li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <h2>Linked clients</h2>
+      <StateBlock
+        :loading="grants.loading.value"
+        :error="grants.error.value"
+        :empty="(grants.data.value ?? []).length === 0"
+        empty-text="Nothing is connected."
+        @retry="grants.reload()"
+      >
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Client</th>
+                <th>Scope</th>
+                <th>Linked</th>
+                <th>Last used</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="grant in grants.data.value ?? []" :key="grant.id">
+                <td>{{ grant.clientName ?? grant.clientId }}</td>
+                <td>{{ grant.scope.join(" ") }}</td>
+                <td class="nowrap" :title="formatDateTime(grant.createdAt, timezone)">
+                  {{ relativeTime(grant.createdAt) }}
+                </td>
+                <td class="nowrap">{{ relativeTime(grant.lastUsedAt) }}</td>
+                <td class="nowrap">
+                  <button
+                    class="small danger"
+                    :disabled="mutate.busy.value"
+                    @click="onRevoke(grant.id)"
+                  >
+                    Revoke
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </StateBlock>
+    </section>
+
+    <PolicySection
+      :tools="tools.data.value ?? []"
+      :health-systems="healthSystems.data.value ?? []"
+      :devices="devices.data.value ?? []"
+    />
+
+    <McpToolTester />
+
+    <section class="card">
+      <div class="row">
+        <h2>Audit log</h2>
+        <label class="field inline spacer">
+          Show
+          <select v-model.number="auditLimit">
+            <option v-for="limit in AUDIT_LIMITS" :key="limit" :value="limit">{{ limit }}</option>
+          </select>
+        </label>
+      </div>
+
+      <StateBlock
+        :loading="audit.loading.value"
+        :error="audit.error.value"
+        :empty="(audit.data.value ?? []).length === 0"
+        empty-text="No calls yet."
+        @retry="audit.reload()"
+      >
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Tool</th>
+                <th>When</th>
+                <th>Client</th>
+                <th>Sources</th>
+                <th class="num">Results</th>
+                <th>jq</th>
+                <th>Result</th>
+                <th class="num">Took</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="entry in audit.data.value ?? []" :key="entry.id">
+                <td class="nowrap">{{ entry.tool }}</td>
+                <td class="nowrap" :title="formatDateTime(entry.ts, timezone)">
+                  {{ relativeTime(entry.ts) }}
+                </td>
+                <td>{{ entry.clientId }}</td>
+                <td>{{ entry.healthSystemIds.map(nameSource).join(", ") || "—" }}</td>
+                <td class="num">{{ entry.resultCount }}</td>
+                <td
+                  class="nowrap"
+                  :title="entry.jq === null ? undefined : `jq program SHA-256 ${entry.jq.sha256}`"
+                >
+                  {{ describeJq(entry.jq) }}
+                </td>
+                <td class="nowrap" :class="{ 'danger-text': !entry.ok }">
+                  {{ entry.ok ? "ok" : (entry.errorCode ?? "error") }}
+                </td>
+                <td class="num">{{ formatDuration(entry.durationMs) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </StateBlock>
+    </section>
+  </div>
+</template>
+
+<style scoped>
+h2 {
+  font-size: 1.05rem;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+
+.field.inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.steps {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-dim);
+  font-size: 0.88rem;
+  display: grid;
+  gap: 4px;
+}
+</style>
