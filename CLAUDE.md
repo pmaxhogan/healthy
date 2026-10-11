@@ -52,9 +52,20 @@ body is the only copy of those records. These hold for `worker/src/hc/**`,
   `worker/src/policy/hc-fields.ts` (`JOINED_FIELDS` or `OWN_FIELDS`) and in
   `worker/src/policy/tree.ts`; a unit test holds them to the tools' real output.
   A field nobody placed is a field an exposure rule cannot find.
-- Applying a batch is replayable and bounded: a slice is one `db.batch` per chunk,
-  a slice that dies is run again, and the runner counts an attempt before each
-  slice (eight, then the head batch is parked as `apply_gave_up`).
+- Applying a batch is replayable and bounded. The chunks of a page share one
+  `db.batch` (a round trip to D1 costs far more than the statements in it), cut
+  by statements and by sealed bytes, and the cursor moves only after the commit
+  that holds its work; a commit D1 refuses falls back to one per chunk. A slice
+  that dies is run again, and the runner counts an attempt before each slice
+  (eight, then the head batch is parked as `apply_gave_up`). The queue row goes
+  in the same transaction that records the batch applied.
+  `worker/test/integration/hc/replay.test.ts` kills a run around every commit and
+  compares the store with an uninterrupted one: a change to `apply.ts` keeps it
+  green.
+- Statements are nearly free in production (about a millisecond); round trips
+  are not (about 20 ms a read, 65 to 80 ms a commit). `hc.slice` logs
+  `roundTrips`, `executed` and `sqlMs`: measure there before optimising, and do
+  not trust a local timing, where a round trip is in-process.
 
 ## Privacy: the one rule that is never negotiable
 
