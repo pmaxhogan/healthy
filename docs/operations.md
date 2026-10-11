@@ -338,7 +338,24 @@ sending. A short queue is normal during a backfill. If it does not shrink:
    The ten-minute cron tick wakes the runner regardless. Each slice also logs one
    `hc.slice` line: the device id, which phase it was in (`apply` or `rebuild`),
    the statements and milliseconds it spent, the units of work finished, what ended
-   it (`done`, `statements` or `time`) and how many batches are still queued.
+   it (`done`, `statements` or `time`) and how many batches are still queued. The
+   same line says where the time went, in counts and durations only: `batches`
+   applied in the slice, `rebuildMs` of its `ms` spent rebuilding rollups and
+   summaries, and of what it asked of D1 the `roundTrips` (each `db.batch`, and
+   each statement run alone), the statements `executed` in them, `d1Ms` of wall
+   clock waiting on them, `sqlMs` that D1 itself reports for the SQL (no network in
+   it), and `rowsRead` and `rowsWritten`. `d1Ms` less `sqlMs` is the network and
+   D1's own queue; `ms` less `d1Ms` is the Worker's work (unsealing, compressing,
+   sealing). `idleMs`, when present, is how long the runner sat between the last
+   slice and this one.
+
+   The chunks of a page are committed together, in one transaction. If D1 will not
+   take such a commit (a request has a size), the runner logs `hc.commit_split`
+   (the device id, how many chunk writes and statements were in it, and the error)
+   and commits each chunk by itself, as it did before they shared one: nothing is
+   lost and nothing is parked. A line now and then is harmless; a steady stream of
+   them means every page is being sent twice and is worth a look.
+
 4. When a phone already has more than 96 MiB or 400 batches waiting, the Worker
    answers its uploads with 429 `backlogged` and `retry-after`; the app waits and
    retries. Parked batches are not counted. Leave the phone charging and online and

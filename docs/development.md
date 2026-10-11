@@ -57,10 +57,12 @@ Gradle**, and Workers Builds never will; the Android build has its own job in
 
 ## `npm run check`
 
-This is the whole gate. It is what CI runs on every push and pull request,
-what the pre-push hook runs, and what Cloudflare Workers Builds runs before
-deploying — the same command everywhere means a green `npm run check`
-locally is a green build everywhere else. It runs, in order:
+This is the whole gate. It is what CI runs on every push and pull request and
+what the pre-push hook runs, so a green `npm run check` locally is a green
+build everywhere else. Cloudflare Workers Builds does not run it again: by the
+time a commit reaches `main` it has passed here (a direct push through the
+hook, a pull request through its required checks), so the deploy only builds.
+It runs, in order:
 
 1. **`lint`** — `eslint .` (typescript-eslint strict + stylistic, plus
    unicorn, import-x, sonarjs, security, promise, and vue/vitest plugins),
