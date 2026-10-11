@@ -1,0 +1,5 @@
+# The Gradle wrapper runs on Linux in CI and on Windows locally: the shell
+# script must stay LF, the batch file CRLF, and the jar must never be rewritten.
+gradlew text eol=lf
+*.bat text eol=crlf
+*.jar binary

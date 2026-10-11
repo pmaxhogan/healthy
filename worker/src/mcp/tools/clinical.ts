@@ -1,0 +1,292 @@
+/**
+ * The per-resource read tools: one per thing a medical record contains.
+ *
+ * Deliberately many small tools rather than one `query_fhir`. A model picks a
+ * tool by name, and "get_allergies" is a better prompt than a resource type plus
+ * a category parameter it has to get right. It also means the owner's deny-list
+ * can switch off a whole subject area by naming one tool.
+ *
+ * Every one of them is a `collectionTool`: a description, the resource types to
+ * read, the date to order by, and any predicate. No tool in this file touches the
+ * network, the policy rules or the serialiser -- `collectionTool` owns all three.
+ */
+
+import { z } from "zod";
+
+import { jqArg, sharedOnlyArgs, toolArgs, windowArgs } from "../args.ts";
+import { spec } from "../collect.ts";
+import {
+  CATEGORY_ARG,
+  CATEGORY_SPELLINGS,
+  canonicalCategory,
+  conditionsReshape,
+} from "../conditions.ts";
+import {
+  LABORATORY,
+  SOCIAL_HISTORY,
+  VITAL_SIGNS,
+  hasCategory,
+  hasCode,
+  slug,
+  textMatches,
+} from "../match.ts";
+
+import { collectionTool } from "./register.ts";
+
+import type { ToolDeps } from "../deps.ts";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+
+/** `A · B` style: the first non-empty of several optional strings. */
+function firstOf(...values: (string | undefined)[]): string | undefined {
+  return values.find((value) => value !== undefined && value !== "");
+}
+
+export function registerClinicalTools(server: McpServer, deps: ToolDeps): void {
+  collectionTool(server, deps, {
+    name: "get_patient_profile",
+    description:
+      "The demographic record each connected health system holds: name, gender, " +
+      "and city/state. Birth date is withheld unless the owner has allowed it.",
+    schema: sharedOnlyArgs("get_patient_profile"),
+    specs: () => [spec("Patient")],
+  });
+
+  collectionTool(server, deps, {
+    name: "get_encounters",
+    description:
+      "Visits and admissions, newest first: status, type, times, practitioners, " +
+      "department and location.",
+    schema: toolArgs({ ...windowArgs("`start`"), ...jqArg("get_encounters") }),
+    specs: () => [spec("Encounter", { dateOf: (item) => item.start })],
+  });
+
+  collectionTool(server, deps, {
+    name: "get_conditions",
+    description:
+      "Diagnoses, problems and health concerns, newest first. With no arguments " +
+      "it returns every row, and most rows are usually encounter diagnoses: the " +
+      "same condition recorded again at each visit it was coded at. For 'what " +
+      'conditions do I have\', pass `category: ["problem-list-item"]` (the ' +
+      "problem list only) or `collapse: true` (one item per condition). " +
+      "`category` keeps rows in any of the given categories " +
+      "(problem-list-item, encounter-diagnosis, health-concern; the display " +
+      "strings and Epic's 'Visit Diagnosis' are accepted too). `collapse` groups " +
+      "rows by condition -- the health system plus the first ICD-10 code, else " +
+      "the first SNOMED code, else the text -- into one item carrying the shared " +
+      "code, `categories`, `onProblemList`, `firstSeen`/`lastSeen` (earliest and " +
+      "latest onset or recorded date), `occurrences`, the Condition `ids`, the " +
+      "`encounterIds` it was coded at, and the status of the problem-list entry " +
+      "(else of the latest row that has one). With `collapse`, `total` counts " +
+      "rows before grouping, `groups` counts the groups, and `jq` and `limit` " +
+      "run on the groups; with `raw: true` each group's `raw` is the list of its " +
+      "rows' resources. Many rows carry no clinical status: `status` matches it " +
+      '(e.g. active, resolved), `status: "unknown"` keeps exactly the rows ' +
+      "without one, and a `status_filter_excluded_unknown:<n>` warning says how " +
+      "many status-less rows another value left out.",
+    schema: toolArgs({
+      ...windowArgs("`recorded` (else `onset`)"),
+      ...jqArg("get_conditions"),
+      category: CATEGORY_ARG.optional().describe(
+        "Only rows in any of these categories: problem-list-item, " +
+          'encounter-diagnosis, health-concern (or "Problem List Item", ' +
+          '"Encounter Diagnosis", "Visit Diagnosis", "Health Concern").',
+      ),
+      status: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "Clinical status, e.g. active, inactive, resolved, remission; or " +
+            "`unknown` for rows that carry none.",
+        ),
+      collapse: z
+        .boolean()
+        .optional()
+        .describe(
+          "One item per condition instead of one per row (see the tool " +
+            "description). Off by default.",
+        ),
+    }),
+    specs: ({ category }) => {
+      const wanted = (category ?? []).flatMap((value) => {
+        const code = canonicalCategory(value);
+        return code === undefined ? [] : (CATEGORY_SPELLINGS.get(code) ?? []);
+      });
+      return [
+        spec("Condition", {
+          dateOf: (item) => firstOf(item.recorded, item.onset),
+          ...(category !== undefined && {
+            keep: (item, resource) => hasCategory(resource, item.category, wanted),
+          }),
+        }),
+      ];
+    },
+    reshape: ({ status, collapse }) => conditionsReshape({ status, collapse }),
+  });
+
+  collectionTool(server, deps, {
+    name: "get_medications",
+    description:
+      "Prescriptions and medication orders. Pass `active: true` for the current " +
+      "medication list rather than the whole history.",
+    schema: toolArgs({
+      ...windowArgs("`authoredOn`"),
+      ...jqArg("get_medications"),
+      active: z.boolean().optional().describe("Only orders whose status is active."),
+    }),
+    specs: ({ active }) => [
+      spec("MedicationRequest", {
+        dateOf: (item) => item.authoredOn,
+        ...(active === true && { keep: (item) => slug(item.status) === "active" }),
+      }),
+    ],
+  });
+
+  collectionTool(server, deps, {
+    name: "get_medication_fills",
+    description:
+      "Dispense records: what was actually handed over, when, how much, and the " +
+      "days supply. Complements get_medications, which is what was ordered.",
+    schema: toolArgs({ ...windowArgs("`whenHandedOver`"), ...jqArg("get_medication_fills") }),
+    specs: () => [spec("MedicationDispense", { dateOf: (item) => item.whenHandedOver })],
+  });
+
+  collectionTool(server, deps, {
+    name: "get_allergies",
+    description: "Allergies and intolerances with their reactions, severity and criticality.",
+    schema: sharedOnlyArgs("get_allergies"),
+    specs: () => [spec("AllergyIntolerance", { dateOf: (item) => item.onset })],
+  });
+
+  collectionTool(server, deps, {
+    name: "get_immunizations",
+    description: "Vaccination history: vaccine, date, status, site and route.",
+    schema: toolArgs({ ...windowArgs("`occurrence`"), ...jqArg("get_immunizations") }),
+    specs: () => [spec("Immunization", { dateOf: (item) => item.occurrence })],
+  });
+
+  collectionTool(server, deps, {
+    name: "get_lab_results",
+    description:
+      "Laboratory observations with their values, units, reference ranges and " +
+      "interpretations. Narrow with `code` (a LOINC or local code) or `text` " +
+      "(a substring of the test name), or filter and project with `jq`.",
+    schema: toolArgs({
+      ...windowArgs("`effective` (else `issued`)"),
+      ...jqArg("get_lab_results"),
+      code: z.string().min(1).optional().describe("Match this observation code exactly."),
+      text: z.string().min(1).optional().describe("Match this substring of the test name."),
+    }),
+    specs: ({ code, text }) => [
+      spec("Observation", {
+        dateOf: (item) => firstOf(item.effective, item.issued),
+        keep: (item, resource) =>
+          hasCategory(resource, item.category, LABORATORY) &&
+          (code === undefined || hasCode(resource, code)) &&
+          (text === undefined || textMatches(text, [item.code])),
+      }),
+    ],
+  });
+
+  collectionTool(server, deps, {
+    name: "get_vitals",
+    description:
+      "Vital-sign observations: blood pressure (as systolic/diastolic components), " +
+      "heart rate, temperature, weight, height and the rest.",
+    schema: toolArgs({ ...windowArgs("`effective` (else `issued`)"), ...jqArg("get_vitals") }),
+    specs: () => [
+      spec("Observation", {
+        dateOf: (item) => firstOf(item.effective, item.issued),
+        keep: (item, resource) => hasCategory(resource, item.category, VITAL_SIGNS),
+      }),
+    ],
+  });
+
+  collectionTool(server, deps, {
+    name: "get_social_history",
+    description:
+      "Social-history observations: smoking and alcohol status, occupation and " +
+      "similar screening answers.",
+    schema: toolArgs({
+      ...windowArgs("`effective` (else `issued`)"),
+      ...jqArg("get_social_history"),
+    }),
+    specs: () => [
+      spec("Observation", {
+        dateOf: (item) => firstOf(item.effective, item.issued),
+        keep: (item, resource) => hasCategory(resource, item.category, SOCIAL_HISTORY),
+      }),
+    ],
+  });
+
+  collectionTool(server, deps, {
+    name: "get_procedures",
+    description: "Procedures performed, with who performed them and why.",
+    schema: toolArgs({ ...windowArgs("`performed`"), ...jqArg("get_procedures") }),
+    specs: () => [spec("Procedure", { dateOf: (item) => item.performed })],
+  });
+
+  collectionTool(server, deps, {
+    name: "get_diagnostic_reports",
+    description:
+      "Diagnostic reports (labs, imaging, pathology) with their conclusions. The " +
+      "narrative text of an attached document is fetched separately with " +
+      "get_document_text.",
+    schema: toolArgs({
+      ...windowArgs("`effective` (else `issued`)"),
+      ...jqArg("get_diagnostic_reports"),
+    }),
+    specs: () => [
+      spec("DiagnosticReport", { dateOf: (item) => firstOf(item.effective, item.issued) }),
+    ],
+  });
+
+  collectionTool(server, deps, {
+    name: "get_care_team",
+    description: "Care team members and their roles at each health system.",
+    schema: sharedOnlyArgs("get_care_team"),
+    specs: () => [spec("CareTeam")],
+  });
+
+  collectionTool(server, deps, {
+    name: "get_care_plans",
+    description:
+      "Care plans: title, status, period and the activities they call for. An " +
+      "empty result can mean the health system genuinely has none, or that the " +
+      "last sync of this type failed or has not run -- check `coverage` (and " +
+      "the `incomplete_no_data_is_not_absence` warning) before concluding there " +
+      "are no care plans.",
+    schema: toolArgs({ ...windowArgs("`period.start`"), ...jqArg("get_care_plans") }),
+    specs: () => [spec("CarePlan", { dateOf: (item) => item.period?.start })],
+  });
+
+  collectionTool(server, deps, {
+    name: "get_goals",
+    description: "Care goals with their lifecycle status, achievement status and targets.",
+    schema: toolArgs({ ...windowArgs("`startDate`"), ...jqArg("get_goals") }),
+    specs: () => [spec("Goal", { dateOf: (item) => item.startDate })],
+  });
+
+  collectionTool(server, deps, {
+    name: "get_devices",
+    description: "Implanted and patient-associated devices: type, manufacturer, model, UDI.",
+    schema: sharedOnlyArgs("get_devices"),
+    specs: () => [spec("Device")],
+  });
+
+  collectionTool(server, deps, {
+    name: "get_coverage",
+    description:
+      "Insurance coverage: payor, plan type and status. The subscriber id is " +
+      "withheld unless the owner has allowed it.",
+    schema: sharedOnlyArgs("get_coverage"),
+    specs: () => [spec("Coverage")],
+  });
+
+  collectionTool(server, deps, {
+    name: "get_service_requests",
+    description: "Orders and referrals that have been placed: what, why, by whom, and when.",
+    schema: toolArgs({ ...windowArgs("`occurrence`"), ...jqArg("get_service_requests") }),
+    specs: () => [spec("ServiceRequest", { dateOf: (item) => item.occurrence })],
+  });
+}

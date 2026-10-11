@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Only the window behind Compose; every colour on screen comes from the Compose theme. -->
+    <style name="Theme.Healthy" parent="android:Theme.DeviceDefault.DayNight">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+    </style>
+</resources>

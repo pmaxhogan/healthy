@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+        One read permission per Health Connect record type the client library knows. The app
+        never writes. This list is checked against the library by RecordTypesTest:
+        adding a type to RecordTypes without declaring its permission here fails the build.
+    -->
+    <uses-permission android:name="android.permission.health.READ_ACTIVE_CALORIES_BURNED" />
+    <uses-permission android:name="android.permission.health.READ_BASAL_BODY_TEMPERATURE" />
+    <uses-permission android:name="android.permission.health.READ_BASAL_METABOLIC_RATE" />
+    <uses-permission android:name="android.permission.health.READ_BLOOD_GLUCOSE" />
+    <uses-permission android:name="android.permission.health.READ_BLOOD_PRESSURE" />
+    <uses-permission android:name="android.permission.health.READ_BODY_FAT" />
+    <uses-permission android:name="android.permission.health.READ_BODY_TEMPERATURE" />
+    <uses-permission android:name="android.permission.health.READ_BODY_WATER_MASS" />
+    <uses-permission android:name="android.permission.health.READ_BONE_MASS" />
+    <uses-permission android:name="android.permission.health.READ_CERVICAL_MUCUS" />
+    <uses-permission android:name="android.permission.health.READ_DISTANCE" />
+    <uses-permission android:name="android.permission.health.READ_ELEVATION_GAINED" />
+    <uses-permission android:name="android.permission.health.READ_EXERCISE" />
+    <uses-permission android:name="android.permission.health.READ_FLOORS_CLIMBED" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE_VARIABILITY" />
+    <uses-permission android:name="android.permission.health.READ_HEIGHT" />
+    <uses-permission android:name="android.permission.health.READ_HYDRATION" />
+    <uses-permission android:name="android.permission.health.READ_INTERMENSTRUAL_BLEEDING" />
+    <uses-permission android:name="android.permission.health.READ_LEAN_BODY_MASS" />
+    <uses-permission android:name="android.permission.health.READ_MENSTRUATION" />
+    <uses-permission android:name="android.permission.health.READ_MINDFULNESS" />
+    <uses-permission android:name="android.permission.health.READ_NUTRITION" />
+    <uses-permission android:name="android.permission.health.READ_OVULATION_TEST" />
+    <uses-permission android:name="android.permission.health.READ_OXYGEN_SATURATION" />
+    <uses-permission android:name="android.permission.health.READ_PLANNED_EXERCISE" />
+    <uses-permission android:name="android.permission.health.READ_POWER" />
+    <uses-permission android:name="android.permission.health.READ_RESPIRATORY_RATE" />
+    <uses-permission android:name="android.permission.health.READ_RESTING_HEART_RATE" />
+    <uses-permission android:name="android.permission.health.READ_SEXUAL_ACTIVITY" />
+    <uses-permission android:name="android.permission.health.READ_SKIN_TEMPERATURE" />
+    <uses-permission android:name="android.permission.health.READ_SLEEP" />
+    <uses-permission android:name="android.permission.health.READ_SPEED" />
+    <uses-permission android:name="android.permission.health.READ_STEPS" />
+    <uses-permission android:name="android.permission.health.READ_TOTAL_CALORIES_BURNED" />
+    <uses-permission android:name="android.permission.health.READ_VO2_MAX" />
+    <uses-permission android:name="android.permission.health.READ_WEIGHT" />
+    <uses-permission android:name="android.permission.health.READ_WHEELCHAIR_PUSHES" />
+    <!-- Sync while the app is not on screen, and read records older than 30 days. -->
+    <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
+    <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_HISTORY" />
+    <!-- Routes other apps recorded, without a consent dialog per route. -->
+    <uses-permission android:name="android.permission.health.READ_EXERCISE_ROUTES" />
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The full-history backfill runs as a foreground service of type "health". -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+    <!--
+        Keeps the CPU on while the backfill is working with the screen off; a foreground service
+        alone keeps the process, not the processor. Always taken with a timeout. (WorkManager
+        declares the same permission for its own use.)
+    -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Backfill progress, and a warning after repeated failed syncs. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Reading the pairing QR code; frames are decoded on the device and never stored. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Asking to be exempt from battery optimisation so the 15-minute sync is reliable. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!-- Pairing also works by pasting the code, so a camera is not required. -->
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+
+    <queries>
+        <package android:name="com.google.android.apps.healthdata" />
+        <!-- Where Health Connect lives as part of the platform; read for its version only. -->
+        <package android:name="com.google.android.healthconnect.controller" />
+        <package android:name="com.android.healthconnect.controller" />
+    </queries>
+
+    <!--
+        No backups: the device token must not leave the phone, and its Keystore key would not
+        survive a restore anyway. Cleartext traffic is not allowed at all in a release build; a
+        debug build alone may reach this device's own loopback (see the two
+        network_security_config files).
+    -->
+    <application
+        android:name=".HealthyApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Healthy">
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Health Connect's "privacy policy" link in the permission dialog opens this. -->
+        <activity
+            android:name=".ui.PermissionsRationaleActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
+        </activity>
+
+        <!-- Android 14+ reaches the same screen through the system permission-usage intent. -->
+        <activity-alias
+            android:name="ViewPermissionUsageActivity"
+            android:exported="true"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE"
+            android:targetActivity=".ui.PermissionsRationaleActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- Keeps the process alive, with a progress notification, during the history backfill. -->
+        <service
+            android:name=".sync.BackfillService"
+            android:exported="false"
+            android:foregroundServiceType="health" />
+
+        <!--
+            The Health Connect client library declares this exported service for phones where
+            Health Connect is a separate app that calls back into its clients. From Android 14
+            Health Connect is part of the platform and nothing binds to it, and this app runs on
+            nothing older, so the entry point is removed rather than left open.
+        -->
+        <service
+            android:name="androidx.health.platform.client.impl.sdkservice.HealthDataSdkService"
+            tools:node="remove" />
+
+        <!--
+            Tasker (Locale-protocol) plugin with one action, "Trigger refresh". The activity is
+            the action's configuration step: there is nothing to configure, so it answers the
+            host and finishes without drawing. Both must be exported for the host to reach
+            them; all a caller can do is ask for a sync.
+        -->
+        <activity
+            android:name=".tasker.TaskerEditActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:label="Trigger refresh"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="com.twofortyfouram.locale.intent.action.EDIT_SETTING" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name=".tasker.TaskerFireReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.twofortyfouram.locale.intent.action.FIRE_SETTING" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+</manifest>

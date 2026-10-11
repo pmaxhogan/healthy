@@ -1,0 +1,19 @@
+-- Healthy: remember what title the sync last wrote to each calendar event, so an
+-- owner's own edit to an event's title is never overwritten.
+--
+-- Apply with `npm run migrate:local` (Miniflare) or `npm run migrate:remote`
+-- (production) BEFORE deploying code that depends on it.
+--
+-- Additive only: one nullable column, nothing existing is rewritten.
+--
+-- `title_digest` is a keyed digest (worker/db/blind.ts, domain
+-- `calendar_events.title_digest`) of the `summary` Healthy last wrote to the
+-- event -- never the title itself, which names a practitioner. On every run the
+-- sync digests the `summary` Google holds now (from the `events.list` it already
+-- makes) and compares: equal means the title is still Healthy's to update;
+-- different means the owner edited it, and every later write leaves `summary`
+-- out. See `worker/sync/titles.ts`.
+--
+-- NULL on every existing row: the first run after this migration seeds it (see
+-- the legacy rule in `worker/sync/titles.ts`).
+ALTER TABLE calendar_events ADD COLUMN title_digest TEXT;

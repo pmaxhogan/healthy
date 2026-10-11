@@ -13,8 +13,25 @@ npm run check      # lint, typecheck, knip, test, build
 
 `npm run check` is the whole contract. CI runs exactly it, the pre-push hook runs
 exactly it, and Cloudflare runs it before deploying. If it passes locally it will
-pass everywhere. `npm run fix` applies the mechanical half (eslint --fix and
-Prettier).
+pass everywhere for the Worker. `npm run fix` applies the mechanical half (eslint
+--fix and Prettier).
+
+The one thing it does not cover is the Android companion app in `android/`, which
+is a separate Gradle project with its own CI job. If you change it, also run, from
+`android/` (JDK 21 and Android SDK platform 37.2 needed; see
+[docs/setup-android.md](docs/setup-android.md#building-from-source)):
+
+```sh
+./gradlew testDebugUnitTest lintDebug assembleDebug
+```
+
+CI's `android` job runs the same three tasks. A change that touches the wire between
+the phone and the Worker changes a file both sides test against,
+`worker/test/fixtures/hc/phone-batches.json`: the Android test `PhoneBatchFixtureTest`
+writes it, and fails when the checked-in copy is out of date. Regenerate it with
+`HEALTHY_WRITE_FIXTURES=1 ./gradlew testDebugUnitTest` (from `android/`), review the
+diff, commit it, and run `npm run check`, whose `phone-contract` test runs every batch
+in it through the Worker's validator.
 
 You will also need [gitleaks](https://github.com/gitleaks/gitleaks) on your PATH
 — the pre-commit hook scans staged changes with it.
@@ -24,11 +41,13 @@ You will also need [gitleaks](https://github.com/gitleaks/gitleaks) on your PATH
 This repository is public and the application handles health information. **No
 commit may contain personal data**, including:
 
-- health-system, clinic, or provider names
+- health-system, clinic, or health system names
 - FHIR base URLs, organisation ids, or portal URLs
 - email addresses, patient identifiers, or anything from a real record
 - the Cloudflare Access team domain or application AUD
 - locations, timezones, or board and list ids
+- device serials, wireless-debugging addresses, or the package names of the apps on
+  a real phone (test fixtures use `com.example.*`)
 
 Cloudflare _binding_ ids (D1 database id, KV namespace id, account id) are fine:
 they are not credentials and they are useless without an API token.
@@ -42,10 +61,10 @@ gitignored and must stay that way.
 - TypeScript strict, and the lint config is not advisory. If a rule is genuinely
   wrong for a case, disable it narrowly **with a comment saying why** — that
   convention is enforced by review, not by tooling.
-- Tests: pure logic goes in `test/unit/` (fast, Node); anything touching D1, a
-  Durable Object, or the Worker's request path goes in `test/integration/`,
+- Tests: pure logic goes in `worker/test/unit/` (fast, Node); anything touching D1, a
+  Durable Object, or the Worker's request path goes in `worker/test/integration/`,
   which runs in real workerd.
-- No logging of tokens, patient data, or provider names. Structured JSON logs
+- No logging of tokens, patient data, or health system names. Structured JSON logs
   with explicit fields only.
 - Commits are Conventional Commits (`feat:`, `fix:`, `chore:` …).
 

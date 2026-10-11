@@ -1,0 +1,365 @@
+/**
+ * The diff. Pure, exhaustive, and the only place that decides what happens to an
+ * appointment.
+ *
+ * Three sources disagree on every run and the plan reconciles them:
+ *
+ *   - the **candidates**, built from what the organisation returned this run (plus
+ *     whatever the cache still remembers about an appointment that has vanished)
+ *   - the **rows** of `calendar_events`, which say what this app last wrote
+ *   - the **Google events** carrying `extendedProperties.private.healthy = "1"`,
+ *     which say what is actually on the calendar now
+ *
+ * Deliberate asymmetries, each of which is a bug if inverted:
+ *
+ *   - An appointment that has vanished and never had a row is **skipped**, not
+ *     ghosted. A ghost for something that was never on the calendar would invent
+ *     history.
+ *   - A row whose Google event is gone was deleted by the owner by hand. It is
+ *     re-created only if the appointment is still ahead and the row is not
+ *     already a ghost; otherwise the row is ghosted with no Google write, because
+ *     re-creating an event the owner deleted is the one thing they clearly did
+ *     not want.
+ *   - A Google event whose key has no row *and* no candidate is an **orphan**. It
+ *     is reported and left alone: it carries this app's marker, so something
+ *     wrote it, and guessing at its content would be worse than counting it.
+ *   - An event is settled only when its fingerprint matches **and** its
+ *     description still carries Healthy's current block below the rule
+ *     (`carriesBlock`). The owner's text above the rule never costs a write; an
+ *     edit below it, or a deleted rule, is rewritten on the next run
+ *     (`description_drift`). Both halves read what `events.list` already
+ *     returned, so an unchanged event costs no Google call either way.
+ *   - **The owner's title wins** (`titles.ts`). An event whose title differs
+ *     from what Healthy last wrote is the owner's: every write to it carries
+ *     `keepTitle` and leaves `summary` out, and the settled check never compares
+ *     the owner's title to the model's -- the fingerprint still covers the model's
+ *     title, so a model change patches once (without the title) and settles. A
+ *     title Healthy still owns but that is not the one it would write now (the
+ *     owner changed it back to an older Healthy title) is `title_drift`.
+ *   - `suppressGhosting` exists for Epic 4119 -- the organisation admitted it
+ *     filtered the patient-facing view. Partial results must never ghost real
+ *     appointments, so absent candidates are skipped for that run while inserts
+ *     and patches carry on.
+ */
+
+import { carriesBlock } from "./description.ts";
+import { titleOwnership } from "./titles.ts";
+
+import type { TitleDigests, TitleOwnership } from "./titles.ts";
+import type { CalendarEventRow } from "../db/rows.ts";
+import type { EventRecord } from "../google/types.ts";
+
+/**
+ * What the plan does with one key.
+ *
+ * `ghost-row-only` is the case with no Google write: the event is not there to
+ * patch, so only `calendar_events` moves.
+ */
+type PlanAction =
+  "insert" | "patch" | "ghost" | "ghost-row-only" | "restore" | "unchanged" | "skip";
+
+/** Which of the two models a write should use. */
+type PlanVariant = "active" | "ghost";
+
+/** One appointment as the plan sees it. Built by the caller from the mapping. */
+export interface PlanCandidate {
+  key: string;
+  /** Fingerprint of the active model. */
+  fingerprint: string;
+  /** Fingerprint of the ghost variant, when one could be built. */
+  ghostFingerprint: string | null;
+  /** Healthy's description block for the active model, or null with no model. */
+  description: string | null;
+  /** The ghost variant's block, when one could be built. */
+  ghostDescription: string | null;
+  /** Cancelled or entered-in-error upstream. */
+  offSchedule: boolean;
+  /** Not in this run's search results at all. */
+  absent: boolean;
+  /** The appointment starts after the run's clock. */
+  upcoming: boolean;
+  /**
+   * False when no model could be built -- the appointment is gone from the
+   * organisation and gone from the cache too, so there is nothing to write.
+   */
+  hasModel: boolean;
+}
+
+export interface PlanEntry {
+  key: string;
+  action: PlanAction;
+  /** The Google event to patch, or null for an insert or a row-only change. */
+  googleEventId: string | null;
+  /** Which model the caller should render. Meaningless for `skip`/`unchanged`. */
+  variant: PlanVariant;
+  /** Short, stable reason code. Logged; never anything but these literals. */
+  reason: string;
+  /** The owner edited the event's title: a write must leave `summary` out. */
+  keepTitle: boolean;
+  /**
+   * What the row should record as the title Healthy last wrote, when the write
+   * does not itself write the title (`keepTitle`, or an `unchanged` legacy row
+   * being seeded). Null when there is nothing to record.
+   */
+  titleDigest: string | null;
+}
+
+interface OrphanEntry {
+  key: string;
+  googleEventId: string;
+}
+
+export interface ChangePlan {
+  /** Every key considered, in a stable order. */
+  entries: PlanEntry[];
+  inserts: PlanEntry[];
+  patches: PlanEntry[];
+  ghosts: PlanEntry[];
+  restores: PlanEntry[];
+  unchanged: PlanEntry[];
+  skipped: PlanEntry[];
+  orphans: OrphanEntry[];
+  /** Entries whose title the owner edited. Logged as a count: see `titles.ts`. */
+  titlesKept: number;
+}
+
+export interface PlanOptions {
+  /** Epic 4119: the view was filtered, so absence proves nothing this run. */
+  suppressGhosting?: boolean;
+  /**
+   * Title digests by event key (`titles.ts`). Absent: every title is treated as
+   * Healthy's and never drifts -- what the plan did before titles were tracked.
+   */
+  titles?: ReadonlyMap<string, TitleDigests>;
+}
+
+/** The `key` a Google event carries, or null when it is not one of ours. */
+export function eventKeyOf(event: EventRecord): string | null {
+  const properties = event.extendedProperties?.private;
+  if (properties === undefined) return null;
+  // The marker is the invariant: without it the event is not ours to touch,
+  // whatever else it carries.
+  if (properties.healthy !== "1") return null;
+  const key = properties.key;
+  return key === undefined || key === "" ? null : key;
+}
+
+/** The fingerprint Google is holding for an event, when it recorded one. */
+function eventFingerprintOf(event: EventRecord): string | null {
+  const fingerprint = event.extendedProperties?.private.fp;
+  return fingerprint === undefined || fingerprint === "" ? null : fingerprint;
+}
+
+/**
+ * True when the event's description carries this block below its rule, or when
+ * there is no block to compare (no model, so nothing could be written anyway).
+ */
+function described(event: EventRecord, block: string | null): boolean {
+  return block === null || carriesBlock(event.description, block);
+}
+
+function entry(
+  key: string,
+  action: PlanAction,
+  reason: string,
+  options: {
+    googleEventId?: string | null;
+    variant?: PlanVariant;
+    title?: TitleOwnership;
+  } = {},
+): PlanEntry {
+  return {
+    key,
+    action,
+    googleEventId: options.googleEventId ?? null,
+    variant: options.variant ?? "active",
+    reason,
+    keepTitle: options.title?.ownerEdited ?? false,
+    titleDigest: options.title?.lastWritten ?? null,
+  };
+}
+
+/** No title tracking for this key: Healthy's, nothing to record. */
+const HEALTHY_TITLE: TitleOwnership = { ownerEdited: false, lastWritten: null };
+
+/**
+ * Who owns this event's title, for the variant about to be considered.
+ *
+ * `drifted` is true when Healthy owns the title but it is not the one Healthy
+ * would write now -- only knowable when both digests are.
+ */
+function ownershipFor(
+  row: CalendarEventRow | undefined,
+  titles: TitleDigests | undefined,
+  variant: PlanVariant,
+  variantFingerprint: string | null,
+): { title: TitleOwnership; drifted: boolean } {
+  if (titles === undefined) return { title: HEALTHY_TITLE, drifted: false };
+  const variantTitle = variant === "ghost" ? titles.ghost : titles.active;
+  const title = titleOwnership(
+    row,
+    titles.google,
+    variantTitle,
+    row !== undefined && variantFingerprint !== null && row.fingerprint === variantFingerprint,
+  );
+  const drifted =
+    !title.ownerEdited &&
+    title.lastWritten !== null &&
+    variantTitle !== null &&
+    title.lastWritten !== variantTitle;
+  return { title, drifted };
+}
+
+/** The ghost branch: the appointment is cancelled, or gone from the search. */
+function decideGhost(
+  candidate: PlanCandidate,
+  row: CalendarEventRow | undefined,
+  event: EventRecord | undefined,
+  titles: TitleDigests | undefined,
+): PlanEntry {
+  // Never on the calendar, so there is no history to preserve.
+  if (row === undefined) return entry(candidate.key, "skip", "never_written");
+  if (event === undefined || !candidate.hasModel) {
+    if (row.state === "ghost") return entry(candidate.key, "unchanged", "already_ghost");
+    const reason = candidate.hasModel ? "event_gone" : "no_model";
+    return entry(candidate.key, "ghost-row-only", reason, { variant: "ghost" });
+  }
+  const { title, drifted } = ownershipFor(row, titles, "ghost", candidate.ghostFingerprint);
+  if (row.fingerprint === candidate.ghostFingerprint && row.state === "ghost") {
+    if (!described(event, candidate.ghostDescription)) {
+      return entry(candidate.key, "ghost", "description_drift", {
+        googleEventId: event.id,
+        variant: "ghost",
+        title,
+      });
+    }
+    if (drifted) {
+      return entry(candidate.key, "ghost", "title_drift", {
+        googleEventId: event.id,
+        variant: "ghost",
+        title,
+      });
+    }
+    return entry(candidate.key, "unchanged", "already_ghost", {
+      googleEventId: row.google_event_id,
+      variant: "ghost",
+      title,
+    });
+  }
+  return entry(candidate.key, "ghost", candidate.offSchedule ? "cancelled" : "vanished", {
+    googleEventId: event.id,
+    variant: "ghost",
+    title,
+  });
+}
+
+/** The live branch: the appointment is on the schedule. */
+function decideActive(
+  candidate: PlanCandidate,
+  row: CalendarEventRow | undefined,
+  event: EventRecord | undefined,
+  titles: TitleDigests | undefined,
+): PlanEntry {
+  if (!candidate.hasModel) return entry(candidate.key, "skip", "no_model");
+  if (event === undefined) {
+    if (row === undefined) return entry(candidate.key, "insert", "new");
+    // A ghost is never re-created: it went away once, and the owner has seen
+    // that. Reappearing upstream restores it only while the event still exists.
+    if (row.state === "ghost") return entry(candidate.key, "unchanged", "ghost_not_recreated");
+    return candidate.upcoming
+      ? entry(candidate.key, "insert", "recreate_deleted")
+      : entry(candidate.key, "ghost-row-only", "past_deleted", { variant: "ghost" });
+  }
+  if (row === undefined) {
+    // The event carries our marker but we have no row: a local data loss, or a
+    // restore from a backup. Adopt it rather than inserting a duplicate.
+    return entry(candidate.key, "patch", "adopt", { googleEventId: event.id });
+  }
+  // A ghost row's fingerprint is the ghost's, so it cannot vouch for the active
+  // title: a legacy ghost coming back falls to the "unknown provenance" rule.
+  const { title, drifted } = ownershipFor(
+    row,
+    titles,
+    "active",
+    row.state === "ghost" ? null : candidate.fingerprint,
+  );
+  const googleEventId = event.id;
+  if (row.state === "ghost") {
+    return entry(candidate.key, "restore", "reappeared", { googleEventId, title });
+  }
+  const googleFingerprint = eventFingerprintOf(event);
+  const settled =
+    row.fingerprint === candidate.fingerprint &&
+    (googleFingerprint === null || googleFingerprint === candidate.fingerprint);
+  if (!settled) return entry(candidate.key, "patch", "changed", { googleEventId, title });
+  if (!described(event, candidate.description)) {
+    return entry(candidate.key, "patch", "description_drift", { googleEventId, title });
+  }
+  return drifted
+    ? entry(candidate.key, "patch", "title_drift", { googleEventId, title })
+    : entry(candidate.key, "unchanged", "fingerprint_match", { googleEventId, title });
+}
+
+/**
+ * Reconcile the three sources into one plan.
+ *
+ * `rows` and `googleEvents` must already be narrowed to one health system and to the
+ * sync window: a row older than the window is absent from every search by
+ * definition, and diffing it would ghost a real appointment for being old.
+ */
+export function planChanges(
+  rows: readonly CalendarEventRow[],
+  googleEvents: readonly EventRecord[],
+  candidates: readonly PlanCandidate[],
+  options: PlanOptions = {},
+): ChangePlan {
+  const rowByKey = new Map(rows.map((row) => [row.event_key, row]));
+  const eventByKey = new Map<string, EventRecord>();
+  for (const event of googleEvents) {
+    const key = eventKeyOf(event);
+    // Last write wins on a duplicate key: Google's list is ordered by start
+    // time, so the later event is the one the owner is looking at.
+    if (key !== null) eventByKey.set(key, event);
+  }
+
+  const entries: PlanEntry[] = [];
+  const orphans: OrphanEntry[] = [];
+  const candidateKeys = new Set<string>();
+
+  for (const candidate of candidates) {
+    candidateKeys.add(candidate.key);
+    const row = rowByKey.get(candidate.key);
+    const event = eventByKey.get(candidate.key);
+    const wantsGhost = candidate.offSchedule || candidate.absent;
+    if (wantsGhost && candidate.absent && options.suppressGhosting === true) {
+      entries.push(entry(candidate.key, "skip", "filtered_view"));
+      continue;
+    }
+    const titles = options.titles?.get(candidate.key);
+    entries.push(
+      wantsGhost
+        ? decideGhost(candidate, row, event, titles)
+        : decideActive(candidate, row, event, titles),
+    );
+  }
+
+  for (const [key, event] of eventByKey) {
+    if (candidateKeys.has(key) || rowByKey.has(key)) continue;
+    orphans.push({ key, googleEventId: event.id });
+  }
+
+  const of = (action: PlanAction): PlanEntry[] => entries.filter((item) => item.action === action);
+  return {
+    entries,
+    // A re-created event is an insert; `ghost-row-only` is a ghost with no
+    // Google write. Grouping them here keeps the caller's loop flat.
+    inserts: of("insert"),
+    patches: of("patch"),
+    ghosts: [...of("ghost"), ...of("ghost-row-only")],
+    restores: of("restore"),
+    unchanged: of("unchanged"),
+    skipped: of("skip"),
+    orphans,
+    titlesKept: entries.filter((item) => item.keepTitle).length,
+  };
+}

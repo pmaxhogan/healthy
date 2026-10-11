@@ -1,7 +1,8 @@
 # Setting up Epic
 
-Epic is the only health-system vendor implemented today. Connecting one is
-two separate jobs: registering an application on Epic's developer portal
+Epic is one of two health-system vendors implemented (the other is ModMed:
+[setup-modmed.md](setup-modmed.md)). Connecting an Epic organisation is two
+separate jobs: registering an application on Epic's developer portal
 (once, for your whole deployment), and then connecting individual health
 systems to it from the admin UI (once per organisation you get care from).
 
@@ -89,6 +90,49 @@ organisation and per environment (production vs. non-production). Request a
 secret only for the organisation(s) you actually intend to connect; nothing
 else needs enabling.
 
+#### Derived secrets
+
+You do not have to keep a secret per organisation. Mint a derivation key once
+(`npm run epic-org-secret -- --gen-key --put`, and copy it into `worker/.dev.vars`),
+then for any organisation:
+
+```sh
+npm run epic-org-secret -- --org <organisation id>                 # production
+npm run epic-org-secret -- --org <organisation id> --env nonprod   # non-production
+```
+
+`<organisation id>` is the number the developer portal shows for that
+organisation. Register the printed value as the organisation's client secret,
+and enter the same id as the health system's **Epic organisation id** in the
+admin UI. The Worker recomputes the secret whenever it needs it, so nothing per
+organisation is stored, each organisation and environment still gets a different
+secret as Epic asks, and an organisation can be enabled long before you ever
+connect to it. A secret pasted into the admin UI still takes precedence, so
+organisations registered the other way keep working.
+
+Three things about the developer portal's form, as observed when this was
+written **(verify)**:
+
+- An organisation has to be activated for non-production before the portal
+  will let you activate it for production, so both secrets are needed even if
+  you only ever use production.
+- The portal sends Epic a hash of the secret, never the secret itself, so a
+  value you lose cannot be recovered from Epic -- which is the reason to derive
+  it.
+- The dialog only offers **Get Secret**, which fills in a random value; there
+  is no field to type your own into. The value lives in the page's own model
+  until you press Activate, so supplying yours means setting it there from the
+  browser console, with the dialog open on **Other -> Client Secret**:
+
+  ```js
+  // "NonProdAuthData" for non-production, "ProdAuthData" for production
+  ko.dataFor(document.querySelector("#EnableKeysModal .modal-body"))
+    .NonProdAuthData()
+    .PendingClientSecret("<printed value>");
+  ```
+
+The key is permanent — see [docs/operations.md](operations.md).
+
 Propagation is not instant: expect on the order of an hour for a sandbox
 change to take effect, and considerably longer — up to roughly two days —
 for a newly Ready-for-Production app to appear at a given organisation once
@@ -97,22 +141,27 @@ does not commit to a number.)** If authorisation fails immediately after
 completing these steps, wait and retry before assuming something is
 misconfigured.
 
-## 2. Add a provider in the admin UI
+## 2. Add a health system in the admin UI
 
 Once the app is registered (sandbox is enough to start):
 
-1. Open the admin UI → **Providers** → **Add provider**.
+1. Open the admin UI → **Health systems** → **Add health system**.
 2. Either pick your health system from the searchable list — sourced from
-   `data/epic-brands.json`, a slimmed copy of Epic's own published directory
+   `worker/data/epic-brands.json`, a slimmed copy of Epic's own published directory
    of FHIR endpoints — or enter a FHIR base URL manually. A manual URL is
-   verified with a live SMART discovery request before the provider is
+   verified with a live SMART discovery request before the health system is
    saved; an endpoint that is not really an Epic FHIR server is rejected at
    that point rather than silently stored.
 3. Choose the **environment**: `sandbox` while testing, `prod` for a real
    organisation.
-4. Save, then open the provider and set its **client secret** — the one
+4. Save, then open the health system and either fill in its **Epic
+   organisation id** (if you registered a derived secret for it) or set its
+   **client secret** — the one
    provisioned for your app at that organisation in the previous section.
-   This is write-only: once saved, the admin UI never displays it again.
+   This is write-only: once saved, the admin UI never displays it again. With
+   no live browser session against that environment, `npm run
+set-health-system-secret -- --health-system <id> --remote` sets the same value from
+   the command line instead — see the README's secrets section.
 5. Click **Connect**. You are redirected through `/oauth/epic/start`, land
    on that organisation's own sign-in and consent screen, and are returned
    to `/oauth/callback`. Approve every data category the consent screen

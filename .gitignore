@@ -1,7 +1,8 @@
 # Dependencies
 node_modules/
 
-# Build output
+# Build output (patterns without a leading slash match at any depth, so the
+# worker/ copies of dist/, .wrangler/ and worker-configuration.d.ts are covered)
 dist/
 .wrangler/
 worker-configuration.d.ts
@@ -49,3 +50,14 @@ Desktop.ini
 *.swo
 *~
 .gstack/
+
+# Android companion app (android/): Gradle and Kotlin build state, the local SDK
+# path, and signing material -- a keystore is NEVER committed
+android/.gradle/
+android/**/build/
+android/.kotlin/
+android/local.properties
+android/captures/
+*.iml
+*.jks
+*.keystore
