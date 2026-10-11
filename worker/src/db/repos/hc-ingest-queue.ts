@@ -109,7 +109,50 @@ function replay(stored: string, digest: string): EnqueueResult {
     : { duplicate: false, conflict: true };
 }
 
+/**
+ * The statement `head` runs: every row of the oldest batch a device has
+ * waiting, in part order. Bound: the device, twice. Exported so its plan can
+ * be asserted.
+ */
+export const HEAD_SQL = `SELECT * FROM hc_ingest_queue
+  WHERE device_id = ?
+    AND batch_id = (SELECT batch_id FROM hc_ingest_queue
+                     WHERE device_id = ? AND parked_at IS NULL ORDER BY seq LIMIT 1)
+  ORDER BY part`;
+
 export function makeHcIngestQueueRepo(ctx: Ctx) {
+  const outcomeStatement = (
+    deviceId: string,
+    batchId: string,
+    outcome: IngestOutcome,
+  ): D1PreparedStatement => {
+    const finished = outcome.status === "applied" || outcome.status === "failed";
+    return ctx.db
+      .prepare(
+        `UPDATE hc_ingest_log SET
+           status = ?,
+           error_code = ?,
+           applied = coalesce(?, applied),
+           superseded = coalesce(?, superseded),
+           removed = coalesce(?, removed),
+           apply_ms = coalesce(?, apply_ms),
+           applied_at = CASE WHEN ? THEN ? ELSE applied_at END
+         WHERE device_id = ? AND batch_id = ?`,
+      )
+      .bind(
+        outcome.status,
+        outcome.errorCode ?? null,
+        outcome.applied ?? null,
+        outcome.superseded ?? null,
+        outcome.removed ?? null,
+        outcome.applyMs ?? null,
+        finished ? 1 : 0,
+        ctx.now(),
+        deviceId,
+        batchId,
+      );
+  };
+
   /** The digest stored for a batch id this device has sent before, or null. */
   const seenDigest = async (deviceId: string, batchId: string): Promise<string | null> => {
     const row = await one<{ body_digest: string }>(
@@ -231,22 +274,8 @@ export function makeHcIngestQueueRepo(ctx: Ctx) {
      * arrival order: a delete that follows an upsert must be applied after it.
      */
     async head(deviceId: string): Promise<QueuedBatch | null> {
-      const first = await one<Pick<QueueRow, "batch_id">>(
-        ctx.db
-          .prepare(
-            `SELECT batch_id FROM hc_ingest_queue
-             WHERE device_id = ? AND parked_at IS NULL ORDER BY seq LIMIT 1`,
-          )
-          .bind(deviceId),
-      );
-      if (first === null) return null;
-      const rows = await all<QueueRow>(
-        ctx.db
-          .prepare(
-            "SELECT * FROM hc_ingest_queue WHERE device_id = ? AND batch_id = ? ORDER BY part",
-          )
-          .bind(deviceId, first.batch_id),
-      );
+      // One statement, so one round trip: which batch is oldest, and its rows.
+      const rows = await all<QueueRow>(ctx.db.prepare(HEAD_SQL).bind(deviceId, deviceId));
       const head = rows[0];
       if (head === undefined) return null;
       if (rows.length !== head.parts) throw new Error("queued batch is missing parts");
@@ -270,13 +299,20 @@ export function makeHcIngestQueueRepo(ctx: Ctx) {
       };
     },
 
-    /** Drop a batch from the queue once it is applied. A batch that failed is parked, never dropped. */
-    async remove(deviceId: string, batchId: string): Promise<void> {
-      await run(
-        ctx.db
-          .prepare("DELETE FROM hc_ingest_queue WHERE device_id = ? AND batch_id = ?")
-          .bind(deviceId, batchId),
-      );
+    /**
+     * The statement that drops a batch from the queue once it is applied. A
+     * batch that failed is parked, never dropped.
+     *
+     * A statement and not a call, because of where it has to run: in the same
+     * `db.batch` -- the same transaction -- as the statement that records the
+     * batch as applied (`outcomeStatement`). The queued body is the only copy
+     * of what the phone sent, so it goes at the moment the log says its records
+     * are in the store, and not a round trip before or after.
+     */
+    removeStatement(deviceId: string, batchId: string): D1PreparedStatement {
+      return ctx.db
+        .prepare("DELETE FROM hc_ingest_queue WHERE device_id = ? AND batch_id = ?")
+        .bind(deviceId, batchId);
     },
 
     /**
@@ -328,35 +364,16 @@ export function makeHcIngestQueueRepo(ctx: Ctx) {
       return rows.length;
     },
 
-    /** Record what became of a batch. Counts, a duration and a stable error code only. */
+    /**
+     * The statement that records what became of a batch, for a caller that
+     * commits it with other statements. Counts, a duration and a stable error
+     * code only.
+     */
+    outcomeStatement,
+
+    /** Record what became of a batch, by itself. */
     async recordOutcome(deviceId: string, batchId: string, outcome: IngestOutcome): Promise<void> {
-      const finished = outcome.status === "applied" || outcome.status === "failed";
-      await run(
-        ctx.db
-          .prepare(
-            `UPDATE hc_ingest_log SET
-               status = ?,
-               error_code = ?,
-               applied = coalesce(?, applied),
-               superseded = coalesce(?, superseded),
-               removed = coalesce(?, removed),
-               apply_ms = coalesce(?, apply_ms),
-               applied_at = CASE WHEN ? THEN ? ELSE applied_at END
-             WHERE device_id = ? AND batch_id = ?`,
-          )
-          .bind(
-            outcome.status,
-            outcome.errorCode ?? null,
-            outcome.applied ?? null,
-            outcome.superseded ?? null,
-            outcome.removed ?? null,
-            outcome.applyMs ?? null,
-            finished ? 1 : 0,
-            ctx.now(),
-            deviceId,
-            batchId,
-          ),
-      );
+      await run(outcomeStatement(deviceId, batchId, outcome));
     },
   };
 }
