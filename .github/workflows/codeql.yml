@@ -28,7 +28,7 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # JavaScript/TypeScript is analysed from source, so nothing is built.
       - uses: github/codeql-action/init@v4
