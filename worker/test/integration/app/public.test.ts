@@ -21,14 +21,13 @@ const ORIGIN = "https://healthy.example";
 /**
  * The real bindings plus the vars and secrets this test needs.
  *
- * The cast is load-bearing only for `HEALTHY_MCP`: `wrangler types` narrows it to
- * `DurableObjectNamespace<HealthyMcp>`, which is not assignable to the
- * unparameterised `DurableObjectNamespace` that worker/src/env.ts declares. Typing
- * `overrides` as `Partial<Env>` keeps the values under test checked, so the cast
- * cannot hide a typo in one of them.
+ * No cast: `wrangler types` narrows `HEALTHY_MCP` to
+ * `DurableObjectNamespace<HealthyMcp>`, which TypeScript 6 accepts where
+ * worker/src/env.ts declares the unparameterised `DurableObjectNamespace`, so the
+ * whole spread is checked against `Env`.
  */
 function testEnv(overrides: Partial<Env>): Env {
-  return { ...env, ...overrides } as unknown as Env;
+  return { ...env, ...overrides };
 }
 
 // No Cloudflare Access in front of a test runner; the password gate still applies.

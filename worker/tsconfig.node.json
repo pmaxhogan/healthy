@@ -7,7 +7,6 @@
     // TypeScript has not yet folded into a numbered ES lib.
     "lib": ["ES2024", "ESNext.Array"],
     "types": ["node"],
-    "baseUrl": ".",
     // The brands slimmer is plain .mjs (it runs under bare `node`, with no
     // build step). allowJs lets tsc infer its types from the implementation so
     // its unit tests are still fully checked, instead of resolving the import

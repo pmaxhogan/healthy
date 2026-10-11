@@ -205,7 +205,9 @@ describe("GET /api/phone/devices", () => {
         historyRead: true,
         backfillComplete: false,
         exerciseRoutes: "denied",
-        lastError: { errorCode: "hc_rate_limited", at: 1_790_000_000_000 },
+        // The owner manages the phone here, so this page keeps the phone's true code
+        // (MCP clients get it reworded: worker/src/mcp/hc/phone-errors.ts).
+        lastError: { errorCode: "permission_denied", at: 1_790_000_000_000 },
       }),
     });
     await seedSyncState(device.id, "HeartRate", { permission: "granted", count: 7 });
@@ -225,7 +227,7 @@ describe("GET /api/phone/devices", () => {
       historyRead: true,
       backfillComplete: false,
       exerciseRoutes: "denied",
-      lastErrorCode: "hc_rate_limited",
+      lastErrorCode: "permission_denied",
       lastErrorAt: "2026-09-21T14:13:20.000Z",
     });
     // The empty batch was queued, and the runner has not applied it in this test.

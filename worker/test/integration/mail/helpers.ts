@@ -15,8 +15,7 @@ export function randomDataKey(): string {
 
 /** An `Env` the handler can run against, sharing `dataKey` with the test's own repos. */
 export function handlerEnv(dataKey: string): Env {
-  // See worker/test/integration/db/helpers.ts: the same HEALTHY_MCP narrowing cast applies.
-  return { ...workerEnv, DATA_KEY: dataKey } as unknown as Env;
+  return { ...workerEnv, DATA_KEY: dataKey };
 }
 
 export interface FakeEmail {

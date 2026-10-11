@@ -8,8 +8,7 @@
     "lib": ["ES2022"],
     // Empty on purpose. Pulling in @types/node here would redeclare fetch,
     // Request and Response with Node's shapes and silently mask workerd's.
-    "types": [],
-    "baseUrl": "."
+    "types": []
   },
   // worker-configuration.d.ts is generated (and gitignored) by the `wrangler
   // types` step at the head of `npm run typecheck`, so it must be listed
