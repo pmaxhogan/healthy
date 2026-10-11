@@ -4,7 +4,11 @@
  * Both answer from the summaries the store builds when a session arrives
  * (`hc_sleep_night`, `hc_exercise_session`): stage minutes, the overnight
  * heart-rate and HRV joins, the heart-rate-checked wake, the left-running
- * flag. No raw chunk is opened.
+ * flag. The only raw records opened are the sessions themselves, for one
+ * thing: their ids. A summary is stored under a keyed blind of its record's
+ * id, which is not a thing to hand out and joins to nothing; the `id` of a row
+ * and of each of its `members` is the record's own, the one `hc_records` gives
+ * it (`sessionRecordIds`), so a session here can be looked up there.
  *
  * What is decided here, at answer time, is which stored sessions are the same
  * stretch of time: two apps writing one night, or one workout logged twice.
@@ -98,7 +102,11 @@ const EXERCISE_SCHEMA = hcArgs("exercise_sessions", {
  * the row stands for, the one that describes it included, each by its own id,
  * times and origin: a session a merge absorbed is still there to be seen.
  */
-function groupFields<Summary extends Spanned>(call: HcCall, group: Group<Summary>) {
+function groupFields<Summary extends Spanned>(
+  call: HcCall,
+  group: Group<Summary>,
+  recordIds: RecordIds,
+) {
   const { clock } = call;
   return {
     origin: group.primary.summary.origin,
@@ -109,13 +117,25 @@ function groupFields<Summary extends Spanned>(call: HcCall, group: Group<Summary
     spanEnd: clock.iso(group.merged.endMs),
     spanMin: (group.merged.endMs - group.merged.startMs) / MINUTE_MS,
     members: group.members.map(({ id, summary }) => ({
-      id,
+      id: recordIdOf(recordIds, id),
       start: clock.iso(summary.startMs),
       end: clock.iso(summary.endMs),
       ...(summary.exerciseType !== undefined && { exerciseType: summary.exerciseType }),
       origin: summary.origin,
     })),
   };
+}
+
+/** The record id of each stored session in an answer, by its summary's key. */
+type RecordIds = ReadonlyMap<string, string>;
+
+/**
+ * The id `hc_records` gives a stored session. Null when the record is not
+ * there to be read (deleted since its summary was built, and the summary not
+ * yet rebuilt): the summary's own key is internal and is never sent in its place.
+ */
+function recordIdOf(recordIds: RecordIds, key: string): string | null {
+  return recordIds.get(key) ?? null;
 }
 
 /** True when the policy lets this call see the left-running flag, which is heart rate and steps. */
@@ -129,13 +149,14 @@ function sleepRow(
   call: HcCall,
   device: HcDevice,
   group: Group<SleepNight>,
+  recordIds: RecordIds,
   includeStages: boolean,
 ): Record<string, unknown> {
   const { clock } = call;
   const night = group.primary.summary;
   return stripJoined(call.rules, "sleep_sessions", {
     ...rowTags(device, TYPE_SLEEP),
-    id: group.primary.id,
+    id: recordIdOf(recordIds, group.primary.id),
     date: clock.day(night.endMs),
     start: clock.iso(night.startMs),
     end: clock.iso(night.endMs),
@@ -154,7 +175,7 @@ function sleepRow(
     skinTempDelta: night.skinTempDelta,
     restingHr: night.restingHr,
     contextClamped: night.contextClamped ?? false,
-    ...groupFields(call, group),
+    ...groupFields(call, group, recordIds),
     ...(includeStages && {
       stages: night.stages.map((stage) => ({
         start: clock.iso(stage.start),
@@ -169,12 +190,13 @@ function exerciseRow(
   call: HcCall,
   device: HcDevice,
   group: Group<ExerciseSummary>,
+  recordIds: RecordIds,
 ): Record<string, unknown> {
   const { clock } = call;
   const session = group.primary.summary;
   return stripJoined(call.rules, "exercise_sessions", {
     ...rowTags(device, TYPE_EXERCISE),
-    id: group.primary.id,
+    id: recordIdOf(recordIds, group.primary.id),
     title: session.title,
     exerciseType: session.exerciseType,
     // The session's own times, like every figure below: one span for the row.
@@ -191,7 +213,24 @@ function exerciseRow(
     exactDuplicate: session.exactDuplicate,
     hasRoute: session.hasRoute,
     contextClamped: session.contextClamped ?? false,
-    ...groupFields(call, group),
+    ...groupFields(call, group, recordIds),
+  });
+}
+
+/** The record ids of one phone's stored sessions in the range; nothing is read when there are none. */
+async function sessionIds(
+  deps: ToolDeps,
+  device: HcDevice,
+  type: string,
+  range: Range,
+  stored: number,
+): Promise<RecordIds> {
+  if (stored === 0) return new Map();
+  return deps.hc.sessionRecordIds({
+    deviceId: device.id,
+    type,
+    startMs: range.startMs,
+    endMs: range.endMs,
   });
 }
 
@@ -204,11 +243,12 @@ async function sleepRows(
   const rows: Record<string, unknown>[] = [];
   for (const device of call.devices) {
     const nights = await deps.hc.sleepNights({ deviceId: device.id, ...range });
+    const recordIds = await sessionIds(deps, device, TYPE_SLEEP, range, nights.length);
     const groups = groupSessions(
       TYPE_SLEEP,
       nights.map(({ id, night }) => ({ id, summary: night })),
     );
-    for (const group of groups) rows.push(sleepRow(call, device, group, includeStages));
+    for (const group of groups) rows.push(sleepRow(call, device, group, recordIds, includeStages));
   }
   return rows;
 }
@@ -223,6 +263,7 @@ async function exerciseRows(
   const rows: Record<string, unknown>[] = [];
   for (const device of call.devices) {
     const sessions = await deps.hc.exerciseSessions({ deviceId: device.id, ...range });
+    const recordIds = await sessionIds(deps, device, TYPE_EXERCISE, range, sessions.length);
     const groups = groupSessions(
       TYPE_EXERCISE,
       sessions
@@ -230,7 +271,7 @@ async function exerciseRows(
         .map(({ id, session }) => ({ id, summary: session })),
       leftRunningReadable(call),
     );
-    for (const group of groups) rows.push(exerciseRow(call, device, group));
+    for (const group of groups) rows.push(exerciseRow(call, device, group, recordIds));
   }
   return rows;
 }
@@ -260,6 +301,7 @@ export function registerHcSessionTools(server: McpServer, deps: ToolDeps): void 
         "it stands for listed in `members` (`id`, `start`, `end`, `origin`) and the stretch " +
         "they cover together in `spanStart`, `spanEnd`, `spanMin`. A session longer than 18 " +
         "hours is never merged with another: it was not closed, and gets a row of its own. " +
+        "A row's `id` and each member's `id` is that SleepSession record's `id` in `hc_records`. " +
         "`contextClamped` is true when a session claimed so long a span that only its first " +
         "48 hours of heart rate and the rest were read for the joins. `include_stages` " +
         `adds the stage timeline. ${AVAILABILITY_NOTE} ${BUDGET_NOTE}`,
@@ -335,7 +377,8 @@ export function registerHcSessionTools(server: McpServer, deps: ToolDeps): void 
         "type never counts an hour twice. A session that is `likelyLeftRunning` or longer " +
         "than 12 hours is never merged with anything but an exact copy of itself, so a " +
         "forgotten session cannot swallow the real workouts recorded while it ran: each " +
-        "keeps its own row. `contextClamped` is true when a session claimed so long a span " +
+        "keeps its own row. A row's `id` and each member's `id` is that ExerciseSession " +
+        "record's `id` in `hc_records`. `contextClamped` is true when a session claimed so long a span " +
         "that only its first 48 hours of heart rate, steps and energy were read. " +
         `${AVAILABILITY_NOTE} ${BUDGET_NOTE}`,
       schema: EXERCISE_SCHEMA,

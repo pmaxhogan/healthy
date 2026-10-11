@@ -1769,13 +1769,13 @@ const HC_GROUP = {
   spanStart: ["string", "Start of the stretch the merged sessions cover together"],
   spanEnd: "string",
   spanMin: "number",
-  members: ["object?[]", "Every session the row stands for"],
+  members: ["object?[]", "Every session the row stands for, each by its hc_records id"],
   contextClamped: ["boolean", "True when only part of an over-long session was joined"],
 } as const;
 
 const HC_SLEEP = {
   ...HC_TAGS,
-  id: "string",
+  id: ["string", "The SleepSession record's id, the one hc_records gives it"],
   date: ["string", "The local date the sleep ended on"],
   start: "string",
   end: "string",
@@ -1799,7 +1799,7 @@ const HC_SLEEP = {
 
 const HC_EXERCISE = {
   ...HC_TAGS,
-  id: "string",
+  id: ["string", "The ExerciseSession record's id, the one hc_records gives it"],
   title: "string",
   exerciseType: "string",
   start: "string",

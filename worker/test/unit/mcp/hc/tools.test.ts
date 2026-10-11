@@ -937,8 +937,9 @@ describe("sleep_sessions", () => {
     expect((answer.items[0]?.hr as { min: number }).min).toBe(54);
     expect(Object.hasOwn(answer.items[0] ?? {}, "hrWake")).toBe(true);
     expect(Object.hasOwn(answer.items[0] ?? {}, "stages")).toBe(false);
-    // From the stored summary: no raw chunk, no heart-rate row.
-    expect(readers()).toStrictEqual(["sleepNights"]);
+    // From the stored summary: no heart-rate row, and no raw record but the
+    // sessions themselves, read for the ids the rows are named by.
+    expect(readers()).toStrictEqual(["sleepNights", "sessionRecordIds"]);
   });
 
   it("adds the stage timeline on request", async () => {
@@ -989,7 +990,7 @@ describe("a night whose stages overlap", () => {
     const nights = await call("sleep_sessions", RANGE);
     const days = await call("daily_summary", { date: TODAY });
     const quality = await call("data_quality", { ...RANGE, types: ["SleepSession"] });
-    const nap = nights.items.find((item) => item.id === "blind-nap-overlap");
+    const nap = nights.items.find((item) => item.id === "nap-overlap");
 
     expect(nights.items.map((item) => item.stagesOverlap)).toStrictEqual([false, true]);
     expect(Number(nap?.asleepMin)).toBeLessThanOrEqual(60);
@@ -1015,7 +1016,7 @@ describe("exercise_sessions", () => {
       {
         resourceType: "hc:ExerciseSession",
         healthSystemId: SOURCE,
-        id: "blind-walk-1",
+        id: "walk-1",
         title: "Evening walk",
         exerciseType: "WALKING",
         start: `${TODAY}T18:30:00+00:00`,
@@ -1040,7 +1041,7 @@ describe("exercise_sessions", () => {
         spanMin: 40,
         members: [
           {
-            id: "blind-walk-1",
+            id: "walk-1",
             start: `${TODAY}T18:30:00+00:00`,
             end: `${TODAY}T19:10:00+00:00`,
             exerciseType: "WALKING",
@@ -1093,7 +1094,7 @@ describe("exercise_sessions", () => {
     expect(answer.items).toHaveLength(1);
     expect(answer.items[0]).toMatchObject({
       // The row's own times are its longest session's, like its heart rate...
-      id: "blind-walk-1",
+      id: "walk-1",
       start: `${TODAY}T18:30:00+00:00`,
       end: `${TODAY}T19:10:00+00:00`,
       durationMin: 40,
@@ -1110,9 +1111,9 @@ describe("exercise_sessions", () => {
     expect(
       (answer.items[0]?.members as { id: string; end: string }[]).map((m) => [m.id, m.end]),
     ).toStrictEqual([
-      ["blind-walk-copy", `${TODAY}T19:10:00+00:00`],
-      ["blind-walk-1", `${TODAY}T19:10:00+00:00`],
-      ["blind-walk-tail", `${TODAY}T19:20:00+00:00`],
+      ["walk-copy", `${TODAY}T19:10:00+00:00`],
+      ["walk-1", `${TODAY}T19:10:00+00:00`],
+      ["walk-tail", `${TODAY}T19:20:00+00:00`],
     ]);
   });
 });

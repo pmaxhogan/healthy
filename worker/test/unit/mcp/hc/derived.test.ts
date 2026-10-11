@@ -72,6 +72,13 @@ const records = (): HcRecord[] => world.state.hc.records.get(DEVICE_ID) ?? [];
 const deny = (...types: string[]) =>
   buildRules(types.map((type) => ({ rule_type: "resource" as const, target: `hc:${type}` })));
 
+/** The `id` of every row of an answer. */
+const idsOf = (answer: ToolAnswer): unknown[] => answer.items.map((item) => item.id);
+
+/** The `id` of every member of every session row of an answer. */
+const memberIdsOf = (answer: ToolAnswer): unknown[] =>
+  answer.items.flatMap((item) => (item.members as { id: string }[]).map((member) => member.id));
+
 function workout(
   id: string,
   type: string,
@@ -118,7 +125,7 @@ describe("a session nobody stopped does not swallow the real workouts", () => {
     expect(answer.items[1]).toMatchObject({
       start: `${TODAY}T08:00:00+00:00`,
       end: `${TODAY}T08:40:00+00:00`,
-      members: [expect.objectContaining({ id: "blind-Morning run", origin: PHONE })],
+      members: [expect.objectContaining({ id: "Morning run", origin: PHONE })],
     });
   });
 
@@ -178,6 +185,71 @@ describe("a session nobody stopped does not swallow the real workouts", () => {
   });
 });
 
+describe("which row a session is in is read off the span, not the row's own times", () => {
+  // The owner's acceptance check placed each raw session in the row whose
+  // `start`..`end` held it, and so reported merged sessions as left apart: a
+  // row's own times are its LONGEST session's, and a member that only partly
+  // overlaps that one sticks out of them. The span is what holds every member.
+  beforeEach(() => {
+    records().push(
+      // A chain: the first overlaps the second, the second the third, the first not the third.
+      workout("Run", "RUNNING", at(12), at(12, 50), WEARABLE),
+      workout("Run, second app", "RUNNING", at(12, 40), at(13, 20), PHONE),
+      workout("Run, third", "RUNNING", at(13, 10), at(13, 40), PHONE),
+      // Another activity, wholly inside the run.
+      workout("Stretch", "YOGA", at(12, 10), at(12, 30), WEARABLE),
+    );
+  });
+
+  it("merges a chain of partial overlaps into one row whose span holds every member", async () => {
+    const answer = await call("exercise_sessions", { ...RANGE, types: ["RUNNING"] });
+
+    expect(answer.items).toHaveLength(1);
+    expect(answer.items[0]).toMatchObject({
+      title: "Run",
+      mergedSessions: 3,
+      // The longest session's own times: two of the three members end after them.
+      start: `${TODAY}T12:00:00+00:00`,
+      end: `${TODAY}T12:50:00+00:00`,
+      durationMin: 50,
+      spanStart: `${TODAY}T12:00:00+00:00`,
+      spanEnd: `${TODAY}T13:40:00+00:00`,
+      spanMin: 100,
+    });
+    expect(
+      (answer.items[0]?.members as { start: string; end: string }[]).map((m) => [m.start, m.end]),
+    ).toStrictEqual([
+      [`${TODAY}T12:00:00+00:00`, `${TODAY}T12:50:00+00:00`],
+      [`${TODAY}T12:40:00+00:00`, `${TODAY}T13:20:00+00:00`],
+      [`${TODAY}T13:10:00+00:00`, `${TODAY}T13:40:00+00:00`],
+    ]);
+  });
+
+  it("names every row and member by the id hc_records gives that session", async () => {
+    const sessions = await call("exercise_sessions", RANGE);
+    const raw = await call("hc_records", { type: "ExerciseSession", ...RANGE, ...EVERYTHING });
+    const nights = await call("sleep_sessions", RANGE);
+    const rawNights = await call("hc_records", { type: "SleepSession", ...RANGE, ...EVERYTHING });
+    // Was: a keyed blind of the id, which no other tool returns.
+    expect(new Set(memberIdsOf(sessions))).toStrictEqual(new Set(idsOf(raw)));
+    expect(memberIdsOf(sessions)).toHaveLength(raw.items.length);
+    expect(memberIdsOf(sessions)).toContain("Run, second app");
+    expect(idsOf(raw)).toStrictEqual(expect.arrayContaining(idsOf(sessions)));
+    expect(new Set(memberIdsOf(nights))).toStrictEqual(new Set(idsOf(rawNights)));
+    expect(idsOf(rawNights)).toStrictEqual(expect.arrayContaining(idsOf(nights)));
+    expect(idsOf(nights).length).toBeGreaterThan(0);
+  });
+
+  it("keeps an overlapping session of another type in its own row", async () => {
+    const answer = await call("exercise_sessions", { ...RANGE, types: ["RUNNING", "YOGA"] });
+
+    expect(answer.items.map((item) => [item.exerciseType, item.mergedSessions])).toStrictEqual([
+      ["RUNNING", 3],
+      ["YOGA", 1],
+    ]);
+  });
+});
+
 describe("sleep that was never closed", () => {
   it("does not absorb the next night", async () => {
     // Thirty hours of "sleep" that runs straight through the fixture's real night.
@@ -202,7 +274,7 @@ describe("sleep that was never closed", () => {
     ]);
     expect(answer.items[1]).toMatchObject({
       contextClamped: false,
-      members: [{ id: "blind-sleep-1", origin: WEARABLE }],
+      members: [{ id: "sleep-1", origin: WEARABLE }],
     });
   });
 });

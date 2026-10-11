@@ -14,6 +14,7 @@
  * means.
  */
 
+import { blindHcRecordId, blinderFor } from "../db/blind.ts";
 import { reposFor } from "../db/index.ts";
 import { parseJsonColumn, healthSystemConfigSchema } from "../db/schemas.ts";
 import { getSetting, getTimezone } from "../db/settings.ts";
@@ -322,6 +323,20 @@ function makeHcReads(repos: Repos, cache: () => CallCache): HcReads {
     sleepNights: (window) => once("sleepNights", window, () => readSleepNights(ctx, window)),
     exerciseSessions: (window) =>
       once("exerciseSessions", window, () => readExerciseSessions(ctx, window)),
+    sessionRecordIds: (window) =>
+      once("sessionRecordIds", window, async () => {
+        // A summary is in a window when the session ends AT its start; a record
+        // only when it ends after it. One millisecond earlier reads the same set.
+        const records = await readRecords(ctx, { ...window, startMs: window.startMs - 1 });
+        const blinder = blinderFor(ctx.env);
+        const keyed = await Promise.all(
+          records.map(
+            async (record) =>
+              [await blindHcRecordId(blinder, window.deviceId, record.id), record.id] as const,
+          ),
+        );
+        return new Map(keyed);
+      }),
   };
 }
 

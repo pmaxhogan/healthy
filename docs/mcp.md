@@ -704,7 +704,13 @@ app name): `start`, `end`, `durationMin` (or `inBedMin`), heart rate, steps
 and energy are all that session's, so they describe the same span. The
 stretch the whole group covers is beside them in `spanStart`, `spanEnd` and
 `spanMin`, and `members` lists every session the row stands for, so nothing a
-merge absorbed disappears. Not everything that overlaps is merged: two
+merge absorbed disappears. The row's `id` and each member's `id` are the
+session records' own ids, the ones `hc_records` returns for `SleepSession` and
+`ExerciseSession`, so a row or a member can be looked up there (`null` only
+for a record deleted on the phone whose summary has not been rebuilt yet).
+Which row a session is in is read off `members` or the span, never off
+`start`/`end`: a member that only partly overlaps the longest one sticks out
+of them. Not everything that overlaps is merged: two
 exercise sessions of different `exerciseType` are two activities, and a
 session that is `likelyLeftRunning`, an exercise session longer than 12 hours
 or a sleep session longer than 18 is never merged with anything but an exact

@@ -46,6 +46,7 @@ import {
   PLATFORM,
   WEARABLE,
   hcWorldRecords,
+  interval,
 } from "../../unit/mcp/hc-fake.ts";
 import { resetDb } from "../db/helpers.ts";
 
@@ -601,6 +602,13 @@ describe("what the real store hands back", () => {
     });
     expect((answer.items[0]?.hr as { min: number }).min).toBe(54);
     expect(answer.items[0]?.stages).toHaveLength(5);
+
+    // The night and its members carry the id hc_records gives the SleepSession record.
+    const raw = await call("hc_records", { devices: devices(), type: "SleepSession", ...RANGE });
+    const rawIds = raw.items.map((item) => item.id);
+    expect(rawIds).toHaveLength(1);
+    expect([answer.items[0]?.id]).toStrictEqual(rawIds);
+    expect((answer.items[0]?.members as { id: string }[]).map((m) => m.id)).toStrictEqual(rawIds);
   });
 
   it("returns the workouts the runner summarised, the forgotten one flagged", async () => {
@@ -745,5 +753,121 @@ describe("what the real store hands back", () => {
     ]);
     expect(mine[1]).toMatchObject({ systolic: 117, diastolic: 77, origin: CUFF });
     expect(mine[2]).toMatchObject({ asleepMin: 460, origin: WEARABLE });
+  });
+});
+
+/** One synthetic workout, titled by its id. */
+function workout(id: string, type: string, startMs: number, endMs: number, origin: string) {
+  return interval(
+    id,
+    "ExerciseSession",
+    startMs,
+    endMs,
+    { exerciseType: type, title: id },
+    { origin },
+  );
+}
+
+describe("overlapping workouts, whatever order the phone sent them in", () => {
+  // The backfill sends the newest month first, so the older half of an
+  // overlapping pair can arrive batches after the summary of the newer half was
+  // built. Which sessions are one row is decided when the tool answers, from
+  // every stored summary in range, so the order cannot matter. Kept last in the
+  // file: it pairs a third phone.
+  const BASE = DAY - 40 * DAY_MS;
+  const on = (hour: number, minute = 0): number => BASE + hour * HOUR_MS + minute * MINUTE_MS;
+  const paired = { source: "" };
+
+  beforeAll(async () => {
+    const { device, token } = await repos.devices.mint("Overlap phone");
+    paired.source = `device:${device.id}`;
+    const batches = [
+      // First: the newer sessions. A run across UTC midnight, the one after it, one app's ride.
+      [
+        workout("run-late", "RUNNING", on(23, 40), on(24, 20), PHONE),
+        workout("run-last", "RUNNING", on(24, 10), on(24, 40), PHONE),
+        workout("ride-copy", "BIKING", on(10, 10), on(11, 5), PHONE),
+      ],
+      // Batches later: the older session each of them overlaps, and another activity inside one.
+      [
+        workout("run-early", "RUNNING", on(23), on(23, 50), WEARABLE),
+        workout("ride", "BIKING", on(10), on(11), WEARABLE),
+        workout("stretch", "YOGA", on(10, 20), on(10, 40), WEARABLE),
+      ],
+    ];
+    for (const upserts of batches) {
+      const response = await upload(token, {
+        v: 1,
+        deviceId: device.id,
+        appVersion: "0.1.9",
+        batchId: crypto.randomUUID(),
+        phoneTime: Date.now(),
+        upserts,
+        deletes: [],
+        syncState: {
+          types: [{ type: "ExerciseSession", permission: "granted", tokenAgeS: 60, backlog: 0 }],
+          backgroundRead: true,
+          historyRead: true,
+          batteryExempt: false,
+          backfillComplete: false,
+          androidSdk: 37,
+        },
+      });
+      if (response.status !== 200) throw new Error(`ingest answered ${String(response.status)}`);
+      // Each batch is applied and summarised before the next arrives.
+      await settle(device.id);
+    }
+  }, 120_000);
+
+  it("puts every overlapping pair of one type in one row, and no other pair", async () => {
+    const answer = await call("exercise_sessions", {
+      devices: [paired.source],
+      start: instant(BASE),
+      end: instant(BASE + 2 * DAY_MS),
+    });
+
+    expect(
+      answer.items.map((item) => [
+        item.exerciseType,
+        item.title,
+        item.mergedSessions,
+        item.durationMin,
+        item.spanMin,
+      ]),
+    ).toStrictEqual([
+      ["BIKING", "ride", 2, 60, 65],
+      ["YOGA", "stretch", 1, 20, 20],
+      // A chain: early overlaps late, late overlaps last, early does not reach last.
+      ["RUNNING", "run-early", 3, 50, 100],
+    ]);
+    // The row's own times are its longest session's; the span is what holds every member.
+    const run = answer.items[2] ?? {};
+    expect(
+      [run.start, run.end, run.spanStart, run.spanEnd].map((time) => Date.parse(String(time))),
+    ).toStrictEqual([on(23), on(23, 50), on(23), on(24, 40)]);
+    expect(run.origins).toStrictEqual([PHONE, WEARABLE]);
+    // Every member, and the row itself, is named by the id hc_records gives that record.
+    const raw = await call("hc_records", {
+      devices: [paired.source],
+      type: "ExerciseSession",
+      start: instant(BASE),
+      end: instant(BASE + 2 * DAY_MS),
+    });
+    const memberIds = answer.items.flatMap((item) =>
+      (item.members as { id: string }[]).map((member) => member.id),
+    );
+    expect(memberIds).toHaveLength(6);
+    expect(new Set(memberIds)).toStrictEqual(
+      new Set(["ride", "ride-copy", "run-early", "run-last", "run-late", "stretch"]),
+    );
+    expect(raw.items).toHaveLength(6);
+    expect(new Set(raw.items.map((item) => item.id))).toStrictEqual(new Set(memberIds));
+    expect(answer.items.map((item) => item.id)).toStrictEqual(["ride", "stretch", "run-early"]);
+    for (const row of answer.items) {
+      for (const member of row.members as { start: string; end: string }[]) {
+        expect(Date.parse(member.start)).toBeGreaterThanOrEqual(Date.parse(String(row.spanStart)));
+        expect(Date.parse(member.end)).toBeLessThanOrEqual(Date.parse(String(row.spanEnd)));
+      }
+    }
   });
 });

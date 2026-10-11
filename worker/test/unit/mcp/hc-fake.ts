@@ -392,6 +392,14 @@ export function fakeHcReads(hc: FakeHc): FakeHcReads {
       );
     },
 
+    sessionRecordIds: (window) => {
+      log({ reader: "sessionRecordIds", type: window.type });
+      const sessions = within(window.deviceId, window.type, window.startMs, window.endMs);
+      return Promise.resolve(
+        new Map(sessions.map((session) => [`blind-${session.id}`, session.id])),
+      );
+    },
+
     exerciseSessions: (window) => {
       log({ reader: "exerciseSessions", startMs: window.startMs, endMs: window.endMs });
       const { deviceId } = window;

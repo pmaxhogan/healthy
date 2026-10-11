@@ -63,12 +63,17 @@ interface HrMinuteRow {
 }
 
 interface StoredSleepNight {
-  /** The session's blinded record id: stable, and names nothing. */
+  /**
+   * The summary's key, a keyed blind of the session's record id. Internal: it
+   * groups and orders, and is never put in an answer. What an answer carries is
+   * the record's own id, from {@link HcReads.sessionRecordIds}.
+   */
   id: string;
   night: SleepNight;
 }
 
 interface StoredExerciseSession {
+  /** The summary's key, as on {@link StoredSleepNight}: internal, never emitted. */
   id: string;
   session: ExerciseSummary;
 }
@@ -131,6 +136,13 @@ export interface HcReads {
   hrMinutes(window: Omit<RecordWindow, "type">): Promise<HrMinuteRow[]>;
   sleepNights(window: DeviceWindow): Promise<StoredSleepNight[]>;
   exerciseSessions(window: DeviceWindow): Promise<StoredExerciseSession[]>;
+  /**
+   * For every session record of `type` (`SleepSession`, `ExerciseSession`) that
+   * `sleepNights` / `exerciseSessions` would return for the same window: the
+   * summary's key, mapped to the record's own id -- the `id` `hc_records` emits
+   * for it, so a session row can be joined to its raw record.
+   */
+  sessionRecordIds(window: DeviceWindow & { type: string }): Promise<Map<string, string>>;
 }
 
 export { type SyncStateRow } from "../../hc/device.ts";
