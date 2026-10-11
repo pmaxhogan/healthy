@@ -100,7 +100,7 @@ The MCP server itself lives in a SQLite-backed Durable Object.
   the application before they reach D1, with the AAD bound to the table,
   column and row. See [SECURITY.md](SECURITY.md).
 - **Vendor abstraction.** Health systems sit behind a `EhrAdapter`
-  interface. Epic is the only implementation today.
+  interface, with two implementations: Epic and ModMed's certified FHIR API.
 
 ## Quick start
 
@@ -148,13 +148,14 @@ development (one `NAME=value` line each).
 | `GOOGLE_CLIENT_SECRET`    | The OAuth client from [setup-google.md](docs/setup-google.md).                                                   |
 | `EPIC_CLIENT_ID_PROD`     | Your app's production client id. [setup-epic.md](docs/setup-epic.md)                                             |
 | `EPIC_CLIENT_ID_NONPROD`  | Your app's sandbox client id. [setup-epic.md](docs/setup-epic.md)                                                |
+| `MODMED_CLIENT_ID`        | Optional. Your ModMed app's client id. [setup-modmed.md](docs/setup-modmed.md)                                   |
 | `EPIC_ORG_SECRET_KEY`     | Optional. The key per-organisation client secrets are derived from. `npm run epic-org-secret -- --gen-key --put` |
 | `TRELLO_KEY`              | Trello API key. [setup-trello.md](docs/setup-trello.md)                                                          |
 | `TRELLO_TOKEN`            | Trello API token. [setup-trello.md](docs/setup-trello.md)                                                        |
 | `TRELLO_MUST_LIST_ID`     | The Trello list new alert cards open in. [setup-trello.md](docs/setup-trello.md)                                 |
 | `TRELLO_DONE_LIST_ID`     | The Trello list resolved alert cards move to. [setup-trello.md](docs/setup-trello.md)                            |
 
-Per-organisation Epic client secrets are **not** Worker secrets: they are
+Per-organisation client secrets (Epic's and ModMed's alike) are **not** Worker secrets: they are
 entered in the admin UI and stored encrypted in D1, one per health system,
 rotated independently. When the admin UI is not an option (no live browser
 session against that environment), `npm run set-health-system-secret -- --health-system

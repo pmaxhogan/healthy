@@ -1,7 +1,8 @@
 # Setting up Epic
 
-Epic is the only health-system vendor implemented today. Connecting one is
-two separate jobs: registering an application on Epic's developer portal
+Epic is one of two health-system vendors implemented (the other is ModMed:
+[setup-modmed.md](setup-modmed.md)). Connecting an Epic organisation is two
+separate jobs: registering an application on Epic's developer portal
 (once, for your whole deployment), and then connecting individual health
 systems to it from the admin UI (once per organisation you get care from).
 
