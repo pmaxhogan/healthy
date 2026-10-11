@@ -120,9 +120,12 @@ class SyncEngineTest {
     }
 
     @Test
-    fun `deletions are sent as ids and the last change to a record wins`() = runTest {
+    fun `deletions are sent as ids, and a record that is both upserted and deleted is uploaded`() = runTest {
         val rig = Rig()
         rig.sync()
+        // The client library lists every upserted record, then every deleted id, whatever the
+        // order of events was. An upserted record was read as it is now, so "a" exists: its app
+        // deleted it and wrote it again under the same client record id, which is the same id.
         rig.source.changePages["HeartRate#1"] = page(
             listOf(
                 HcChange.Upsert(hr("a")),
@@ -130,14 +133,18 @@ class SyncEngineTest {
                 HcChange.Delete("x"),
                 HcChange.Upsert(hr("x")),
                 HcChange.Delete("gone"),
+                HcChange.Upsert(hr("twice", NOW - 60_000)),
+                HcChange.Upsert(hr("twice")),
             ),
             "HeartRate#2",
         )
         rig.sync()
         val batch = rig.transport.data.single()
-        assertEquals(listOf("x"), batch.upsertIds)
-        assertEquals(listOf("a", "gone"), batch.deletes)
-        assertEquals(1, rig.type("HeartRate").uploaded)
+        assertEquals(listOf("a", "x", "twice"), batch.upsertIds)
+        assertEquals(listOf("gone"), batch.deletes)
+        // Of a record upserted twice, the later copy is the one sent.
+        assertEquals(NOW, batch.upserts.last().jsonObject.getValue("start").jsonPrimitive.long)
+        assertEquals(3, rig.type("HeartRate").uploaded)
     }
 
     @Test

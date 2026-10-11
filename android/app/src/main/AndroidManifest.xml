@@ -67,6 +67,11 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- Asking to be exempt from battery optimisation so the 15-minute sync is reliable. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!--
+        Putting the sync schedule back after the phone restarts: the watchdog alarm does not
+        survive a restart. (WorkManager declares the same permission for its own jobs.)
+    -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!-- Pairing also works by pasting the code, so a camera is not required. -->
     <uses-feature
@@ -159,6 +164,21 @@
                 <action android:name="com.twofortyfouram.locale.intent.action.EDIT_SETTING" />
             </intent-filter>
         </activity>
+
+        <!--
+            The watchdog behind the periodic sync, and what puts the schedule back after a
+            restart or an update. Not exported: the alarm is the app's own pending intent and the
+            other two broadcasts come from the system, which reaches a receiver that is not
+            exported.
+        -->
+        <receiver
+            android:name=".sync.SyncWakeReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <receiver
             android:name=".tasker.TaskerFireReceiver"

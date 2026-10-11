@@ -7,7 +7,6 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.PowerManager
-import androidx.work.await
 import dev.maxhogan.healthy.companion.BuildConfig
 import dev.maxhogan.healthy.companion.hc.Grant
 import dev.maxhogan.healthy.companion.hc.HealthAccess
@@ -233,6 +232,7 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
     private val types: List<String> = RecordTypes.ALL.map(RecordTypes::typeName)
     private val store: SyncStateStore = DataStoreSyncStateStore(context)
     private val scheduler = SyncScheduler(context)
+    private val alarm = SyncAlarm(context)
     internal val notifications = SyncNotifications(context)
     private val engine = SyncEngine(
         store = store,
@@ -312,8 +312,10 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
                     guarded {
                         if (pairing is PairingState.Paired) {
                             scheduler.schedulePeriodic(wifiOnly)
+                            alarm.arm(SyncCadence.nextAlarmInMs(lastAttemptMs(), System.currentTimeMillis()))
                         } else {
                             scheduler.cancelAll()
+                            alarm.cancel()
                             // Unpairing lifts a refused pairing and takes its error off screen.
                             engine.pairingCleared()
                         }
@@ -332,11 +334,51 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
      * Enqueues a one-off sync and returns once WorkManager has it on disk. For callers that
      * must not let go before then (a broadcast receiver whose process may be reaped).
      */
-    suspend fun requestSync() {
+    suspend fun requestSync(trigger: SyncTrigger = SyncTrigger.MANUAL) {
         guarded {
             if (dependencies.pairingStore.pairing.first() == null) return@guarded
-            scheduler.syncNow(dependencies.settings.wifiOnly.first()).await()
+            scheduler.syncNow(dependencies.settings.wifiOnly.first(), trigger)
         }
+    }
+
+    /**
+     * The watchdog alarm went off, the phone started, or the app was updated: put the schedule
+     * back, ask for a sync if one is overdue, and set the alarm again. See [SyncCadence].
+     *
+     * The alarm is set again whatever else fails here, since it is what calls this the next
+     * time; only an app that is known not to be paired lets it lapse.
+     */
+    suspend fun onWake() {
+        var paired = true
+        var next = SyncCadence.WATCHDOG_MS
+        try {
+            guarded {
+                if (dependencies.pairingStore.pairing.first() == null) {
+                    paired = false
+                    return@guarded
+                }
+                val wifiOnly = dependencies.settings.wifiOnly.first()
+                guarded { scheduler.schedulePeriodic(wifiOnly) }
+                val now = System.currentTimeMillis()
+                val last = lastAttemptMs()
+                if (SyncCadence.overdue(last, now)) {
+                    scheduler.syncNow(wifiOnly, SyncTrigger.ALARM)
+                } else {
+                    next = SyncCadence.nextAlarmInMs(last, now)
+                }
+            }
+        } finally {
+            if (paired) alarm.arm(next) else alarm.cancel()
+        }
+    }
+
+    /** When a sync last started, or null when none has or the store cannot say. */
+    private suspend fun lastAttemptMs(): Long? = try {
+        store.snapshot().global.lastAttemptMs
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
     }
 
     override fun startBackfill() {
@@ -366,10 +408,11 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
     }
 
     /**
-     * One incremental sync, for the worker. Null when the app is not paired. Never throws: an
+     * One incremental sync, for the worker. Null when the app is not paired, and when a scheduled
+     * run finds that another sync started moments ago ([SyncCadence.shouldRun]). Never throws: an
      * unexpected failure is recorded as `internal_error` and reported as retryable.
      */
-    suspend fun runSync(): RunResult? {
+    suspend fun runSync(trigger: SyncTrigger = SyncTrigger.MANUAL): RunResult? {
         val pairing = try {
             dependencies.pairingStore.pairing.first()
         } catch (e: CancellationException) {
@@ -379,6 +422,9 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
             return storeFailed()
         }
         if (pairing == null) return null
+        if (!SyncCadence.shouldRun(trigger, lastAttemptMs(), System.currentTimeMillis())) return null
+        // A sync is starting: the watchdog has nothing to say until one is overdue again.
+        alarm.arm(SyncCadence.WATCHDOG_MS)
         live.update { it.copy(syncing = true) }
         val result = try {
             // When the grants cannot be read the run must not go ahead on a guess: it would

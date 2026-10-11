@@ -18,6 +18,7 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 // A file that cannot be parsed is replaced by an empty one, which reads as "not paired": the
 // owner scans again. Without it every read would fail for good and the app could do nothing.
@@ -52,6 +53,14 @@ class AppGraph(context: Context) {
 
 class HealthyApp : Application() {
     val graph: AppGraph by lazy { AppGraph(this) }
+
+    override fun onCreate() {
+        super.onCreate()
+        // Whatever started the process (the launcher, a job, an alarm, a broadcast), the sync
+        // schedule is put back in place: building the controller is what plans it. Off the main
+        // thread, since it reads the stores.
+        graph.scope.launch { graph.syncController }
+    }
 }
 
 /** The app's object graph, from any [Context] (an activity, a worker, a receiver). */

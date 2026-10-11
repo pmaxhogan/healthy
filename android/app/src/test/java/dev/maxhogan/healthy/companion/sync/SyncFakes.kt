@@ -132,6 +132,9 @@ class FakeHealthSource : HealthSource {
     /** Types for which any read with a page token is refused as invalid. */
     val refusePageTokens = HashSet<String>()
 
+    /** Thrown by every read of a type's change feed, by type, and by nothing else. */
+    val changesFailure = HashMap<String, HealthSourceException>()
+
     /** Thrown by every aggregate call, and by nothing else. */
     var aggregateFailure: HealthSourceException? = null
 
@@ -169,6 +172,7 @@ class FakeHealthSource : HealthSource {
     override suspend fun changes(token: String): ChangesPage {
         calls.add("changes:$token")
         gate(token.substringBefore('#'))
+        changesFailure[token.substringBefore('#')]?.let { throw it }
         if (token.substringBefore('#') in alwaysExpired) return ChangesPage(emptyList(), "", hasMore = false, expired = true)
         return changePages[token] ?: ChangesPage(emptyList(), token, hasMore = false, expired = false)
     }

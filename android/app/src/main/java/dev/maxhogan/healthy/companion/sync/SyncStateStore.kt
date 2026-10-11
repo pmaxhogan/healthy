@@ -167,6 +167,13 @@ data class TypeState(
      * incremental sync clears: only a backfill unit of this type that succeeds clears this.
      */
     val backfillError: StoredError? = null,
+    /**
+     * For a type that is re-read by time on every sync ([SyncEngine.SWEEP_TYPES]): the records of
+     * the trailing window the server has acknowledged, as record id to `lastModified`. A record
+     * the window holds that is not here, or is here with another `lastModified`, is sent; the
+     * rest are not sent again. Pruned to the window on every re-read, so it stays a few entries.
+     */
+    val recent: Map<String, Long> = emptyMap(),
 )
 
 @Serializable
@@ -174,6 +181,12 @@ data class GlobalState(
     /** The device this state belongs to. A different pairing resets everything. */
     val deviceId: String? = null,
     val lastSyncMs: Long? = null,
+    /**
+     * When a sync last started, whatever became of it. The watchdog alarm and the periodic work
+     * both look at it: the first to tell that nothing has run for too long, the second so that
+     * two triggers a moment apart do not both read everything.
+     */
+    val lastAttemptMs: Long? = null,
     val consecutiveFailures: Int = 0,
     val lastError: StoredError? = null,
     /**

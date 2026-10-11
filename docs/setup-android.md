@@ -159,8 +159,18 @@ privacy screen Health Connect also opens from its permission dialog.
 
 ## 6. How syncing works
 
-- **Every 15 minutes**, on any network, unless the battery is low. It is
-  WorkManager's periodic work, so Android may run it late. After the first sync
+- **Every 15 minutes**, on any network, at any battery level. It is WorkManager's
+  periodic work, and Android holds such work back for reasons of its own (while
+  the phone dozes, and for every app while the phone is hot), so a watchdog stands
+  behind it: an alarm set for 17 minutes after every sync that starts. It only goes
+  off when the periodic work did not run in time, and then asks for the same sync
+  as expedited work, which Android is far more willing to run in those situations
+  (not always: a phone hot enough holds everything back). The alarm is
+  inexact (no "alarms and reminders" access is asked for) and is on time while the
+  phone dozes only for an app exempt from battery optimisation (step 4). The
+  schedule and the alarm are put back when the phone restarts, when the app is
+  updated and whenever the app starts. There is no permanently running service.
+  After the first sync
   the app reads only what changed, through Health Connect's change feed, one
   cursor per record type. A cursor Health Connect has expired is replaced by a
   re-read of the last 30 days; duplicates are harmless because every record is
@@ -168,6 +178,14 @@ privacy screen Health Connect also opens from its permission dialog.
   learnt that way. **Sync now**, the Tasker action and opening the app run at
   once and ignore the low-battery condition, but still honour **Upload on Wi-Fi
   only**.
+- **Sessions are also read by time.** For sleep, exercise and mindfulness sessions
+  every sync also reads the last 48 hours by time, and uploads any session the
+  Worker has not acknowledged in its current form (the app remembers the id and
+  last-modified time of what it sent, so an unchanged session is not sent again).
+  A session the change feed failed to report therefore still arrives within one
+  sync. Series such as heart rate are never re-read this way. A record that Health
+  Connect reports as both changed and deleted in the same answer (an app that
+  deleted it and wrote it again under the same id) is uploaded, not deleted.
 - **Acknowledge, then commit.** The app advances its cursor only after the Worker
   answers 200, and "200" means the batch was validated and durably queued. A batch
   that fails is sent again, never dropped, and a replay is recognised by its batch

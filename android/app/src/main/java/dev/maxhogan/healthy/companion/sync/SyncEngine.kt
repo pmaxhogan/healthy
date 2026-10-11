@@ -123,6 +123,18 @@ class BackfillRun {
  * as itself and its position still moves: it is larger than the server's limits even alone, and
  * goes up as a stub that says so.
  *
+ * **A record that is there beats a deletion.** One answer from the change feed lists the records
+ * that changed (read as they are now) and, apart from them, the ids that were deleted, in no order
+ * between the two. Health Connect derives a record's id from the writing app and its client
+ * record id, so an app that deletes a record and writes it again gets the same id back, and that
+ * id then arrives both ways at once. The record exists, so it is uploaded and the deletion is
+ * dropped: see [changeItems].
+ *
+ * **Sessions are also read by time.** The change feed is the only way an edit is learnt, and a
+ * session it failed to surface would be missing for good. So for the few session types
+ * ([SWEEP_TYPES]) every sync also reads the trailing [SWEEP_WINDOW_MS] by time and uploads what
+ * the server has not acknowledged in that form ([TypeState.recent]): see [sweep].
+ *
  * **Per type.** Each record type has its own token, its own backfill cursor and its own
  * errors. A type that is denied, or that the platform or the server refuses, is set aside and
  * the others carry on.
@@ -253,8 +265,10 @@ class SyncEngine(
         }
         // The server asked for time. Nothing it has not asked for is sent, and nothing is read
         // that could not be delivered anyway.
-        serverGate.remainingMs()?.let { return RunResult.Failed(serverGate.errorCode, it) }
         val runStart = clock()
+        // First, and whatever becomes of the run: this is what says a sync was at least started.
+        store.updateGlobal { it.copy(lastAttemptMs = runStart) }
+        serverGate.remainingMs()?.let { return RunResult.Failed(serverGate.errorCode, it) }
         // An error from when a type was still granted says nothing about it now.
         for (type in types) {
             if (session.access.types[type] == Grant.GRANTED) continue
@@ -445,7 +459,91 @@ class SyncEngine(
             is Delivery.Stopped -> delivery.outcome
         }
 
+    /**
+     * One type's incremental sync: its change feed, and for a session type the trailing window
+     * read by time as well. The window is read even when the change feed failed for the type
+     * (that is when it is needed most); a failure that says "not now" for every type is not
+     * followed by another request.
+     */
     private suspend fun syncType(session: Session, type: String): Outcome {
+        if (type !in SWEEP_TYPES) return syncChanges(session, type)
+        var thrown: HealthSourceException? = null
+        val changes = try {
+            syncChanges(session, type)
+        } catch (e: HealthSourceException) {
+            when (e.kind) {
+                HealthSourceException.Kind.TRANSIENT, HealthSourceException.Kind.INVALID -> thrown = e
+                else -> throw e
+            }
+            null
+        }
+        if (changes is Outcome.RunFailed || changes is Outcome.Rejected) return changes
+        val swept = sweep(session, type)
+        if (swept is Outcome.RunFailed || swept is Outcome.Rejected) return swept
+        thrown?.let { throw it }
+        return if (changes != null && changes != Outcome.Ok) changes else swept
+    }
+
+    /**
+     * Reads the trailing [SWEEP_WINDOW_MS] of a session type by time and uploads every record
+     * the server has not acknowledged with that `lastModified`, with the platform totals of the
+     * hours those records touch. What was sent is remembered only once it is acknowledged, so a
+     * failed upload is simply read and sent again.
+     *
+     * It costs one read per type and sync when nothing is new, and nothing is uploaded then.
+     * Sending a record the server already holds would be harmless (it stores by id and keeps
+     * the newer `lastModified`), only wasteful, which is what [TypeState.recent] avoids.
+     */
+    private suspend fun sweep(session: Session, type: String): Outcome {
+        val now = clock()
+        val start = now - SWEEP_WINDOW_MS
+        val known = store.snapshot().type(type).recent
+        val seen = HashMap<String, Long>()
+        val fresh = ArrayList<BatchItem.Upsert>()
+        var pageToken: String? = null
+        do {
+            val page = source.readRecords(type, start, FAR_FUTURE_MS, pageToken)
+            for (wire in page.records) {
+                val item = BatchItem.record(wire)
+                val stamp = item.lastModified ?: NO_STAMP
+                if (seen.put(item.id, stamp) == null && known[item.id] != stamp) fresh.add(item)
+            }
+            pageToken = page.pageToken
+        } while (pageToken != null)
+        if (fresh.isEmpty()) {
+            // Nothing to send; forget what has left the window.
+            if (seen != known) store.updateType(type) { it.copy(recent = seen) }
+            return Outcome.Ok
+        }
+        val all = fresh + aggregateItems(type, touchedHours(fresh), includeDeletes = true, now)
+        return deliverAndCommit(session, type, position("sweep", type, start), all, IN_RUN_ATTEMPTS) {
+            it.copy(recent = seen)
+        }
+    }
+
+    /**
+     * [items] were acknowledged through the change feed: for a session type, note them so the
+     * re-read by time that follows does not send the same records a second time.
+     */
+    private fun TypeState.remembering(type: String, items: List<BatchItem>, now: Long): TypeState {
+        if (type !in SWEEP_TYPES) return this
+        val floor = now - SWEEP_WINDOW_MS
+        val next = HashMap(recent)
+        for (item in items) {
+            when (item) {
+                is BatchItem.Delete -> next.remove(item.id)
+                is BatchItem.Upsert -> {
+                    // By its end: the read by time returns a record that reaches into the window.
+                    // One noted here that the read does not return is simply pruned by it.
+                    val end = item.endMs ?: item.startMs
+                    if (!item.synthetic && end != null && end >= floor) next[item.id] = item.lastModified ?: NO_STAMP
+                }
+            }
+        }
+        return if (next == recent) this else copy(recent = next)
+    }
+
+    private suspend fun syncChanges(session: Session, type: String): Outcome {
         if (store.snapshot().type(type).reread != null) {
             val resumed = reread(session, type)
             if (resumed != Outcome.Ok) return resumed
@@ -486,7 +584,7 @@ class SyncEngine(
                 val all = items + aggregateItems(type, hours, includeDeletes = true, now)
                 val position = position("changes", type, token)
                 val outcome = deliverAndCommit(session, type, position, all, IN_RUN_ATTEMPTS) {
-                    it.copy(token = next, tokenCreatedMs = now)
+                    it.copy(token = next, tokenCreatedMs = now).remembering(type, items, now)
                 }
                 if (outcome != Outcome.Ok) return outcome
             }
@@ -1221,13 +1319,27 @@ class SyncEngine(
         }
     }
 
-    /** One item per record id, the last change to it winning, in the order they last changed. */
+    /**
+     * One item per record id, in the order they last appear.
+     *
+     * An id that is both upserted and deleted in the same answer is uploaded, never deleted. The
+     * order of the two says nothing: the client library hands over every upserted record first
+     * and every deleted id after, whatever happened when. What does say something is that the
+     * upserted record was read from Health Connect for this very answer, so it exists now; a
+     * record deleted after its last write is not among the upserts at all. Both at once means
+     * the app deleted the record and wrote it again under the same client record id, which gives
+     * it the same id. Taking the deletion there would remove a record that is present, and the
+     * server never takes an id back once it has been deleted.
+     */
     private fun changeItems(changes: List<HcChange>): List<BatchItem> {
+        val upserted = changes.filterIsInstance<HcChange.Upsert>().map { BatchItem.record(it.record) }
+        val live = upserted.mapTo(HashSet()) { it.id }
         val byId = LinkedHashMap<String, BatchItem>()
+        var next = 0
         for (change in changes) {
             val item = when (change) {
-                is HcChange.Upsert -> BatchItem.record(change.record)
-                is HcChange.Delete -> BatchItem.Delete(change.id)
+                is HcChange.Upsert -> upserted[next++]
+                is HcChange.Delete -> if (change.id in live) continue else BatchItem.Delete(change.id)
             }
             val id = if (item is BatchItem.Upsert) item.id else (item as BatchItem.Delete).id
             byId.remove(id)
@@ -1292,6 +1404,19 @@ class SyncEngine(
          * is also the latest instant the server accepts in any field.
          */
         const val FAR_FUTURE_MS = 7_258_118_400_000L
+
+        /** How far back the session types are read again by time on every sync. */
+        const val SWEEP_WINDOW_MS = 48L * Hours.MS
+
+        /**
+         * The types read again by time on every sync: sessions, of which there are a handful a
+         * day, each the only record of its night or workout. Never a series such as heart rate,
+         * whose two days are tens of thousands of records.
+         */
+        val SWEEP_TYPES = setOf("SleepSession", "ExerciseSession", "MindfulnessSession")
+
+        /** Stands for the `lastModified` of a record that carries none. */
+        private const val NO_STAMP = -1L
 
         const val ERROR_UNAUTHORIZED = "unauthorized"
 

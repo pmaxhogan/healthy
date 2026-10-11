@@ -45,6 +45,8 @@ sealed interface BatchItem {
         override val synthetic: Boolean,
         /** True when this stands in for a record too large to send. */
         val stub: Boolean = false,
+        /** The record's own `lastModified`, when it carries one: what tells an edit from a repeat. */
+        val lastModified: Long? = null,
     ) : BatchItem {
         override val rawBytes: Int = utf8Length(json) + 1
     }
@@ -61,6 +63,7 @@ sealed interface BatchItem {
             startMs = wire.long("start") ?: wire.long("time"),
             endMs = wire.long("end") ?: wire.long("time"),
             synthetic = false,
+            lastModified = wire.long("lastModified"),
         )
 
         /** The synthetic record for one UTC hour of a platform aggregate. */
@@ -113,7 +116,15 @@ sealed interface BatchItem {
                     }
                     ),
             )
-            return Upsert(stubbed.toString(), item.id, item.startMs, item.endMs, synthetic = false, stub = true)
+            return Upsert(
+                stubbed.toString(),
+                item.id,
+                item.startMs,
+                item.endMs,
+                synthetic = false,
+                stub = true,
+                lastModified = item.lastModified,
+            )
         }
 
         const val AGG_ORIGIN = "healthconnect"

@@ -114,6 +114,6 @@ class UploaderTest {
         assertEquals(WorkOutcome.SUCCESS, SyncWorker.outcomeFor(RunResult.Skipped("background_read_missing", notify = true)))
         assertEquals(WorkOutcome.SUCCESS, SyncWorker.outcomeFor(RunResult.Success))
         assertEquals(WorkOutcome.SUCCESS, SyncWorker.outcomeFor(null))
-        assertEquals(15L, SyncScheduler.PERIOD_MINUTES)
+        assertEquals(15 * 60_000L, SyncCadence.PERIOD_MS)
     }
 }
