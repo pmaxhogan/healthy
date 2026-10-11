@@ -88,7 +88,7 @@ jobs:
 
       - name: Upload test and lint reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: android-reports
           path: |
@@ -96,7 +96,7 @@ jobs:
             android/app/build/reports/lint-results-debug.html
           if-no-files-found: ignore
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: healthy-companion-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
