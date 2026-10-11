@@ -18,6 +18,7 @@ import type {
   DeviceCoverageRowDto,
   DeviceDto,
   DeviceIngestLogDto,
+  DeviceIngestSummaryDto,
   PairedDeviceDto,
   WipeDeviceResponse,
 } from "@shared/types.ts";
@@ -109,12 +110,17 @@ async function bodyText(path: string): Promise<string> {
 async function seedSyncState(
   deviceId: string,
   recordType: string,
-  columns: { permission: string; count?: number; lastUploadAt?: number | null },
+  columns: {
+    permission: string;
+    count?: number;
+    lastUploadAt?: number | null;
+    backfilled?: boolean;
+  },
 ): Promise<void> {
   await env.DB.prepare(
     `INSERT INTO hc_sync_state
-       (device_id, record_type, permission_state, first_ms, last_ms, record_count, last_upload_at, token_age_s, backlog)
-     VALUES (?, ?, ?, 1700000000000, 1790000000000, ?, ?, 30, 0)`,
+       (device_id, record_type, permission_state, first_ms, last_ms, record_count, last_upload_at, token_age_s, backlog, backfill_complete)
+     VALUES (?, ?, ?, 1700000000000, 1790000000000, ?, ?, 30, 0, ?)`,
   )
     .bind(
       deviceId,
@@ -122,7 +128,20 @@ async function seedSyncState(
       columns.permission,
       columns.count ?? 0,
       columns.lastUploadAt ?? null,
+      columns.backfilled === true ? 1 : 0,
     )
+    .run();
+}
+
+/** Rewrite the log rows matching `where` (a literal, test-only condition) as the runner would have left them. */
+async function setLog(
+  where: string,
+  to: { status: string; appliedAt?: number; applyMs?: number; errorCode?: string },
+): Promise<void> {
+  await env.DB.prepare(
+    `UPDATE hc_ingest_log SET status = ?, applied_at = ?, apply_ms = ?, error_code = ? WHERE ${where}`,
+  )
+    .bind(to.status, to.appliedAt ?? null, to.applyMs ?? null, to.errorCode ?? null)
     .run();
 }
 
@@ -137,6 +156,7 @@ describe("authentication and CSRF", () => {
       ["POST", "/api/phone/devices/x/wipe"],
       ["GET", "/api/phone/devices/x/coverage"],
       ["GET", "/api/phone/devices/x/ingest-log"],
+      ["GET", "/api/phone/devices/x/ingest-summary"],
     ] as const) {
       const response = await call(path, {
         method,
@@ -187,7 +207,7 @@ describe("GET /api/phone/devices", () => {
       parked: { batches: 0, bytes: 0, errorCodes: [] },
       parkedMarks: 0,
       report: null,
-      totals: { recordCount: 0, typesGranted: 0, typesDenied: 0 },
+      totals: { recordCount: 0, typesGranted: 0, typesDenied: 0, typesBackfilled: 0 },
     });
   });
 
@@ -210,9 +230,14 @@ describe("GET /api/phone/devices", () => {
         lastError: { errorCode: "permission_denied", at: 1_790_000_000_000 },
       }),
     });
-    await seedSyncState(device.id, "HeartRate", { permission: "granted", count: 7 });
+    await seedSyncState(device.id, "HeartRate", {
+      permission: "granted",
+      count: 7,
+      backfilled: true,
+    });
     await seedSyncState(device.id, "Steps", { permission: "granted", count: 3 });
-    await seedSyncState(device.id, "Weight", { permission: "denied" });
+    // A type that is not granted has no backfill: flagged or not, it is not counted as one.
+    await seedSyncState(device.id, "Weight", { permission: "denied", backfilled: true });
 
     const [listed] = await json<DeviceDto[]>(await owner().get("/api/phone/devices"));
 
@@ -220,7 +245,12 @@ describe("GET /api/phone/devices", () => {
     expect(listed?.appVersion).toBe("0.1.7");
     expect(listed?.lastUploadAt).not.toBeNull();
     expect(listed?.lastSeenAt).not.toBeNull();
-    expect(listed?.totals).toStrictEqual({ recordCount: 10, typesGranted: 2, typesDenied: 1 });
+    expect(listed?.totals).toStrictEqual({
+      recordCount: 10,
+      typesGranted: 2,
+      typesDenied: 1,
+      typesBackfilled: 1,
+    });
     expect(listed?.report).toStrictEqual({
       batteryExempt: true,
       backgroundRead: false,
@@ -674,6 +704,26 @@ describe("GET /api/phone/devices/:id/coverage", () => {
     expect(listed?.totals).toMatchObject({ typesGranted: 1, typesDenied: 0 });
   });
 
+  it("counts the same types on the card as in the table: no exercise-route pseudo-type", async () => {
+    const { device } = await pair();
+    await seedSyncState(device.id, "Steps", { permission: "granted", count: 3, backfilled: true });
+    // What older app builds reported the route permission as. It never finishes a backfill.
+    await seedSyncState(device.id, "ExerciseRoute", { permission: "granted" });
+
+    const rows = await json<DeviceCoverageRowDto[]>(
+      await owner().get(`/api/phone/devices/${device.id}/coverage`),
+    );
+    const [listed] = await listDevices();
+
+    expect(rows.map((row) => row.recordType)).toStrictEqual(["Steps"]);
+    expect(listed?.totals).toStrictEqual({
+      recordCount: 3,
+      typesGranted: 1,
+      typesDenied: 0,
+      typesBackfilled: 1,
+    });
+  });
+
   it("is a 404 for an unknown phone", async () => {
     expect(await getStatus("/api/phone/devices/nope/coverage")).toBe(404);
   });
@@ -729,5 +779,98 @@ describe("GET /api/phone/devices/:id/ingest-log", () => {
     expect(limited).toHaveLength(2);
     expect(await getStatus(`/api/phone/devices/${device.id}/ingest-log?limit=0`)).toBe(400);
     expect(await getStatus("/api/phone/devices/nope/ingest-log")).toBe(404);
+  });
+
+  it("lists only the finished or only the waiting batches when asked by state", async () => {
+    const { device, token } = await pair();
+    for (let i = 0; i < 4; i++) expect(await ingestStatus(device.id, token)).toBe(200);
+    await setLog("batch_id = (SELECT min(batch_id) FROM hc_ingest_log)", {
+      status: "applied",
+      appliedAt: 1_790_000_000,
+      applyMs: 40,
+    });
+    const path = `/api/phone/devices/${device.id}/ingest-log`;
+
+    const finished = await json<DeviceIngestLogDto[]>(await owner().get(`${path}?state=finished`));
+    const waiting = await json<DeviceIngestLogDto[]>(await owner().get(`${path}?state=waiting`));
+    const limited = await json<DeviceIngestLogDto[]>(
+      await owner().get(`${path}?state=waiting&limit=2`),
+    );
+
+    expect(finished.map((row) => row.status)).toStrictEqual(["applied"]);
+    expect(waiting.map((row) => row.status)).toStrictEqual(["queued", "queued", "queued"]);
+    expect(limited).toHaveLength(2);
+    expect(await getStatus(`${path}?state=parked`)).toBe(400);
+    expect(await getStatus(`${path}?limit=501`)).toBe(400);
+  });
+});
+
+describe("GET /api/phone/devices/:id/ingest-summary", () => {
+  it("is all zeroes for a phone that has uploaded nothing, and never cached", async () => {
+    const { device } = await pair();
+
+    const response = await owner().get(`/api/phone/devices/${device.id}/ingest-summary`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await json<DeviceIngestSummaryDto>(response)).toStrictEqual({
+      total: 0,
+      queued: 0,
+      applying: 0,
+      applied: 0,
+      failed: 0,
+      parked: 0,
+      appliedLastHour: 0,
+      lastAppliedAt: null,
+      applyMsMedian: null,
+      applySample: 0,
+    });
+  });
+
+  it("counts batches by state, the recently applied, and the median apply time", async () => {
+    const { device, token } = await pair();
+    for (let i = 0; i < 7; i++) expect(await ingestStatus(device.id, token)).toBe(200);
+    const ids = await env.DB.prepare(
+      "SELECT batch_id FROM hc_ingest_log WHERE device_id = ? ORDER BY batch_id",
+    )
+      .bind(device.id)
+      .all<{ batch_id: string }>();
+    const batch = (index: number): string => `batch_id = '${ids.results[index]?.batch_id ?? ""}'`;
+    const now = Math.floor(Date.now() / 1000);
+    // Three applied (one of them hours ago), one being applied, one failed and kept, two waiting.
+    await setLog(batch(0), { status: "applied", appliedAt: now - 5 * 3600, applyMs: 900 });
+    await setLog(batch(1), { status: "applied", appliedAt: now - 600, applyMs: 100 });
+    await setLog(batch(2), { status: "applied", appliedAt: now - 60, applyMs: 300 });
+    await setLog(batch(3), { status: "applying" });
+    await setLog(batch(4), { status: "failed", errorCode: "apply_failed" });
+    await env.DB.prepare(
+      "UPDATE hc_ingest_queue SET parked_at = ? WHERE device_id = ? AND batch_id = ?",
+    )
+      .bind(now, device.id, ids.results[4]?.batch_id ?? "")
+      .run();
+    // Another phone's batches are not this one's.
+    const other = await pair("Other phone");
+    expect(await ingestStatus(other.device.id, other.token)).toBe(200);
+
+    const summary = await json<DeviceIngestSummaryDto>(
+      await owner().get(`/api/phone/devices/${device.id}/ingest-summary`),
+    );
+
+    expect(summary).toStrictEqual({
+      total: 7,
+      queued: 2,
+      applying: 1,
+      applied: 3,
+      failed: 1,
+      parked: 1,
+      appliedLastHour: 2,
+      lastAppliedAt: new Date((now - 60) * 1000).toISOString(),
+      applyMsMedian: 300,
+      applySample: 3,
+    });
+  });
+
+  it("is a 404 for an unknown phone", async () => {
+    expect(await getStatus("/api/phone/devices/nope/ingest-summary")).toBe(404);
   });
 });

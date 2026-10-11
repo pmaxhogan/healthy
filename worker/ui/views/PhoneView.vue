@@ -6,7 +6,7 @@
 // code and as text. This page is the only holder of it: `paired` is cleared when
 // the owner presses Done, and leaving the page drops it with the component.
 
-import { computed, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
 import { endpoints } from "../api/endpoints.ts";
 import DeviceCard from "../components/DeviceCard.vue";
@@ -59,6 +59,77 @@ async function copyLink(): Promise<void> {
 async function reloadDevices(): Promise<void> {
   await devices.reload();
 }
+
+// --- live refresh -----------------------------------------------------------
+//
+// A backfill runs for hours and this page is where the owner watches it, so the
+// list (and whichever details are open, through `refreshTick`) is fetched again
+// every `REFRESH_MS` while the page is on screen. Quietly: the fresh list is
+// swapped in with `set`, never `reload`, so nothing blanks, no card loses its
+// open details and the scroll position stays where it was. A hidden tab does
+// not fetch, and catches up the moment it is shown again.
+
+const REFRESH_MS = 15_000;
+const CLOCK_MS = 1000;
+
+/** The page's clock: what every relative time on it is relative to. */
+const now = ref(Date.now());
+const refreshedAt = ref<number | null>(null);
+const refreshTick = ref(0);
+const refreshing = ref(false);
+const clock: { handle: ReturnType<typeof setInterval> | null; askedAt: number } = {
+  handle: null,
+  askedAt: Date.now(),
+};
+
+watch(devices.data, () => {
+  refreshedAt.value = Date.now();
+});
+
+async function refresh(): Promise<void> {
+  // One at a time, and never across a load the page is already showing.
+  if (refreshing.value || devices.loading.value) return;
+  clock.askedAt = Date.now();
+  if (devices.error.value !== null) {
+    await devices.reload();
+    return;
+  }
+  refreshing.value = true;
+  refreshTick.value += 1;
+  try {
+    devices.set(await endpoints.devices());
+  } catch {
+    // A refresh that fails waits for the next one; "Updated" keeps saying how
+    // old what is on screen is.
+  } finally {
+    refreshing.value = false;
+  }
+}
+
+function tick(): void {
+  if (document.visibilityState === "hidden") return;
+  now.value = Date.now();
+  if (now.value - clock.askedAt >= REFRESH_MS) void refresh();
+}
+
+onMounted(() => {
+  clock.handle = setInterval(tick, CLOCK_MS);
+  document.addEventListener("visibilitychange", tick);
+});
+
+onUnmounted(() => {
+  if (clock.handle !== null) clearInterval(clock.handle);
+  document.removeEventListener("visibilitychange", tick);
+});
+
+const updatedText = computed(() => {
+  if (refreshedAt.value === null) return "";
+  const seconds = Math.max(0, Math.round((now.value - refreshedAt.value) / 1000));
+  if (seconds < 5) return "Updated just now";
+  return seconds < 120
+    ? `Updated ${String(seconds)} s ago`
+    : `Updated ${String(Math.round(seconds / 60))} min ago`;
+});
 </script>
 
 <template>
@@ -96,11 +167,19 @@ async function reloadDevices(): Promise<void> {
       loading-text="Loading phones…"
       @retry="reloadDevices"
     >
+      <div class="row refresh">
+        <span class="muted">{{ updatedText }} · refreshes every {{ REFRESH_MS / 1000 }} s</span>
+        <button type="button" class="small" :disabled="refreshing" @click="refresh">
+          {{ refreshing ? "Refreshing…" : "Refresh" }}
+        </button>
+      </div>
       <DeviceCard
         v-for="device in list"
         :key="device.id"
         :device="device"
         :timezone="timezone"
+        :now="now"
+        :refresh-tick="refreshTick"
         @changed="reloadDevices"
         @paired="paired = $event"
       />
@@ -131,6 +210,10 @@ h2 {
 
 .grow {
   flex: 1;
+}
+
+.refresh {
+  justify-content: flex-end;
 }
 
 .link {
