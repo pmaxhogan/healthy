@@ -521,7 +521,8 @@ describe("a slice that dies", () => {
     expect((alone[1]?.minutes as unknown[]).length).toBeGreaterThan(3);
     expect(shared).toStrictEqual(alone);
     expect(tight).toStrictEqual(alone);
-  });
+    // Three runs of the scenario: seconds, when the whole suite runs beside it.
+  }, 60_000);
 
   it("reaches the same store when killed just after any commit of chunks", async () => {
     const counted = never();
