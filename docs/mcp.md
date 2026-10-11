@@ -751,6 +751,18 @@ count. The queue, rollup and upload figures on the phone's row (`backlog`,
 `lastUploadAt`, `recentFailures`) are bookkeeping for the whole phone, are
 not per type, and are shown whenever the phone is.
 
+The error codes in `lastPhoneError` and `recentFailures` are pipeline health,
+and nothing else. They are the stable codes the companion app and the server
+use (`network`, `hc_rate_limited`, `backlogged`, `unsupported_media_type`,
+`apply_gave_up`, ...), with one change made for MCP clients: what the phone
+may read is not reported. An error that is only about one record type the
+phone does not read is left out (`lastPhoneError` is null), because that is
+by design and the type is simply absent from the data. When the phone is
+reading nothing at all, the code is `phone_not_reading`, whatever the cause;
+any code that words itself in those terms is replaced by it too. The Phone
+page shows the true codes, and
+[setup-android.md](setup-android.md) lists them.
+
 A `resource` rule's type is checked when the rule is saved: it must be one of
 the record types the companion app maps (all of them, including the ones with
 nothing numeric to summarise, such as `hc:SexualActivity` or

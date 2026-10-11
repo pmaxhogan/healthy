@@ -166,6 +166,24 @@ async function run(label: string, fn: () => Promise<unknown>): Promise<void> {
   if (ok) emit("changed");
 }
 
+// The three operations are named here rather than written as arrow functions in
+// the template: a closure in a template expression that reads an import
+// (`() => endpoints.x()`) is mistyped by vue-tsc 3.3.12 and 3.3.13, which fail
+// the typecheck on a `.value` the import never had.
+function onSync(): Promise<void> {
+  return run("Sync started.", () => endpoints.syncHealthSystem(props.healthSystem.id));
+}
+
+function onRefreshToken(): Promise<void> {
+  return run("Token refreshed.", () => endpoints.refreshHealthSystemToken(props.healthSystem.id));
+}
+
+function onFullRefresh(): Promise<void> {
+  return run("Full refresh started.", () =>
+    endpoints.fullRefreshHealthSystem(props.healthSystem.id),
+  );
+}
+
 async function onRemove(): Promise<void> {
   const ok = await removal.run(async () => {
     await endpoints.deleteHealthSystem(props.healthSystem.id);
@@ -279,27 +297,11 @@ async function onRemove(): Promise<void> {
       <a class="btn small" :href="href">{{
         status === "disconnected" ? "Connect" : "Reconnect"
       }}</a>
-      <button
-        class="small"
-        :disabled="operation.busy.value"
-        @click="run('Sync started.', () => endpoints.syncHealthSystem(healthSystem.id))"
-      >
-        Sync now
-      </button>
-      <button
-        class="small"
-        :disabled="operation.busy.value"
-        @click="run('Token refreshed.', () => endpoints.refreshHealthSystemToken(healthSystem.id))"
-      >
+      <button class="small" :disabled="operation.busy.value" @click="onSync">Sync now</button>
+      <button class="small" :disabled="operation.busy.value" @click="onRefreshToken">
         Refresh token
       </button>
-      <button
-        class="small"
-        :disabled="operation.busy.value"
-        @click="
-          run('Full refresh started.', () => endpoints.fullRefreshHealthSystem(healthSystem.id))
-        "
-      >
+      <button class="small" :disabled="operation.busy.value" @click="onFullRefresh">
         Full refresh
       </button>
       <button class="small" @click="showSecret = !showSecret">
