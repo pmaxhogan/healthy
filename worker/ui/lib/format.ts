@@ -115,7 +115,20 @@ export function humanizeCode(code: string | null): string {
   return code ? code.replaceAll("_", " ") : "—";
 }
 
-/** "412 B" / "3.1 KB" -- the size of one MCP tool call's request or result JSON. */
+const BYTE_UNITS = ["KB", "MB", "GB"] as const;
+
+/**
+ * "412 B" / "3.1 KB" / "11.4 MB" / "2.3 GB" -- the size of one MCP tool call's
+ * JSON, or of a phone's queued uploads. Decimal units, one decimal place.
+ */
 export function formatBytes(bytes: number): string {
-  return bytes < 1000 ? `${String(bytes)} B` : `${(bytes / 1000).toFixed(1)} KB`;
+  if (bytes < 1000) return `${String(bytes)} B`;
+  let value = bytes / 1000;
+  let unit = 0;
+  // Compare what would be printed, so 999,960 B is "1.0 MB" and never "1000.0 KB".
+  while (unit < BYTE_UNITS.length - 1 && Number(value.toFixed(1)) >= 1000) {
+    value /= 1000;
+    unit += 1;
+  }
+  return `${value.toFixed(1)} ${BYTE_UNITS.at(unit) ?? "GB"}`;
 }

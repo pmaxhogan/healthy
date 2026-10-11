@@ -240,22 +240,38 @@ Each paired phone has a card:
   then refused). **Paired** shows when the phone was paired, rotated or revoked; the
   card heading carries the app version it last reported.
 - **Records and Types.** Records stored, and how many record types are granted
-  or denied on the phone.
+  or not granted on the phone. Not granting a type is a choice, not a fault, and
+  is shown in the same colour as everything else.
+- **Backfill.** How many of the granted types have finished their backfill. A
+  type that is not granted is in neither number.
 - **Waiting to apply.** The queue: batches the Worker has accepted and not yet
   applied. It is empty at rest. Parked batches are not in it.
 - **What the phone last reported:** the battery exemption, background read,
-  exercise routes (once the phone has reported them), history read, whether the backfill is complete, and the last error code. A
+  exercise routes (once the phone has reported them), history read, whether the phone says its backfill is done, and the last error code. A
   red _no_ on the battery exemption or background read is the usual reason a
   phone goes stale.
 
-**Show details** adds two tables. _Record types_ is one row per type with its
-permission, record count, first and last record time, backlog on the phone,
-backfill state and coverage status (a denied type reads `unsupported` with a
-"not permitted" notice; a granted type with no records reads "permitted, no
-data"). _Recent uploads_ is the ingest log, newest first: when it arrived, its
+The list refreshes itself every 15 seconds while the page is on screen (and
+not while it is hidden); **Refresh** does it at once. An instant shown as "5 min
+ago" gives its exact date and time when pressed.
+
+**Show details** adds two tables, which refresh with the list. _Record types_ is
+one row per type that has data: its record count, first and last record time,
+backlog on the phone (_Phone backlog_: the phone's own count of what it still has to upload,
+which is not the Worker's queue), backfill state (for an unfinished one, how far
+back it has reached) and status. Types with nothing stored are folded under one
+button, the granted ones first ("Granted, no data."), then the ones that are
+`not granted` or `not available`, which have no backfill. _Uploads_ starts with
+counts of the batches that are queued, being applied, applied (and how many of
+those in the last hour) and that could not be applied, when the last one was
+applied and the median apply time of the last twenty. Under it is the ingest
+log, newest first, fifty rows at a time (**Show more** goes to 200, then 500;
+the caption says how many there are in all): when a batch arrived, its
 status (`queued`, `applying`, `applied` or `failed`; a `failed` row is a parked
 batch), counts of upserts, deletes and rejected records, size, how long applying
-took, and an error code. Both are counts, instants and stable codes; nothing on this
+took, and an error code. **Finished**, **Waiting** and **All** choose which
+batches are listed; during a backfill the newest are all waiting, so the list
+starts on the finished ones. All of it is counts, instants and stable codes; nothing on this
 page is a health value. The card's other buttons are **Rename**, **Rotate token**,
 **Revoke** and **Delete phone and data**.
 
@@ -295,7 +311,7 @@ of backfill can take several minutes to drain after the phone has finished
 sending. A short queue is normal during a backfill. If it does not shrink:
 
 1. Look at the card for the parked-uploads warning, then open **Show details** and
-   read the **Recent uploads** table. A `failed` batch with an error code is one
+   read the **Uploads** table. A `failed` batch with an error code is one
    the Worker **parked**: kept, set aside and no longer in the queue, so it cannot
    block the batches behind it (the queue is strictly ordered). Either it could not
    be read (`batch_unreadable`, `batch_invalid`, `batch_mismatch`,

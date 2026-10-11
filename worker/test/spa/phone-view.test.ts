@@ -3,8 +3,9 @@
 // did not declare, so a call the page makes that nobody expected fails loudly.
 
 import { flushPromises, mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { configureClient } from "../../ui/api/client.ts";
 import { toasts } from "../../ui/lib/toasts.ts";
 import PhoneView from "../../ui/views/PhoneView.vue";
 
@@ -15,6 +16,7 @@ import type {
   DeviceCoverageRowDto,
   DeviceDto,
   DeviceIngestLogDto,
+  DeviceIngestSummaryDto,
   PairedDeviceDto,
 } from "@shared/types.ts";
 
@@ -41,7 +43,7 @@ function device(overrides: Partial<DeviceDto> = {}): DeviceDto {
       lastErrorCode: "hc_rate_limited",
       lastErrorAt: "2026-09-21T11:00:00.000Z",
     },
-    totals: { recordCount: 1234, typesGranted: 5, typesDenied: 1 },
+    totals: { recordCount: 1234, typesGranted: 5, typesDenied: 1, typesBackfilled: 3 },
     ...overrides,
   };
 }
@@ -67,7 +69,7 @@ const COVERAGE: DeviceCoverageRowDto[] = [
     tokenAgeS: 30,
     backlog: 4,
     backfillComplete: false,
-    backfillOldestAt: null,
+    backfillOldestAt: "2026-08-03T12:00:00.000Z",
     status: "ok",
     notice: null,
     ageHours: null,
@@ -137,6 +139,55 @@ const LOG: DeviceIngestLogDto[] = [
   },
 ];
 
+const SUMMARY: DeviceIngestSummaryDto = {
+  total: 2,
+  queued: 0,
+  applying: 0,
+  applied: 1,
+  failed: 1,
+  parked: 1,
+  appliedLastHour: 1,
+  lastAppliedAt: "2026-09-21T11:50:02.000Z",
+  applyMsMedian: 412,
+  applySample: 1,
+};
+
+/** A backfill under way: far more waiting than one page of the log holds. */
+const BACKFILL: DeviceIngestSummaryDto = {
+  total: 1380,
+  queued: 132,
+  applying: 1,
+  applied: 1247,
+  failed: 0,
+  parked: 0,
+  appliedLastHour: 40,
+  lastAppliedAt: "2026-09-21T11:59:00.000Z",
+  applyMsMedian: 1800,
+  applySample: 20,
+};
+
+const COVERAGE_URL = "/api/phone/devices/dev-1/coverage";
+const LOG_URL = "/api/phone/devices/dev-1/ingest-log";
+const SUMMARY_URL = "/api/phone/devices/dev-1/ingest-summary";
+
+/**
+ * Every page a test mounted and has not left. A page that outlives its test keeps
+ * its clock and its `visibilitychange` listener, and would answer the next
+ * test's event with a fetch of its own.
+ */
+const mounted = new Set<ReturnType<typeof mount>>();
+
+function leave(wrapper: ReturnType<typeof mount>): void {
+  mounted.delete(wrapper);
+  wrapper.unmount();
+}
+
+afterEach(() => {
+  for (const wrapper of mounted) leave(wrapper);
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
 interface Setup {
   devices?: DeviceDto[];
   /** What each action answers; omitted actions 404. */
@@ -168,22 +219,51 @@ async function mountView(setup: Setup = {}): Promise<{
       list = list.map((d) => ({ ...d, status: "revoked" as const }));
       return fakeResponse({ body: list[0] });
     },
-    "/api/phone/devices/dev-1/coverage": () => fakeResponse({ body: COVERAGE }),
-    "/api/phone/devices/dev-1/ingest-log": () => fakeResponse({ body: LOG }),
+    [COVERAGE_URL]: () => fakeResponse({ body: COVERAGE }),
+    [LOG_URL]: () => fakeResponse({ body: LOG }),
+    [SUMMARY_URL]: () => fakeResponse({ body: SUMMARY }),
     ...Object.fromEntries(
       Object.entries(setup.extra ?? {}).map(([path, make]) => [path, () => make(get)]),
     ),
   });
   const router = await testRouter("/phone");
   const wrapper = mount(PhoneView, { global: { plugins: [router] } });
+  mounted.add(wrapper);
   await flushPromises();
   return { wrapper, api: get() };
+}
+
+/** The GETs the page has made of one path, whatever their query string. */
+function getsOf(api: FakeFetch, path: string): string[] {
+  return api.calls
+    .filter((call) => call.method === "GET" && call.url.split("?", 1)[0] === path)
+    .map((call) => call.url);
 }
 
 function buttonNamed(wrapper: ReturnType<typeof mount>, text: string) {
   const button = wrapper.findAll("button").find((b) => b.text().includes(text));
   if (button === undefined) throw new Error(`no button "${text}"`);
   return button;
+}
+
+/** The page with the first phone's details open. */
+async function openDetails(setup: Setup = {}) {
+  const view = await mountView(setup);
+  await buttonNamed(view.wrapper, "Show details").trigger("click");
+  await flushPromises();
+  return view;
+}
+
+/** Mounted with the clock faked, so fifteen seconds is one call away. */
+async function mountTicking(setup: Setup = {}) {
+  // Only what the page's clock uses: a faked setTimeout would stall flushPromises.
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+  return mountView(setup);
+}
+
+async function pass(ms: number): Promise<void> {
+  vi.advanceTimersByTime(ms);
+  await flushPromises();
 }
 
 describe("PhoneView: the list", () => {
@@ -196,7 +276,9 @@ describe("PhoneView: the list", () => {
     expect(text).toContain("v0.1.7");
     expect(text).toContain("1,234");
     expect(text).toContain("5 granted");
-    expect(text).toContain("1 denied");
+    expect(text).toContain("1 not granted");
+    expect(text).not.toContain("denied");
+    expect(text).toContain("3 of 5 types complete");
     expect(text).toContain("2 batches");
     expect(text).toContain("hc_rate_limited");
     expect(text).toContain("Battery exemption");
@@ -382,36 +464,182 @@ describe("PhoneView: actions", () => {
 });
 
 describe("PhoneView: details", () => {
-  it("loads the coverage table and the ingest log when opened, and not before", async () => {
+  it("loads the coverage table and the uploads when opened, and not before", async () => {
     const { wrapper, api } = await mountView();
-    expect(api.calls.some((call) => call.url.endsWith("/coverage"))).toBe(false);
+    expect(getsOf(api, COVERAGE_URL)).toHaveLength(0);
 
     await buttonNamed(wrapper, "Show details").trigger("click");
     await flushPromises();
 
-    expect(api.calls.some((call) => call.url === "/api/phone/devices/dev-1/coverage")).toBe(true);
-    expect(api.calls.some((call) => call.url === "/api/phone/devices/dev-1/ingest-log")).toBe(true);
+    expect(getsOf(api, COVERAGE_URL)).toHaveLength(1);
+    expect(getsOf(api, SUMMARY_URL)).toHaveLength(1);
+    // The page asks for a number of rows by name, so the list it shows is the list it asked for.
+    expect(getsOf(api, LOG_URL)).toStrictEqual([`${LOG_URL}?limit=50`]);
     const text = wrapper.text();
     expect(text).toContain("HeartRate");
     expect(text).toContain("900");
-    expect(text).toContain("Permitted, no data.");
-    expect(text).toContain("not permitted");
-    expect(text).toContain("unsupported");
     expect(text).toContain("apply_failed");
     expect(text).toContain("412 ms");
     expect(text).toContain("2.0 KB");
 
-    const headers = wrapper.findAll("th").map((th) => th.text());
-    for (const column of ["Type", "Permission", "Records", "First", "Last", "Backlog", "Status"]) {
+    const headers = wrapper.findAll("th[scope='col']").map((th) => th.text());
+    for (const column of ["Type", "Records", "Phone backlog", "Backfill", "Status", "Received"]) {
       expect(headers).toContain(column);
     }
+    // "Backlog" alone read as the Worker's queue.
+    expect(headers).not.toContain("Backlog");
+    expect(wrapper.findAll("caption")).toHaveLength(2);
+  });
+
+  it("folds the types with nothing stored under one button", async () => {
+    const { wrapper } = await openDetails();
+
+    const types = (): string[] => wrapper.findAll("tbody th[scope='row']").map((th) => th.text());
+    expect(types()).toStrictEqual(["HeartRate"]);
+
+    const toggle = buttonNamed(wrapper, "types with no data");
+    expect(toggle.text()).toBe("Show 2 types with no data (1 granted, 1 not granted)");
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+    await toggle.trigger("click");
+
+    // Granted and empty before not granted.
+    expect(types()).toStrictEqual(["HeartRate", "Sleep", "Weight"]);
+    expect(wrapper.text()).toContain("Granted, no data.");
+    expect(buttonNamed(wrapper, "types with no data").attributes("aria-expanded")).toBe("true");
+  });
+
+  it("opens that list by itself when no type has any data", async () => {
+    const { wrapper } = await openDetails({
+      extra: { [COVERAGE_URL]: () => fakeResponse({ body: COVERAGE.slice(1) }) },
+    });
+
+    expect(wrapper.findAll("tbody th[scope='row']").map((th) => th.text())).toStrictEqual([
+      "Sleep",
+      "Weight",
+    ]);
+  });
+
+  it("shows a type that is not granted neutrally, in one word, with no backfill", async () => {
+    const { wrapper } = await openDetails();
+    await buttonNamed(wrapper, "types with no data").trigger("click");
+
+    const row = wrapper.findAll("tbody tr").find((tr) => tr.text().includes("Weight"));
+    const cells = row?.findAll("td").map((td) => td.text()) ?? [];
+
+    // Records, range, backlog, backfill, status.
+    expect(cells).toStrictEqual(["0", "—", "—", "—", "not granted"]);
+    expect(row?.find(".danger-text").exists()).toBe(false);
+    // Neither the Worker's sentence nor its other words for the same state.
+    const text = wrapper.text();
+    expect(text).not.toContain("not permitted");
+    expect(text).not.toContain("unsupported");
+    expect(text).not.toContain("denied");
+  });
+
+  it("says how far back an unfinished backfill has reached", async () => {
+    const { wrapper } = await openDetails();
+    await buttonNamed(wrapper, "types with no data").trigger("click");
+
+    const cell = (type: string): string =>
+      wrapper
+        .findAll("tbody tr")
+        .find((tr) => tr.text().includes(type))
+        ?.findAll("td")[3]
+        ?.text() ?? "";
+
+    expect(cell("HeartRate")).toMatch(/^in progress\s*back to .*2026/u);
+    expect(cell("Sleep")).toBe("complete");
+  });
+
+  it("gives an instant a title only when there is one, and its exact time on a press", async () => {
+    const { wrapper } = await openDetails();
+    await buttonNamed(wrapper, "types with no data").trigger("click");
+
+    expect(wrapper.findAll("[title='—']")).toHaveLength(0);
+    const first = wrapper.find("tbody button.reltime");
+    expect(first.attributes("title")).toContain("2026");
+    expect(first.text()).not.toContain("2026");
+    await first.trigger("click");
+
+    expect(first.text()).toContain("2026");
+    expect(first.attributes("aria-pressed")).toBe("true");
+  });
+
+  it("summarises the uploads by state and says what the list is", async () => {
+    const { wrapper } = await openDetails();
+
+    const stats = wrapper.find(".stats").text();
+    expect(stats).toContain("0 queued");
+    expect(stats).toContain("1 applied");
+    expect(stats).toContain("1 could not be applied");
+    expect(wrapper.text()).toContain("median apply time 412 ms over the last 1 applied");
+    expect(wrapper.find(".list-caption").text()).toContain("All 2 uploads, newest first.");
+    expect(buttonNamed(wrapper, "All (2)").attributes("aria-pressed")).toBe("true");
+    expect(wrapper.text()).not.toContain("Show more");
+  });
+
+  it("says so when nothing failed", async () => {
+    const { wrapper } = await openDetails({
+      extra: {
+        [SUMMARY_URL]: () => fakeResponse({ body: { ...SUMMARY, failed: 0, parked: 0, total: 1 } }),
+      },
+    });
+
+    expect(wrapper.find(".stats").text()).toContain("Nothing failed");
+    expect(wrapper.find(".stats .danger-text").exists()).toBe(false);
+  });
+
+  it("starts on the finished uploads during a backfill, and lists more on request", async () => {
+    const { wrapper, api } = await openDetails({
+      extra: { [SUMMARY_URL]: () => fakeResponse({ body: BACKFILL }) },
+    });
+
+    // The newest fifty would all be waiting: the page asks for what was applied.
+    expect(getsOf(api, LOG_URL)).toStrictEqual([`${LOG_URL}?limit=50&state=finished`]);
+    expect(wrapper.find(".stats").text()).toContain("132 queued");
+    expect(wrapper.find(".stats").text()).toContain("(40 in the last hour)");
+    expect(wrapper.find(".list-caption").text()).toContain("Newest 2 of 1,247 finished uploads");
+    expect(buttonNamed(wrapper, "Finished (1,247)").attributes("aria-pressed")).toBe("true");
+
+    await buttonNamed(wrapper, "Show more").trigger("click");
+    await flushPromises();
+    expect(getsOf(api, LOG_URL).at(-1)).toBe(`${LOG_URL}?limit=200&state=finished`);
+
+    await buttonNamed(wrapper, "Waiting (133)").trigger("click");
+    await flushPromises();
+    // A new list starts at the first page again.
+    expect(getsOf(api, LOG_URL).at(-1)).toBe(`${LOG_URL}?limit=50&state=waiting`);
+    expect(wrapper.find(".list-caption").text()).toContain("Newest 2 of 133 waiting uploads");
+
+    await buttonNamed(wrapper, "All (1,380)").trigger("click");
+    await flushPromises();
+    expect(getsOf(api, LOG_URL).at(-1)).toBe(`${LOG_URL}?limit=50`);
+  });
+
+  it("stops offering more at the most the Worker lists, and says so", async () => {
+    const { wrapper, api } = await openDetails({
+      extra: { [SUMMARY_URL]: () => fakeResponse({ body: BACKFILL }) },
+    });
+
+    await buttonNamed(wrapper, "Show more").trigger("click");
+    await flushPromises();
+    await buttonNamed(wrapper, "Show more").trigger("click");
+    await flushPromises();
+
+    expect(getsOf(api, LOG_URL).at(-1)).toBe(`${LOG_URL}?limit=500&state=finished`);
+    expect(wrapper.findAll("button").some((b) => b.text() === "Show more")).toBe(false);
+    expect(wrapper.text()).toContain("This list stops at the newest 500");
   });
 
   it("shows an empty coverage table as such", async () => {
     const { wrapper } = await mountView({
       extra: {
-        "/api/phone/devices/dev-1/coverage": () => fakeResponse({ body: [] }),
-        "/api/phone/devices/dev-1/ingest-log": () => fakeResponse({ body: [] }),
+        [COVERAGE_URL]: () => fakeResponse({ body: [] }),
+        [LOG_URL]: () => fakeResponse({ body: [] }),
+        [SUMMARY_URL]: () =>
+          fakeResponse({
+            body: { ...SUMMARY, total: 0, applied: 0, failed: 0, parked: 0, lastAppliedAt: null },
+          }),
       },
     });
 
@@ -420,6 +648,100 @@ describe("PhoneView: details", () => {
 
     expect(wrapper.text()).toContain("has not reported any record types");
     expect(wrapper.text()).toContain("Nothing has been uploaded yet");
+  });
+});
+
+describe("PhoneView: live refresh", () => {
+  it("fetches the list again every fifteen seconds, and not sooner", async () => {
+    const { wrapper, api } = await mountTicking();
+    expect(getsOf(api, "/api/phone/devices")).toHaveLength(1);
+
+    await pass(14_000);
+    expect(getsOf(api, "/api/phone/devices")).toHaveLength(1);
+    expect(wrapper.text()).toContain("Updated 14 s ago");
+
+    await pass(1000);
+    expect(getsOf(api, "/api/phone/devices")).toHaveLength(2);
+    expect(wrapper.text()).toContain("Updated just now");
+
+    await pass(15_000);
+    expect(getsOf(api, "/api/phone/devices")).toHaveLength(3);
+  });
+
+  it("refreshes the open details with it, without closing or blanking them", async () => {
+    let records = 900;
+    const { wrapper, api } = await mountTicking({
+      extra: {
+        [COVERAGE_URL]: () =>
+          fakeResponse({ body: [{ ...COVERAGE[0]!, recordCount: records }, ...COVERAGE.slice(1)] }),
+      },
+    });
+    await buttonNamed(wrapper, "Show details").trigger("click");
+    await flushPromises();
+    expect(wrapper.text()).toContain("900");
+
+    records = 1900;
+    vi.advanceTimersByTime(15_000);
+    // Before any answer is in: the tables are still there, with no spinner.
+    expect(wrapper.findAll("table")).toHaveLength(2);
+    expect(wrapper.text()).not.toContain("Loading");
+    await flushPromises();
+
+    expect(getsOf(api, COVERAGE_URL)).toHaveLength(2);
+    expect(getsOf(api, SUMMARY_URL)).toHaveLength(2);
+    expect(getsOf(api, LOG_URL)).toHaveLength(2);
+    expect(wrapper.text()).toContain("1,900");
+    expect(buttonNamed(wrapper, "Hide details").attributes("aria-expanded")).toBe("true");
+  });
+
+  it("does not fetch while the page is hidden, and catches up when it is shown", async () => {
+    const { api } = await mountTicking();
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+
+    await pass(60_000);
+    expect(getsOf(api, "/api/phone/devices")).toHaveLength(1);
+
+    visibility.mockReturnValue("visible");
+    document.dispatchEvent(new Event("visibilitychange"));
+    await flushPromises();
+
+    expect(getsOf(api, "/api/phone/devices")).toHaveLength(2);
+  });
+
+  it("never has two refreshes in flight", async () => {
+    const { wrapper, api } = await mountTicking();
+    const waiting: (() => void)[] = [];
+    const answer = api.fetch;
+    const slow: typeof globalThis.fetch = async (input, init) => {
+      const response = await answer(input, init);
+      await new Promise<void>((resolve) => {
+        waiting.push(resolve);
+      });
+      return response;
+    };
+    configureClient({ fetch: slow });
+
+    await pass(15_000);
+    await pass(30_000);
+    expect(getsOf(api, "/api/phone/devices")).toHaveLength(2);
+    expect(buttonNamed(wrapper, "Refreshing").attributes("disabled")).toBeDefined();
+
+    for (const release of waiting) release();
+    await flushPromises();
+    expect(buttonNamed(wrapper, "Refresh").attributes("disabled")).toBeUndefined();
+  });
+
+  it("refreshes at once from the button, and stops ticking when the page is left", async () => {
+    const { wrapper, api } = await mountTicking();
+
+    await pass(3000);
+    await buttonNamed(wrapper, "Refresh").trigger("click");
+    await flushPromises();
+    expect(getsOf(api, "/api/phone/devices")).toHaveLength(2);
+
+    leave(wrapper);
+    await pass(60_000);
+    expect(getsOf(api, "/api/phone/devices")).toHaveLength(2);
   });
 });
 
@@ -469,7 +791,10 @@ describe("PhoneView: parked uploads", () => {
     const { wrapper } = await mountView();
 
     expect(wrapper.text()).toContain("Exercise routes");
-    expect(wrapper.text()).toContain("denied");
+    // In the page's one word for it, and not as a fault.
+    const row = wrapper.findAll("dl.facts > div").find((d) => d.text().includes("Exercise routes"));
+    expect(row?.text()).toContain("not granted");
+    expect(row?.find(".danger-text").exists()).toBe(false);
   });
 
   it("omits the exercise-route row when the phone has not reported it", async () => {
@@ -502,42 +827,48 @@ describe("PhoneView: page with data", () => {
     ageHours: 9,
   };
 
-  async function openDetails() {
-    const mounted = await mountView({
+  async function openEverything() {
+    const view = await mountView({
       devices: [device({ status: "stale" })],
       extra: {
-        "/api/phone/devices/dev-1/coverage": () =>
-          fakeResponse({ body: [...COVERAGE, unavailable, stale] }),
+        [COVERAGE_URL]: () => fakeResponse({ body: [...COVERAGE, unavailable, stale] }),
       },
     });
-    await buttonNamed(mounted.wrapper, "Show details").trigger("click");
+    await buttonNamed(view.wrapper, "Show details").trigger("click");
     await flushPromises();
-    return mounted;
+    await buttonNamed(view.wrapper, "types with no data").trigger("click");
+    return view;
   }
 
-  it("renders denied, unavailable and stale types and a failed upload", async () => {
-    const { wrapper } = await openDetails();
+  it("renders not-granted, unavailable and stale types and a failed upload", async () => {
+    const { wrapper } = await openEverything();
     const text = wrapper.text();
 
     expect(text).toContain("stale");
-    expect(text).toContain("not permitted");
-    expect(text).toContain("not available on this phone");
+    expect(text).toContain("not granted");
+    expect(text).toContain("not available");
     expect(text).toContain("No upload for 9 h.");
     expect(text).toContain("apply_failed");
     expect(text).toContain("2 batches");
   });
 
   it("keeps wide tables inside their own scroll container and wraps long text", async () => {
-    const { wrapper } = await openDetails();
+    const { wrapper } = await openEverything();
 
     const tables = wrapper.findAll("table");
     expect(tables).toHaveLength(2);
-    for (const table of tables) expect(table.element.parentElement?.className).toBe("table-wrap");
+    for (const table of tables) {
+      const box = table.element.parentElement;
+      expect(box?.classList.contains("table-wrap")).toBe(true);
+      // Focusable and named, so the keyboard can scroll it.
+      expect(box?.getAttribute("tabindex")).toBe("0");
+      expect(box?.getAttribute("role")).toBe("region");
+    }
     expect(wrapper.find("code.link").exists()).toBe(true);
   });
 
   it("keeps Details open across a rename and its refresh", async () => {
-    const { wrapper } = await openDetails();
+    const { wrapper } = await openEverything();
 
     await buttonNamed(wrapper, "Rename").trigger("click");
     await wrapper.findAll("form")[1]?.find("input").setValue("Renamed phone");
@@ -545,7 +876,8 @@ describe("PhoneView: page with data", () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain("Renamed phone");
-    expect(wrapper.text()).toContain("Recent uploads");
+    expect(wrapper.text()).toContain("Uploads");
+    expect(wrapper.findAll("table")).toHaveLength(2);
   });
 
   it("gives a long name a title so an ellipsis can be read in full", async () => {
@@ -595,6 +927,6 @@ describe("PhoneView: page with data", () => {
     expect(document.activeElement).toBe(revoke?.element);
     attached.unmount();
     host.remove();
-    wrapper.unmount();
+    leave(wrapper);
   });
 });

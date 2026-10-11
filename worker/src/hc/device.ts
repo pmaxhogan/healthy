@@ -54,6 +54,22 @@ export interface DeviceTotals {
   recordCount: number;
   typesGranted: number;
   typesDenied: number;
+  /** Granted types whose backfill has finished: a part of `typesGranted`. */
+  typesBackfilled: number;
+}
+
+/** What became of one device's uploaded batches, as counts. Instants are Unix seconds. */
+export interface IngestSummary {
+  queued: number;
+  applying: number;
+  applied: number;
+  failed: number;
+  /** Batches applied since the instant the caller asked about. */
+  appliedRecently: number;
+  lastAppliedAt: number | null;
+  /** Median apply time of the newest `applySample` applied batches, in ms. */
+  applyMsMedian: number | null;
+  applySample: number;
 }
 
 export interface IngestLogRow {
