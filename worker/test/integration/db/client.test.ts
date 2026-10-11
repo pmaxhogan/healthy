@@ -138,7 +138,7 @@ describe("sha256Hex", () => {
 
 describe("makeCtx", () => {
   it("defaults to a real clock in unix seconds and a logger that says nothing", () => {
-    const ctx = makeCtx(env.DB, { ...env, DATA_KEY: "unused" } as never);
+    const ctx = makeCtx(env.DB, { ...env, DATA_KEY: "unused" });
 
     expect(ctx.now()).toBeGreaterThan(1_700_000_000);
     expect(ctx.now()).toBeLessThan(4_000_000_000);
@@ -150,7 +150,7 @@ describe("makeCtx", () => {
 
 describe("reposFor", () => {
   it("builds the whole set from a binding and an env, which is what a handler has", async () => {
-    const repos = reposFor(env.DB, { ...env, DATA_KEY: "unused" } as never, { now: () => T0 });
+    const repos = reposFor(env.DB, { ...env, DATA_KEY: "unused" }, { now: () => T0 });
 
     // A set, because the order the factory happens to build them in is not part
     // of the contract (and `toSorted` is not in the Worker project's lib).
