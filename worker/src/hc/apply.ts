@@ -61,7 +61,7 @@ import { openParkedAlert, resolveParkedAlert } from "../sync/alerts.ts";
 import { unpackJson } from "./codec.ts";
 import { hrHoursTouched } from "./rollup/hr-minute.ts";
 import { DEFAULT_SLICE_BUDGET, Meter } from "./store/budget.ts";
-import { chunkStatements, hrMinuteStatement, hrSpillIn, readChunks } from "./store/chunks.ts";
+import { chunkStatements, hrMinuteWrite, hrSpillIn, readChunks } from "./store/chunks.ts";
 import { countedDb } from "./store/counted.ts";
 import {
   dirtyBacklog,
@@ -69,6 +69,7 @@ import {
   markSessionsStatement,
   markStatements,
 } from "./store/dirty.ts";
+import { HrSpillView } from "./store/hr-spill.ts";
 import {
   HOUR_MS,
   TYPE_EXERCISE_SESSION,
@@ -209,6 +210,14 @@ const BATCH_OVERHEAD = 8;
  * (one that outgrew a row) is sent alone.
  */
 const COMMIT_STATEMENTS = 50;
+/**
+ * Sealed text one `db.batch` of chunk writes carries before it is sent, in
+ * characters: about a mebibyte. An hour of heart rate is tens of kilobytes and
+ * an hour with a route in it far more, and a request to D1 has a size. Checked
+ * between chunks like the statements, so a chunk larger than this is sent
+ * alone; and a commit D1 will not take is split all the same (`flush`).
+ */
+const COMMIT_BYTES = 1_048_576;
 
 /**
  * Chunk writes built and not yet sent: the statements of one `db.batch`.
@@ -223,8 +232,11 @@ const COMMIT_STATEMENTS = 50;
  *   - Nothing is built from the database while a write it would read is still
  *     in here. `makeRoom` sends the buffer first when a unit touches a chunk a
  *     buffered unit also touches (a record moving between two groups of one
- *     page), or reads heart-rate spill while a heart-rate chunk is buffered
- *     (the minute row of an hour is built from the hour before it).
+ *     page). The one other thing a unit reads that another may have written is
+ *     heart-rate spill -- the minute row of an hour is built from the hours
+ *     before it -- and that is answered from what was read before the page
+ *     began and what the page has built since (`HrSpillView`), never from the
+ *     table while a heart-rate chunk is waiting in here (`spillInto`).
  *   - What a unit counts -- the cursor's offset, `applied`, `removed` -- is
  *     counted by `settle`, which runs only after the commit. A slice that
  *     stops, or dies, never carries a cursor past work that is not durable.
@@ -242,6 +254,8 @@ interface Buffered {
   units: BufferedUnit[];
   /** Statements in all of them. */
   statements: number;
+  /** Sealed text bound to those statements, in characters: see `COMMIT_BYTES`. */
+  bytes: number;
   /** Every chunk a buffered unit reads or writes, by `keyId`. */
   chunks: Set<string>;
   /** True when one of them is a heart-rate chunk. */
@@ -260,7 +274,14 @@ interface BufferedUnit {
 }
 
 function emptyBuffer(): Buffered {
-  return { units: [], statements: 0, chunks: new Set(), heartRate: false, days: new Set() };
+  return {
+    units: [],
+    statements: 0,
+    bytes: 0,
+    chunks: new Set(),
+    heartRate: false,
+    days: new Set(),
+  };
 }
 
 /** One batch being applied in one slice: what every step needs. */
@@ -289,8 +310,17 @@ interface BatchRun {
   marked: Set<string>;
   /** Day marks in the statements of the unit now being built: the buffer's once it is queued. */
   pending: string[];
+  /** Sealed text in the statements of the unit now being built: the buffer's once it is queued. */
+  pendingBytes: number;
   /** Units built and not yet committed: see `Buffered`. */
   buffer: Buffered;
+  /** Every chunk in a commit of its own, spill read from the table: `SliceBudget.perChunk`. */
+  perChunk: boolean;
+  /**
+   * Heart-rate spill read ahead for the page now being worked on, kept true as
+   * its chunks are built; null between pages, and always when `perChunk`.
+   */
+  spill: HrSpillView | null;
 }
 
 /** The stable code for a failure that retrying cannot fix, or null. */
@@ -389,17 +419,24 @@ async function rewriteChunk(
   records: readonly HcRecord[],
   touched: readonly HcRecord[],
 ): Promise<D1PreparedStatement[]> {
-  const { ctx, deviceId, meter } = job;
-  const statements = await chunkStatements(ctx, deviceId, key, origin, before, records);
+  const { ctx, deviceId } = job;
+  // Told of every heart-rate chunk built, changed or not: what the view
+  // answers for later hours of the page depends on it (`HrSpillView`).
+  job.spill?.wrote(key, records);
+  const write = await chunkStatements(ctx, deviceId, key, origin, before, records);
+  const { statements } = write;
   if (statements.length === 0) return [];
+  job.pendingBytes += write.bytes;
 
   if (key.type === TYPE_HEART_RATE) {
     // The minute row of the chunk's own hour is written now, from this chunk
     // and any earlier series running into it. A series that runs past the hour
     // changes later rows too; `marksFor` marks those.
-    const spill = await hrSpillIn(ctx, deviceId, key.originHash, key.hourUtc, meter);
+    const spill = await spillInto(job, key);
     const inHour = [...spill, ...records];
-    statements.push(await hrMinuteStatement(ctx, deviceId, key.originHash, key.hourUtc, inHour));
+    const minutes = await hrMinuteWrite(ctx, deviceId, key.originHash, key.hourUtc, inHour);
+    statements.push(minutes.statement);
+    job.pendingBytes += minutes.bytes;
   }
   const marks = await marksFor(job, key, touched);
   statements.push(
@@ -407,6 +444,37 @@ async function rewriteChunk(
     ...dependantStatements(job, key.type, touched),
   );
   return statements;
+}
+
+/**
+ * The records of earlier heart-rate chunks that reach into the hour of `key`,
+ * as they will be once everything built so far is committed.
+ *
+ * From the page's view when the hour was read ahead. Otherwise from the table
+ * -- and the table is only the truth about earlier hours when no heart-rate
+ * chunk is waiting in the buffer, so the buffer is sent first. That is all
+ * that happens when chunks do not share commits (`perChunk`): there is no
+ * view, the buffer never holds more than the unit before, and every hour is
+ * read as it always was.
+ */
+async function spillInto(job: BatchRun, key: ChunkKey): Promise<HcRecord[]> {
+  const { ctx, deviceId, meter, spill } = job;
+  if (spill?.covers(key) === true) return spill.into(key);
+  if (job.buffer.heartRate) await flush(job);
+  return hrSpillIn(ctx, deviceId, key.originHash, key.hourUtc, meter);
+}
+
+/**
+ * Read ahead the heart-rate spill of a page that is about to build `keys`, so
+ * that its chunks can share commits: see `HrSpillView`. A no-op without heart
+ * rate among them, and when chunks do not share commits.
+ */
+async function readSpillAhead(job: BatchRun, keys: readonly ChunkKey[]): Promise<void> {
+  job.spill = null;
+  if (job.perChunk || keys.every((key) => key.type !== TYPE_HEART_RATE)) return;
+  // The view starts from the table, so the table has to be current.
+  if (job.buffer.heartRate) await flush(job);
+  job.spill = await HrSpillView.load(job.ctx, job.deviceId, keys, job.meter);
 }
 
 /** Count a unit that is now durable: its day marks are `marked`, and its `settle` moves the cursor. */
@@ -468,9 +536,8 @@ async function flush(job: BatchRun): Promise<void> {
  */
 async function makeRoom(job: BatchRun, touching: readonly ChunkKey[]): Promise<void> {
   const { buffer } = job;
-  const heartRate = touching.some((key) => key.type === TYPE_HEART_RATE);
-  const shared = touching.some((key) => buffer.chunks.has(keyId(key)));
-  if (shared || (heartRate && buffer.heartRate)) await flush(job);
+  // With every chunk in a commit of its own, there is never room to share.
+  if (job.perChunk || touching.some((key) => buffer.chunks.has(keyId(key)))) await flush(job);
 }
 
 /** One unit of work, built: what `defer` queues. */
@@ -484,16 +551,21 @@ interface Unit {
 
 /**
  * Queue a unit's statements to be committed with its neighbours'. The buffer
- * is sent first when the unit would take it past `COMMIT_STATEMENTS`, so a
- * `db.batch` is cut between units and never inside one.
+ * is sent first when the unit would take it past `COMMIT_STATEMENTS` or
+ * `COMMIT_BYTES`, so a `db.batch` is cut between units and never inside one.
  */
 async function defer(job: BatchRun, unit: Unit): Promise<void> {
   const queued = job.buffer.statements;
-  if (queued > 0 && queued + unit.statements.length > COMMIT_STATEMENTS) await flush(job);
+  const bytes = job.pendingBytes;
+  const tooMany = queued + unit.statements.length > COMMIT_STATEMENTS;
+  const tooLarge = job.buffer.bytes + bytes > COMMIT_BYTES;
+  if (queued > 0 && (tooMany || tooLarge)) await flush(job);
   const { buffer } = job;
   job.meter.spend(unit.statements.length);
   buffer.units.push({ statements: unit.statements, days: job.pending, settle: unit.settle });
   buffer.statements += unit.statements.length;
+  buffer.bytes += bytes;
+  job.pendingBytes = 0;
   for (const key of unit.chunks) {
     buffer.chunks.add(keyId(key));
     if (key.type === TYPE_HEART_RATE) buffer.heartRate = true;
@@ -663,6 +735,7 @@ async function deletePage(job: BatchRun, page: readonly string[]): Promise<boole
     if (!meter.mayStart(CHUNK_COST)) return yieldPage(job);
     const keys = slots.map((slot) => slot.key);
     const chunks = await readChunks(ctx, deviceId, keys, meter);
+    await readSpillAhead(job, keys);
     for (const slot of slots) {
       if (!meter.mayStart(CHUNK_COST)) return yieldPage(job);
       await deleteSlot(job, slot, chunks.get(keyId(slot.key)));
@@ -671,12 +744,14 @@ async function deletePage(job: BatchRun, page: readonly string[]): Promise<boole
   // Before the caller counts the page as done, and before the next page looks
   // anything up.
   await flush(job);
+  job.spill = null;
   return true;
 }
 
 /** Stop part way through a page: what was built is committed, then the slice yields. */
 async function yieldPage(job: BatchRun): Promise<false> {
   await flush(job);
+  job.spill = null;
   return false;
 }
 
@@ -892,7 +967,9 @@ async function applyUpserts(job: BatchRun, groups: readonly UpsertGroup[]): Prom
     // Every chunk the page will read, in one statement (a second only when
     // records are moving between chunks): see `HeldChunks`.
     const held = new HeldChunks(job);
-    await held.read(jobs.flatMap((work) => chunksOf(work)));
+    const touching = jobs.flatMap((work) => chunksOf(work));
+    await held.read(touching);
+    await readSpillAhead(job, touching);
     for (const work of jobs) {
       if (!meter.mayStart(CHUNK_COST)) return yieldPage(job);
       await applyGroup(job, work, held);
@@ -901,6 +978,7 @@ async function applyUpserts(job: BatchRun, groups: readonly UpsertGroup[]): Prom
     // A page is durable before the next one is looked up: its index rows and
     // chunks are what that lookup reads.
     await flush(job);
+    job.spill = null;
   }
   return true;
 }
@@ -1155,7 +1233,10 @@ async function applyHead(
     deps,
     marked: head.marked,
     pending: [],
+    pendingBytes: 0,
     buffer: emptyBuffer(),
+    perChunk: meter.allowed.perChunk === true,
+    spill: null,
   };
   meter.spend();
 
@@ -1191,6 +1272,7 @@ async function applyHead(
     // What was built before the unit that cannot be is whole, and is kept: the
     // batch is set aside with as much of it applied as could be.
     job.pending = [];
+    job.pendingBytes = 0;
     await flush(job);
     await failBatch(ctx, deviceId, batch.batchId, errorCode, cursor, deps);
     meter.done();

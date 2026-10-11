@@ -38,7 +38,7 @@
  */
 
 import { blinderFor } from "../../db/blind.ts";
-import { all, chunk as pages } from "../../db/client.ts";
+import { all, batch, chunk as pages } from "../../db/client.ts";
 import { openBytes, sealBytes } from "../../db/crypto.ts";
 import { gunzipText, gzipText } from "../codec.ts";
 import { rollupBucket } from "../rollup/hour.ts";
@@ -84,6 +84,19 @@ export interface StoredChunk {
 
 /** Chunk keys fetched per query. Each row is a payload, so the page is small. */
 const READ_PAGE = 20;
+
+/** The statements of a write, and how much sealed text they carry. */
+export interface SizedWrite {
+  statements: D1PreparedStatement[];
+  /**
+   * Characters of sealed payload bound to the statements: what makes one
+   * request to D1 large. The caller that puts several writes in one `db.batch`
+   * keeps their sum under a limit.
+   */
+  bytes: number;
+}
+
+const NO_WRITE: SizedWrite = { statements: [], bytes: 0 };
 
 /**
  * Compressed bytes per row. D1 caps a value at two million bytes and the
@@ -287,16 +300,19 @@ export async function chunkStatements(
   origin: string,
   before: StoredChunk | undefined,
   records: readonly HcRecord[],
-): Promise<D1PreparedStatement[]> {
+): Promise<SizedWrite> {
   const where = "WHERE device_id = ? AND record_type = ? AND origin_hash = ? AND hour_utc = ?";
   const bind = [deviceId, key.type, key.originHash, key.hourUtc] as const;
   if (records.length === 0) {
-    if (before === undefined) return [];
+    if (before === undefined) return NO_WRITE;
     // Every part of the chunk: the statement names no `part`.
-    return [
-      ctx.db.prepare(`DELETE FROM hc_chunks ${where}`).bind(...bind),
-      ctx.db.prepare(`DELETE FROM hc_rollup_hour ${where}`).bind(...bind),
-    ];
+    return {
+      statements: [
+        ctx.db.prepare(`DELETE FROM hc_chunks ${where}`).bind(...bind),
+        ctx.db.prepare(`DELETE FROM hc_rollup_hour ${where}`).bind(...bind),
+      ],
+      bytes: 0,
+    };
   }
 
   const sorted = sortRecords(records);
@@ -306,16 +322,18 @@ export async function chunkStatements(
     `${deviceId}\u{0}${keyId(key)}\u{0}${json}`,
   );
   // A content digest for change detection, not a secret being compared.
-  if (before?.contentHash === contentHash) return [];
+  if (before?.contentHash === contentHash) return NO_WRITE;
 
   const { minStartMs, maxEndMs } = chunkExtent(sorted);
   const at = ctx.now();
   const bytes = await gzipText(json);
   const parts = Math.max(1, Math.ceil(bytes.length / PART_BYTES));
   const statements: D1PreparedStatement[] = [];
+  let sealedChars = 0;
   for (let part = 0; part < parts; part += 1) {
     const piece = bytes.slice(part * PART_BYTES, (part + 1) * PART_BYTES);
     const sealed = await sealBytes(ctx.env, piece, partAad(deviceId, key, part));
+    sealedChars += sealed.length;
     statements.push(
       ctx.db.prepare(UPSERT_PART).bind(
         ...bind,
@@ -337,8 +355,9 @@ export async function chunkStatements(
       ctx.db.prepare(`DELETE FROM hc_chunks ${where} AND part >= ?`).bind(...bind, parts),
     );
   }
-  statements.push(await hourRollupStatement(ctx, deviceId, key, sorted));
-  return statements;
+  const rollup = await hourRollupWrite(ctx, deviceId, key, sorted);
+  statements.push(rollup.statement);
+  return { statements, bytes: sealedChars + rollup.bytes };
 }
 
 /**
@@ -352,8 +371,25 @@ export async function hourRollupStatement(
   key: ChunkKey,
   records: readonly HcRecord[],
 ): Promise<D1PreparedStatement> {
+  const write = await hourRollupWrite(ctx, deviceId, key, records);
+  return write.statement;
+}
+
+/** One statement, and how much sealed text it carries: see `SizedWrite`. */
+interface SizedStatement {
+  statement: D1PreparedStatement;
+  bytes: number;
+}
+
+/** `hourRollupStatement`, with the size of what it seals. */
+async function hourRollupWrite(
+  ctx: Ctx,
+  deviceId: string,
+  key: ChunkKey,
+  records: readonly HcRecord[],
+): Promise<SizedStatement> {
   const rollup = await sealJson(ctx, rollupBucket(key.type, records), hourRollupAad(deviceId, key));
-  return ctx.db
+  const statement = ctx.db
     .prepare(
       `INSERT INTO hc_rollup_hour (device_id, record_type, origin_hash, hour_utc, payload_enc, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)
@@ -362,6 +398,7 @@ export async function hourRollupStatement(
          updated_at = excluded.updated_at`,
     )
     .bind(deviceId, key.type, key.originHash, key.hourUtc, rollup, ctx.now());
+  return { statement, bytes: rollup.length };
 }
 
 /** Every chunk of one type whose UTC hour is in `[startHour, endHour)`, whole. */
@@ -411,6 +448,36 @@ export async function hrSpillIn(
 }
 
 /**
+ * The spill into each of several hours, in ONE round trip: `HR_SPILL_SQL` once
+ * per hour, all in a `db.batch`. Per hour asked for, in the order asked, the
+ * earlier chunks of the same origin that reach into it, whole.
+ *
+ * The same statement as `hrSpillIn`, so the same rows and the same plan; only
+ * the trips are saved. What applying a page of heart-rate chunks reads ahead
+ * (worker/src/hc/store/hr-spill.ts).
+ */
+export async function hrSpillChunks(
+  ctx: Ctx,
+  deviceId: string,
+  hours: readonly Pick<ChunkKey, "originHash" | "hourUtc">[],
+  meter?: Meter,
+): Promise<StoredChunk[][]> {
+  const spills: StoredChunk[][] = [];
+  // A page at a time: every row is a payload.
+  for (const page of pages(hours, READ_PAGE)) {
+    meter?.spend(page.length);
+    const results = await batch<ChunkRow>(
+      ctx.db,
+      page.map((hour) =>
+        ctx.db.prepare(HR_SPILL_SQL).bind(deviceId, TYPE_HEART_RATE, hour.originHash, hour.hourUtc),
+      ),
+    );
+    for (const rows of results) spills.push(await assembleChunks(ctx, deviceId, rows));
+  }
+  return spills;
+}
+
+/**
  * The statement that makes the per-minute heart-rate row of one (origin, UTC
  * hour) agree with the HeartRate records given: an upsert, or a delete when no
  * sample falls in the hour.
@@ -422,14 +489,28 @@ export async function hrMinuteStatement(
   hourUtc: number,
   records: readonly HcRecord[],
 ): Promise<D1PreparedStatement> {
+  const write = await hrMinuteWrite(ctx, deviceId, originHash, hourUtc, records);
+  return write.statement;
+}
+
+/** `hrMinuteStatement`, with the size of what it seals. */
+export async function hrMinuteWrite(
+  ctx: Ctx,
+  deviceId: string,
+  originHash: string,
+  hourUtc: number,
+  records: readonly HcRecord[],
+): Promise<SizedStatement> {
   // Only samples inside their own record's interval: see `samplesInInterval`.
   const hour = hrMinutesOfHour(samplesInInterval(records).records, hourUtc);
   if (hour.minutes.length === 0) {
-    return ctx.db
+    const gone = ctx.db
       .prepare("DELETE FROM hc_hr_minute WHERE device_id = ? AND origin_hash = ? AND hour_utc = ?")
       .bind(deviceId, originHash, hourUtc);
+    return { statement: gone, bytes: 0 };
   }
-  return ctx.db
+  const sealed = await sealJson(ctx, hour, hrMinuteAad(deviceId, originHash, hourUtc));
+  const statement = ctx.db
     .prepare(
       `INSERT INTO hc_hr_minute (device_id, origin_hash, hour_utc, payload_enc, updated_at)
        VALUES (?, ?, ?, ?, ?)
@@ -437,11 +518,6 @@ export async function hrMinuteStatement(
          payload_enc = excluded.payload_enc,
          updated_at = excluded.updated_at`,
     )
-    .bind(
-      deviceId,
-      originHash,
-      hourUtc,
-      await sealJson(ctx, hour, hrMinuteAad(deviceId, originHash, hourUtc)),
-      ctx.now(),
-    );
+    .bind(deviceId, originHash, hourUtc, sealed, ctx.now());
+  return { statement, bytes: sealed.length };
 }

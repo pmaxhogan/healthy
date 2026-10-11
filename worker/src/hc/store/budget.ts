@@ -17,6 +17,13 @@ export interface SliceBudget {
   /** Statements, counted by the code that issues them. */
   maxQueries: number;
   maxMs: number;
+  /**
+   * Commit every chunk in a transaction of its own, and read heart-rate spill
+   * from the table for each: applying as it was before chunks shared a commit.
+   * The reference the shared path is held to in the tests, and the way to turn
+   * sharing off. Slower by a round trip or two a chunk, and the same store.
+   */
+  perChunk?: boolean;
 }
 
 /**

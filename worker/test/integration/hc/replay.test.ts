@@ -66,7 +66,15 @@ interface Fault {
   tooMany?: { over: number; how: "refuse" | "lose" };
   /** How many were turned away that way. */
   turnedAway: number;
+  /**
+   * Called just before the transaction that closes a batch is run: every chunk
+   * of the batch is committed, and nothing has been rebuilt since it began.
+   */
+  onClose?: () => Promise<void>;
 }
+
+/** The statement that takes an applied batch out of the queue: the mark of its closing transaction. */
+const CLOSES_BATCH = /^\s*DELETE FROM hc_ingest_queue\b/u;
 
 /** What the first statement of a commit of chunk writes, or of tombstones, begins with. */
 const APPLY_COMMIT = /^\s*(?:INSERT INTO|DELETE FROM|UPDATE) hc_(?:chunks|record_index)\b/u;
@@ -129,7 +137,8 @@ function faultyDb(fault: Fault): D1Database {
     batch: async (statements: FaultyStatement[]) => {
       const inner = statements.map((statement) => statement.inner);
       const { tooMany } = fault;
-      const chunks = APPLY_COMMIT.test(statements[0]?.sql ?? "");
+      const chunks = statements.some((statement) => APPLY_COMMIT.test(statement.sql));
+      if (statements.some((statement) => CLOSES_BATCH.test(statement.sql))) await fault.onClose?.();
       if (chunks && tooMany !== undefined && statements.length > tooMany.over) {
         fault.turnedAway += 1;
         if (tooMany.how === "lose") await env.DB.batch(inner);
@@ -238,7 +247,10 @@ async function snapshot(deviceId: string): Promise<Record<string, unknown>> {
          FROM hc_ingest_log WHERE device_id = ? ORDER BY batch_id`,
       deviceId,
     ),
-    marks: await rowsOf("SELECT kind, key FROM hc_dirty WHERE device_id = ?", deviceId),
+    marks: await rowsOf(
+      "SELECT kind, key FROM hc_dirty WHERE device_id = ? ORDER BY kind, key",
+      deviceId,
+    ),
     queued: await rowsOf("SELECT batch_id FROM hc_ingest_queue WHERE device_id = ?", deviceId),
   };
 }
@@ -379,6 +391,9 @@ function scenario(): TestBatch[] {
       steps("a", NEXT + 2 * MINUTE_MS, 150, { lastModified: 3000 }),
       steps("sparse-3", T + 40 * HOUR_MS, 77, { lastModified: 4000 }),
       steps("gone-1", T + 3 * HOUR_MS, 1, { lastModified: 9000 }),
+      // A heart-rate series moves to another hour: the chunk it leaves and the
+      // one it joins are both rewritten, and so are their minute rows.
+      series("hr-next", T + 5 * HOUR_MS + MINUTE_MS, 30 * MINUTE_MS, { lastModified: 3000 }),
       series("hr-spill", T + 2 * HOUR_MS + 30 * MINUTE_MS, 20 * MINUTE_MS, { lastModified: 2000 }),
       instant("hrv-2", "HeartRateVariabilityRmssd", T + 4 * HOUR_MS, { rmssd: 39 }),
     ],
@@ -415,6 +430,46 @@ function heavy(): TestBatch[] {
 /** A budget small enough that slices also end part way through a page. */
 const TIGHT: SliceBudget = { maxQueries: 70, maxMs: 20_000 };
 
+/**
+ * Every chunk committed by itself, its heart-rate spill read from the table:
+ * applying as it was before chunks shared a commit, and what every other way
+ * of running it is compared with.
+ */
+const PER_CHUNK: SliceBudget = { maxQueries: 650, maxMs: 20_000, perChunk: true };
+
+/** The store an uninterrupted chunk-by-chunk run leaves. */
+function reference(deviceId: string, batches: () => TestBatch[]): Promise<Record<string, unknown>> {
+  return outcome(deviceId, batches(), never(), PER_CHUNK);
+}
+
+/**
+ * Apply the batches one at a time, each on a store the one before has left
+ * idle, and say what was stored at the moment each was about to be closed:
+ * all of its chunks written, and no rebuild run since it began. That is where
+ * the rows the apply itself writes -- the minute rows, and the marks for the
+ * hours a series ran into -- can be seen as it left them, before a rebuild has
+ * had the chance to put anything right.
+ */
+async function closings(
+  deviceId: string,
+  batches: readonly TestBatch[],
+  budget: SliceBudget,
+): Promise<Record<string, unknown>[]> {
+  await clearStore();
+  const seen: Record<string, unknown>[] = [];
+  for (const batch of batches) {
+    await enqueue(repos, deviceId, batch);
+    const watching: Fault = {
+      ...never(),
+      onClose: async () => {
+        seen.push(await snapshot(deviceId));
+      },
+    };
+    await run(deviceId, watching, budget);
+  }
+  return seen;
+}
+
 describe("a slice that dies", () => {
   let deviceId = "";
 
@@ -440,42 +495,67 @@ describe("a slice that dies", () => {
   });
 
   it("reaches the same store whatever the slices' budget", async () => {
-    const reference = await outcome(deviceId, scenario(), never());
+    const expected = await reference(deviceId, scenario);
+    const whole = await outcome(deviceId, scenario(), never());
     const tight = await outcome(deviceId, scenario(), never(), TIGHT);
-    expect(tight).toStrictEqual(reference);
+    expect(whole).toStrictEqual(expected);
+    expect(tight).toStrictEqual(expected);
+  });
+
+  // The rows a rebuild would repair are compared before any rebuild has run:
+  // sharing a commit must not leave a minute row, or a mark, for it to fix.
+  it("has written the same rows, minute rows and marks as chunk by chunk when each batch closes", async () => {
+    const alone = await closings(deviceId, scenario(), PER_CHUNK);
+    const shared = await closings(deviceId, scenario(), { maxQueries: 650, maxMs: 20_000 });
+    const tight = await closings(deviceId, scenario(), TIGHT);
+
+    expect(alone).toHaveLength(3);
+    // Not a comparison of nothing: heart rate has been written, a series has
+    // run into a later hour and marked it, and nothing has been rebuilt yet.
+    const kinds = alone.flatMap((stored) =>
+      (stored.marks as { kind: string }[]).map((mark) => mark.kind),
+    );
+    expect(kinds).toContain("hr");
+    expect(kinds).toContain("day");
+    expect(kinds).toContain("sleep");
+    expect((alone[1]?.minutes as unknown[]).length).toBeGreaterThan(3);
+    expect(shared).toStrictEqual(alone);
+    expect(tight).toStrictEqual(alone);
   });
 
   it("reaches the same store when killed just after any commit of chunks", async () => {
     const counted = never();
-    const reference = await outcome(deviceId, scenario(), counted);
+    const expected = await reference(deviceId, scenario);
+    await outcome(deviceId, scenario(), counted);
     // Fewer than the chunks written, or nothing here is about a shared commit.
     expect(counted.commits.length).toBeGreaterThan(8);
     expect(counted.commits.length).toBeLessThan(30);
     const faults = counted.commits.map((at) => killAt(at, "after"));
-    await expectSameStore(deviceId, scenario, reference, faults);
+    await expectSameStore(deviceId, scenario, expected, faults);
   }, 240_000);
 
   it("reaches the same store when killed just before a commit, or anywhere else", async () => {
     const counted = never();
-    const reference = await outcome(deviceId, scenario(), counted);
+    const expected = await reference(deviceId, scenario);
+    await outcome(deviceId, scenario(), counted);
     const others = Array.from({ length: counted.seen }, (_, index) => index + 1).filter(
       (at) => !counted.commits.includes(at),
     );
     const faults = [
-      ...sample(counted.commits, 2).map((at) => killAt(at, "before")),
+      ...counted.commits.map((at) => killAt(at, "before")),
       ...sample(others, 17).map((at) => killAt(at, "after")),
     ];
     expect(faults.length).toBeGreaterThan(10);
-    await expectSameStore(deviceId, scenario, reference, faults);
+    await expectSameStore(deviceId, scenario, expected, faults);
   }, 240_000);
 
   it("reaches the same store when slices that also stop part way through a page are killed", async () => {
-    const reference = await outcome(deviceId, scenario(), never());
+    const expected = await reference(deviceId, scenario);
     const counted = never();
     await outcome(deviceId, scenario(), counted, TIGHT);
     const faults = sample(counted.commits, 3).map((at) => killAt(at, "after"));
     expect(faults.length).toBeGreaterThan(3);
-    await expectSameStore(deviceId, scenario, reference, faults, TIGHT);
+    await expectSameStore(deviceId, scenario, expected, faults, TIGHT);
   }, 240_000);
 
   // A commit shared by several chunks is a larger request, and D1 may not take
@@ -484,7 +564,7 @@ describe("a slice that dies", () => {
   it.each(["refuse", "lose"] as const)(
     "reaches the same store, with nothing set aside, when D1 will only %s a large commit",
     async (how) => {
-      const reference = await outcome(deviceId, scenario(), never());
+      const expected = await reference(deviceId, scenario);
       // Any one chunk's statements fit; a page of them does not.
       const small = (): Fault => ({ ...never(), tooMany: { over: 12, how } });
 
@@ -495,7 +575,7 @@ describe("a slice that dies", () => {
       // The log is in the comparison: every batch `applied`, with the same
       // counts as when each commit was taken whole -- also when it had been
       // (`lose`), and every chunk of it was then written a second time.
-      expect(stored).toStrictEqual(reference);
+      expect(stored).toStrictEqual(expected);
       // And dying between the chunks of a commit that was split changes nothing.
       const faults = sample(alone.commits, 12).map((at) => ({
         ...small(),
@@ -503,18 +583,38 @@ describe("a slice that dies", () => {
         when: "after" as const,
       }));
       expect(faults.length).toBeGreaterThan(2);
-      await expectSameStore(deviceId, scenario, reference, faults);
+      await expectSameStore(deviceId, scenario, expected, faults);
     },
     240_000,
   );
 
+  // A commit is cut by size as well as by statements: megabytes of sealed
+  // payload do not ride in one request with their neighbours.
+  it("commits a chunk too large to share by itself", async () => {
+    const [first] = heavy();
+    const counted = never();
+    await clearStore();
+    await enqueue(repos, deviceId, first ?? { batchId: "batch-0001" });
+    await run(deviceId, counted);
+
+    // Two chunks, the large one and an ordinary one, and so two commits: under
+    // the statement limit alone they would have shared one.
+    const chunks = await rowsOf(
+      "SELECT DISTINCT hour_utc FROM hc_chunks WHERE device_id = ?",
+      deviceId,
+    );
+    expect(chunks).toHaveLength(2);
+    expect(counted.commits).toHaveLength(2);
+  });
+
   it("reaches the same store for a chunk of several rows, killed either side of any commit", async () => {
     const counted = never();
-    const reference = await outcome(deviceId, heavy(), counted);
+    const expected = await reference(deviceId, heavy);
+    await outcome(deviceId, heavy(), counted);
     // Written across rows by the first batch, shrunk to one by the second.
-    const parts = (reference.chunks as { part: number }[]).map((row) => row.part);
+    const parts = (expected.chunks as { part: number }[]).map((row) => row.part);
     expect(parts.every((part) => part === 0)).toBe(true);
     const faults = counted.commits.flatMap((at) => [killAt(at, "before"), killAt(at, "after")]);
-    await expectSameStore(deviceId, heavy, reference, faults);
+    await expectSameStore(deviceId, heavy, expected, faults);
   }, 240_000);
 });
