@@ -136,7 +136,21 @@ export class Meter {
     );
   }
 
-  /** Count what a `share` spent and finished as this meter's own. */
+  /**
+   * A meter with a budget of its own, on this one's clock, for work that is
+   * allowed so much and no more whatever this meter has left. `absorb` it
+   * afterwards.
+   */
+  part(budget: SliceBudget): Meter {
+    return new Meter(budget, this.clock);
+  }
+
+  /** What this meter may spend in all. */
+  get allowed(): SliceBudget {
+    return this.budget;
+  }
+
+  /** Count what a `share` or a `part` spent and finished as this meter's own. */
   absorb(part: Meter): void {
     this.queries += part.queries;
     this.units += part.units;
