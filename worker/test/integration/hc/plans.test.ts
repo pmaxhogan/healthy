@@ -13,6 +13,7 @@ import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { makeRepos } from "../../../src/db/index.ts";
+import { HEAD_SQL } from "../../../src/db/repos/hc-ingest-queue.ts";
 import { HR_SPILL_SQL, READ_CHUNKS_SQL } from "../../../src/hc/store/chunks.ts";
 import {
   DIRTY_BACKLOG_SQL,
@@ -415,5 +416,26 @@ describe("recounting a type at the end of a batch", () => {
     expect(detail.join(" / ")).toMatch(
       /USING COVERING INDEX hc_chunks_counts \(device_id=\? AND record_type=\?\)/u,
     );
+  });
+});
+
+describe("reading the head of the queue", () => {
+  it("finds the oldest batch and its rows by index, however long the queue is", async () => {
+    const deviceId = await seedDevice(repos);
+    for (let index = 0; index < 30; index += 1) {
+      await enqueue(repos, deviceId, {
+        batchId: `batch-${String(index).padStart(4, "0")}`,
+        upserts: [steps(`q-${String(index)}`, T + index * HOUR_MS, 1)],
+      });
+    }
+
+    const detail = await plan(HEAD_SQL, deviceId, deviceId);
+
+    // The oldest unparked batch off the device index, then its rows by the
+    // unique key: never a walk of the queue, whose rows carry the bodies.
+    expect(detail.join(" / ")).toMatch(/USING (COVERING )?INDEX hc_ingest_queue_device/u);
+    expect(await rowsRead(HEAD_SQL, deviceId, deviceId)).toBeLessThan(10);
+    const head = await repos.hcIngestQueue.head(deviceId);
+    expect(head?.batchId).toBe("batch-0000");
   });
 });

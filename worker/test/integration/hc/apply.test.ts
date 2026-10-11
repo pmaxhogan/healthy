@@ -1147,3 +1147,83 @@ describe("the ingest log", () => {
     expect(results.map((row) => row.batch_id)).toStrictEqual(["new-applied", "old-failed"]);
   });
 });
+
+describe("closing a batch", () => {
+  it("records it applied and takes it out of the queue in one transaction, or does neither", async () => {
+    const deviceId = await seedDevice(repos);
+    await enqueue(repos, deviceId, { batchId: "batch-0001", upserts: [steps("a", T, 100)] });
+    // The queued body may not go: so the log must not say the batch is applied.
+    await env.DB.prepare(
+      `CREATE TRIGGER synthetic_failure BEFORE DELETE ON hc_ingest_queue
+         BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END`,
+    ).run();
+    try {
+      await expect(runHcSlice(ctx, deviceId)).rejects.toThrow();
+    } finally {
+      await stopFailing();
+    }
+
+    // Its records are stored, it is still queued, and the log has not closed it.
+    expect(await stored(deviceId)).toStrictEqual(["a:100"]);
+    expect(await count("hc_ingest_queue", deviceId)).toBe(1);
+    expect(await logRow(deviceId, "batch-0001")).toMatchObject({
+      status: "applying",
+      applied: 0,
+      applied_at: null,
+    });
+
+    await drain(ctx, deviceId);
+
+    expect(await count("hc_ingest_queue", deviceId)).toBe(0);
+    expect(await logRow(deviceId, "batch-0001")).toMatchObject({ status: "applied", applied: 1 });
+  });
+});
+
+describe("what a slice asks of D1", () => {
+  it("is measured and logged, and a small batch is a handful of round trips", async () => {
+    const logged = recordingLog();
+    const loud = testCtx({ now: time.now, log: logged.log });
+    const deviceId = await seedDevice(repos);
+    await enqueue(repos, deviceId, {
+      batchId: "batch-0001",
+      upserts: [steps("a", T, 100), steps("b", T + 5 * MINUTE_MS, 120), steps("c", T + HOUR_MS, 3)],
+    });
+
+    const result = await runHcSlice(loud, deviceId);
+
+    expect(result.more).toBe(false);
+    const line = logged.lines.find((entry) => entry.includes('"hc.slice"'));
+    const slice = JSON.parse(line ?? "{}") as Record<string, number>;
+    expect(slice).toMatchObject({ batches: 1, queuedBatches: 0 });
+    // The batch (head, index, chunks, one commit, one closing transaction), its
+    // day rollup, and the checks that end an idle slice. A bound, so that a
+    // round trip added per batch or per chunk is noticed here.
+    expect(slice.roundTrips).toBeGreaterThan(5);
+    expect(slice.roundTrips).toBeLessThanOrEqual(16);
+    expect(slice.executed).toBeGreaterThanOrEqual(slice.roundTrips ?? 0);
+    expect(slice.rowsWritten).toBeGreaterThan(5);
+    expect(slice.rowsRead).toBeGreaterThan(0);
+    expect(slice.d1Ms).toBeGreaterThanOrEqual(0);
+    expect(slice.sqlMs).toBeGreaterThanOrEqual(0);
+    expect(slice.rebuildMs).toBeGreaterThanOrEqual(0);
+    // No earlier slice in this cache: nothing to say about the wait between two.
+    expect(slice.idleMs).toBeUndefined();
+  });
+
+  it("says how long the runner sat between two slices of one instance", async () => {
+    const logged = recordingLog();
+    const loud = testCtx({ now: time.now, log: logged.log });
+    const deviceId = await seedDevice(repos);
+    const cache = { head: null };
+
+    await runHcSlice(loud, deviceId, EMPTY_RUNNER_STATE, undefined, cache);
+    await runHcSlice(loud, deviceId, EMPTY_RUNNER_STATE, undefined, cache);
+
+    const slices = logged.lines
+      .filter((entry) => entry.includes('"hc.slice"'))
+      .map((entry) => JSON.parse(entry) as Record<string, number>);
+    expect(slices).toHaveLength(2);
+    expect(slices[0]?.idleMs).toBeUndefined();
+    expect(slices[1]?.idleMs).toBeGreaterThanOrEqual(0);
+  });
+});

@@ -28,7 +28,9 @@ testDebugUnitTest lintDebug` from `android/` yourself before pushing (JDK 21 and
   `worker/test/unit/hc/phone-contract.test.ts` runs every batch in it through the
   Worker's validator. A change to either side of the wire changes the file.
 - Workers Builds is unaffected by the monorepo: root directory `/`, build
-  `npm run check`, deploy `npm run deploy`.
+  `npm run build`, deploy `npm run deploy`. It only builds and deploys; it does
+  not run the gate again (the pre-push hook and CI already have), so a push that
+  skips the hook deploys unchecked. Do not skip it.
 
 ## Health Connect store: invariants
 
@@ -178,8 +180,8 @@ npm run check   # lint, typecheck, knip, test, build -- the whole gate
 npm run fix     # eslint --fix + prettier --write
 ```
 
-`npm run check` is what CI runs, what the pre-push hook runs, and what Cloudflare
-Workers Builds runs before deploying. It is the only definition of "done".
+`npm run check` is what CI runs and what the pre-push hook runs. It is the only
+definition of "done".
 
 Also worth knowing:
 

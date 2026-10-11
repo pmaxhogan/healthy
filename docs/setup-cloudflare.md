@@ -134,23 +134,28 @@ Two secrets come from this application's settings:
 
 Connect the GitHub repository to Cloudflare Workers Builds, with:
 
-- **Build command:** `npm run check`
+- **Build command:** `npm run build`
 - **Deploy command:** `npm run deploy`
 
 The repository is a monorepo, and that changes nothing here: leave the
 Workers Builds **root directory** at `/` (the repository root), because the root
-`package.json` is an npm workspace whose `check` and `deploy` scripts fan into
-`worker/`. Build with `npm run check` and deploy with `npm run deploy`, as above.
+`package.json` is an npm workspace whose `build` and `deploy` scripts fan into
+`worker/`. Build with `npm run build` and deploy with `npm run deploy`, as above.
+The build command is deliberately not `npm run check`: the gate has already run
+by the time a commit is on `main` (the pre-push hook for a direct push, the
+required checks for a pull request), and running it a third time only made
+every deploy several minutes slower. The cost is that Workers Builds deploys
+whatever reaches `main`, so do not push with the hook skipped.
 The Android app in `android/` is not part of either: it has its own CI job and
 release workflow in GitHub Actions, and a push that changes only `android/`
-still runs `npm run check`, which does not touch Gradle.
+still runs the Worker build and deploy, which do not touch Gradle.
 
 `npm run deploy` runs, inside `worker/`, `npm run migrate:remote && wrangler deploy`, so
 the remote D1 migration always runs immediately before the new code that
 depends on it, in that order, on every build. **(verify whether Workers
 Builds automatically picks up `.node-version` and runs `npm ci` rather than
 `npm install` — check the build's Node-version and install-command settings
-if a build behaves differently from local `npm run check`.)**
+if a build behaves differently from a local `npm run build`.)**
 
 ## 5. Secrets
 

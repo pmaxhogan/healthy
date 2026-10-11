@@ -26,9 +26,34 @@ export interface SliceBudget {
  */
 export const DEFAULT_SLICE_BUDGET: SliceBudget = { maxQueries: 650, maxMs: 20_000 };
 
+/**
+ * What a slice really asked of D1, as D1 and the clock report it: see
+ * worker/src/hc/store/counted.ts. Counts and durations only.
+ */
+export interface Measured {
+  /** Calls that left for D1: each `db.batch`, and each statement run alone. */
+  roundTrips: number;
+  /** Statements in those calls. */
+  executed: number;
+  /** Wall clock spent waiting on those calls, in ms. */
+  d1Ms: number;
+  /** SQL time D1 reported for them, in ms: no network in it. */
+  sqlMs: number;
+  rowsRead: number;
+  rowsWritten: number;
+}
+
 export class Meter {
   private queries = 0;
   private units = 0;
+  private readonly seen: Measured = {
+    roundTrips: 0,
+    executed: 0,
+    d1Ms: 0,
+    sqlMs: 0,
+    rowsRead: 0,
+    rowsWritten: 0,
+  };
   private readonly startedAt: number;
 
   constructor(
@@ -41,6 +66,29 @@ export class Meter {
   /** Count statements about to be issued. */
   spend(queries = 1): void {
     this.queries += queries;
+  }
+
+  /** A call to D1 returned (or threw): one round trip of `statements`, `ms` long. */
+  trip(statements: number, ms: number): void {
+    this.seen.roundTrips += 1;
+    this.seen.executed += statements;
+    this.seen.d1Ms += ms;
+  }
+
+  /** What D1 said of one statement it ran. */
+  reported(sqlMs: number, rowsRead: number, rowsWritten: number): void {
+    this.seen.sqlMs += sqlMs;
+    this.seen.rowsRead += rowsRead;
+    this.seen.rowsWritten += rowsWritten;
+  }
+
+  /** What has been measured so far, with the durations in whole ms. */
+  get measured(): Measured {
+    return {
+      ...this.seen,
+      d1Ms: Math.round(this.seen.d1Ms),
+      sqlMs: Math.round(this.seen.sqlMs),
+    };
   }
 
   /** Record that one unit of work finished: the slice has made progress. */

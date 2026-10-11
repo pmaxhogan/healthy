@@ -62,7 +62,13 @@ import { unpackJson } from "./codec.ts";
 import { hrHoursTouched } from "./rollup/hr-minute.ts";
 import { DEFAULT_SLICE_BUDGET, Meter } from "./store/budget.ts";
 import { chunkStatements, hrMinuteStatement, hrSpillIn, readChunks } from "./store/chunks.ts";
-import { dirtyBacklog, markSessionsStatement, markStatements } from "./store/dirty.ts";
+import { countedDb } from "./store/counted.ts";
+import {
+  dirtyBacklog,
+  dirtyBacklogStatement,
+  markSessionsStatement,
+  markStatements,
+} from "./store/dirty.ts";
 import {
   HOUR_MS,
   TYPE_EXERCISE_SESSION,
@@ -100,8 +106,9 @@ import type { Blinder } from "../db/blind.ts";
 import type { Ctx } from "../db/client.ts";
 import type { SliceBudget } from "./store/budget.ts";
 import type { StoredChunk } from "./store/chunks.ts";
-import type { DirtyMark } from "./store/dirty.ts";
+import type { BacklogRow, DirtyMark } from "./store/dirty.ts";
 import type { ChunkKey, UpsertGroup } from "./store/keys.ts";
+import type { SliceMemo } from "./store/rebuild.ts";
 import type { IndexEntry } from "./store/record-index.ts";
 import type { HcRecord, ParsedBatch } from "./wire.ts";
 import type { QueuedBatch } from "../db/repos/hc-ingest-queue.ts";
@@ -400,12 +407,6 @@ async function rewriteChunk(
     ...dependantStatements(job, key.type, touched),
   );
   return statements;
-}
-
-async function commit(job: BatchRun, statements: D1PreparedStatement[]): Promise<void> {
-  if (statements.length === 0) return;
-  job.meter.spend(statements.length);
-  await runBatch(job.ctx.db, statements);
 }
 
 /** Count a unit that is now durable: its day marks are `marked`, and its `settle` moves the cursor. */
@@ -924,6 +925,8 @@ interface Head {
  */
 export interface HeadCache {
   head: Head | null;
+  /** When the last slice this cache saw ended, epoch ms: for the log line's `idleMs`. */
+  endedAt?: number;
 }
 
 /** Which batch is at the head of a device's queue, without opening it. */
@@ -1045,34 +1048,48 @@ async function openHead(
   return { queued, batch, marked: new Set() };
 }
 
-/** Counts, arrival times and the phone's report; then the batch leaves the queue. */
-async function finishBatch(job: BatchRun, head: Head): Promise<void> {
+/**
+ * Close a batch: counts, arrival times and the phone's report, the log's word
+ * that it is applied, and the batch out of the queue -- in ONE `db.batch`, so
+ * one transaction. Returns how many marks are now waiting to be rebuilt, read
+ * in the same transaction.
+ *
+ * The order of what is durable is what matters here, and the transaction keeps
+ * it: every chunk of the batch was committed before this (the buffer is sent
+ * first), and the queued body -- the only copy of what the phone sent -- is
+ * deleted in the very transaction that records the batch as applied. There is
+ * no moment at which the body is gone and the log does not say why, and a
+ * slice that dies before or during this runs the batch again from the queue.
+ */
+async function finishBatch(job: BatchRun, head: Head): Promise<number> {
   const { ctx, deviceId, cursor } = job;
   const { queued, batch } = head;
+  // A batch with nothing to write has only its `applying` note buffered.
+  await flush(job);
   const applyMs = cursor.ms + (job.meter.elapsedMs - job.startedMs);
   const types = unique([...batch.upserts.map((record) => record.type), ...cursor.shrunk]);
   const statements: D1PreparedStatement[] = [];
   if (types.length > 0) statements.push(recountStatement(ctx, deviceId, types, queued.receivedAt));
   const report = reportStatement(ctx, deviceId, batch.syncState, queued.receivedAt);
   if (report !== null) statements.push(report);
-  await commit(job, statements);
-
   const queue = makeHcIngestQueueRepo(ctx);
-  job.meter.spend(2);
-  await queue.recordOutcome(deviceId, batch.batchId, {
-    status: "applied",
-    applied: cursor.applied,
-    // Upserts that did not become the stored copy: an older `lastModified`
-    // than what is held, a duplicate within the batch, or a tombstoned id.
-    superseded: batch.upserts.length - cursor.applied,
-    removed: cursor.removed,
-    applyMs,
-  });
-  await queue.remove(deviceId, batch.batchId);
-  // If this was the last of what had been set aside, queued again and now
-  // applied, the device's alert is over. One SELECT when no alert is open.
-  job.meter.spend();
-  await resolveParkedAlert(ctx, deviceId, job.deps);
+  statements.push(
+    queue.outcomeStatement(deviceId, batch.batchId, {
+      status: "applied",
+      applied: cursor.applied,
+      // Upserts that did not become the stored copy: an older `lastModified`
+      // than what is held, a duplicate within the batch, or a tombstoned id.
+      superseded: batch.upserts.length - cursor.applied,
+      removed: cursor.removed,
+      applyMs,
+    }),
+    queue.removeStatement(deviceId, batch.batchId),
+    // Last, so that it counts what this batch marked: see `workSlice`.
+    dirtyBacklogStatement(ctx, deviceId, REBUILD_BACKLOG_FULL),
+  );
+  job.meter.spend(statements.length);
+  const results = await runBatch<BacklogRow>(ctx.db, statements);
+  const backlog = results.at(-1)?.[0]?.marks ?? 0;
   ctx.log.info("hc.batch_applied", {
     deviceId,
     batchId: batch.batchId,
@@ -1082,11 +1099,20 @@ async function finishBatch(job: BatchRun, head: Head): Promise<void> {
     outOfInterval: cursor.outOfInterval,
     ms: applyMs,
   });
+  return backlog;
+}
+
+/** A batch that is no longer the head: applied, or set aside. */
+interface Closed {
+  /** True when it was applied; false when it was set aside as failed. */
+  applied: boolean;
+  /** Marks waiting to be rebuilt when it closed, or null when that was not read. */
+  backlog: number | null;
 }
 
 /**
  * Work on the head batch until it is done or the budget is. Returns the cursor
- * to carry to the next slice, or null when the batch has left the queue.
+ * to carry to the next slice, or how the batch left the head of the queue.
  */
 async function applyHead(
   ctx: Ctx,
@@ -1095,7 +1121,7 @@ async function applyHead(
   carried: ApplyCursor | null,
   meter: Meter,
   deps: SyncDeps | undefined,
-): Promise<ApplyCursor | null> {
+): Promise<ApplyCursor | Closed> {
   const { batch } = head;
   const startedMs = meter.elapsedMs;
   const fresh = carried?.batchId !== batch.batchId;
@@ -1128,10 +1154,13 @@ async function applyHead(
 
   try {
     if (fresh) {
-      meter.spend();
-      await makeHcIngestQueueRepo(ctx).recordOutcome(deviceId, batch.batchId, {
+      // The log's note that the batch is under way rides with the first commit
+      // of its chunks: it is a status to look at, and not worth a round trip
+      // of its own. (A batch with nothing to commit goes straight to applied.)
+      const note = makeHcIngestQueueRepo(ctx).outcomeStatement(deviceId, batch.batchId, {
         status: "applying",
       });
+      await defer(job, { statements: [note], chunks: [], settle: countNothing });
     }
     if (cursor.phase === "deletes") {
       if (!(await applyDeletes(job, unique(batch.deletes))))
@@ -1146,9 +1175,9 @@ async function applyHead(
       cursor.phase = "finish";
       cursor.offset = 0;
     }
-    await finishBatch(job, head);
+    const backlog = await finishBatch(job, head);
     meter.done();
-    return null;
+    return { applied: true, backlog };
   } catch (error) {
     const errorCode = permanentCode(error);
     if (errorCode === null) throw error;
@@ -1158,7 +1187,7 @@ async function applyHead(
     await flush(job);
     await failBatch(ctx, deviceId, batch.batchId, errorCode, cursor, deps);
     meter.done();
-    return null;
+    return { applied: false, backlog: null };
   }
 }
 
@@ -1204,10 +1233,25 @@ export async function runHcSlice(
   deps?: SyncDeps,
 ): Promise<SliceResult> {
   const meter = new Meter(budget);
-  const { result, phase } = await workSlice(ctx, deviceId, state, meter, cache, deps);
+  const startedAt = Date.now();
+  // Every round trip of the slice goes through a binding that counts it: see
+  // worker/src/hc/store/counted.ts. The same statements, in the same calls.
+  const counted: Ctx = { ...ctx, db: countedDb(ctx.db, meter) };
+  const tally: SliceTally = { applied: 0, rebuildMs: 0 };
+  const { result, phase } = await workSlice(counted, deviceId, state, meter, cache, deps, tally);
+  // If what had been set aside was queued again and is now applied, the
+  // device's alert is over. Asked once a slice, not once a batch: after a slice
+  // that applied something, and when the work runs out -- so a slice that died
+  // between applying the last of them and getting here is still answered for,
+  // by the slice that finds nothing left. One SELECT when no alert is open.
+  if (tally.applied > 0 || !result.more) {
+    meter.spend();
+    await resolveParkedAlert(counted, deviceId, deps);
+  }
   // One line per slice: how much it did and what stopped it. Counts and codes.
   meter.spend();
-  const queued = await makeHcIngestQueueRepo(ctx).depth(deviceId);
+  const queued = await makeHcIngestQueueRepo(counted).depth(deviceId);
+  const endedAt = Date.now();
   ctx.log.info("hc.slice", {
     deviceId,
     phase,
@@ -1218,8 +1262,26 @@ export async function runHcSlice(
     // that yields with neither spent stopped just short of the statement one.
     ended: result.more ? (meter.spent ?? "statements") : "done",
     queuedBatches: queued.batches,
+    // Where the time went. `batches` closed in this slice; `rebuildMs` of `ms`
+    // was the rebuild; and of what was asked of D1, the calls, the statements
+    // in them, the wall clock waiting on them, and what D1 says its SQL took.
+    batches: tally.applied,
+    rebuildMs: tally.rebuildMs,
+    ...meter.measured,
+    // How long the runner sat between the last slice and this one, when the
+    // same instance ran both: the alarm coming round again.
+    ...(cache?.endedAt !== undefined && { idleMs: Math.max(0, startedAt - cache.endedAt) }),
   });
+  if (cache !== undefined) cache.endedAt = endedAt;
   return result;
+}
+
+/** What a slice counts as it goes, for its log line. */
+interface SliceTally {
+  /** Batches applied. */
+  applied: number;
+  /** Wall clock spent in the rebuild, in ms. */
+  rebuildMs: number;
 }
 
 /**
@@ -1258,6 +1320,45 @@ export function rebuildShare(backlog: number, unspent: number): number {
   return Math.max(REBUILD_SHARE_MIN, Math.min(wanted, unspent));
 }
 
+/** What the work of one slice shares between its steps. */
+interface SliceRun {
+  ctx: Ctx;
+  deviceId: string;
+  meter: Meter;
+  tally: SliceTally;
+  memo: SliceMemo;
+  /** `HcRunnerState.tzDigest`, as the slice now knows it. */
+  tzDigest: string | null;
+}
+
+/** Run the rebuild within `part`, and keep what it learned and how long it took. */
+async function rebuildWithin(run: SliceRun, part: Meter): Promise<boolean> {
+  const { ctx, deviceId, meter, memo } = run;
+  const startedMs = meter.elapsedMs;
+  const rebuilt = await rebuildSlice(ctx, deviceId, run.tzDigest, part, memo);
+  run.tally.rebuildMs += meter.elapsedMs - startedMs;
+  run.tzDigest = rebuilt.tzDigest;
+  return rebuilt.more;
+}
+
+/**
+ * The rebuild's share after a batch has left the head: see `REBUILD_SHARE_MIN`.
+ * Marks are settled exactly as in the rebuild proper: a row written, then its
+ * mark cleared, in one transaction.
+ */
+async function shareAfter(run: SliceRun, closed: Closed): Promise<void> {
+  const { ctx, deviceId, meter } = run;
+  if (closed.applied) run.tally.applied += 1;
+  const backlog = closed.backlog ?? (await backlogNow(ctx, deviceId, meter));
+  // Nothing marked, and the zone of every day rollup already known: there is
+  // nothing for a share to do, so it is not asked. (With the zone not known
+  // the rebuild is run all the same: it is what checks it.)
+  if (backlog === 0 && run.tzDigest !== null) return;
+  const part = meter.share(rebuildShare(backlog, meter.unspent));
+  await rebuildWithin(run, part);
+  meter.absorb(part);
+}
+
 /** The work of one slice, and which phase it ended in. */
 async function workSlice(
   ctx: Ctx,
@@ -1266,11 +1367,16 @@ async function workSlice(
   meter: Meter,
   cache: HeadCache | undefined,
   deps: SyncDeps | undefined,
+  tally: SliceTally,
 ): Promise<{ result: SliceResult; phase: "apply" | "rebuild" }> {
   let cursor = state.cursor;
-  let { tzDigest } = state;
+  const run: SliceRun = { ctx, deviceId, meter, tally, memo: {}, tzDigest: state.tzDigest };
   const paused = (next: ApplyCursor | null): { result: SliceResult; phase: "apply" } => ({
-    result: { state: { cursor: next, tzDigest }, more: true, progressed: meter.progressed },
+    result: {
+      state: { cursor: next, tzDigest: run.tzDigest },
+      more: true,
+      progressed: meter.progressed,
+    },
     phase: "apply",
   });
   for (;;) {
@@ -1280,31 +1386,31 @@ async function workSlice(
       cursor = null;
       meter.done();
     } else {
-      cursor = await applyHead(ctx, deviceId, head, cursor, meter, deps);
-      if (cursor !== null) return paused(cursor);
+      const closed = await applyHead(ctx, deviceId, head, cursor, meter, deps);
+      if ("phase" in closed) return paused(closed);
       // Applied or set aside: either way it is no longer the head.
+      cursor = null;
       if (cache !== undefined) cache.head = null;
-      // See `REBUILD_SHARE_MIN`. Marks are settled exactly as in the rebuild
-      // proper: a row written, then its mark cleared, in one transaction.
-      meter.spend();
-      const backlog = await dirtyBacklog(ctx, deviceId, REBUILD_BACKLOG_FULL);
-      const part = meter.share(rebuildShare(backlog, meter.unspent));
-      ({ tzDigest } = await rebuildSlice(ctx, deviceId, tzDigest, part));
-      meter.absorb(part);
+      await shareAfter(run, closed);
     }
     if (!meter.mayStart(BATCH_OVERHEAD + CHUNK_COST)) return paused(null);
   }
 
-  const rebuilt = await rebuildSlice(ctx, deviceId, tzDigest, meter);
-  const more = rebuilt.more || (await pruneLog(ctx, deviceId, meter));
+  const more = (await rebuildWithin(run, meter)) || (await pruneLog(ctx, deviceId, meter));
   return {
     result: {
-      state: { cursor: null, tzDigest: rebuilt.tzDigest },
+      state: { cursor: null, tzDigest: run.tzDigest },
       more,
       progressed: meter.progressed,
     },
     phase: "rebuild",
   };
+}
+
+/** The marks waiting to be rebuilt, for a batch that closed without reading them. */
+async function backlogNow(ctx: Ctx, deviceId: string, meter: Meter): Promise<number> {
+  meter.spend();
+  return dirtyBacklog(ctx, deviceId, REBUILD_BACKLOG_FULL);
 }
 
 /**
