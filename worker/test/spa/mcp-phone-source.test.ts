@@ -48,7 +48,7 @@ function device(overrides: Partial<DeviceDto> = {}): DeviceDto {
     parked: { batches: 0, bytes: 0, errorCodes: [] },
     parkedMarks: 0,
     report: null,
-    totals: { recordCount: 0, typesGranted: 0, typesDenied: 0 },
+    totals: { recordCount: 0, typesGranted: 0, typesDenied: 0, typesBackfilled: 0 },
     ...overrides,
   };
 }

@@ -30,16 +30,24 @@ import { unparkMarks } from "../../hc/store/dirty.ts";
 import { storeBacklog } from "../../hc/store/read.ts";
 import { wipeDevice } from "../../hc/store/wipe.ts";
 import { AppError } from "../../lib/errors.ts";
-import { isoFromMs, toDeviceCoverageRowDto, toDeviceDto, toDeviceIngestLogDto } from "../dto.ts";
+import {
+  isoFromMs,
+  toDeviceCoverageRowDto,
+  toDeviceDto,
+  toDeviceIngestLogDto,
+  toDeviceIngestSummaryDto,
+} from "../dto.ts";
 import { NO_STORE, apiContext, limitQuerySchema, readJson, readQuery } from "../http.ts";
 import { deviceNameSchema, wipeDeviceSchema } from "../schemas.ts";
 
 import type { AppHonoEnv } from "../../auth/gate.ts";
-import type { DeviceTotals, Device } from "../../hc/device.ts";
+import type { DeviceTotals, Device, IngestLogRow } from "../../hc/device.ts";
 import type { ApiContext } from "../http.ts";
 import type {
   DeviceCoverageRowDto,
   DeviceDto,
+  DeviceIngestLogState,
+  DeviceIngestSummaryDto,
   DeviceReportDto,
   PairedDeviceDto,
   RetryFailedResponse,
@@ -64,7 +72,27 @@ const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["localhost", "127.0.0.1"]);
 /** What the type name of one of Health Connect's own hourly totals starts with. */
 const PLATFORM_AGGREGATE_PREFIX = "Agg.";
 
-const NO_TOTALS: DeviceTotals = { recordCount: 0, typesGranted: 0, typesDenied: 0 };
+const NO_TOTALS: DeviceTotals = {
+  recordCount: 0,
+  typesGranted: 0,
+  typesDenied: 0,
+  typesBackfilled: 0,
+};
+
+/** What "applied recently" means in the upload summary, in seconds. */
+const RECENT_SECONDS = 3600;
+
+/** Applied batches the summary's median apply time is taken over. */
+const APPLY_SAMPLE = 20;
+
+/** The log statuses behind each `?state=` of the ingest log. */
+function logStatuses(state: DeviceIngestLogState): readonly IngestLogRow["status"][] {
+  return state === "finished" ? ["applied", "failed"] : ["queued", "applying"];
+}
+
+const logQuerySchema = limitQuerySchema.extend({
+  state: z.enum(["finished", "waiting"]).optional(),
+});
 
 const reportSchema = z.looseObject({
   batteryExempt: z.boolean().optional(),
@@ -257,10 +285,31 @@ phoneRouter.get("/devices/:id/coverage", async (c) => {
 phoneRouter.get("/devices/:id/ingest-log", async (c) => {
   const api = apiContext(c);
   const device = await requireDevice(api, c.req.param("id"));
-  const { limit } = readQuery(c, limitQuerySchema);
-  const rows = await api.repos.hcStatus.ingestLog(device.id, limit ?? DEFAULT_LOG_LIMIT);
+  const { limit, state } = readQuery(c, logQuerySchema);
+  const rows = await api.repos.hcStatus.ingestLog(
+    device.id,
+    limit ?? DEFAULT_LOG_LIMIT,
+    state === undefined ? undefined : logStatuses(state),
+  );
   return c.json(
     rows.map((row) => toDeviceIngestLogDto(row)),
+    200,
+    NO_STORE,
+  );
+});
+
+// What the log's newest rows cannot show during a backfill, when every one of
+// them is still waiting: how many batches are in each state, and how fast they
+// are being applied. Counts and instants only.
+phoneRouter.get("/devices/:id/ingest-summary", async (c) => {
+  const api = apiContext(c);
+  const device = await requireDevice(api, c.req.param("id"));
+  const [summary, parked] = await Promise.all([
+    api.repos.hcStatus.ingestSummary(device.id, api.ctx.now() - RECENT_SECONDS, APPLY_SAMPLE),
+    api.repos.hcIngestQueue.parked(device.id),
+  ]);
+  return c.json<DeviceIngestSummaryDto>(
+    toDeviceIngestSummaryDto(summary, parked.batches),
     200,
     NO_STORE,
   );

@@ -816,7 +816,17 @@ export interface DeviceDto {
   parkedMarks: number;
   /** Null until the phone has sent a sync report. */
   report: DeviceReportDto | null;
-  totals: { recordCount: number; typesGranted: number; typesDenied: number };
+  /**
+   * `typesDenied` are types the owner has not granted, which is a choice and not
+   * a fault. `typesBackfilled` counts granted types whose backfill has finished,
+   * so it is out of `typesGranted`.
+   */
+  totals: {
+    recordCount: number;
+    typesGranted: number;
+    typesDenied: number;
+    typesBackfilled: number;
+  };
 }
 
 /**
@@ -888,6 +898,29 @@ export interface DeviceIngestLogDto {
   bodyBytes: number;
   rawBytes: number;
   applyMs: number | null;
+}
+
+/** Which batches `GET /api/phone/devices/:id/ingest-log?state=` lists. */
+export type DeviceIngestLogState = "finished" | "waiting";
+
+/**
+ * What became of one phone's uploads, as counts: `GET
+ * /api/phone/devices/:id/ingest-summary`. `total` is every batch in the log,
+ * which is what a listing of the newest few is "of".
+ */
+export interface DeviceIngestSummaryDto {
+  total: number;
+  queued: number;
+  applying: number;
+  applied: number;
+  failed: number;
+  /** Batches that could not be applied and are being kept. */
+  parked: number;
+  appliedLastHour: number;
+  lastAppliedAt: string | null;
+  /** Median apply time, in ms, of the newest `applySample` applied batches. */
+  applyMsMedian: number | null;
+  applySample: number;
 }
 
 export interface ApiError {

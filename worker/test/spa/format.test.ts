@@ -140,4 +140,17 @@ describe("formatBytes", () => {
     expect(formatBytes(1000)).toBe("1.0 KB");
     expect(formatBytes(15_400)).toBe("15.4 KB");
   });
+
+  it("moves up to MB and GB instead of counting thousands of KB", () => {
+    expect(formatBytes(11_623_500)).toBe("11.6 MB");
+    expect(formatBytes(11_400_000)).toBe("11.4 MB");
+    expect(formatBytes(2_340_000_000)).toBe("2.3 GB");
+    expect(formatBytes(5_000_000_000_000)).toBe("5000.0 GB");
+  });
+
+  it("never prints 1000 of a unit that has a bigger one", () => {
+    expect(formatBytes(999_949)).toBe("999.9 KB");
+    expect(formatBytes(999_960)).toBe("1.0 MB");
+    expect(formatBytes(999_960_000)).toBe("1.0 GB");
+  });
 });

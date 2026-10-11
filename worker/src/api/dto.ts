@@ -38,12 +38,13 @@ import type {
   RunSummary as DbRunSummary,
   Settings,
 } from "../db/schemas.ts";
-import type { IngestLogRow, SyncStateRow, Device } from "../hc/device.ts";
+import type { IngestLogRow, IngestSummary, SyncStateRow, Device } from "../hc/device.ts";
 import type {
   ClientSecretSource,
   DeviceCoverageRowDto,
   DeviceDto,
   DeviceIngestLogDto,
+  DeviceIngestSummaryDto,
   DeviceReportDto,
   AlertDto,
   ConnectionDto,
@@ -583,5 +584,24 @@ export function toDeviceIngestLogDto(row: IngestLogRow): DeviceIngestLogDto {
     bodyBytes: row.bodyBytes,
     rawBytes: row.rawBytes,
     applyMs: row.applyMs,
+  };
+}
+
+/** A device's upload counts, with the batches still held in the queue as parked. */
+export function toDeviceIngestSummaryDto(
+  summary: IngestSummary,
+  parkedBatches: number,
+): DeviceIngestSummaryDto {
+  return {
+    total: summary.queued + summary.applying + summary.applied + summary.failed,
+    queued: summary.queued,
+    applying: summary.applying,
+    applied: summary.applied,
+    failed: summary.failed,
+    parked: parkedBatches,
+    appliedLastHour: summary.appliedRecently,
+    lastAppliedAt: isoOrNull(summary.lastAppliedAt),
+    applyMsMedian: summary.applyMsMedian,
+    applySample: summary.applySample,
   };
 }
