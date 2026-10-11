@@ -1108,6 +1108,12 @@ interface Closed {
   applied: boolean;
   /** Marks waiting to be rebuilt when it closed, or null when that was not read. */
   backlog: number | null;
+  /**
+   * What the batch cost: its whole time, over however many slices, and the
+   * statements of the slice that closed it. What the rebuild's share after it
+   * is measured against (`rebuildAllowance`).
+   */
+  cost: BatchCost;
 }
 
 /**
@@ -1124,6 +1130,7 @@ async function applyHead(
 ): Promise<ApplyCursor | Closed> {
   const { batch } = head;
   const startedMs = meter.elapsedMs;
+  const startedStatements = meter.statements;
   const fresh = carried?.batchId !== batch.batchId;
   const cursor: ApplyCursor =
     carried !== null && !fresh
@@ -1177,7 +1184,7 @@ async function applyHead(
     }
     const backlog = await finishBatch(job, head);
     meter.done();
-    return { applied: true, backlog };
+    return { applied: true, backlog, cost: costOf(cursor, meter, startedMs, startedStatements) };
   } catch (error) {
     const errorCode = permanentCode(error);
     if (errorCode === null) throw error;
@@ -1187,8 +1194,25 @@ async function applyHead(
     await flush(job);
     await failBatch(ctx, deviceId, batch.batchId, errorCode, cursor, deps);
     meter.done();
-    return { applied: false, backlog: null };
+    return {
+      applied: false,
+      backlog: null,
+      cost: costOf(cursor, meter, startedMs, startedStatements),
+    };
   }
+}
+
+/** What a batch that has just closed cost: see `Closed.cost`. */
+function costOf(
+  cursor: ApplyCursor,
+  meter: Meter,
+  startedMs: number,
+  startedStatements: number,
+): BatchCost {
+  return {
+    statements: meter.statements - startedStatements,
+    ms: cursor.ms + (meter.elapsedMs - startedMs),
+  };
 }
 
 function yielded(cursor: ApplyCursor, meter: Meter, startedMs: number): ApplyCursor {
@@ -1302,6 +1326,9 @@ interface SliceTally {
  * applied; and the list cannot be ignored, because every applied batch takes
  * at least the fifth.
  *
+ * The fraction is of the work, measured against the batch just applied, and
+ * not of a slice: see `rebuildAllowance`.
+ *
  * Whatever is taken above the fifth comes out of what the slice has not yet
  * spent (`unspent`, a fraction of its budget): a batch that ends a slice
  * already at its budget is followed by the fifth and no more, as it always
@@ -1318,6 +1345,59 @@ export function rebuildShare(backlog: number, unspent: number): number {
   const fullness = Math.min(1, Math.max(0, backlog) / REBUILD_BACKLOG_FULL);
   const wanted = REBUILD_SHARE_MIN + (REBUILD_SHARE_MAX - REBUILD_SHARE_MIN) * fullness;
   return Math.max(REBUILD_SHARE_MIN, Math.min(wanted, unspent));
+}
+
+/** What applying one batch took, in the measures a slice is budgeted in. */
+export interface BatchCost {
+  /** Statements, as the meter counts them. */
+  statements: number;
+  /** Wall clock, in ms. */
+  ms: number;
+}
+
+/**
+ * The least a share is allowed, whatever the batch before it cost: statements
+ * for two marks, and an eighth of the time the share would have of a whole
+ * slice. A batch that cost nothing (every record already stored) is still
+ * followed by a little rebuilding, and a first unit may always start besides.
+ */
+const SHARE_FLOOR_STATEMENTS = 32;
+const SHARE_FLOOR_DIVISOR = 8;
+
+/**
+ * What the rebuild may spend after one batch.
+ *
+ * `fraction` is the rebuild's share of the WORK, not of a slice: a share of a
+ * fifth means one part rebuilding to four parts applying, so the rebuild after
+ * a batch is allowed a quarter of what that batch cost -- in statements and in
+ * time -- and with a share of a half, as much again as the batch.
+ *
+ * It used to be allowed that fraction of a whole slice after every batch. That
+ * is the same thing when a batch fills a slice, and nothing like it when a
+ * phone sends batches a slice holds five of: each two-second batch was then
+ * followed by up to four seconds of rebuilding (a fifth of the slice's twenty),
+ * and with a list long enough to fill every share the rebuild was taking two
+ * thirds of the runner while the queue stood at its limit. The old allowance is
+ * kept as the ceiling, so a share is never more than it was.
+ */
+export function rebuildAllowance(
+  fraction: number,
+  batch: BatchCost,
+  slice: SliceBudget,
+): SliceBudget {
+  const ratio = fraction / (1 - fraction);
+  const ceiling = {
+    maxQueries: Math.floor(slice.maxQueries * fraction),
+    maxMs: Math.floor(slice.maxMs * fraction),
+  };
+  const floorMs = Math.floor(ceiling.maxMs / SHARE_FLOOR_DIVISOR);
+  return {
+    maxQueries: Math.min(
+      ceiling.maxQueries,
+      Math.max(SHARE_FLOOR_STATEMENTS, Math.ceil(batch.statements * ratio)),
+    ),
+    maxMs: Math.min(ceiling.maxMs, Math.max(floorMs, Math.ceil(batch.ms * ratio))),
+  };
 }
 
 /** What the work of one slice shares between its steps. */
@@ -1354,7 +1434,8 @@ async function shareAfter(run: SliceRun, closed: Closed): Promise<void> {
   // nothing for a share to do, so it is not asked. (With the zone not known
   // the rebuild is run all the same: it is what checks it.)
   if (backlog === 0 && run.tzDigest !== null) return;
-  const part = meter.share(rebuildShare(backlog, meter.unspent));
+  const fraction = rebuildShare(backlog, meter.unspent);
+  const part = meter.part(rebuildAllowance(fraction, closed.cost, meter.allowed));
   await rebuildWithin(run, part);
   meter.absorb(part);
 }
