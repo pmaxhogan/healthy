@@ -161,6 +161,19 @@ beforeAll(async () => {
     throw new Error("the synthetic batch was not accepted whole");
   }
   await settle(device.id);
+  // The upload is stamped with the real clock, and the tools are asked at
+  // `toolNow`: pinned a minute before it, so that how long ago the phone
+  // uploaded does not depend on the time of day this file runs.
+  const uploadedAt = toolNow() - 60;
+  await env.DB.batch([
+    env.DB.prepare("UPDATE devices SET last_upload_at = ? WHERE id = ?").bind(
+      uploadedAt,
+      device.id,
+    ),
+    env.DB.prepare(
+      "UPDATE hc_sync_state SET last_upload_at = ? WHERE device_id = ? AND last_upload_at IS NOT NULL",
+    ).bind(uploadedAt, device.id),
+  ]);
 }, 120_000);
 
 afterEach(async () => {
@@ -385,9 +398,9 @@ describe("a field rule", () => {
   });
 });
 
-/** The real clock an hour past the staleness limit: the upload happened moments ago. */
+/** An hour past the staleness limit, counted from the tools' clock: the upload was a minute before that. */
 function later(): number {
-  return Math.floor(Date.now() / 1000) + HC_STALE_AFTER_SECONDS + 3600;
+  return toolNow() + HC_STALE_AFTER_SECONDS + 3600;
 }
 
 /** Words a client must never be handed about a type the phone has nothing of. */
