@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-08T20:13:25.492Z",
+  "generatedAt": "2026-10-12T19:04:35.926Z",
   "source": "https://open.epic.com/Endpoints/Brands",
   "count": 772,
   "brands": [
@@ -80,7 +80,14 @@
     {
       "id": "57ae07d2-bb17-444c-b1e2-0bca66b7f443",
       "name": "Adventist Health",
-      "fhirBaseUrl": "https://epicproxy.et1438.epichosted.com/apiproxyprd/api/FHIR/R4"
+      "fhirBaseUrl": "https://epicproxy.et1438.epichosted.com/apiproxyprd/api/FHIR/R4",
+      "locations": [
+        "Arroyo Grande, CA",
+        "Visalia, CA",
+        "Angels Camp, CA",
+        "Eagle Rock, CA",
+        "Riverdale, CA"
+      ]
     },
     {
       "id": "c961c1dd-8270-4f45-baf3-071552f2ebae",
@@ -461,8 +468,7 @@
         "Alleghany Health",
         "Camino Health Center",
         "Morehouse Medicine",
-        "Scotland Health Care System",
-        "St. Luke's Hospital"
+        "Scotland Health Care System"
       ]
     },
     {
@@ -903,6 +909,16 @@
       "aliases": [
         "Boulder Medical Center",
         "The Pediatric Center Boulder"
+      ]
+    },
+    {
+      "id": "70baa7c5-26da-4edd-9967-81a84a0ec4a7",
+      "name": "Boys Town",
+      "fhirBaseUrl": "https://epic-fhir.mercy.net/prdfhirstl/api/FHIR/R4",
+      "aliases": [
+        "Mercy",
+        "Metro Imaging",
+        "MTS"
       ]
     },
     {
@@ -1535,7 +1551,14 @@
     {
       "id": "8c458f7c-f076-4cbb-8957-d0977cd18dde",
       "name": "Children's Minnesota",
-      "fhirBaseUrl": "https://epicproxy.et1444.epichosted.com/APIPROXYPRD/HOME/api/FHIR/R4"
+      "fhirBaseUrl": "https://epicproxy.et1444.epichosted.com/APIPROXYPRD/HOME/api/FHIR/R4",
+      "locations": [
+        "SAINT PAUL, MN",
+        "Minnetonka, MN",
+        "LAKEVILLE, MN",
+        "MAPLE GROVE, MN",
+        "HUGO, MN"
+      ]
     },
     {
       "id": "952334e3-5dc7-4e5f-8cb4-071c315a70bc",
@@ -1603,10 +1626,10 @@
       "fhirBaseUrl": "https://epicproxy.et1461.epichosted.com/FHIRProxyPRD/MYCHART/api/FHIR/R4",
       "locations": [
         "Wilmington, DE",
+        "NEWARK, DE",
         "North East, MD",
         "Middltown, DE",
-        "Aston, PA",
-        "New Castle, DE"
+        "Aston, PA"
       ]
     },
     {
@@ -1793,7 +1816,11 @@
       "name": "CommonSpirit Health",
       "fhirBaseUrl": "https://epicproxy.et1482.epichosted.com/APIProxyPRD/api/FHIR/R4",
       "locations": [
-        "SEATTLE, WA"
+        "SEATTLE, WA",
+        "FEDERAL WAY, WA",
+        "SILVERDALE, WA",
+        "LYNNWOOD, WA",
+        "PORT ORCHARD, WA"
       ]
     },
     {
@@ -1991,6 +2018,7 @@
         "Louisiana Orthopaedic Specialists",
         "Madison Ridgeland Medical Clinic",
         "MEA Medical Clinic",
+        "Mississippi Arthritis Clinic",
         "Neighborhood Health Clinic",
         "North Sunflower Medical Center",
         "Our Lady of the Lake LSU",
@@ -2164,10 +2192,11 @@
       "name": "CoxHealth",
       "fhirBaseUrl": "https://epicproxy.et1402.epichosted.com/FHIRProxyPRD/api/FHIR/R4",
       "locations": [
+        "Willard, MO",
+        "Branson, MO",
+        "Monett, MO",
         "OZARK, MO",
-        "ROLLA, MO",
-        "SPRINGFIELD, MO",
-        "BOLIVAR, MO"
+        "Willow Springs, MO"
       ]
     },
     {
@@ -2186,7 +2215,7 @@
     {
       "id": "4c9940a6-f25a-4c08-aa02-c154f45e845a",
       "name": "Dartmouth",
-      "fhirBaseUrl": "https://edhwebportal.hitchcock.org/FHIRProxy/api/FHIR/R4",
+      "fhirBaseUrl": "https://edhwebportal.hitchcock.org/FHIRProxy/MYDH/api/FHIR/R4",
       "locations": [
         "Manchester, NH",
         "LEBANON, NH",
@@ -2271,6 +2300,24 @@
         "White Bluff, TN",
         "Nolensville, TN",
         "DICKSON, TN"
+      ]
+    },
+    {
+      "id": "1b70be43-7cb5-4fe4-b0b9-b1daf6c6d278",
+      "name": "Doctors on Duty",
+      "fhirBaseUrl": "https://epicproxy.et1146.epichosted.com/FHIRProxy/api/FHIR/R4",
+      "locations": [
+        "Salinas, CA",
+        "SALINAS, CA",
+        "SEASIDE, CA",
+        "APTOS, CA",
+        "Monterey, CA"
+      ],
+      "aliases": [
+        "Johnny Blanchard, MD",
+        "Salinas Valley Health",
+        "Salinas Valley Health Affiliates",
+        "Santa Lucia Medical Group"
       ]
     },
     {
@@ -2881,7 +2928,11 @@
       "name": "Great River Health",
       "fhirBaseUrl": "https://epicproxy.et1475.epichosted.com/APIPROXYPRD/api/FHIR/R4",
       "locations": [
-        "NEW LONDON, IA"
+        "NEW LONDON, IA",
+        "FORT MADISON, IA",
+        "WEST BURLINGTON, IA",
+        "WAYLAND, IA",
+        "KEOKUK, IA"
       ]
     },
     {
@@ -2933,7 +2984,14 @@
     {
       "id": "361a35c3-799b-4ec7-972e-2fd50495f1ec",
       "name": "Halifax Hospital Medical Center",
-      "fhirBaseUrl": "https://epicproxy.et1393.epichosted.com/FHIRProxyPRD/api/FHIR/R4"
+      "fhirBaseUrl": "https://epicproxy.et1393.epichosted.com/FHIRProxyPRD/api/FHIR/R4",
+      "locations": [
+        "DAYTONA BEACH, FL",
+        "Daytona Beach Shores, FL",
+        "Bunnell, FL",
+        "Edgewater, FL",
+        "Ormond Beach, FL"
+      ]
     },
     {
       "id": "dea336c4-3ceb-4315-b30c-cf8a6b93b34b",
@@ -3136,7 +3194,7 @@
     {
       "id": "e533b051-92f2-4b49-946b-22b8b46464e3",
       "name": "Henry Ford Health",
-      "fhirBaseUrl": "https://fhir.hfhs.org/fhirproxy/api/FHIR/R4",
+      "fhirBaseUrl": "https://fhir.hfhs.org/tesseractproxy/api/FHIR/R4",
       "locations": [
         "DETROIT, MI",
         "ST CLAIR SHORES, MI",
@@ -3377,7 +3435,14 @@
     {
       "id": "83a96e2d-04fe-4212-b5c1-371582a20303",
       "name": "InspiraHealth",
-      "fhirBaseUrl": "https://epicproxy.et1473.epichosted.com/APIProxyPRD/api/FHIR/R4"
+      "fhirBaseUrl": "https://epicproxy.et1473.epichosted.com/APIProxyPRD/api/FHIR/R4",
+      "locations": [
+        "Vineland, NJ",
+        "Deptford, NJ",
+        "Mullica Hill, NJ",
+        "Pennsville, NJ",
+        "Williamstown, NJ"
+      ]
     },
     {
       "id": "9daddc9c-1ff2-4c20-897b-a953f51545e0",
@@ -4204,16 +4269,6 @@
       ]
     },
     {
-      "id": "9fcce44d-11d3-4ded-a8e2-cc3df115ff80",
-      "name": "Mercy",
-      "fhirBaseUrl": "https://epic-fhir.mercy.net/prdfhirstl/api/FHIR/R4",
-      "aliases": [
-        "Boys Town",
-        "Metro Imaging",
-        "MTS"
-      ]
-    },
-    {
       "id": "e33f24df-b2eb-4494-bad7-be965c75a01f",
       "name": "Mercy Care",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MYCHARTSJMC/api/FHIR/R4",
@@ -4496,7 +4551,11 @@
       "name": "Mount Nittany Health",
       "fhirBaseUrl": "https://arr.mountnittany.org/FHIR/api/FHIR/R4",
       "locations": [
-        "Bellefonte, PA"
+        "State College, PA",
+        "Spring Mills, PA",
+        "Philipsburg, PA",
+        "Altoona, PA",
+        "Huntingdon, PA"
       ]
     },
     {
@@ -5684,6 +5743,21 @@
       ]
     },
     {
+      "id": "144e4611-cdcf-408f-aeb7-677538b26cc5",
+      "name": "ProHealth Physicians",
+      "fhirBaseUrl": "https://fhirprd.reliantmedicalgroup.org/FHIRPRD/api/FHIR/R4",
+      "locations": [
+        "Farmington, CT",
+        "Rocky Hill, CT",
+        "Danbury, CT",
+        "Glastonbury, CT",
+        "South Windsor, CT"
+      ],
+      "aliases": [
+        "Reliant Medical Group"
+      ]
+    },
+    {
       "id": "3e96366e-e212-45b3-b827-d5c97bd540af",
       "name": "ProMedica",
       "fhirBaseUrl": "https://fhir.promedica.org/FHIR/MYCHART/api/FHIR/R4",
@@ -5890,21 +5964,6 @@
         "Brookville, IN",
         "CAMBRIDGE CITY, IN",
         "RICHMOND, IN"
-      ]
-    },
-    {
-      "id": "9052b2d6-fdef-437e-af82-d54d0316c6f0",
-      "name": "Reliant Medical Group",
-      "fhirBaseUrl": "https://fhirprd.reliantmedicalgroup.org/FHIRPRD/api/FHIR/R4",
-      "locations": [
-        "Worcester, MA",
-        "Webster, MA",
-        "WESTBOROUGH, MA",
-        "WORCESTER, MA",
-        "LEOMINSTER, MA"
-      ],
-      "aliases": [
-        "ProHealth Physicians"
       ]
     },
     {
@@ -6169,24 +6228,6 @@
       ]
     },
     {
-      "id": "baa981d3-a8f6-4395-9b19-0849f1d3d807",
-      "name": "Salinas Valley Health",
-      "fhirBaseUrl": "https://epicproxy.et1146.epichosted.com/FHIRProxy/api/FHIR/R4",
-      "locations": [
-        "SALINAS, CA",
-        "GONZALES, CA",
-        "Salinas, CA",
-        "MONTEREY, CA",
-        "SEASIDE, CA"
-      ],
-      "aliases": [
-        "Doctors on Duty",
-        "Johnny Blanchard, MD",
-        "Salinas Valley Health Affiliates",
-        "Santa Lucia Medical Group"
-      ]
-    },
-    {
       "id": "f64379ee-5554-466f-ae39-c982d7bb648f",
       "name": "Samaritan Health Services",
       "fhirBaseUrl": "https://fhir.samhealth.org/fhir-arr/api/FHIR/R4",
@@ -6324,7 +6365,14 @@
     {
       "id": "ff69eebd-2fa5-42df-98e4-ede01c791227",
       "name": "Sarasota Memorial Health MyChart",
-      "fhirBaseUrl": "https://epicproxy.et1465.epichosted.com/APIProxyPRD/HOME/api/FHIR/R4"
+      "fhirBaseUrl": "https://epicproxy.et1465.epichosted.com/APIProxyPRD/HOME/api/FHIR/R4",
+      "locations": [
+        "Sarasota, FL",
+        "Lakewood Ranch, FL",
+        "North Venice, FL",
+        "Bradenton, FL",
+        "Venice, FL"
+      ]
     },
     {
       "id": "68c6c469-0873-42c6-ab4c-974a4c525591",
@@ -7412,7 +7460,14 @@
     {
       "id": "33a3297c-7a4d-4a5c-9ee4-62c261e181ec",
       "name": "UAB Medicine",
-      "fhirBaseUrl": "https://epicproxy.et1460.epichosted.com/APIPROXYPRD/api/FHIR/R4"
+      "fhirBaseUrl": "https://epicproxy.et1460.epichosted.com/APIPROXYPRD/api/FHIR/R4",
+      "locations": [
+        "TUSCALOOSA, AL",
+        "CHATTANOOGA, AL",
+        "BIRMINGHAM, AL",
+        "LOCUST FORK, AL",
+        "DEMOPOLIS, AL"
+      ]
     },
     {
       "id": "50361b98-37a2-4ab7-a024-5e07c23e150b",
@@ -7602,10 +7657,10 @@
       "fhirBaseUrl": "https://epicproxy.et1442.epichosted.com/APIProxyPRD/api/FHIR/R4",
       "locations": [
         "Lubbock, TX",
+        "LUBBOCK, TX",
         "Lubbock",
-        "AMARILLO, TX",
-        "SEMINOLE, TX",
-        "Lamesa, TX"
+        "Wolforth, TX",
+        "Slaton, TX"
       ]
     },
     {
