@@ -32,7 +32,9 @@
  *      than one may carry is refused whole so the phone splits it.
  *   6. Queue        -- the body is sealed into `hc_ingest_queue` in one
  *      transaction, and only then is the batch acknowledged. A batch id seen
- *      before is acknowledged again only if its content is the same.
+ *      before is acknowledged again only if its content is the same. The log
+ *      row written with it carries which sync run the batch says it is part
+ *      of, so a run can be seen the moment it uploads and not once applied.
  *
  * It does not apply the batch. A month of backfill touches hundreds of stored
  * rows, which does not fit one request's D1 query budget; the alarm-driven
@@ -44,8 +46,8 @@
  * push data to its own device and can do nothing else: not read the store, not
  * touch another device, not reach the admin API or the MCP.
  *
- * Logging: this app's own device id, counts, sizes and stable error codes.
- * Never the token, never a record id, never an origin app's package name.
+ * Logging: this app's own device id, counts, sizes, stable error codes and
+ * the code for what started the sync run. Never the token, never a record id, never an origin app's package name.
  */
 
 import { Hono } from "hono";
@@ -53,7 +55,7 @@ import { Hono } from "hono";
 import { reposFor } from "../db/index.ts";
 import { bearerDeviceToken, verifyDeviceToken } from "../hc/device-token.ts";
 import { kickIngestRunner } from "../hc/kick.ts";
-import { exceedsRecordLimit, parseBatch } from "../hc/wire.ts";
+import { exceedsRecordLimit, parseBatch, runStampOf } from "../hc/wire.ts";
 import { makeLogger } from "../lib/log.ts";
 
 import { MAX_COMPRESSED_BYTES, MAX_RAW_BYTES, gunzipCapped, readCapped } from "./body.ts";
@@ -246,6 +248,7 @@ ingestRouter.post(INGEST_PATH, async (c) => {
   const { parsed, compressed, rawBytes } = read;
 
   // --- 6. Queue, then acknowledge --------------------------------------------
+  const run = runStampOf(parsed.syncState);
   const { duplicate, conflict } = await repos.hcIngestQueue.enqueue({
     deviceId,
     batchId: parsed.batchId,
@@ -255,6 +258,7 @@ ingestRouter.post(INGEST_PATH, async (c) => {
     deletes: parsed.deletes.length,
     rejected: parsed.rejected.length,
     phoneTime: parsed.phoneTime,
+    run,
   });
   if (conflict) {
     // The same batch id, different content. Acknowledging it would tell the
@@ -276,6 +280,7 @@ ingestRouter.post(INGEST_PATH, async (c) => {
     rejected: parsed.rejected.length,
     bodyBytes: compressed.length,
     rawBytes,
+    runTrigger: run.trigger,
   });
   const body: IngestResponse = {
     accepted: parsed.upserts.length,

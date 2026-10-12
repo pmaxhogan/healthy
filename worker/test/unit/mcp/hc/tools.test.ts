@@ -1517,7 +1517,35 @@ describe("hc_coverage and hc_sync_status", () => {
       rollupsPending: 0,
       recentBatches: 2,
       recentFailures: [{ receivedAt: zoned(NOW_MS - 4_000_000), errorCode: "apply_failed" }],
+      // The newer batch says which run it was part of; the older one is from
+      // an app that did not, and is a run by itself with nothing known of it.
+      recentUploads: [
+        {
+          startedAt: zoned(NOW_MS - 605_000),
+          receivedAt: zoned(NOW_MS - 600_000),
+          trigger: "periodic",
+          batches: 1,
+          upserts: 10,
+          deletes: 0,
+          closed: false,
+          ended: null,
+        },
+        {
+          startedAt: null,
+          receivedAt: zoned(NOW_MS - 4_000_000),
+          trigger: null,
+          batches: 1,
+          upserts: 1,
+          deletes: 0,
+          closed: null,
+          ended: null,
+        },
+      ],
     });
+    const newest = await call("hc_sync_status", { recent_uploads: 1 });
+    expect(newest.items[0]?.recentUploads).toHaveLength(1);
+    const none = await call("hc_sync_status", { recent_uploads: 0 });
+    expect(none.isError).toBe(true);
     expect(answer.items.find((item) => item.type === "Steps")).toMatchObject({
       kind: "type_sync",
       resourceType: "hc:Steps",

@@ -20,6 +20,7 @@ import { blinderFor } from "../blind.ts";
 import { all, batch, one, run } from "../client.ts";
 import { aadFor, openBytes, sealBytes } from "../crypto.ts";
 
+import type { BatchRunStamp } from "../../hc/wire.ts";
 import type { Ctx } from "../client.ts";
 
 /**
@@ -40,6 +41,11 @@ export interface EnqueueInput {
   rejected: number;
   /** The phone's clock when it built the batch, epoch ms, as it claimed. */
   phoneTime: number | null;
+  /**
+   * The sync run the batch says it belongs to, and how the one before it
+   * ended. Omitted, like a batch that says neither: every column NULL.
+   */
+  run?: BatchRunStamp | undefined;
 }
 
 export interface EnqueueResult {
@@ -190,8 +196,9 @@ export function makeHcIngestQueueRepo(ctx: Ctx) {
         ctx.db
           .prepare(
             `INSERT INTO hc_ingest_log
-               (device_id, batch_id, body_digest, received_at, status, upserts, deletes, rejected, body_bytes, raw_bytes, phone_time)
-             VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
+               (device_id, batch_id, body_digest, received_at, status, upserts, deletes, rejected, body_bytes, raw_bytes, phone_time,
+                run_trigger, run_started_ms, prev_run_started_ms, prev_run_end)
+             VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .bind(
             input.deviceId,
@@ -204,6 +211,10 @@ export function makeHcIngestQueueRepo(ctx: Ctx) {
             input.body.length,
             input.rawBytes,
             input.phoneTime,
+            input.run?.trigger ?? null,
+            input.run?.startedMs ?? null,
+            input.run?.previousStartedMs ?? null,
+            input.run?.previousEnd ?? null,
           ),
       ];
       for (let part = 0; part < parts; part++) {

@@ -109,6 +109,7 @@ export const JQ_EXAMPLES = {
   ],
   hc_sync_status: [
     '.[] | select(.kind == "device") | {healthSystem, status, lastUploadAt, hoursSinceUpload, phoneBacklog, queuedBatches, recentFailures}',
+    '.[] | select(.kind == "device") | .recentUploads[] | select(.closed == false or .ended == "interrupted") | {startedAt, trigger, batches, ended}',
     '.[] | select(.kind == "type_sync") | {type, recordCount, backlog, backfillComplete, backfillOldestAt}',
   ],
   hc_records: [

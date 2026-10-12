@@ -121,6 +121,8 @@ const LOG: DeviceIngestLogDto[] = [
     bodyBytes: 2048,
     rawBytes: 20_000,
     applyMs: 412,
+    runTrigger: "periodic",
+    runStartedAt: "2026-09-21T11:49:58.000Z",
   },
   {
     receivedAt: "2026-09-21T11:35:00.000Z",
@@ -136,6 +138,8 @@ const LOG: DeviceIngestLogDto[] = [
     bodyBytes: 300,
     rawBytes: 900,
     applyMs: null,
+    runTrigger: null,
+    runStartedAt: null,
   },
 ];
 

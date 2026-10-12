@@ -327,6 +327,8 @@ function makeHcReads(repos: Repos, cache: () => CallCache): HcReads {
     backlog: (deviceId) => once("backlog", deviceId, () => storeBacklog(ctx, deviceId)),
     ingestLog: (deviceId, limit) =>
       once("ingestLog", [deviceId, limit], () => repos.hcStatus.ingestLog(deviceId, limit)),
+    recentUploads: (deviceId, limit) =>
+      once("recentUploads", [deviceId, limit], () => repos.hcStatus.recentRuns(deviceId, limit)),
     origins: (deviceId, type) =>
       once("origins", [deviceId, type], async () => {
         const refs = await listOrigins(ctx, deviceId, type);

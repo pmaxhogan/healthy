@@ -65,9 +65,14 @@ body is the only copy of those records. These hold for `worker/src/hc/**`,
 - **A record id comes back.** Health Connect gives a record rewritten under the
   same client record id the id it had, and the app's own ids for the platform's
   hourly totals (`agg:<Metric>:<hour>`) are deleted and upserted as an hour
-  empties and fills. A tombstone in `hc_record_index` carries when the deleting
-  batch ARRIVED (`received_at`), and only refuses an upsert from a batch that
-  arrived before it; never compare it with a record's `lastModified`.
+  empties and fills. A tombstone in `hc_record_index` carries WHICH batch
+  deleted the id, as its place in the order batches arrived (`deleted_seq`, the
+  batch's `hc_ingest_queue.seq`, which a parked batch keeps when it is queued
+  again), and only refuses an upsert from a batch that arrived no later: a
+  lower number, or the same batch. `deleted_at` (that batch's `received_at`, in
+  whole seconds) decides only for a tombstone written before the number was
+  kept, where a tie in one second goes to the upsert. Never compare either with
+  a record's `lastModified`.
 - **A stored rollup holds every record whole, where it starts.** Dividing a
   record among the buckets it spans is done when an answer is made
   (`worker/src/mcp/hc/aggregate.ts`), from the `crossing` list a rollup carries.

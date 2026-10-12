@@ -898,6 +898,14 @@ export interface DeviceIngestLogDto {
   bodyBytes: number;
   rawBytes: number;
   applyMs: number | null;
+  /**
+   * What started the sync run the batch was uploaded in: a stable code
+   * (`periodic`, `alarm`, `manual`, `app_open`, `backfill`, ...). Null from a
+   * build of the app that does not say.
+   */
+  runTrigger: string | null;
+  /** When that run began, by the phone's clock: the same for every batch of one run. */
+  runStartedAt: string | null;
 }
 
 /** Which batches `GET /api/phone/devices/:id/ingest-log?state=` lists. */

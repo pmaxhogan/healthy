@@ -211,8 +211,18 @@ async function snapshot(deviceId: string): Promise<Record<string, unknown>> {
          FROM hc_chunks WHERE device_id = ? ORDER BY record_type, origin_hash, hour_utc, part`,
       deviceId,
     ),
+    // A tombstone's `deleted_seq` is the queue's sequence number of the batch
+    // that deleted it, and every run queues its batches afresh under new
+    // numbers. What two runs must agree on is which batch that was, so the
+    // number is read as its rank among the device's: first deleting batch,
+    // second, and so on.
     index: await rowsOf(
-      "SELECT * FROM hc_record_index WHERE device_id = ? ORDER BY record_id_blind",
+      `SELECT record_id_blind, device_id, record_type, origin_hash, hour_utc, deleted_at,
+              (SELECT count(DISTINCT other.deleted_seq) FROM hc_record_index other
+                WHERE other.device_id = i.device_id AND other.deleted_seq <= i.deleted_seq
+              ) AS deleted_seq_rank,
+              deleted_at IS NOT NULL AND deleted_seq IS NULL AS unnumbered
+         FROM hc_record_index i WHERE device_id = ? ORDER BY record_id_blind`,
       deviceId,
     ),
     hours: await opened(deviceId, "hc_rollup_hour", "record_type, origin_hash, hour_utc", (row) => [

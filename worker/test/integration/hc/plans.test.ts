@@ -166,7 +166,7 @@ describe("the record index", () => {
     const ids = JSON.stringify([one?.record_id_blind ?? "", "~not-in-the-index"]);
 
     const lookup = await plan(LOOKUP_INDEX_SQL, ids, deviceId);
-    const tombstone = await plan(TOMBSTONE_SQL, 0, ids, deviceId);
+    const tombstone = await plan(TOMBSTONE_SQL, 0, 0, ids, deviceId);
 
     for (const detail of [lookup, tombstone]) {
       expect(detail.join("\n")).toMatch(

@@ -1686,6 +1686,10 @@ const HC_DEVICE_ROW = {
   parkedBatches: "integer",
   recentBatches: "integer",
   recentFailures: ["object?[]", "Failed uploads among the recent ones"],
+  recentUploads: [
+    "object?[]",
+    "The newest sync runs: when, what started each, what it sent, whether it finished",
+  ],
 } as const;
 
 const HC_TYPE_SYNC_ROW = {

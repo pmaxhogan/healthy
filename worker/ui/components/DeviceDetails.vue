@@ -397,6 +397,7 @@ function showMore(): void {
               <tr>
                 <th scope="col">Received</th>
                 <th scope="col">Status</th>
+                <th scope="col">Trigger</th>
                 <th scope="col" class="num">Upserts</th>
                 <th scope="col" class="num">Deletes</th>
                 <th scope="col" class="num">Rejected</th>
@@ -419,6 +420,7 @@ function showMore(): void {
                 <td class="nowrap" :class="{ 'danger-text': batch.status === 'failed' }">
                   {{ batch.status }}
                 </td>
+                <td class="nowrap">{{ batch.runTrigger ?? "—" }}</td>
                 <td class="num">{{ count(batch.upserts) }}</td>
                 <td class="num">{{ count(batch.deletes) }}</td>
                 <td class="num">{{ count(batch.rejected) }}</td>

@@ -495,7 +495,7 @@ source of their own, beside the health systems and never merged into them:
 | Tool                | What it answers                                                                                                                                                           |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `hc_coverage`       | Per record type that has data: `availability`, first and last record, count, typical cadence, the apps that wrote it. Call it first.                                      |
-| `hc_sync_status`    | Per phone: last upload, backlog, backfill, battery-optimisation exemption, queue depth, recent failed uploads. Then one row per type that has data.                       |
+| `hc_sync_status`    | Per phone: last upload, backlog, backfill, battery-optimisation exemption, queue depth, recent failed uploads, the newest sync runs. Then one row per type that has data. |
 | `hc_records`        | Raw records of one `type` in a range, exactly as stored.                                                                                                                  |
 | `hc_aggregate`      | One `type` in calendar buckets (`hour`, `day`, `week`, `month`, `year`, `<N>min`), duplicates between apps handled.                                                       |
 | `hr_series`         | Heart rate as a series: `resolution` `raw`, `5s`, `1min` (default), `5min`, `1h`.                                                                                         |
@@ -651,6 +651,40 @@ they are queued again, and `hc_sync_status` reports the count as
 session summaries could not be rebuilt and are set aside; a figure answered
 from them may be missing or out of date. That is not "pending" (nothing is
 working on them) and does not stop the day rollups being used.
+
+**Sync runs: `recentUploads`.** The phone syncs in runs: something starts one,
+it uploads a batch per page of what changed, and it ends with a closing batch
+that carries only its state report. `hc_sync_status` lists the newest runs on
+the phone's row, newest first, `recent_uploads` of them (default 20, no
+maximum), each `{ startedAt, receivedAt, trigger, batches, upserts, deletes,
+closed, ended }`. A run is listed even when it found nothing new and sent only
+its closing batch, so this is the record of when the phone actually synced,
+which `lastUploadAt` alone cannot show for a quiet stretch.
+
+- `startedAt` is when the run began by the phone's clock; `receivedAt` is when
+  its last batch arrived at the server. Both are written in the answer's zone.
+- `batches`, `upserts` and `deletes` are what the run sent: every batch of it
+  is counted, however many there were.
+- `trigger` is what started it: `periodic` (the 15-minute background job),
+  `alarm` (the watchdog alarm, set because nothing had run), `manual` (the
+  owner pressed Sync now, or an automation asked), `app_open` (the app was
+  opened), `backfill` (history upload). A newer build of the app may send a
+  code that is not in this list; it is passed on as given. A run that was
+  `periodic` or `alarm` happened with nobody touching the phone.
+- `closed` is true when the run's batches include its closing report (a batch
+  with no upserts, deletes or rejected records) and false when they do not:
+  the run stopped before it could report.
+- `ended` is what a later run said of this one: `ok`, `interrupted`, or the
+  error code it failed with (`network`, ...), worded like `lastPhoneError`. A
+  run that is cut off cannot say so itself, so each run reports how the one
+  before it ended. Null means nothing has said yet (the newest run always), or
+  the app is too old to say.
+
+`closed: false` or `ended: "interrupted"` means the run was cut off part way.
+Nothing is lost by that: the record types it had not reached arrive with the
+next run, about fifteen minutes later. An upload from a build of the app that
+does not report runs is listed as a run of one batch, with `startedAt`,
+`trigger` and `closed` null.
 
 **Whose numbers: `origin_mode`.** Several apps write the same thing to one
 Health Connect store, and adding everything up counts a walk twice.
@@ -920,10 +954,13 @@ tool rule only removes one way of asking.
 `records`, `phoneBacklog` and `typesWithData` on the phone's row) cover only the
 types the policy lets the call see; a denied type has no row and is in no
 count. The queue, rollup and upload figures on the phone's row (`backlog`,
-`lastUploadAt`, `recentFailures`) are bookkeeping for the whole phone, are
-not per type, and are shown whenever the phone is.
+`lastUploadAt`, `recentFailures`, `recentUploads`) are bookkeeping for the
+whole phone, are not per type, and are shown whenever the phone is: the
+`upserts` and `deletes` of a sync run count every record it sent, of every
+type.
 
-The error codes in `lastPhoneError` and `recentFailures` are pipeline health,
+The error codes in `lastPhoneError`, `recentFailures` and a run's `ended` are
+pipeline health,
 and nothing else. They are the stable codes the companion app and the server
 use (`network`, `hc_rate_limited`, `backlogged`, `unsupported_media_type`,
 `apply_gave_up`, ...), with one change made for MCP clients: what the phone

@@ -11,6 +11,7 @@ import { makeCtx } from "../../../src/db/client.ts";
 import { EMPTY_RUNNER_STATE, runHcSlice } from "../../../src/hc/apply.ts";
 import { gzipText } from "../../../src/hc/codec.ts";
 import { HOUR_MS } from "../../../src/hc/store/keys.ts";
+import { runStampOf } from "../../../src/hc/wire.ts";
 import { testCtx as dbTestCtx } from "../db/helpers.ts";
 
 import type { Ctx } from "../../../src/db/client.ts";
@@ -178,6 +179,7 @@ export async function enqueue(repos: Repos, deviceId: string, batch: TestBatch):
     deletes: deletes.length,
     rejected: 0,
     phoneTime: T,
+    run: runStampOf(batch.syncState),
   });
   if (result.duplicate) throw new Error("test batch id reused");
 }

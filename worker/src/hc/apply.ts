@@ -97,6 +97,7 @@ import {
   indexUpsertStatement,
   lookupIndex,
   restampStatement,
+  restamps,
   revivesTombstone,
   tombstoneStatement,
   unknownTombstoneStatement,
@@ -112,7 +113,7 @@ import type { StoredChunk } from "./store/chunks.ts";
 import type { BacklogRow, DirtyMark } from "./store/dirty.ts";
 import type { ChunkKey, UpsertGroup } from "./store/keys.ts";
 import type { SliceMemo } from "./store/rebuild.ts";
-import type { IndexEntry } from "./store/record-index.ts";
+import type { BatchArrival, IndexEntry } from "./store/record-index.ts";
 import type { HcRecord, ParsedBatch } from "./wire.ts";
 import type { QueuedBatch } from "../db/repos/hc-ingest-queue.ts";
 import type { SyncDeps } from "../sync/deps.ts";
@@ -298,12 +299,12 @@ interface BatchRun {
   /** The alert channel's seam: see `runHcSlice`. */
   deps: SyncDeps | undefined;
   /**
-   * When the batch arrived (the queue row's `received_at`, unix seconds), and
-   * the ids it deletes: what its tombstones are stamped with, and what decides
-   * whether one of its upserts brings a tombstoned id back
-   * (worker/src/hc/store/record-index.ts).
+   * Where the batch stands in the order of arrival (its queue sequence number,
+   * and the queue row's `received_at`, unix seconds), and the ids it deletes:
+   * what its tombstones are stamped with, and what decides whether one of its
+   * upserts brings a tombstoned id back (worker/src/hc/store/record-index.ts).
    */
-  arrival: { receivedAt: number; deletes: (id: string) => boolean };
+  arrival: BatchArrival;
   /**
    * The `day` marks this batch is known to have written, by key: `Head.marked`.
    * A day is two dozen chunks, and each of them would write the same mark.
@@ -699,7 +700,7 @@ async function deleteSlot(
     const rewrite = await rewriteChunk(job, slot.key, stored.origin, stored, records, removed);
     statements.push(...rewrite);
   }
-  statements.push(tombstoneStatement(ctx, deviceId, slot.blinds, job.arrival.receivedAt));
+  statements.push(tombstoneStatement(ctx, deviceId, slot.blinds, job.arrival));
   // Noted at once, durable or not: a type noted too often is only recounted.
   noteShrunk(cursor, slot.key.type);
   const removed = slot.blinds.length;
@@ -732,18 +733,19 @@ async function deletePage(job: BatchRun, page: readonly string[]): Promise<boole
 
   const unknown = every.filter((blind) => !index.has(blind));
   if (unknown.length > 0) {
-    const statements = [unknownTombstoneStatement(ctx, deviceId, unknown, job.arrival.receivedAt)];
+    const statements = [unknownTombstoneStatement(ctx, deviceId, unknown, job.arrival)];
     await defer(job, { statements, chunks: [], settle: countNothing });
   }
   // Deleted before, and deleted again by this batch: the tombstone takes this
-  // batch's arrival, so that only a still later upsert brings the id back.
-  const { receivedAt } = job.arrival;
+  // batch's place in the order, so that only a still later upsert brings the
+  // id back. Not when this batch is the earlier of the two, or the same one
+  // replayed.
   const again = every.filter((blind) => {
     const entry = index.get(blind);
-    return entry?.deleted === true && (entry.deletedAt ?? receivedAt) < receivedAt;
+    return entry !== undefined && restamps(entry, job.arrival);
   });
   if (again.length > 0) {
-    const statements = [restampStatement(ctx, deviceId, again, receivedAt)];
+    const statements = [restampStatement(ctx, deviceId, again, job.arrival)];
     await defer(job, { statements, chunks: [], settle: countNothing });
   }
 
@@ -1273,6 +1275,7 @@ async function applyHead(
     startedMs,
     deps,
     arrival: {
+      seq: head.queued.seq,
       receivedAt: head.queued.receivedAt,
       deletes: (id) => head.deleted.has(id),
     },

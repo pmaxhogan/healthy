@@ -765,6 +765,35 @@ describe("GET /api/phone/devices/:id/ingest-log", () => {
       bodyBytes: expect.any(Number),
       rawBytes: expect.any(Number),
       applyMs: 12,
+      // These batches did not say which sync run they were part of.
+      runTrigger: null,
+      runStartedAt: null,
+    });
+  });
+
+  it("says what started the sync run a batch was uploaded in", async () => {
+    const { device } = await pair();
+    const startedMs = Date.UTC(2026, 0, 10, 12);
+    await testRepos().hcIngestQueue.enqueue({
+      deviceId: device.id,
+      batchId: "batch-run-0001",
+      body: new Uint8Array([1, 2, 3]),
+      rawBytes: 3,
+      upserts: 0,
+      deletes: 0,
+      rejected: 0,
+      phoneTime: startedMs,
+      run: { trigger: "alarm", startedMs, previousStartedMs: null, previousEnd: null },
+    });
+
+    const rows = await json<DeviceIngestLogDto[]>(
+      await owner().get(`/api/phone/devices/${device.id}/ingest-log`),
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      runTrigger: "alarm",
+      runStartedAt: "2026-01-10T12:00:00.000Z",
     });
   });
 

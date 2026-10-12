@@ -14,6 +14,7 @@
 
 import type { IngestLogRow, SyncStateRow } from "../../hc/device.ts";
 import type { BucketRollup, ExerciseSummary, HrMinute, SleepNight } from "../../hc/rollup/types.ts";
+import type { UploadRun } from "../../hc/upload-runs.ts";
 import type { HcRecord, HcSyncState } from "../../hc/wire.ts";
 
 // The reader shapes are declared here, structurally, and not imported from
@@ -121,6 +122,11 @@ export interface HcReads {
   backlog(deviceId: string): Promise<StoreBacklog>;
   /** The newest `limit` batches, newest first. Counts and stable codes only. */
   ingestLog(deviceId: string, limit: number): Promise<IngestLogRow[]>;
+  /**
+   * The newest `limit` sync runs the phone uploaded in, newest first, each
+   * whole: every batch of it counted, however many that is.
+   */
+  recentUploads(deviceId: string, limit: number): Promise<UploadRun[]>;
   /** Package names of the apps that have written records of one type. */
   origins(deviceId: string, type: string): Promise<string[]>;
   /** Raw records with anything in the window, by start time. */

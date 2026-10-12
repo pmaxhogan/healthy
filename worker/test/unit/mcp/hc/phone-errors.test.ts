@@ -158,4 +158,35 @@ describe("hc_sync_status error codes", () => {
     ]);
     expect(text).not.toMatch(ACCESS_WORDING);
   });
+
+  it("holds how a sync run ended, and what started it, to the same rule", async () => {
+    const [template] = world.state.hc.ingestLog.get(DEVICE_ID) ?? [];
+    if (template === undefined) throw new Error("the fake phone has no uploads");
+    const run = (index: number, trigger: string, previousEnd: string | null): typeof template => ({
+      ...template,
+      receivedAt: template.receivedAt + index,
+      runTrigger: trigger,
+      runStartedMs: NOW_MS + index,
+      prevRunStartedMs: previousEnd === null ? null : NOW_MS + index - 1,
+      prevRunEnd: previousEnd,
+    });
+    // Newest first; each says how the one below it ended.
+    world.state.hc.ingestLog.set(DEVICE_ID, [
+      run(4, "periodic", "no_permissions"),
+      run(3, "permission_granted", "permission_denied"),
+      run(2, "manual", "network"),
+      run(1, "alarm", null),
+    ]);
+
+    const { phone, text } = await status();
+    const runs = phone.recentUploads as { trigger: string | null; ended: string | null }[];
+
+    expect(runs.map((entry) => [entry.trigger, entry.ended])).toEqual([
+      ["periodic", null],
+      [null, PHONE_NOT_READING],
+      ["manual", null],
+      ["alarm", "network"],
+    ]);
+    expect(text).not.toMatch(ACCESS_WORDING);
+  });
 });

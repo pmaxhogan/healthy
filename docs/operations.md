@@ -268,8 +268,13 @@ applied and the median apply time of the last twenty. Under it is the ingest
 log, newest first, fifty rows at a time (**Show more** goes to 200, then 500;
 the caption says how many there are in all): when a batch arrived, its
 status (`queued`, `applying`, `applied` or `failed`; a `failed` row is a parked
-batch), counts of upserts, deletes and rejected records, size, how long applying
-took, and an error code. **Finished**, **Waiting** and **All** choose which
+batch), what started the sync run it was uploaded in (_Trigger_: `periodic` for
+the 15-minute background job, `alarm` for the watchdog alarm that fires when
+nothing has run, `manual` for Sync now or an automation, `app_open`, `backfill`;
+a dash for a build of the app that does not say), counts of upserts, deletes and
+rejected records, size, how long applying took, and an error code. The MCP tool
+`hc_sync_status` groups the same rows into runs (`recentUploads`), with whether
+each one finished: see [mcp.md](mcp.md). **Finished**, **Waiting** and **All** choose which
 batches are listed; during a backfill the newest are all waiting, so the list
 starts on the finished ones. All of it is counts, instants and stable codes; nothing on this
 page is a health value. The card's other buttons are **Rename**, **Rotate token**,

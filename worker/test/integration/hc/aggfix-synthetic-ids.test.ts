@@ -15,8 +15,13 @@
 // delete -- from a batch that arrived before the deleting batch did -- and
 // nothing else.
 //
+// "Arrived before" is the queue's sequence number, which two batches in one
+// second still differ by; only a tombstone older than that column is compared
+// by the second it arrived in.
+//
 // Every record is synthetic: see helpers.ts.
 
+import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { makeRepos } from "../../../src/db/index.ts";
@@ -213,18 +218,19 @@ describe("a record deleted and written again under the same id", () => {
     "stays deleted when the upsert is from a batch that arrived before the delete",
     async () => {
       const deviceId = await seedDevice(repos);
-      // The delete arrives, and is applied.
-      time.advance(600);
-      await enqueue(repos, deviceId, { batchId: "batch-0002", deletes: ["a"] });
-      await drain(ctx, deviceId);
-      // A batch that arrived ten minutes earlier is only applied now: one that
-      // had been set aside and was queued again.
-      time.advance(-600);
+      // The upsert arrives first, and is set aside before it is applied.
       await enqueue(repos, deviceId, {
         batchId: "batch-0001",
         upserts: [steps("a", T, 10, { lastModified: 9_000_000 })],
       });
-      time.advance(1200);
+      await repos.hcIngestQueue.park(deviceId, "batch-0001");
+      // The delete arrives ten minutes later, and is applied.
+      time.advance(600);
+      await enqueue(repos, deviceId, { batchId: "batch-0002", deletes: ["a"] });
+      await drain(ctx, deviceId);
+      // Only now is the older batch queued again.
+      time.advance(600);
+      await repos.hcIngestQueue.unpark(deviceId);
       await drain(ctx, deviceId);
 
       expect(await held(deviceId)).toStrictEqual([]);
@@ -242,19 +248,230 @@ describe("a record deleted and written again under the same id", () => {
       // An upsert arrives and is held back; a second delete arrives after it
       // and is applied first.
       time.advance(100);
-      const heldBackAt = time.now();
+      await enqueue(repos, deviceId, { batchId: "batch-0002", upserts: [steps("a", T, 10)] });
+      await repos.hcIngestQueue.park(deviceId, "batch-0002");
       time.advance(100);
       await enqueue(repos, deviceId, { batchId: "batch-0003", deletes: ["a"] });
       await drain(ctx, deviceId);
-      time.advance(heldBackAt - time.now());
-      await enqueue(repos, deviceId, { batchId: "batch-0002", upserts: [steps("a", T, 10)] });
       time.advance(1000);
+      await repos.hcIngestQueue.unpark(deviceId);
       await drain(ctx, deviceId);
       expect(await held(deviceId)).toStrictEqual([]);
 
       await enqueue(repos, deviceId, { batchId: "batch-0004", upserts: [steps("a", T, 13)] });
       await drain(ctx, deviceId);
       expect(await held(deviceId)).toStrictEqual(["a:13"]);
+    },
+    TIMEOUT,
+  );
+});
+
+/** The tombstone of every deleted id a device has, as the index holds it. */
+async function tombstones(
+  deviceId: string,
+): Promise<{ deleted_at: number | null; deleted_seq: number | null }[]> {
+  const { results } = await env.DB.prepare(
+    `SELECT deleted_at, deleted_seq FROM hc_record_index
+      WHERE device_id = ? AND deleted_at IS NOT NULL`,
+  )
+    .bind(deviceId)
+    .all<{ deleted_at: number | null; deleted_seq: number | null }>();
+  return results;
+}
+
+/** The queue sequence number of a batch that is still queued. */
+async function seqOf(deviceId: string, batchId: string): Promise<number> {
+  const row = await env.DB.prepare(
+    "SELECT min(seq) AS seq FROM hc_ingest_queue WHERE device_id = ? AND batch_id = ?",
+  )
+    .bind(deviceId, batchId)
+    .first<{ seq: number | null }>();
+  return row?.seq ?? -1;
+}
+
+// The clock does not move in these: every batch arrives in the same second,
+// so `received_at` cannot tell them apart and only the sequence number can.
+describe("a delete and a rewrite that arrive in the same second", () => {
+  it(
+    "stays deleted when the upsert's batch arrived first, however late it is applied",
+    async () => {
+      const deviceId = await seedDevice(repos);
+      await enqueue(repos, deviceId, { batchId: "batch-0001", upserts: [steps("a", T, 10)] });
+      await repos.hcIngestQueue.park(deviceId, "batch-0001");
+      await enqueue(repos, deviceId, { batchId: "batch-0002", deletes: ["a"] });
+      const deleting = await seqOf(deviceId, "batch-0002");
+      await drain(ctx, deviceId);
+      expect(await tombstones(deviceId)).toStrictEqual([
+        { deleted_at: time.now(), deleted_seq: deleting },
+      ]);
+
+      await repos.hcIngestQueue.unpark(deviceId);
+      await drain(ctx, deviceId);
+
+      expect(await held(deviceId)).toStrictEqual([]);
+      expect(await logRow(deviceId, "batch-0001")).toMatchObject({ applied: 0, superseded: 1 });
+      // And the late batch left the stamp alone.
+      expect(await tombstones(deviceId)).toStrictEqual([
+        { deleted_at: time.now(), deleted_seq: deleting },
+      ]);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "comes back when the upsert's batch arrived after the delete's",
+    async () => {
+      const deviceId = await seedDevice(repos);
+      await enqueue(repos, deviceId, { batchId: "batch-0001", upserts: [steps("a", T, 10)] });
+      await enqueue(repos, deviceId, { batchId: "batch-0002", deletes: ["a", "never-seen"] });
+      await enqueue(repos, deviceId, {
+        batchId: "batch-0003",
+        upserts: [steps("a", T, 11), steps("never-seen", T + 1000, 20)],
+      });
+      await drain(ctx, deviceId);
+
+      expect(await held(deviceId)).toStrictEqual(["a:11", "never-seen:20"]);
+      // Brought back to life: neither half of the stamp is left behind.
+      expect(await tombstones(deviceId)).toStrictEqual([]);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "stays deleted when one batch both deletes and upserts the id",
+    async () => {
+      const deviceId = await seedDevice(repos);
+      await enqueue(repos, deviceId, { batchId: "batch-0001", upserts: [steps("a", T, 10)] });
+      await enqueue(repos, deviceId, {
+        batchId: "batch-0002",
+        deletes: ["a", "never-seen"],
+        upserts: [steps("a", T, 11), steps("never-seen", T + 1000, 20)],
+      });
+      await drain(ctx, deviceId);
+
+      expect(await held(deviceId)).toStrictEqual([]);
+      expect(await logRow(deviceId, "batch-0002")).toMatchObject({ applied: 0, superseded: 2 });
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "takes the later delete's place when a parked delete is applied after a newer one",
+    async () => {
+      const deviceId = await seedDevice(repos);
+      await enqueue(repos, deviceId, { batchId: "batch-0001", deletes: ["a"] });
+      await repos.hcIngestQueue.park(deviceId, "batch-0001");
+      await enqueue(repos, deviceId, { batchId: "batch-0002", deletes: ["a"] });
+      const newer = await seqOf(deviceId, "batch-0002");
+      await drain(ctx, deviceId);
+      await repos.hcIngestQueue.unpark(deviceId);
+      await drain(ctx, deviceId);
+
+      // The older delete, applied late, did not move the stamp back.
+      expect(await tombstones(deviceId)).toStrictEqual([
+        { deleted_at: time.now(), deleted_seq: newer },
+      ]);
+    },
+    TIMEOUT,
+  );
+});
+
+/** Make every tombstone of a device one from before `deleted_seq` was kept. */
+async function forgetSeq(deviceId: string, deletedAt: number): Promise<void> {
+  await env.DB.prepare(
+    `UPDATE hc_record_index SET deleted_seq = NULL, deleted_at = ?
+      WHERE device_id = ? AND deleted_at IS NOT NULL`,
+  )
+    .bind(deletedAt, deviceId)
+    .run();
+}
+
+describe("a tombstone from before the sequence number was kept", () => {
+  it(
+    "is brought back by a batch that arrived in the same second, as it always was",
+    async () => {
+      const deviceId = await seedDevice(repos);
+      await enqueue(repos, deviceId, { batchId: "batch-0001", deletes: ["a"] });
+      await drain(ctx, deviceId);
+      await forgetSeq(deviceId, time.now());
+
+      await enqueue(repos, deviceId, { batchId: "batch-0002", upserts: [steps("a", T, 10)] });
+      await drain(ctx, deviceId);
+
+      expect(await held(deviceId)).toStrictEqual(["a:10"]);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "is not brought back by a same-second batch that deletes the id too",
+    async () => {
+      const deviceId = await seedDevice(repos);
+      await enqueue(repos, deviceId, { batchId: "batch-0001", deletes: ["a"] });
+      await drain(ctx, deviceId);
+      await forgetSeq(deviceId, time.now());
+
+      await enqueue(repos, deviceId, {
+        batchId: "batch-0002",
+        deletes: ["a"],
+        upserts: [steps("a", T, 10)],
+      });
+      await drain(ctx, deviceId);
+
+      expect(await held(deviceId)).toStrictEqual([]);
+      // Not later by the second, so the old stamp stands, without a number.
+      expect(await tombstones(deviceId)).toStrictEqual([
+        { deleted_at: time.now(), deleted_seq: null },
+      ]);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "refuses a batch from an earlier second and takes one from a later second",
+    async () => {
+      const deviceId = await seedDevice(repos);
+      await enqueue(repos, deviceId, { batchId: "batch-0001", deletes: ["a"] });
+      await drain(ctx, deviceId);
+      // The delete is on record as having arrived a minute from now.
+      const deletedAt = time.now() + 60;
+      await forgetSeq(deviceId, deletedAt);
+
+      // A higher sequence number, but the tombstone has none to compare with.
+      await enqueue(repos, deviceId, { batchId: "batch-0002", upserts: [steps("a", T, 10)] });
+      await drain(ctx, deviceId);
+      expect(await held(deviceId)).toStrictEqual([]);
+
+      time.advance(120);
+      await enqueue(repos, deviceId, { batchId: "batch-0003", upserts: [steps("a", T, 12)] });
+      await drain(ctx, deviceId);
+      expect(await held(deviceId)).toStrictEqual(["a:12"]);
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "takes a number, and the exact order with it, when a later batch deletes the id again",
+    async () => {
+      const deviceId = await seedDevice(repos);
+      await enqueue(repos, deviceId, { batchId: "batch-0001", deletes: ["a"] });
+      await drain(ctx, deviceId);
+      await forgetSeq(deviceId, time.now());
+
+      time.advance(1);
+      await enqueue(repos, deviceId, { batchId: "batch-0002", upserts: [steps("a", T, 10)] });
+      await repos.hcIngestQueue.park(deviceId, "batch-0002");
+      await enqueue(repos, deviceId, { batchId: "batch-0003", deletes: ["a"] });
+      const deleting = await seqOf(deviceId, "batch-0003");
+      await drain(ctx, deviceId);
+      expect(await tombstones(deviceId)).toStrictEqual([
+        { deleted_at: time.now(), deleted_seq: deleting },
+      ]);
+
+      // Same second as the second delete, but before it: refused.
+      await repos.hcIngestQueue.unpark(deviceId);
+      await drain(ctx, deviceId);
+      expect(await held(deviceId)).toStrictEqual([]);
     },
     TIMEOUT,
   );

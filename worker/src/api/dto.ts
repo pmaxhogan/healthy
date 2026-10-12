@@ -584,6 +584,8 @@ export function toDeviceIngestLogDto(row: IngestLogRow): DeviceIngestLogDto {
     bodyBytes: row.bodyBytes,
     rawBytes: row.rawBytes,
     applyMs: row.applyMs,
+    runTrigger: row.runTrigger,
+    runStartedAt: isoFromMs(row.runStartedMs),
   };
 }
 

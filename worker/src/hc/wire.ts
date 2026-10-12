@@ -48,6 +48,15 @@ const MAX_METADATA_LENGTH = 1024;
  */
 export const MAX_BATCH_RECORDS = 25_000;
 
+/**
+ * What started a sync run: a short stable code (`periodic`, `alarm`, `manual`,
+ * `app_open`, `backfill`). Checked for its shape and not against a list, so a
+ * trigger a later build of the app adds is stored as it is given.
+ */
+const RUN_TRIGGER_PATTERN = /^[a-z][a-z0-9_]{0,23}$/u;
+/** How a sync run ended: `ok`, `interrupted`, or the error code it failed with. */
+const RUN_END_PATTERN = /^[a-z][a-z0-9_]{0,39}$/u;
+
 /** Record types one sync report may list. The SDK has a few dozen. */
 const MAX_REPORTED_TYPES = 500;
 
@@ -117,6 +126,16 @@ const typeStateSchema = z.looseObject({
   backfill: backfillSchema.optional(),
 });
 
+/**
+ * How the sync run before this batch's own ended, named by when it started.
+ * A run that is cut off never sends its closing report, so the next one says
+ * it for it.
+ */
+const previousRunSchema = z.looseObject({
+  startedAt: epochMs,
+  end: z.string().regex(RUN_END_PATTERN),
+});
+
 const syncStateSchema = z.looseObject({
   types: z.array(typeStateSchema).max(MAX_REPORTED_TYPES),
   backgroundRead: z.boolean().optional(),
@@ -131,6 +150,15 @@ const syncStateSchema = z.looseObject({
     .looseObject({ errorCode: z.string().max(64), at: epochMs })
     .nullable()
     .optional(),
+  // Which sync run the batch was uploaded in. Optional, all three: a build of
+  // the app from before they existed sends none. Like the rest of the report
+  // they are part of the envelope, so one that is there and malformed refuses
+  // the batch.
+  /** What started the run. */
+  runTrigger: z.string().regex(RUN_TRIGGER_PATTERN).optional(),
+  /** The phone's clock when the run began: the same in every batch of one run. */
+  runStartedAt: epochMs.optional(),
+  previousRun: previousRunSchema.optional(),
 });
 
 /** The phone's own report of its sync health. Latest wins. */
@@ -233,6 +261,28 @@ export function parseBatch(json: unknown): ParsedBatch | null {
     deletes,
     syncState: data.syncState,
     rejected,
+  };
+}
+
+/**
+ * What a batch says of the sync run it belongs to, and of the one before it:
+ * the four values kept on its `hc_ingest_log` row. Null for whatever the batch
+ * did not say.
+ */
+export interface BatchRunStamp {
+  trigger: string | null;
+  /** Epoch milliseconds, by the phone's clock. */
+  startedMs: number | null;
+  previousStartedMs: number | null;
+  previousEnd: string | null;
+}
+
+export function runStampOf(syncState: HcSyncState | undefined): BatchRunStamp {
+  return {
+    trigger: syncState?.runTrigger ?? null,
+    startedMs: syncState?.runStartedAt ?? null,
+    previousStartedMs: syncState?.previousRun?.startedAt ?? null,
+    previousEnd: syncState?.previousRun?.end ?? null,
   };
 }
 
