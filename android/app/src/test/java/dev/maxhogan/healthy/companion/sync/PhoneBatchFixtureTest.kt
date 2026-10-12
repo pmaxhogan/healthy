@@ -62,7 +62,12 @@ class PhoneBatchFixtureTest {
 
     private fun withId(wire: JsonObject, id: String) = JsonObject(wire + ("id" to JsonPrimitive(id)))
 
-    private fun syncState(): String {
+    /**
+     * @param run the incremental run the batch is uploaded in, with the one before it, or null
+     *   for a state no run has written yet
+     * @param backfillSinceMs set for a batch the backfill loop uploads
+     */
+    private fun syncState(run: Pair<RunRecord, RunRecord?>? = null, backfillSinceMs: Long? = null): String {
         val types = RecordTypes.ALL.map(RecordTypes::typeName)
         val access = HealthAccess(
             status = HealthConnectStatus.AVAILABLE,
@@ -78,7 +83,13 @@ class PhoneBatchFixtureTest {
             exerciseRoutes = Grant.DENIED,
         )
         val snapshot = SyncSnapshot(
-            GlobalState(deviceId = DEVICE, backfillRequested = true, lastError = StoredError("network", Fx.T0)),
+            GlobalState(
+                deviceId = DEVICE,
+                backfillRequested = true,
+                lastError = StoredError("network", Fx.T0),
+                run = run?.first,
+                previousRun = run?.second,
+            ),
             mapOf(
                 types[0] to TypeState(
                     token = "t",
@@ -89,8 +100,12 @@ class PhoneBatchFixtureTest {
                 types[1] to TypeState(backfill = BackfillState(started = true, monthMs = Months.floor(Fx.T0))),
             ),
         )
-        return SyncStateReport.build(types, access, snapshot, FACTS, phoneTime).toString()
+        return SyncStateReport.build(types, access, snapshot, FACTS, phoneTime, backfillSinceMs).toString()
     }
+
+    /** A periodic run that began a little before [phoneTime], after one that ended as [previousEnd]. */
+    private fun periodic(previousEnd: String) =
+        RunRecord(phoneTime - 4_000, "periodic") to RunRecord(phoneTime - 904_000, "periodic", previousEnd)
 
     private class Built(val name: String, val description: String, val body: JsonObject)
 
@@ -136,13 +151,16 @@ class PhoneBatchFixtureTest {
                     "they touch (one total, one hour left empty and so deleted), two deletions, and the state report.",
                 records + total + BatchItem.Delete(AggMetric.STEPS.recordId(hour + Hours.MS), synthetic = true) +
                     BatchItem.Delete("rec-gone-1") + BatchItem.Delete("rec-gone-2"),
-                syncState(),
+                // A run that says which run it is, and that the one before it was cut off.
+                syncState(periodic(previousEnd = "interrupted")),
             ),
             build(
                 "backfill-month",
                 "The last page of a backfilled month: records, then the totals of the hours that have one. No deletes.",
                 records.take(3) + total + sleep,
-                syncState(),
+                // Uploaded by the backfill loop: the run is its session, and the run before it is
+                // the latest incremental one, which failed.
+                syncState(run = RunRecord(phoneTime - 904_000, "alarm", "network") to null, backfillSinceMs = phoneTime - 60_000),
             ),
             build(
                 "unmapped-records",
@@ -163,7 +181,9 @@ class PhoneBatchFixtureTest {
                 "state-only",
                 "The batch that closes every run: no records, only the state report.",
                 emptyList(),
-                syncState(),
+                // The first run a phone ever makes, started by opening the app: it names none
+                // before it.
+                syncState(run = RunRecord(phoneTime - 4_000, "app_open") to null),
                 fixedId = "fixture-state-only-0001",
             ),
         )
@@ -213,6 +233,13 @@ class PhoneBatchFixtureTest {
                 assertNull("${batch.name}: ${wire["id"]}", WireContract.recordProblem(wire))
             }
         }
+        // The run members go up in every form the app sends them.
+        val states = built.mapNotNull { it.body["syncState"]?.jsonObject }
+        assertEquals(listOf("periodic", "backfill", "app_open"), states.map { (it.getValue("runTrigger") as JsonPrimitive).content })
+        assertEquals(
+            listOf("interrupted", "network", null),
+            states.map { state -> state["previousRun"]?.jsonObject?.getValue("end")?.let { (it as JsonPrimitive).content } },
+        )
         // The first batch really does cover the whole registry, and nothing shares an id.
         val changes = built.first().body.getValue("upserts").jsonArray.map { it.jsonObject }
         val typeNames = changes.map { (it.getValue("type") as JsonPrimitive).content }.toSet()

@@ -325,8 +325,8 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
         refresh()
     }
 
-    override fun syncNow() {
-        scope.launch { requestSync() }
+    override fun syncNow(trigger: SyncTrigger) {
+        scope.launch { requestSync(trigger) }
         refresh()
     }
 
@@ -430,7 +430,7 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
             // When the grants cannot be read the run must not go ahead on a guess: it would
             // "succeed" having read nothing and tell the server every type is unavailable.
             val session = session(pairing)
-            if (session == null) engine.failRun(SyncEngine.ERROR_HC_UNAVAILABLE) else engine.syncOnce(session)
+            if (session == null) engine.failRun(SyncEngine.ERROR_HC_UNAVAILABLE) else engine.syncOnce(session, trigger)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -734,7 +734,7 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
     }
 
     private companion object {
-        const val ERROR_INTERNAL = "internal_error"
+        const val ERROR_INTERNAL = SyncEngine.ERROR_INTERNAL
         const val ERROR_BACKFILL_NOT_STARTED = "backfill_not_started"
         const val BACKFILL_BACKOFF_BASE_MS = 5_000L
         const val BACKFILL_BACKOFF_CAP_MS = 15 * 60_000L

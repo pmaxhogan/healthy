@@ -143,6 +143,38 @@ data class BackfillGaveUp(
     }
 }
 
+/**
+ * One incremental run, as it is remembered.
+ *
+ * @property trigger what started it, as the code the server is told ([SyncTrigger.code])
+ * @property end how it ended: [OK], or the stable error code it failed or was skipped with. Null
+ *   from the moment the run starts until it has ended, so a run that is found still without one
+ *   when the next begins never got to its end: the process died under it or its coroutine was
+ *   cancelled, and it is reported as [INTERRUPTED]
+ */
+@Serializable
+data class RunRecord(val startedAtMs: Long, val trigger: String, val end: String? = null) {
+    /** As it is reported once it is over: a run that recorded no end did not reach one. */
+    fun ended(): RunRecord = if (end == null) copy(end = INTERRUPTED) else this
+
+    companion object {
+        const val OK = "ok"
+        const val INTERRUPTED = "interrupted"
+    }
+}
+
+/**
+ * The type an incremental run was on when it was last heard of. It is written as the run reaches
+ * each type and cleared when the run has been through all of them, so one that is still there
+ * when the next run starts is the first type the run before did not complete.
+ *
+ * @property again true when the run started with this type because the run before it had been cut
+ *   off there. A run cut off at the same type a second time is not started there a third time:
+ *   a type that stops every run that reaches it would otherwise be all that is ever read
+ */
+@Serializable
+data class RunResume(val type: String, val again: Boolean = false)
+
 /** Everything remembered about one record type. */
 @Serializable
 data class TypeState(
@@ -218,6 +250,19 @@ data class GlobalState(
      * backfill gets somewhere again.
      */
     val backfillGaveUp: BackfillGaveUp? = null,
+    /**
+     * The incremental run under way, or the latest one once it has ended. Written when a run
+     * starts and again when it ends; see [RunRecord.end] for what one without an end means.
+     */
+    val run: RunRecord? = null,
+    /** The run before [run], as it ended. Null until there have been two. */
+    val previousRun: RunRecord? = null,
+    /**
+     * Where the latest run to go through the types had got to, when it did not get through them
+     * all: the next run starts there instead of one further round the rotation. A run that reads
+     * no type at all (a skip, a closed gate) leaves it for the one that does.
+     */
+    val resume: RunResume? = null,
 ) {
     /**
      * Whether a backfill is waiting out a failure right now. While it is, `lastError` and

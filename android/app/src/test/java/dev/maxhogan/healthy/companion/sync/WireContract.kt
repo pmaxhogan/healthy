@@ -18,6 +18,10 @@ import kotlinx.serialization.json.longOrNull
 object WireContract {
     private val TYPE = Regex("^[A-Za-z][A-Za-z0-9_.:-]{0,63}$")
     private val BATCH_ID = Regex("^[A-Za-z0-9_-]{8,64}$")
+
+    /** What started a sync run, and how one ended: checked for their shape, not against a list. */
+    private val RUN_TRIGGER = Regex("^[a-z][a-z0-9_]{0,23}$")
+    private val RUN_END = Regex("^[a-z][a-z0-9_]{0,39}$")
     private const val MAX_ID = 200
     private const val MAX_ORIGIN = 255
 
@@ -115,6 +119,15 @@ object WireContract {
             if (error !is JsonObject) return "lastError"
             string(error["errorCode"], 0, 64) ?: return "lastError.errorCode"
             instant(error["at"]) ?: return "lastError.at"
+        }
+        // Which run the batch was uploaded in. All three are optional, and one that is there
+        // and malformed refuses the batch.
+        state["runTrigger"]?.let { if (string(it)?.let(RUN_TRIGGER::matches) != true) return "runTrigger" }
+        state["runStartedAt"]?.let { instant(it) ?: return "runStartedAt" }
+        state["previousRun"]?.let { previous ->
+            if (previous !is JsonObject) return "previousRun"
+            instant(previous["startedAt"]) ?: return "previousRun.startedAt"
+            if (string(previous["end"])?.let(RUN_END::matches) != true) return "previousRun.end"
         }
         return null
     }

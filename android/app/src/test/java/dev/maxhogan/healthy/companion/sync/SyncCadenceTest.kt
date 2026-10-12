@@ -35,6 +35,17 @@ class SyncCadenceTest {
     fun `a sync the owner asked for always runs`() {
         assertTrue(SyncCadence.shouldRun(SyncTrigger.MANUAL, NOW - 1, NOW))
         assertTrue(SyncCadence.shouldRun(SyncTrigger.MANUAL, null, NOW))
+        // Opening the app is the owner asking too: it has its own name, and is treated the same.
+        assertTrue(SyncCadence.shouldRun(SyncTrigger.APP_OPEN, NOW - 1, NOW))
+        assertTrue(SyncCadence.shouldRun(SyncTrigger.APP_OPEN, null, NOW))
+        assertEquals(listOf(SyncTrigger.MANUAL, SyncTrigger.APP_OPEN), SyncTrigger.entries.filter { it.asked })
+    }
+
+    @Test
+    fun `every trigger has a code the server takes, and no two share one`() {
+        val codes = SyncTrigger.entries.map { it.code } + SyncTrigger.BACKFILL_CODE
+        assertEquals(listOf("periodic", "alarm", "manual", "app_open", "backfill"), codes)
+        assertTrue(codes.all { Regex("^[a-z][a-z0-9_]{0,23}$").matches(it) })
     }
 
     @Test
@@ -56,6 +67,7 @@ class SyncCadenceTest {
         assertEquals(SyncTrigger.MANUAL, SyncTrigger.from("something_else"))
         assertEquals(SyncTrigger.PERIODIC, SyncTrigger.from("PERIODIC"))
         assertEquals(SyncTrigger.ALARM, SyncTrigger.from("ALARM"))
+        assertEquals(SyncTrigger.APP_OPEN, SyncTrigger.from("APP_OPEN"))
     }
 
     @Test

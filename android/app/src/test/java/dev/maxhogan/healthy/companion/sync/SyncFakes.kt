@@ -218,6 +218,9 @@ class SentBatch(val json: JsonObject) {
     val upserts: JsonArray get() = json.getValue("upserts").jsonArray
     val deletes: List<String> get() = json.getValue("deletes").jsonArray.map { it.jsonPrimitive.content }
     val upsertIds: List<String> get() = upserts.map { it.jsonObject.getValue("id").jsonPrimitive.content }
+
+    /** The state report the batch carries. Every batch the engine sends has one. */
+    val syncState: JsonObject get() = json.getValue("syncState").jsonObject
     val isStateOnly: Boolean get() = upserts.isEmpty() && deletes.isEmpty()
 
     /** The `data` object of each upsert, in order. */
@@ -233,6 +236,9 @@ class FakeTransport : HttpTransport {
     /** Applied to every POST before the script; return null to fall through. */
     var rule: (SentBatch) -> HttpReply? = { null }
 
+    /** Run for every POST before it is answered, and free to suspend: a request that hangs. */
+    var hold: suspend (SentBatch) -> Unit = {}
+
     val data: List<SentBatch> get() = sent.filter { !it.isStateOnly }
 
     override suspend fun post(url: String, token: String, gzipBody: ByteArray): HttpReply {
@@ -240,6 +246,7 @@ class FakeTransport : HttpTransport {
         val batch = SentBatch(Json.parseToJsonElement(raw).jsonObject)
         sent.add(batch)
         tokens.add(token)
+        hold(batch)
         rule(batch)?.let { return it }
         script.removeFirstOrNull()?.let { step -> step(batch)?.let { return it } }
         return ok(batch)
@@ -268,7 +275,10 @@ class FakeTransport : HttpTransport {
 }
 
 /** An engine wired to fakes, with a clock that only moves when the engine sleeps. */
-class Rig(types: List<String> = listOf("Steps", "HeartRate", "TotalCaloriesBurned"), limits: BatchLimits = BatchLimits()) {
+class Rig(
+    private val types: List<String> = listOf("Steps", "HeartRate", "TotalCaloriesBurned"),
+    private val limits: BatchLimits = BatchLimits(),
+) {
     val store = InMemorySyncStateStore()
     val source = FakeHealthSource()
     val transport = FakeTransport()
@@ -277,7 +287,10 @@ class Rig(types: List<String> = listOf("Steps", "HeartRate", "TotalCaloriesBurne
 
     /** What the pairing store holds "right now"; null is unpaired. */
     var storedPairing: Pairing? = PAIRING
-    val engine = SyncEngine(
+    var engine = engine()
+        private set
+
+    private fun engine() = SyncEngine(
         store = store,
         source = source,
         transport = transport,
@@ -292,6 +305,14 @@ class Rig(types: List<String> = listOf("Steps", "HeartRate", "TotalCaloriesBurne
         limits = limits,
         currentPairing = { storedPairing },
     )
+
+    /**
+     * The process died and was started again: a new engine, with nothing in memory, over the
+     * state the old one left in the store.
+     */
+    fun restart() {
+        engine = engine()
+    }
     var access = access(*types.toTypedArray())
 
     /** True as if the app were on screen; false is a background run. */
@@ -303,9 +324,9 @@ class Rig(types: List<String> = listOf("Steps", "HeartRate", "TotalCaloriesBurne
     fun session(pairing: Pairing = PAIRING) = Session(pairing, access, FACTS, foreground, pairingGeneration)
 
     /** A run with [pairing] as the stored pairing, the way the controller would start one. */
-    suspend fun sync(pairing: Pairing = PAIRING): RunResult {
+    suspend fun sync(pairing: Pairing = PAIRING, trigger: SyncTrigger = SyncTrigger.MANUAL): RunResult {
         storedPairing = pairing
-        return engine.syncOnce(session(pairing))
+        return engine.syncOnce(session(pairing), trigger)
     }
 
     suspend fun type(name: String): TypeState = store.snapshot().type(name)

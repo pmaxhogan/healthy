@@ -24,8 +24,13 @@ interface SyncController {
     /** Everything the status screen shows. Starts as [SyncUiState] defaults until first loaded. */
     val state: StateFlow<SyncUiState>
 
-    /** Run one incremental sync now (the "Sync now" button, pull-to-refresh, app open). */
-    fun syncNow()
+    /**
+     * Run one incremental sync now (the "Sync now" button, pull-to-refresh, app open).
+     *
+     * @param trigger which of those it was. It changes nothing about the sync, only what the
+     *   server is told started it
+     */
+    fun syncNow(trigger: SyncTrigger = SyncTrigger.MANUAL)
 
     /**
      * Start, or resume, the full-history backfill (newest month first, foreground service).

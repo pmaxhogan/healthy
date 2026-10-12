@@ -24,19 +24,33 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
-/** What asked for a sync. */
-enum class SyncTrigger {
+/**
+ * What asked for a sync.
+ *
+ * @property code what the server is told started the run (`runTrigger` in the state report)
+ * @property asked true when the owner asked, which is never skipped for coming too soon
+ */
+enum class SyncTrigger(val code: String, val asked: Boolean = false) {
     /** WorkManager's periodic work. */
-    PERIODIC,
+    PERIODIC("periodic"),
 
     /** The watchdog alarm, because nothing had run for too long. */
-    ALARM,
+    ALARM("alarm"),
 
-    /** The owner: "Sync now", opening the app, the Tasker action. Never skipped. */
-    MANUAL,
+    /** The owner: "Sync now", pulling the screen down, the Tasker action. Never skipped. */
+    MANUAL("manual", asked = true),
+
+    /** The owner opened the app, which is a request for fresh data. Never skipped either. */
+    APP_OPEN("app_open", asked = true),
     ;
 
     companion object {
+        /**
+         * What a batch says started it when no sync did: the backfill loop uploaded it. Not a
+         * trigger, since nothing asks for a sync with it.
+         */
+        const val BACKFILL_CODE = "backfill"
+
         /** A request this build did not write (an older build's work) is run, not second-guessed. */
         fun from(name: String?): SyncTrigger = entries.firstOrNull { it.name == name } ?: MANUAL
     }
@@ -72,7 +86,7 @@ object SyncCadence {
      * what happens when the alarm and the periodic work fire a moment apart.
      */
     fun shouldRun(trigger: SyncTrigger, lastAttemptMs: Long?, nowMs: Long): Boolean {
-        if (trigger == SyncTrigger.MANUAL || lastAttemptMs == null) return true
+        if (trigger.asked || lastAttemptMs == null) return true
         // A last attempt in the future means the clock was set back: nothing can be told from it.
         return nowMs - lastAttemptMs !in 0 until MIN_GAP_MS
     }

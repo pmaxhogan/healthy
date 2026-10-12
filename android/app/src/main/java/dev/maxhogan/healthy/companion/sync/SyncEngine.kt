@@ -104,6 +104,13 @@ class BackfillRun {
     internal val pages = PageSizer()
 
     /**
+     * When the session took its first step, by the phone's clock. Every batch the session uploads
+     * carries it as `runStartedAt`, which is what lets the server tell one burst of backfill
+     * from the next.
+     */
+    internal var startedAtMs: Long? = null
+
+    /**
      * True when the server refused the token during this session, as opposed to the session
      * finding a refusal that was already known. The owner is told of a refusal once.
      */
@@ -156,6 +163,18 @@ class BackfillRun {
  * opens, neither the backfill nor an incremental sync makes that kind of request, a run that
  * finds it closed counts no failed sync, and a wait the backfill has put on screen is left
  * there. See [syncOnce] and [backfillStep].
+ *
+ * **A run says which run it is, and how the one before it ended.** A run can be cut off part-way:
+ * the system stops the work, or the process dies. It then uploads the batches of the types it
+ * had reached and never sends its closing report, and nothing it could do at that moment would
+ * tell anyone. So every run records its start and what started it before anything else, and its
+ * end as it ends ([GlobalState.run]); the next run files a run it finds without an end as
+ * `interrupted`, and every batch carries both ([SyncStateReport.build]).
+ *
+ * **A run that was cut off is finished first.** The types are read in an order that starts one
+ * further round each run, so that none is always last. A run that did not get through them all
+ * leaves behind the type it was on ([GlobalState.resume]), and the next run starts there instead:
+ * otherwise the types at the tail of a cut run would be at the tail again.
  *
  * **The store may fail too.** See [SyncStateStore] for the rule; [storeFailure] is where a
  * failed write shows.
@@ -252,22 +271,78 @@ class SyncEngine(
      * that closed the gate as a [RunResult.Failed], but no failed sync is counted (so the
      * three-failures notification is not raised by a wait), and if the backfill is showing
      * "waiting to retry" that is left exactly as it is.
+     *
+     * @param trigger what asked for this run. It changes nothing the run does; it is recorded
+     *   with the run and reported to the server
      */
-    suspend fun syncOnce(session: Session): RunResult = storing({ RunResult.Failed(ERROR_STATE_STORE) }) {
-        mutex.withLock { syncLocked(session) }
-    }
+    suspend fun syncOnce(session: Session, trigger: SyncTrigger = SyncTrigger.MANUAL): RunResult =
+        storing({ RunResult.Failed(ERROR_STATE_STORE) }) {
+            mutex.withLock { syncLocked(session, trigger) }
+        }
 
-    private suspend fun syncLocked(session: Session): RunResult {
+    private suspend fun syncLocked(session: Session, trigger: SyncTrigger): RunResult {
+        // A run that is turned away here has not started: it records nothing and sends nothing.
         when (prepare(session)) {
             Ready.REJECTED -> return RunResult.PairingRejected(notify = false)
             Ready.STALE -> return RunResult.Failed(ERROR_PAIRING_CHANGED, retryable = false)
             Ready.OK -> Unit
         }
+        val runStart = clock()
+        // First, and whatever becomes of the run: this is what says a sync was at least started,
+        // and by what. The run before it is filed as it ended; one that never recorded an end
+        // did not reach it.
+        store.updateGlobal {
+            it.copy(
+                lastAttemptMs = runStart,
+                run = RunRecord(runStart, trigger.code),
+                previousRun = it.run?.ended() ?: it.previousRun,
+            )
+        }
+        val result = try {
+            syncStarted(session, runStart)
+        } catch (e: CancellationException) {
+            // The system stopped the work. Nothing is written on the way out: a write to the disk
+            // has no business holding up a cancellation, and it would say nothing new, since the
+            // run is left without an end and that is what the next one reports as interrupted.
+            throw e
+        } catch (e: Exception) {
+            // Said if it can be. If the store is what failed it most likely cannot, and the run
+            // is then reported as interrupted, which is also true of it.
+            try {
+                endRun(runStart, if (e is StateStoreException) ERROR_STATE_STORE else ERROR_INTERNAL)
+            } catch (_: StateStoreException) {
+                // The failure that ended the run is the one to report.
+            }
+            throw e
+        }
+        runEnd(result)?.let { endRun(runStart, it) }
+        return result
+    }
+
+    /**
+     * What a run that returned [result] is remembered to have ended with. Null for a run that
+     * found the pairing changed under it: the store is not its to write any more, so it is left
+     * without an end.
+     */
+    private fun runEnd(result: RunResult): String? = when (result) {
+        RunResult.Success -> RunRecord.OK
+        is RunResult.Failed -> result.errorCode.takeIf { it != ERROR_PAIRING_CHANGED }
+        is RunResult.Skipped -> result.errorCode
+        is RunResult.PairingRejected -> ERROR_UNAUTHORIZED
+    }
+
+    /** Records how the run that started at [startedAtMs] ended, unless it already has. */
+    private suspend fun endRun(startedAtMs: Long, end: String) {
+        store.updateGlobal { it.runEnded(startedAtMs, end) }
+    }
+
+    private fun GlobalState.runEnded(startedAtMs: Long, end: String): GlobalState =
+        if (run == null || run.startedAtMs != startedAtMs || run.end != null) this else copy(run = run.copy(end = end))
+
+    /** The run itself, from the moment it is on record as started. */
+    private suspend fun syncStarted(session: Session, runStart: Long): RunResult {
         // The server asked for time. Nothing it has not asked for is sent, and nothing is read
         // that could not be delivered anyway.
-        val runStart = clock()
-        // First, and whatever becomes of the run: this is what says a sync was at least started.
-        store.updateGlobal { it.copy(lastAttemptMs = runStart) }
         serverGate.remainingMs()?.let { return RunResult.Failed(serverGate.errorCode, it) }
         // An error from when a type was still granted says nothing about it now.
         for (type in types) {
@@ -279,6 +354,7 @@ class SyncEngine(
 
         val granted = types.filter { session.access.types[it] == Grant.GRANTED }
         var failure: Outcome.RunFailed? = null
+        var throughAll = false
         if (granted.isEmpty()) {
             // Paired, and nothing it may read: the owner has to grant something. This comes
             // before the background check, which would otherwise hide it behind a lesser reason.
@@ -291,13 +367,24 @@ class SyncEngine(
             // reader until the moment it gave. No quota is spent finding out again.
             failure = Outcome.RunFailed(hcGate.errorCode, pushback = true)
         } else {
-            val rotation = store.updateGlobal {
-                it.copy(rotation = (it.rotation + 1) % ROTATION_MODULUS, skipReason = null)
-            }.rotation
-            val order = granted.indices.map { granted[(it + rotation) % granted.size] }
+            // Where the run before this one was cut off, if it was and that type can still be
+            // read: it goes first, and the rotation stays where it is. Otherwise the order starts
+            // one further round than last time. A type this was already done for, and which cut
+            // the run off again, is not gone back to a third time: see [RunResume].
+            val before = store.snapshot().global
+            val from = before.resume?.takeUnless { it.again }?.type?.takeIf { it in granted }
+            val rotation = if (from == null) (before.rotation + 1) % ROTATION_MODULUS else before.rotation
+            val first = if (from == null) rotation % granted.size else granted.indexOf(from)
+            val order = granted.indices.map { granted[(it + first) % granted.size] }
             var failedTypes = 0
             var lastTypeError: String? = null
-            for (type in order) {
+            for ((index, type) in order.withIndex()) {
+                // Before the type is read, so that a run which dies in it is known to have got
+                // this far. One small write a type; the first also moves the rotation.
+                store.updateGlobal {
+                    val reached = it.copy(resume = RunResume(type, again = index == 0 && from != null))
+                    if (index == 0) reached.copy(rotation = rotation, skipReason = null) else reached
+                }
                 when (val outcome = guarded(type, backfill = false, runStart) { syncType(session, type) }) {
                     Outcome.Ok -> Unit
                     is Outcome.TypeFailed -> {
@@ -309,9 +396,13 @@ class SyncEngine(
                 }
                 if (failure != null) break
             }
-            if (failure == null && failedTypes == order.size) {
-                // Every type failed on its own: that is not a sync, whatever the server says next.
-                failure = Outcome.RunFailed(lastTypeError ?: "sync_failed")
+            if (failure == null) {
+                // Every type was read, or failed on its own: there is nothing to come back for.
+                throughAll = true
+                if (failedTypes == order.size) {
+                    // Every type failed on its own: that is not a sync, whatever the server says next.
+                    failure = Outcome.RunFailed(lastTypeError ?: "sync_failed")
+                }
             }
         }
         if (failure?.upload != true) {
@@ -319,7 +410,10 @@ class SyncEngine(
             // the error first, so the server never sees an error one sync late.
             val now = clock()
             val standing = failure?.let { StoredError(it.errorCode, now) }
-            store.updateGlobal { it.withRunError(standing, now) }
+            store.updateGlobal {
+                val closing = it.withRunError(standing, now)
+                if (throughAll) closing.copy(resume = null) else closing
+            }
             when (val outcome = sendState(session)) {
                 is Outcome.Rejected -> return RunResult.PairingRejected(notify = outcome.fresh)
                 is Outcome.RunFailed -> failure = if (outcome === stale) outcome else failure ?: outcome
@@ -333,6 +427,8 @@ class SyncEngine(
             store.updateGlobal {
                 it.copy(lastSyncMs = now, consecutiveFailures = 0, skipNotified = false, skipReason = null)
                     .withRunError(null, now)
+                    // In the write that makes it a success, so that a crash cannot part the two.
+                    .runEnded(runStart, RunRecord.OK)
             }
             return RunResult.Success
         }
@@ -762,6 +858,7 @@ class SyncEngine(
         }
 
     private suspend fun backfillLocked(session: Session, run: BackfillRun): BackfillStep {
+        if (run.startedAtMs == null) run.startedAtMs = clock()
         when (prepare(session)) {
             Ready.REJECTED -> return BackfillStep.PairingRejected
             Ready.STALE -> return BackfillStep.Backoff(ERROR_PAIRING_CHANGED)
@@ -952,7 +1049,8 @@ class SyncEngine(
             emptyList()
         }
         val position = position("backfill", type, month, backfill.pageToken.orEmpty())
-        return deliverAndCommit(session, type, position, items + aggregates, BACKFILL_ATTEMPTS) {
+        val since = run.startedAtMs ?: now
+        return deliverAndCommit(session, type, position, items + aggregates, BACKFILL_ATTEMPTS, since) {
             val current = it.backfill
             if (!last) {
                 it.copy(backfill = current.copy(pageToken = page.pageToken, pageSize = pageSize))
@@ -1109,6 +1207,7 @@ class SyncEngine(
         position: String,
         items: List<BatchItem>,
         attempts: Int,
+        backfillSinceMs: Long? = null,
         advance: (TypeState) -> TypeState,
     ): Outcome {
         if (items.isEmpty()) {
@@ -1116,7 +1215,7 @@ class SyncEngine(
             return Outcome.Ok
         }
         val real = items.count { !it.synthetic }.toLong()
-        return when (val delivery = deliver(session, position, items, attempts)) {
+        return when (val delivery = deliver(session, position, items, attempts, backfillSinceMs)) {
             is Delivery.Done -> {
                 val now = clock()
                 store.updateType(type) { advance(counted(it, delivery.tally, now)).copy(backlog = 0) }
@@ -1184,10 +1283,21 @@ class SyncEngine(
         data class Stopped(val outcome: Outcome) : Delivery
     }
 
-    /** Uploads [items] as one or more batches. [Delivery.Done] only when all were acknowledged. */
-    private suspend fun deliver(session: Session, position: String, items: List<BatchItem>, attempts: Int): Delivery {
+    /**
+     * Uploads [items] as one or more batches. [Delivery.Done] only when all were acknowledged.
+     *
+     * @param backfillSinceMs for the backfill, when its session began; null in an incremental run
+     */
+    private suspend fun deliver(
+        session: Session,
+        position: String,
+        items: List<BatchItem>,
+        attempts: Int,
+        backfillSinceMs: Long? = null,
+    ): Delivery {
         val encoder = BatchEncoder(session.pairing.deviceId, appVersion, limits)
-        val report = SyncStateReport.build(types, session.access, store.snapshot(), session.facts, clock()).toString()
+        val report = SyncStateReport.build(types, session.access, store.snapshot(), session.facts, clock(), backfillSinceMs)
+            .toString()
         val phoneTime = clock()
         val queue = ArrayDeque(encoder.plan(position, items, report, phoneTime))
         val tally = Tally()
@@ -1447,6 +1557,9 @@ class SyncEngine(
 
         /** The phone could not read or write its own sync state. Nothing was lost: see [SyncStateStore]. */
         const val ERROR_STATE_STORE = "state_store_failed"
+
+        /** Something nobody foresaw. Nothing was lost: no position moves without an acknowledgement. */
+        const val ERROR_INTERNAL = "internal_error"
         private const val HTTP_TOO_MANY_REQUESTS = 429
 
         /** Tries per batch within one scheduled run before the run gives up until next time. */

@@ -178,6 +178,15 @@ privacy screen Health Connect also opens from its permission dialog.
   learnt that way. **Sync now**, the Tasker action and opening the app run at
   once and ignore the low-battery condition, but still honour **Upload on Wi-Fi
   only**.
+- **A sync that is cut off is finished first.** Android can stop a sync part-way
+  (the network drops for a moment, the job runs out of time). The record types are
+  read in an order that starts one type further round on every sync, so that none
+  is always last; a sync that did not get through them all is followed by one that
+  starts with the type it had reached, instead of one further round. Every upload
+  also says which sync it belongs to and what started it (the schedule, the
+  watchdog, the owner, opening the app, or the backfill), and how the sync before
+  it ended, so the Worker can tell a sync that was cut off from one that had
+  nothing more to send.
 - **Sessions are also read by time.** For sleep, exercise and mindfulness sessions
   every sync also reads the last 48 hours by time, and uploads any session the
   Worker has not acknowledged in its current form (the app remembers the id and
