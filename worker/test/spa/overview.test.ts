@@ -188,6 +188,43 @@ describe("OverviewView", () => {
     expect(wrapper.text()).toContain("~1");
   });
 
+  it("does not paint a lapsed access token red on a connected health system", async () => {
+    // A vendor whose access tokens live five minutes has a lapsed one for most
+    // of every hour, and the next run renews it: nothing is wrong.
+    const lapsed = connection({
+      status: "connected",
+      accessExpiresAt: new Date(Date.now() - 50 * 60_000).toISOString(),
+      lastRefreshAt: new Date(Date.now() - 55 * 60_000).toISOString(),
+    });
+    const wrapper = await mountOverview(
+      overview({ healthSystems: [healthSystem({ connection: lapsed })] }),
+    );
+
+    const card = wrapper.find(".cards > .card");
+    expect(card.find(".pill").text()).toBe("connected");
+    expect(card.text()).toContain("renews when needed · renewed 55 min ago");
+    expect(card.text()).not.toContain("expired");
+    expect(card.find(".danger-text").exists()).toBe(false);
+  });
+
+  it("leaves red to the error code of a connection that is in trouble", async () => {
+    const wrapper = await mountOverview(overview());
+    const broken = wrapper.findAll(".cards > .card")[1];
+
+    expect(broken?.find(".pill").text()).toBe("needs re-auth");
+    expect(broken?.text()).toContain("expired");
+    expect(broken?.findAll(".danger-text").map((node) => node.text())).toContain("invalid grant");
+  });
+
+  it("words the Google token the same way", async () => {
+    const dto = overview();
+    dto.google.accessExpiresAt = new Date(Date.now() - 20 * 60_000).toISOString();
+    dto.google.lastRefreshAt = new Date(Date.now() - 80 * 60_000).toISOString();
+    const wrapper = await mountOverview(dto);
+
+    expect(wrapper.text()).toContain("renews when needed · renewed 1 h ago");
+  });
+
   it("renders a disconnected health system without a token expiry", async () => {
     const dormant = connection({
       status: "disconnected",

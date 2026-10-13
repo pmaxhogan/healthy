@@ -15,7 +15,7 @@ import HealthSystemStatusCard from "../components/HealthSystemStatusCard.vue";
 import RunsTable from "../components/RunsTable.vue";
 import StateBlock from "../components/StateBlock.vue";
 import StatusPill from "../components/StatusPill.vue";
-import { maskAccount, maskCalendarId, relativeTime } from "../lib/format.ts";
+import { maskAccount, maskCalendarId, tokenSummary } from "../lib/format.ts";
 import { GOOGLE_START } from "../lib/oauth.ts";
 import { toastSuccess } from "../lib/toasts.ts";
 import { useAction, useLoad } from "../lib/use-load.ts";
@@ -110,7 +110,7 @@ async function runSyncNow(): Promise<void> {
             </div>
             <div>
               <dt>Token</dt>
-              <dd>{{ relativeTime(overview.data.value.google.accessExpiresAt) }}</dd>
+              <dd>{{ tokenSummary(overview.data.value.google) }}</dd>
             </div>
             <div>
               <dt>Events</dt>
