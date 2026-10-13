@@ -94,6 +94,97 @@ class SyncCadenceTest {
     }
 
     @Test
+    fun `a run is stuck once it has gone without an end for longer than a run takes`() {
+        assertTrue(SyncCadence.RUN_STALL_MS >= SyncCadence.MIN_ALARM_MS)
+        // Well inside the period: the point is to come back for the run before the next one would.
+        assertTrue(SyncCadence.RUN_STALL_MS < SyncCadence.MIN_GAP_MS)
+        assertNull(SyncCadence.openRunStartedMs(null))
+        assertNull(SyncCadence.openRunStartedMs(RunRecord(NOW, "periodic", RunRecord.OK)))
+        assertNull(SyncCadence.openRunStartedMs(RunRecord(NOW, "periodic", "network")))
+        assertEquals(NOW, SyncCadence.openRunStartedMs(RunRecord(NOW, "periodic")))
+
+        assertFalse(SyncCadence.stalled(null, NOW))
+        assertFalse(SyncCadence.stalled(NOW, NOW))
+        assertFalse(SyncCadence.stalled(NOW - SyncCadence.RUN_STALL_MS + 1, NOW))
+        assertTrue(SyncCadence.stalled(NOW - SyncCadence.RUN_STALL_MS, NOW))
+        assertTrue(SyncCadence.stalled(NOW - 19 * minute, NOW))
+        // A start in the future is the clock set back, not a run that is stuck.
+        assertFalse(SyncCadence.stalled(NOW + minute, NOW))
+    }
+
+    @Test
+    fun `a scheduled sync that comes for a stuck run is not dropped for coming soon after it`() {
+        val started = NOW - SyncCadence.RUN_STALL_MS
+        for (trigger in listOf(SyncTrigger.PERIODIC, SyncTrigger.ALARM)) {
+            // The run that started moments ago ended, or nothing is known of it: too soon.
+            assertFalse(SyncCadence.shouldRun(trigger, started, NOW))
+            assertFalse(SyncCadence.shouldRun(trigger, started, NOW, openRunStartedMs = null))
+            // It has no end and has had time to reach one: this sync is what finishes it.
+            assertTrue(SyncCadence.shouldRun(trigger, started, NOW, openRunStartedMs = started))
+            // Under way, and not for long: two syncs a moment apart are still one too many.
+            assertFalse(SyncCadence.shouldRun(trigger, NOW - minute, NOW, openRunStartedMs = NOW - minute))
+        }
+    }
+
+    @Test
+    fun `the alarm asks for a sync when the run under way is stuck`() {
+        val started = NOW - SyncCadence.RUN_STALL_MS
+        assertFalse(SyncCadence.overdue(started, NOW))
+        assertTrue(SyncCadence.overdue(started, NOW, openRunStartedMs = started))
+        assertFalse(SyncCadence.overdue(NOW - minute, NOW, openRunStartedMs = NOW - minute))
+        // A run that ended is not come back for.
+        assertFalse(SyncCadence.overdue(started, NOW, openRunStartedMs = null))
+    }
+
+    @Test
+    fun `while a run is under way the alarm stands close behind it`() {
+        assertEquals(SyncCadence.RUN_STALL_MS, SyncCadence.nextAlarmInMs(NOW, NOW, openRunStartedMs = NOW))
+        assertEquals(
+            SyncCadence.RUN_STALL_MS - 30_000,
+            SyncCadence.nextAlarmInMs(NOW - 30_000, NOW, openRunStartedMs = NOW - 30_000),
+        )
+        // Never closer than a minute.
+        val nearlyStuck = NOW - SyncCadence.RUN_STALL_MS + 1
+        assertEquals(SyncCadence.MIN_ALARM_MS, SyncCadence.nextAlarmInMs(nearlyStuck, NOW, openRunStartedMs = nearlyStuck))
+        // Once the run is stuck a sync is asked for, and the alarm is the watchdog's again.
+        val stuck = NOW - 5 * minute
+        assertEquals(SyncCadence.WATCHDOG_MS - 5 * minute, SyncCadence.nextAlarmInMs(stuck, NOW, openRunStartedMs = stuck))
+        // A run that ended leaves the alarm where it was: the watchdog's time after it started.
+        assertEquals(SyncCadence.WATCHDOG_MS - minute, SyncCadence.nextAlarmInMs(NOW - minute, NOW, openRunStartedMs = null))
+        assertEquals(SyncCadence.WATCHDOG_MS, SyncCadence.nextAlarmInMs(NOW + minute, NOW, openRunStartedMs = NOW + minute))
+    }
+
+    @Test
+    fun `a run is known to be under way before the store says so, and the alarm is not moved out from behind it`() {
+        val inFlight = SyncCadence.InFlight()
+        assertNull(inFlight.newestStartedMs())
+        // The job's run has begun and set its alarm, but has not yet recorded its start: the
+        // store still holds the run before, which ended, and that was long enough ago to be
+        // overdue. Set by the store alone the alarm would be moved out to the watchdog's time.
+        val last = NOW - 18 * minute
+        val run = inFlight.begin(NOW)
+        assertEquals(SyncCadence.WATCHDOG_MS, SyncCadence.nextAlarmInMs(last, NOW + 100, openRunStartedMs = null))
+        assertEquals(
+            SyncCadence.RUN_STALL_MS - 100,
+            SyncCadence.nextAlarmInMs(last, NOW + 100, openRunStartedMs = inFlight.newestStartedMs()),
+        )
+        // The run is stuck, and the one that comes for it is the one the alarm then stands behind.
+        val rescue = inFlight.begin(NOW + 3 * minute)
+        assertEquals(NOW + 3 * minute, inFlight.newestStartedMs())
+        inFlight.end(run)
+        assertEquals(NOW + 3 * minute, inFlight.newestStartedMs())
+        inFlight.end(rescue)
+        assertNull(inFlight.newestStartedMs())
+        // Two that began in the same millisecond are still two.
+        val first = inFlight.begin(NOW)
+        val second = inFlight.begin(NOW)
+        inFlight.end(first)
+        assertEquals(NOW, inFlight.newestStartedMs())
+        inFlight.end(second)
+        assertNull(inFlight.newestStartedMs())
+    }
+
+    @Test
     fun `periodic work that is as it should be is left alone`() {
         assertNull(SyncCadence.periodicPolicy(healthy, NetworkType.CONNECTED))
         // Running, with the attempt that implies, is not "backed off".

@@ -67,6 +67,19 @@ enum class SyncTrigger(val code: String, val asked: Boolean = false) {
  * only ever goes off when the periodic work has not run in time, and then asks for the sync
  * itself, as expedited work, which the system is far more willing to run then (though a phone
  * that is hot enough holds even that back).
+ *
+ * The alarm also stands behind a run that has started. A run is only safe from the system while
+ * the job that started it lasts, and that job can end under it: when the job is what started the
+ * process, WorkManager, coming up, puts its schedule back, which replaces the very job that is
+ * running, and then runs the work itself, in the process, whether or not the system has started
+ * the replacement. A run left like that goes on for a few seconds and is then frozen with the
+ * rest of a process nothing is running in, half-way through its types, until something wakes the
+ * process: measured on a phone, that was this alarm, seventeen minutes on, and the types the run
+ * had not reached arrived that late. So while a run is under way the alarm is set for
+ * [RUN_STALL_MS] after its start instead. One that goes off finds the run still without an end
+ * and asks for a sync as expedited work: its job is what thaws the process and holds it while
+ * the frozen run finishes (the new sync waits for the engine's lock meanwhile), and it then
+ * reads whatever came in since.
  */
 object SyncCadence {
     const val PERIOD_MS = 15 * 60_000L
@@ -81,24 +94,86 @@ object SyncCadence {
     const val MIN_ALARM_MS = 60_000L
 
     /**
+     * How long a run may go without an end before it is taken to be stuck. A run takes seconds,
+     * a minute when a month of hourly totals is recomputed for several types; one that is still
+     * going after this either lost its job and was frozen, or died with its process.
+     */
+    const val RUN_STALL_MS = 2 * 60_000L
+
+    /** When the run that has no end yet started, or null when the latest run ended (or none ran). */
+    fun openRunStartedMs(run: RunRecord?): Long? = run?.takeIf { it.end == null }?.startedAtMs
+
+    /**
+     * Whether a run that started at [openRunStartedMs] and has recorded no end is stuck. A start
+     * in the future means the clock was set back, and says nothing.
+     */
+    fun stalled(openRunStartedMs: Long?, nowMs: Long): Boolean =
+        openRunStartedMs != null && nowMs - openRunStartedMs >= RUN_STALL_MS
+
+    /**
      * Whether a sync asked for by [trigger] should run. One the owner asked for always does. A
      * scheduled one is dropped when another sync started less than [MIN_GAP_MS] ago, which is
-     * what happens when the alarm and the periodic work fire a moment apart.
+     * what happens when the alarm and the periodic work fire a moment apart; unless that sync is
+     * stuck ([stalled]), when this one is what gets it finished.
+     *
+     * @param openRunStartedMs see [openRunStartedMs]
      */
-    fun shouldRun(trigger: SyncTrigger, lastAttemptMs: Long?, nowMs: Long): Boolean {
+    fun shouldRun(trigger: SyncTrigger, lastAttemptMs: Long?, nowMs: Long, openRunStartedMs: Long? = null): Boolean {
         if (trigger.asked || lastAttemptMs == null) return true
+        if (stalled(openRunStartedMs, nowMs)) return true
         // A last attempt in the future means the clock was set back: nothing can be told from it.
         return nowMs - lastAttemptMs !in 0 until MIN_GAP_MS
     }
 
-    /** Whether, when the alarm goes off, a sync is overdue and has to be asked for. */
-    fun overdue(lastAttemptMs: Long?, nowMs: Long): Boolean =
-        lastAttemptMs == null || nowMs - lastAttemptMs !in 0 until WATCHDOG_MS
+    /**
+     * Whether, when the alarm goes off, a sync has to be asked for: none has started for the
+     * watchdog's time, or the one that did is stuck.
+     */
+    fun overdue(lastAttemptMs: Long?, nowMs: Long, openRunStartedMs: Long? = null): Boolean =
+        lastAttemptMs == null || nowMs - lastAttemptMs !in 0 until WATCHDOG_MS || stalled(openRunStartedMs, nowMs)
 
-    /** How long from now the alarm should next go off: [WATCHDOG_MS] after the last attempt. */
-    fun nextAlarmInMs(lastAttemptMs: Long?, nowMs: Long): Long {
-        if (overdue(lastAttemptMs, nowMs) || lastAttemptMs == null) return WATCHDOG_MS
+    /**
+     * How long from now the alarm should next go off: [WATCHDOG_MS] after the last attempt, or,
+     * while a run is under way, [RUN_STALL_MS] after it started.
+     */
+    fun nextAlarmInMs(lastAttemptMs: Long?, nowMs: Long, openRunStartedMs: Long? = null): Long {
+        if (openRunStartedMs != null && nowMs >= openRunStartedMs && !stalled(openRunStartedMs, nowMs)) {
+            return (RUN_STALL_MS - (nowMs - openRunStartedMs)).coerceIn(MIN_ALARM_MS, RUN_STALL_MS)
+        }
+        if (lastAttemptMs == null || overdue(lastAttemptMs, nowMs)) return WATCHDOG_MS
         return (WATCHDOG_MS - (nowMs - lastAttemptMs)).coerceIn(MIN_ALARM_MS, WATCHDOG_MS)
+    }
+
+    /**
+     * The runs this process has under way, by when each was begun.
+     *
+     * The store only says a run is under way once the engine has recorded its start, which comes
+     * after the phone's grants have been read. Whoever sets the alarm in between (the schedule is
+     * put back as the process starts, at the same moment as the job's run begins) would set it by
+     * the run before, and move the alarm that stands behind this one out to the watchdog's time.
+     * So a run is known here from before its alarm is set until it has returned.
+     *
+     * There can be two: a run that is stuck, and the one that came for it and waits for the lock.
+     */
+    class InFlight {
+        private val started = ArrayList<Long>()
+
+        /** A run begins at [nowMs]. Returns what to hand to [end]. */
+        @Synchronized
+        fun begin(nowMs: Long): Long {
+            started.add(nowMs)
+            return nowMs
+        }
+
+        /** The run [begin] returned [startedMs] for is over, however it ended. */
+        @Synchronized
+        fun end(startedMs: Long) {
+            started.remove(startedMs)
+        }
+
+        /** When the newest run still under way began: the one the alarm stands behind. */
+        @Synchronized
+        fun newestStartedMs(): Long? = started.maxOrNull()
     }
 
     /**

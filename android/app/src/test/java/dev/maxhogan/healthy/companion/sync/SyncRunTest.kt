@@ -244,6 +244,58 @@ class SyncRunTest {
     }
 
     @Test
+    fun `a run frozen part-way is seen as stuck, and the sync that comes for it waits for it and then runs`() = runTest {
+        val rig = rig()
+        rig.sync()
+        rig.transport.sent.clear()
+        // A run under way and one that ended are told apart by the store alone.
+        assertNull(SyncCadence.openRunStartedMs(rig.store.current.global.run))
+        // The run loses its job and the process is frozen in the middle of an upload: nothing is
+        // cancelled and nothing fails, it just stops, holding the engine's lock.
+        val frozen = CompletableDeferred<Unit>()
+        val thawed = CompletableDeferred<Unit>()
+        rig.transport.hold = {
+            if (!it.isStateOnly && !thawed.isCompleted) {
+                frozen.complete(Unit)
+                thawed.await()
+            }
+        }
+        rig.now += SyncCadence.PERIOD_MS
+        val startedAt = rig.now
+        val stuck = launch { assertEquals(RunResult.Success, runWithChange(rig, "Weight", "w1")) }
+        frozen.await()
+        val global = rig.store.current.global
+        val open = SyncCadence.openRunStartedMs(global.run)
+        assertEquals(startedAt, open)
+
+        // The alarm that stands behind the run goes off: the run is stuck, and the scheduled sync
+        // it asks for is not dropped for coming too soon after the run it is there to finish.
+        rig.now += SyncCadence.RUN_STALL_MS
+        assertTrue(SyncCadence.overdue(global.lastAttemptMs, rig.now, open))
+        assertTrue(SyncCadence.shouldRun(SyncTrigger.ALARM, global.lastAttemptMs, rig.now, open))
+        // Without the run being known to be stuck, both would have left it frozen.
+        assertFalse(SyncCadence.overdue(global.lastAttemptMs, rig.now))
+        assertFalse(SyncCadence.shouldRun(SyncTrigger.ALARM, global.lastAttemptMs, rig.now))
+
+        // That sync waits for the engine's lock, which is what keeps a job on the process while
+        // the frozen run finishes; then it runs, and files the first as having ended well.
+        var rescued: RunResult? = null
+        val rescue = launch { rescued = rig.sync(trigger = SyncTrigger.ALARM) }
+        testScheduler.runCurrent()
+        assertNull(rescued)
+        assertEquals(RunRecord(startedAt, "periodic"), rig.store.current.global.run)
+        thawed.complete(Unit)
+        stuck.join()
+        rescue.join()
+        assertEquals(RunResult.Success, rescued)
+        assertEquals(RunRecord(startedAt, "periodic", "ok"), rig.store.current.global.previousRun)
+        assertEquals(RunRecord(rig.now, "alarm", "ok"), rig.store.current.global.run)
+        assertNull(SyncCadence.openRunStartedMs(rig.store.current.global.run))
+        // Uploaded once, by the run that was frozen: the one that came for it found nothing new.
+        assertEquals(listOf("w1"), rig.transport.data.flatMap { it.upsertIds })
+    }
+
+    @Test
     fun `a run that simply never finished is reported as interrupted by the process that follows`() = runTest {
         val rig = rig()
         rig.sync()

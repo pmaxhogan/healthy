@@ -244,6 +244,7 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
     )
     private val live = MutableStateFlow(SyncUiStates.Live())
     private val backfillRunning = AtomicBoolean(false)
+    private val inFlight = SyncCadence.InFlight()
 
     /** Runs in a row that could not read or write the sync state, which cannot count them itself. */
     private val storeFailures = AtomicInteger(0)
@@ -312,7 +313,9 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
                     guarded {
                         if (pairing is PairingState.Paired) {
                             scheduler.schedulePeriodic(wifiOnly)
-                            alarm.arm(SyncCadence.nextAlarmInMs(lastAttemptMs(), System.currentTimeMillis()))
+                            // The process may have been started by the very job whose run is
+                            // now under way: the alarm that stands behind that run is kept.
+                            alarm.arm(nextAlarmInMs())
                         } else {
                             scheduler.cancelAll()
                             alarm.cancel()
@@ -360,11 +363,13 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
                 val wifiOnly = dependencies.settings.wifiOnly.first()
                 guarded { scheduler.schedulePeriodic(wifiOnly) }
                 val now = System.currentTimeMillis()
-                val last = lastAttemptMs()
-                if (SyncCadence.overdue(last, now)) {
+                val cadence = cadence()
+                // Overdue, or under way and stuck: a run that lost its job is frozen with the
+                // process, and the job this asks for is what lets it finish.
+                if (SyncCadence.overdue(cadence.lastAttemptMs, now, cadence.openRunStartedMs)) {
                     scheduler.syncNow(wifiOnly, SyncTrigger.ALARM)
                 } else {
-                    next = SyncCadence.nextAlarmInMs(last, now)
+                    next = SyncCadence.nextAlarmInMs(cadence.lastAttemptMs, now, cadence.openRunStartedMs)
                 }
             }
         } finally {
@@ -372,13 +377,34 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
         }
     }
 
-    /** When a sync last started, or null when none has or the store cannot say. */
-    private suspend fun lastAttemptMs(): Long? = try {
-        store.snapshot().global.lastAttemptMs
+    /**
+     * What the schedule is decided from.
+     *
+     * @property lastAttemptMs when a sync last started, or null when none has
+     * @property openRunStartedMs when the run that has not ended started, or null when the latest
+     *   run has ended; see [SyncCadence.openRunStartedMs]
+     */
+    private class Cadence(val lastAttemptMs: Long?, val openRunStartedMs: Long?)
+
+    /** Read from the store; a store that cannot say is a store with no run in it. */
+    private suspend fun cadence(): Cadence = try {
+        val global = store.snapshot().global
+        Cadence(global.lastAttemptMs, SyncCadence.openRunStartedMs(global.run))
     } catch (e: CancellationException) {
         throw e
     } catch (_: Exception) {
-        null
+        Cadence(null, null)
+    }
+
+    /**
+     * How long from now the watchdog alarm should go off: close behind a run this process has
+     * under way ([SyncCadence.InFlight]), else behind one the store holds without an end, else
+     * the watchdog's time after the last sync started.
+     */
+    private suspend fun nextAlarmInMs(): Long {
+        val cadence = cadence()
+        val watched = inFlight.newestStartedMs() ?: cadence.openRunStartedMs
+        return SyncCadence.nextAlarmInMs(cadence.lastAttemptMs, System.currentTimeMillis(), watched)
     }
 
     override fun startBackfill() {
@@ -411,6 +437,11 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
      * One incremental sync, for the worker. Null when the app is not paired, and when a scheduled
      * run finds that another sync started moments ago ([SyncCadence.shouldRun]). Never throws: an
      * unexpected failure is recorded as `internal_error` and reported as retryable.
+     *
+     * While the run is under way the watchdog alarm stands close behind it
+     * ([SyncCadence.RUN_STALL_MS]), and it is only moved out to the next sync once the run has
+     * returned. A run that is cancelled, or frozen with a process that lost its job, leaves the
+     * near alarm in place, which is what comes back for it.
      */
     suspend fun runSync(trigger: SyncTrigger = SyncTrigger.MANUAL): RunResult? {
         val pairing = try {
@@ -422,9 +453,14 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
             return storeFailed()
         }
         if (pairing == null) return null
-        if (!SyncCadence.shouldRun(trigger, lastAttemptMs(), System.currentTimeMillis())) return null
-        // A sync is starting: the watchdog has nothing to say until one is overdue again.
-        alarm.arm(SyncCadence.WATCHDOG_MS)
+        val before = cadence()
+        if (!SyncCadence.shouldRun(trigger, before.lastAttemptMs, System.currentTimeMillis(), before.openRunStartedMs)) {
+            return null
+        }
+        // A sync is starting: the watchdog now watches this run, not the wait for the next one.
+        // Known as under way first, so that nobody who sets the alarm from here on moves it out.
+        val begun = inFlight.begin(System.currentTimeMillis())
+        alarm.arm(SyncCadence.RUN_STALL_MS)
         live.update { it.copy(syncing = true) }
         val result = try {
             // When the grants cannot be read the run must not go ahead on a guess: it would
@@ -442,8 +478,16 @@ class EngineSyncController(private val dependencies: SyncDependencies) : SyncCon
                 RunResult.Failed(ERROR_INTERNAL)
             }
         } finally {
+            inFlight.end(begun)
             live.update { it.copy(syncing = false) }
         }
+        // The run returned, so it is not stuck: the alarm goes back to watching for the next sync,
+        // unless another run is under way (the one that came for this one), which it then stands
+        // behind. Only here, and not on the way out of a cancellation, which leaves the run
+        // without an end and the near alarm where it is.
+        alarm.arm(
+            SyncCadence.nextAlarmInMs(cadence().lastAttemptMs, System.currentTimeMillis(), inFlight.newestStartedMs()),
+        )
         if (result is RunResult.Failed && result.errorCode == SyncEngine.ERROR_STATE_STORE) return storeFailed()
         storeFailures.set(0)
         guarded {
