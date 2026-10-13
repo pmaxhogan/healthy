@@ -43,6 +43,12 @@ export const TOOL_CATALOG: readonly McpToolInfoDto[] = [
     resourceTypes: [],
   },
   {
+    name: "sync_health_systems",
+    description:
+      "Asks for a sync now (ordinary, full or patient portal). The one tool that acts; never signs in.",
+    resourceTypes: [],
+  },
+  {
     name: "get_patient_profile",
     description: "Demographics as each health system holds them.",
     resourceTypes: ["Patient"],

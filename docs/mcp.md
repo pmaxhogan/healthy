@@ -1,16 +1,18 @@
 # The MCP server
 
 Healthy exposes the aggregated record over the Model Context Protocol,
-Streamable HTTP, at `/mcp`. It is OAuth-protected, every tool is read-only
-(`readOnlyHint`), and every call passes through one server-side filter
-before anything is serialised — see [SECURITY.md](../SECURITY.md) for why
-that design exists. This page covers connecting a client, the consent flow,
+Streamable HTTP, at `/mcp`. It is OAuth-protected, every tool but one is
+read-only (`readOnlyHint`), and every call passes through one server-side
+filter before anything is serialised — see [SECURITY.md](../SECURITY.md) for
+why that design exists. The one tool that acts, `sync_health_systems`, asks
+the server to sync sooner than its schedule; it is described under
+[Asking for a sync](#asking-for-a-sync-sync_health_systems). This page covers connecting a client, the consent flow,
 the exposure policy's exact syntax, the audit log, and revoking access.
 
 ## Tools
 
 The server registers (in `worker/src/mcp/tools/index.ts`): `get_health_summary`,
-`list_health_systems`, `get_sync_status`, `get_patient_profile`,
+`list_health_systems`, `get_sync_status`, `sync_health_systems`, `get_patient_profile`,
 `get_appointments`, `get_encounters`, `get_conditions`, `get_medications`,
 `get_medication_fills`, `get_allergies`, `get_immunizations`,
 `get_lab_results`, `get_vitals`, `get_social_history`, `get_procedures`,
@@ -166,6 +168,101 @@ The tools that take a window compare it against one date field of each item
 
 The other tools take no window (a `from` passed to them is a schema error).
 `get_health_summary` in particular is always "nearest to now".
+
+### Asking for a sync: `sync_health_systems`
+
+The one tool that does something rather than reads. It asks the sync engine
+for a run now and answers at once; the run happens afterwards, in the
+background, and its result shows up in `get_sync_status` and in every other
+tool's `coverage`. It is not annotated read-only, so a client asks the person
+before running it.
+
+An assistant rarely needs it. Everything is already synced on a schedule
+(see [operations.md](operations.md#cron-cadence)), and `coverage` says how
+fresh each part is. It is for "refresh my record" and for a `coverage` entry
+that is `stale` or `failed`. It is not for calling before a read as a matter
+of course, and the limits below are there because a model will do exactly
+that if nothing stops it.
+
+Arguments (anything else is refused):
+
+| Argument        | Meaning                                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------ |
+| `kind`          | Required, no default. `ordinary`, `full` or `portal` (below).                                          |
+| `healthSystems` | Ids, or case-insensitive pieces of display names. Give this **or** `all: true`.                        |
+| `all`           | `true` means every health system. There is no default: a call with neither, or with both, is refused.  |
+| `dryRun`        | `true` starts nothing and reports, per health system, what would happen and when a refusal would lift. |
+| `jq`            | As on every tool, over the result rows.                                                                |
+
+The three kinds:
+
+- **`ordinary`** is the hourly sync, narrowed to the health systems named: the
+  appointment search against the health system's API, the calendar, and a read
+  of the patient portal's visits and secure messages where its session is
+  already signed in.
+- **`full`** re-reads every resource type (conditions, medications, results,
+  documents and the rest) into the cache the other tools answer from. It is the
+  expensive one and has to be asked for by name.
+- **`portal`** is the patient-portal pass alone: upcoming visits and secure
+  messages, nothing from the API.
+
+**None of them signs in to a portal.** A sign-in can email you a verification
+code and spends the portal's daily allowance, so it is never started from
+here. A portal that is not signed in is `skipped`; one whose session has
+quietly expired is read as far as "expired" and left for the hourly sync or
+for you.
+
+The answer is the usual envelope with one row per health system:
+
+```json
+{
+  "kind": "sync_request",
+  "healthSystem": "Example Health",
+  "healthSystemId": "…",
+  "sync": "full",
+  "outcome": "refused",
+  "code": "cooldown",
+  "nextAllowedAt": "2026-01-31T16:00:00.000Z",
+  "lastCompletedAt": "2026-01-31T10:23:41.000Z",
+  "lastRequestedAt": "2026-01-31T12:00:00.000Z",
+  "requestsToday": 1,
+  "dailyLimit": 3,
+  "cooldownSeconds": 14400
+}
+```
+
+`lastCompletedAt` is when a sync of that kind last finished, whoever started
+it; `lastRequestedAt` and `requestsToday` are about requests made over MCP.
+
+| `outcome`         | `code`                                                                                          | Meaning                                                                                     |
+| ----------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `started`         | `started`                                                                                       | Queued. `nextAllowedAt` is when the same request may be made again.                         |
+| `would_start`     | `dry_run`                                                                                       | A dry run found nothing in the way.                                                         |
+| `already_running` | `run_in_flight`, `full_refresh_in_flight`, `portal_sign_in_in_flight`                           | A run that covers it is in flight. Nothing was queued behind it, and no cooldown was spent. |
+| `refused`         | `cooldown`, `daily_limit`, `recently_synced`, `backed_off`                                      | A limit said no. `nextAllowedAt` says when to ask again. A refused request is not queued.   |
+| `skipped`         | `disabled`, `not_connected`, `needs_reauth`                                                     | There is no API connection this tool can sync. Only you can fix it, from the admin UI.      |
+| `skipped`         | `portal_not_configured`, `portal_no_credentials`, `portal_needs_reauth`, `portal_not_signed_in` | There is no signed-in portal to read. Only you can sign it in.                              |
+| `failed`          | `start_failed`                                                                                  | Allowed, but the run could not be queued. The cooldown was spent all the same.              |
+
+A target that matches nothing answers no rows and the warning
+`no_health_system_matched`. A dry run adds `dry_run_nothing_was_started`, and
+anything that started adds `sync_runs_in_background_read_get_sync_status_later`.
+A call that says neither `healthSystems` nor `all: true`, or both, is the tool
+error `invalid_target`.
+
+The limits, per health system and per kind, checked in this order:
+
+| Check                 | `ordinary`       | `full`            | `portal`          |
+| --------------------- | ---------------- | ----------------- | ----------------- |
+| Finished recently     | within 5 minutes | within 30 minutes | within 10 minutes |
+| Cooldown between asks | 15 minutes       | 4 hours           | 30 minutes        |
+| Asks in one UTC day   | 12               | 3                 | 8                 |
+
+Before those: a rate-limit backoff (`backed_off`: a health system asked this
+server to slow down, and only the admin UI's buttons override that) and a run
+in flight. The cooldown is a row in D1, so it holds across clients and
+sessions. To switch the tool off altogether, add a `tool` rule for
+`sync_health_systems` on the MCP page.
 
 ### Freshness: `coverage` and `get_sync_status`
 

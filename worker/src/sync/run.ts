@@ -67,7 +67,7 @@ import type { RunKind, RunSummary } from "@shared/types.ts";
  * one is capped well below this, so the threshold only ever catches a run whose
  * invocation is gone.
  */
-const STALE_RUN_SECONDS = 30 * 60;
+export const STALE_RUN_SECONDS = 30 * 60;
 
 /** A zeroed DTO summary. Every run starts from one and counts upward. */
 export function emptySummary(): RunSummary {

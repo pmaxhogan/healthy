@@ -7,8 +7,13 @@
  * context on every turn, and each tool's own description carries the detail.
  */
 export const MCP_INSTRUCTIONS =
-  "A read-only copy of one person's health record, cached from their health " +
-  "systems. Start with get_health_summary. For 'what conditions do I have', " +
+  "A copy of one person's health record, cached from their health systems. " +
+  "Every tool reads that cache and changes nothing, except sync_health_systems, " +
+  "which asks the server to refresh it. The cache is already refreshed on a " +
+  "schedule, so do not call sync_health_systems before a read as a matter of " +
+  "course or in a loop: call it only when the person asks for a refresh or " +
+  "`coverage` shows that what they need is stale or failed, and read its " +
+  "description first. Start with get_health_summary. For 'what conditions do I have', " +
   'use get_conditions with category ["problem-list-item"] or collapse: true. ' +
   "Patient-portal secure messages (inbox conversations with a care team, and " +
   "the letters and notices the portal sends) come from get_messages, one item " +

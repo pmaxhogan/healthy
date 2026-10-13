@@ -73,6 +73,38 @@ organisation that starts rate-limiting a patient-facing endpoint is
 throttling the whole app, not one request, and retrying in the 60 seconds
 a header asked for just burns the next quota window too.
 
+## Syncs an MCP client asks for
+
+An assistant connected over MCP can ask for a sync with the
+`sync_health_systems` tool ([mcp.md](mcp.md#asking-for-a-sync-sync_health_systems)).
+What that means in operation:
+
+- Its runs appear on the **Runs** page like any other. An `ordinary` or
+  `portal` request is one `manual` run over every health system the call
+  named; a `full` request is one `full` run per health system, queued on the
+  same Durable Object the **Full refresh** button uses.
+- It never signs in to a patient portal. A portal whose session has expired
+  shows `portal_session_expired` on that run and nothing else changes: no
+  sign-in attempt is spent, no code is emailed and no reconnect card opens. The
+  hourly sync re-establishes the session under the limits above, or you do.
+- It never clears a backoff. While `sync_backoff_until` is in the future every
+  request is refused as `backed_off`; **Sync now** in the admin UI is still the
+  only override.
+- The cooldown and the daily count live in D1, in `mcp_sync_requests`: one row
+  per health system and kind, with when a request was last let through, how
+  many were that UTC day, and which client asked. Deleting a row lifts that
+  pair's cooldown; nothing else reads it.
+- Every call is in the MCP audit log (which client, which health systems, how
+  many rows), started or not.
+- To switch it off, add a `tool` rule for `sync_health_systems` on the MCP
+  page. The read tools are unaffected.
+
+One thing to know when reading its refusals: `run_in_flight` means _some_ sync
+run is open, not necessarily one for that health system, because a scheduled
+run's row does not say which health systems it covers. A run whose invocation
+died stays open until the next run sweeps it (30 minutes), and requests are
+refused for that long.
+
 ## The run log
 
 Every sync (scheduled or manual) writes one row to `run_log`: its kind

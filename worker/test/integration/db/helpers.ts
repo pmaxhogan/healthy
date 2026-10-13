@@ -150,6 +150,7 @@ const TABLES = [
   "portal_message_sync",
   "portal_visits",
   "portal_accounts",
+  "mcp_sync_requests",
   "mcp_policy",
   "mcp_audit",
   "run_log",

@@ -1,18 +1,21 @@
 /**
  * How a tool gets onto the server.
  *
- * Two functions, and every tool uses one of them:
+ * Three functions, and every tool uses one of them:
  *
  *  - `readTool` registers a hand-written body. It is the one that stamps the
- *    read-only annotations, so no tool can be registered without them.
+ *    read-only annotations, so no reading tool can be registered without them.
  *  - `collectionTool` registers the common shape: pick health systems, read the cache,
  *    normalize, window, filter, respond. Nineteen of the tools are nothing but a
  *    description and a `CollectSpec`, and writing each of them out longhand would
  *    be nineteen chances to forget the policy call.
+ *  - `actionTool` registers a tool that makes this server do something. There
+ *    is exactly one, `sync_health_systems`, and a second should be argued for.
  *
  * The annotations are not decoration. `readOnlyHint` is what lets a client run a
- * tool without a confirmation prompt, and this server has no tool that writes
- * anything, so they are a constant rather than a per-tool choice.
+ * tool without a confirmation prompt, so it is stamped by the registrar and is
+ * never a per-tool choice: a tool is read-only because it went through
+ * `readTool`, and one that acts cannot claim to be.
  */
 
 import { withAudit } from "../audit.ts";
@@ -28,16 +31,32 @@ import type { McpServer, ToolCallback } from "@modelcontextprotocol/sdk/server/m
 import type { z } from "zod";
 
 /**
- * Every tool on this server, always.
+ * Every reading tool on this server, always.
  *
  * `openWorldHint: false` is the honest answer: with the single exception of
- * `get_document_text`, a tool reads the local cache and cannot reach outside it.
+ * `get_document_text`, a reading tool reads the local cache and cannot reach
+ * outside it.
  */
 const READ_ONLY_ANNOTATIONS = {
   readOnlyHint: true,
   destructiveHint: false,
   idempotentHint: true,
   openWorldHint: false,
+} as const;
+
+/**
+ * A tool that acts.
+ *
+ * Not read-only, so a client asks before running it. Not destructive: nothing
+ * it starts deletes or overwrites what the owner has, it re-reads it. Not
+ * idempotent: the second identical call is refused by a cooldown rather than
+ * repeated. Open world: what it starts makes requests to health systems.
+ */
+const ACTION_ANNOTATIONS = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: true,
 } as const;
 
 export interface ReadToolOptions<S extends z.ZodType> {
@@ -66,6 +85,30 @@ export function readTool<S extends z.ZodType>(
     // safe in the direction that matters: `body` is typed `ToolBody<z.output<S>>`
     // at every call site, which is exactly the argument type the SDK will parse
     // `inputSchema` into before calling it.
+    withAudit(deps, options.name, body) as ToolCallback<S>,
+  );
+}
+
+/**
+ * Register a tool that makes this server act.
+ *
+ * The same audit wrapper as every other tool: the MCP switch, the `tool` deny
+ * rule, the stable error codes and the audit row all apply unchanged.
+ */
+export function actionTool<S extends z.ZodType>(
+  server: McpServer,
+  deps: ToolDeps,
+  options: ReadToolOptions<S>,
+  body: ToolBody<z.output<S>>,
+): void {
+  server.registerTool(
+    options.name,
+    {
+      description: options.description,
+      inputSchema: options.schema,
+      annotations: ACTION_ANNOTATIONS,
+    },
+    // See `readTool` for why this assertion is needed and why it is safe.
     withAudit(deps, options.name, body) as ToolCallback<S>,
   );
 }

@@ -86,6 +86,7 @@ export type ToolErrorCode =
   | "invalid_cursor"
   | "cursor_expired"
   | "invalid_range"
+  | "invalid_target"
   | JqFailureCode;
 
 /**
@@ -115,6 +116,11 @@ const ERROR_MESSAGES = new Map<ToolErrorCode, string>([
       "not line up with the ones already read; repeat the call without `cursor` to start again",
   ],
   ["invalid_range", "`end` is before `start`; a range runs from `start` up to `end`"],
+  [
+    "invalid_target",
+    "say which health systems to sync: name them in `healthSystems`, or pass `all: true` " +
+      "to mean every one. Exactly one of the two; nothing was started",
+  ],
   ["jq_error", "the jq program failed; `detail` has jq's message"],
   ["jq_budget_exceeded", "the jq program exceeded its step budget"],
   ["jq_out_of_memory", "the jq program exceeded its memory ceiling; `detail` says what to do"],

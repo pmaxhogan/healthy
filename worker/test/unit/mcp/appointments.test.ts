@@ -655,6 +655,7 @@ describe("coverage", () => {
     const { entry } = await portalEntryFor({
       portal: {
         state: "needs_reauth",
+        hasCredentials: true,
         lastOkAt: NOW - 86_400,
         lastErrorCode: "portal_login_failed",
         needsReauthSince: NOW - 3600,
@@ -670,7 +671,13 @@ describe("coverage", () => {
       status: "not_connected",
       lastSyncAt: null,
       lastErrorCode: null,
-      portal: { state: "active", lastOkAt: NOW - 600, lastErrorCode: null, needsReauthSince: null },
+      portal: {
+        state: "active",
+        hasCredentials: true,
+        lastOkAt: NOW - 600,
+        lastErrorCode: null,
+        needsReauthSince: null,
+      },
     });
     expect(entry).toMatchObject({ status: "ok" });
     expect(warnings.some((warning) => warning.startsWith("sync_failed:PortalVisit"))).toBe(false);
@@ -689,6 +696,7 @@ describe("coverage", () => {
     const stale = await portalEntryFor({
       portal: {
         state: "active",
+        hasCredentials: true,
         lastOkAt: NOW - 8 * 3600,
         lastErrorCode: null,
         needsReauthSince: null,
@@ -696,7 +704,13 @@ describe("coverage", () => {
     });
     expect(stale.entry).toMatchObject({ status: "stale", ageHours: 8 });
     const never = await portalEntryFor({
-      portal: { state: "none", lastOkAt: null, lastErrorCode: null, needsReauthSince: null },
+      portal: {
+        state: "none",
+        hasCredentials: true,
+        lastOkAt: null,
+        lastErrorCode: null,
+        needsReauthSince: null,
+      },
     });
     expect(never.entry).toMatchObject({ status: "never" });
   });

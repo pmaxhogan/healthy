@@ -283,6 +283,43 @@ export interface RunLogRow {
   summary_json: string;
 }
 
+/** Which sync an MCP client asked for (CHECK-constrained): see migration 0018. */
+export type McpSyncKind = "ordinary" | "full" | "portal";
+
+/** One (health system, kind of sync) pair's request history. Nothing personal. */
+export interface McpSyncRequestRow {
+  health_system_id: string;
+  kind: McpSyncKind;
+  requested_at: number;
+  /** Whole UTC days since the epoch `day_count` belongs to. */
+  day: number;
+  day_count: number;
+  client_id: string | null;
+}
+
+/**
+ * What one (health system, kind) pair is held to. Here, beside the row, rather
+ * than in the repo: the MCP tool layer reads these shapes and must not import
+ * a module that touches D1.
+ */
+export interface McpSyncRequestLimits {
+  /** Least seconds between two requests that are let through. */
+  cooldownSeconds: number;
+  /** Most requests let through in one UTC day. */
+  dailyLimit: number;
+}
+
+/** A pair's stored history, as the tool reads it. */
+export interface McpSyncRequestEntry {
+  healthSystemId: string;
+  kind: McpSyncKind;
+  /** Unix seconds of the last request that was let through. */
+  requestedAt: number;
+  /** Whole UTC days since the epoch `dayCount` belongs to. */
+  day: number;
+  dayCount: number;
+}
+
 export interface LoginAttemptRow {
   ip_hash: string;
   count: number;

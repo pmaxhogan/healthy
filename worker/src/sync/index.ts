@@ -34,7 +34,18 @@
  */
 
 export { runCalendarSync } from "./calendar-sync.ts";
-export { startFullRefresh } from "./runner.ts";
+/**
+ * What the MCP tool `sync_health_systems` reaches the engine through: the same
+ * queue the admin button uses for a full refresh, a second job on it for a
+ * calendar sync that never signs in to a portal, and whether either is in
+ * flight. See `runner.ts`.
+ */
+export {
+  calendarSyncBusy,
+  fullRefreshBusy,
+  startCalendarSync,
+  startFullRefresh,
+} from "./runner.ts";
 /**
  * The portal sign-in runner's three entry points.
  *
@@ -43,6 +54,8 @@ export { startFullRefresh } from "./runner.ts";
  * it. `portalSignInState` is what the admin UI polls while it does.
  */
 export { portalSignInState, startPortalSignIn, startPortalSync } from "./portal-runner.ts";
+/** How long an open run row counts as a run in flight; older ones are swept. */
+export { STALE_RUN_SECONDS } from "./run.ts";
 export { refreshConnectionToken } from "./keepalive.ts";
 export { handleScheduled } from "./scheduled.ts";
 

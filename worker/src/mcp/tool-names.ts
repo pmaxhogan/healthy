@@ -9,6 +9,8 @@ export const TOOL_NAMES = [
   "get_health_summary",
   "list_health_systems",
   "get_sync_status",
+  // The one tool that acts: it asks the sync engine for a run.
+  "sync_health_systems",
   "get_patient_profile",
   "get_appointments",
   "get_encounters",

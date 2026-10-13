@@ -58,9 +58,10 @@ function jqSchema(description: string) {
  * has already filtered, and before `limit`. The length ceiling bounds the
  * caller's program, not any data; worker/src/mcp/jq/engine.ts has the other bounds.
  */
-export function jqArg(tool: ToolName, semantics: "raw" | "paged" = "raw") {
+export function jqArg(tool: ToolName, semantics: "raw" | "paged" | "plain" = "raw") {
   const examples = JQ_EXAMPLES[tool].map((example) => `\`${example}\``).join("; ");
-  const lead = semantics === "raw" ? JQ_SEMANTICS : JQ_SEMANTICS_PAGED;
+  const leads = { raw: JQ_SEMANTICS, paged: JQ_SEMANTICS_PAGED, plain: JQ_CORE };
+  const lead = leads[semantics];
   return { jq: jqSchema(`${lead} Examples for this tool: ${examples}.`) } as const;
 }
 

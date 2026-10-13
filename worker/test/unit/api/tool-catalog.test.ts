@@ -12,6 +12,7 @@ import { TOOL_CATALOG } from "../../../src/api/tool-catalog.ts";
 const EXPECTED_NAMES = [
   "list_health_systems",
   "get_sync_status",
+  "sync_health_systems",
   "get_patient_profile",
   "get_appointments",
   "get_encounters",
@@ -82,8 +83,9 @@ describe("TOOL_CATALOG", () => {
   });
 
   it("gives every Health Connect tool hc: types and no FHIR ones", () => {
+    const aboutHealthSystems = new Set(["list_health_systems", "sync_health_systems"]);
     const phoneTools = TOOL_CATALOG.filter((tool) => !tool.name.startsWith("get_")).filter(
-      (tool) => tool.name !== "list_health_systems",
+      (tool) => !aboutHealthSystems.has(tool.name),
     );
 
     expect(phoneTools).toHaveLength(11);
@@ -95,12 +97,18 @@ describe("TOOL_CATALOG", () => {
     }
   });
 
-  it("gives the three cross-cutting tools no resource types", () => {
-    const crossCutting = new Set(["list_health_systems", "get_sync_status", "get_health_summary"]);
+  it("gives the four cross-cutting tools no resource types", () => {
+    // The fourth returns no record at all: it asks for a sync and reports on the asking.
+    const crossCutting = new Set([
+      "list_health_systems",
+      "get_sync_status",
+      "sync_health_systems",
+      "get_health_summary",
+    ]);
     const summaries = TOOL_CATALOG.filter((tool) => crossCutting.has(tool.name));
     const perResource = TOOL_CATALOG.filter((tool) => !crossCutting.has(tool.name));
 
-    expect(summaries.map((tool) => tool.resourceTypes)).toStrictEqual([[], [], []]);
+    expect(summaries.map((tool) => tool.resourceTypes)).toStrictEqual([[], [], [], []]);
     for (const tool of perResource) {
       expect(tool.resourceTypes.length, tool.name).toBeGreaterThan(0);
     }

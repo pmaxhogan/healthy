@@ -19,6 +19,7 @@ import { EMPTY_RULES } from "../../../src/policy/rules.ts";
 import { emptyHc, fakeHcReads } from "./hc-fake.ts";
 
 import type { FakeHc } from "./hc-fake.ts";
+import type { McpSyncRequestEntry } from "../../../src/db/rows.ts";
 import type { Logger } from "../../../src/lib/log.ts";
 import type {
   AuditRecord,
@@ -29,6 +30,7 @@ import type {
   PortalMessageSyncEntry,
   PortalVisitRecord,
   HealthSystemInfo,
+  SyncControls,
   SyncStatusEntry,
   ToolDeps,
 } from "../../../src/mcp/deps.ts";
@@ -55,7 +57,97 @@ function healthSystem(id: string, displayName: string): HealthSystemInfo {
     lastFullRefreshAt: NOW - 86_400,
     lastErrorCode: null,
     needsReauthSince: null,
-    portal: { state: "active", lastOkAt: NOW - 3600, lastErrorCode: null, needsReauthSince: null },
+    portal: {
+      state: "active",
+      hasCredentials: true,
+      lastOkAt: NOW - 3600,
+      lastErrorCode: null,
+      needsReauthSince: null,
+    },
+  };
+}
+
+/**
+ * The sync engine as `sync_health_systems` sees it, faked: what is in flight,
+ * what has been asked for before, and a record of everything a call started.
+ */
+interface FakeSync {
+  backoffUntil: number | null;
+  runInFlight: boolean;
+  fullRefreshInFlight: Set<string>;
+  portalSignInInFlight: Set<string>;
+  /** `mcp_sync_requests`, as rows. `claim` writes here under the real rule. */
+  history: McpSyncRequestEntry[];
+  /** What a start answers: false stands for "one was already queued". */
+  startAnswers: boolean;
+  /** Make every start throw, as a Durable Object that cannot be reached does. */
+  startThrows: boolean;
+  /** Every calendar sync queued, in order. */
+  calendarStarts: { healthSystemIds: string[]; portalOnly: boolean }[];
+  /** Every full refresh queued, by health system id, in order. */
+  fullStarts: string[];
+}
+
+function emptySync(): FakeSync {
+  return {
+    backoffUntil: null,
+    runInFlight: false,
+    fullRefreshInFlight: new Set(),
+    portalSignInInFlight: new Set(),
+    history: [],
+    startAnswers: true,
+    startThrows: false,
+    calendarStarts: [],
+    fullStarts: [],
+  };
+}
+
+/** `SyncControls` over a {@link FakeSync}. The claim follows the repo's SQL rule. */
+function fakeSyncControls(sync: FakeSync, now: () => number): SyncControls {
+  const start = (): Promise<{ started: boolean }> =>
+    sync.startThrows
+      ? Promise.reject(new Error("unreachable"))
+      : Promise.resolve({ started: sync.startAnswers });
+  return {
+    backoffUntil: () => Promise.resolve(sync.backoffUntil),
+    runInFlight: () => Promise.resolve(sync.runInFlight),
+    fullRefreshInFlight: (id) => Promise.resolve(sync.fullRefreshInFlight.has(id)),
+    portalSignInInFlight: (id) => Promise.resolve(sync.portalSignInInFlight.has(id)),
+    // Copies, as rows read from D1 are: a later claim must not rewrite what an
+    // earlier read returned.
+    history: (kind) =>
+      Promise.resolve(
+        sync.history.filter((entry) => entry.kind === kind).map((entry) => ({ ...entry })),
+      ),
+    claim: (healthSystemId, kind, limits) => {
+      const at = now();
+      const day = Math.floor(at / 86_400);
+      const entry = sync.history.find(
+        (row) => row.healthSystemId === healthSystemId && row.kind === kind,
+      );
+      if (entry === undefined) {
+        sync.history.push({ healthSystemId, kind, requestedAt: at, day, dayCount: 1 });
+        return Promise.resolve(true);
+      }
+      const cooled = entry.requestedAt + limits.cooldownSeconds <= at;
+      const underCap = entry.day !== day || entry.dayCount < limits.dailyLimit;
+      if (!cooled || !underCap) return Promise.resolve(false);
+      entry.dayCount = entry.day === day ? entry.dayCount + 1 : 1;
+      entry.day = day;
+      entry.requestedAt = at;
+      return Promise.resolve(true);
+    },
+    startCalendarSync: (healthSystemIds, options) => {
+      sync.calendarStarts.push({
+        healthSystemIds: [...healthSystemIds],
+        portalOnly: options.portalOnly,
+      });
+      return start();
+    },
+    startFullRefresh: (healthSystemId) => {
+      sync.fullStarts.push(healthSystemId);
+      return start();
+    },
   };
 }
 
@@ -247,6 +339,10 @@ export interface FakeState {
   document: DocumentTextResult;
   /** The Health Connect store. No phone is paired unless a test adds one. */
   hc: FakeHc;
+  /** The sync engine, as `sync_health_systems` sees it. Idle unless a test says. */
+  sync: FakeSync;
+  /** The clock every tool reads. A test moves it to let a cooldown pass. */
+  now: number;
   /** Every audit row the tools wrote, in order. */
   audits: AuditRecord[];
   prunes: number;
@@ -310,6 +406,8 @@ export function fakeState(overrides: FakeOverrides = {}): FakeState {
       cached: false,
     },
     hc: overrides.hc ?? emptyHc(),
+    sync: emptySync(),
+    now: NOW,
     audits: [],
     prunes: 0,
     beginCalls: 0,
@@ -355,7 +453,8 @@ export function fakeDeps(state: FakeState): ToolDeps {
     beginCall: () => {
       state.beginCalls += 1;
     },
-    now: () => NOW,
+    now: () => state.now,
+    sync: fakeSyncControls(state.sync, () => state.now),
     mcpEnabled: () => Promise.resolve(state.enabled),
     rules: () => Promise.resolve(state.rules),
     healthSystems: () => Promise.resolve(state.healthSystems),

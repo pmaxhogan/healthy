@@ -170,6 +170,7 @@ describe("reposFor", () => {
         "mailInbox",
         "mcpAudit",
         "mcpPolicy",
+        "mcpSyncRequests",
         "oauthStates",
         "portalAccounts",
         "portalMessageAttachments",
