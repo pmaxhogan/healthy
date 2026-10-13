@@ -158,6 +158,23 @@ export function isGapType(type: string): boolean {
 const SOURCE_SWITCH_MAX_PREVIOUS_SHARE = 0.1;
 
 /**
+ * True for the local day that holds "now", on which no switch is looked for.
+ * The rule weighs each app's share of a DAY's total, and the day still being
+ * lived has no total yet. Apps upload on their own schedules, so minutes after
+ * midnight the day holds whatever the first app to sync has written and
+ * nothing of the app that supplies the type, which reads exactly like that app
+ * going away. No age in hours fixes that (an app that syncs once in the
+ * evening is absent at noon as well), and a finding that is there at 00:20 and
+ * gone by breakfast is worse than one reported a day late: a real switch today
+ * is found from tomorrow on, dated today.
+ *
+ * `QUALITY_RULES.sourceSwitchJudgesUnfinishedDay` says so in the answer.
+ */
+function isUnfinishedDay(label: string, request: QualityRequest): boolean {
+  return label === request.clock.day(request.nowMs);
+}
+
+/**
  * A value printed with this many decimals or fewer is "rounded": what a
  * person types or a display shows.
  */
@@ -246,6 +263,8 @@ export const QUALITY_RULES = {
   gapMinDaysWithData: GAP_MIN_DAYS_WITH_DATA,
   sessionMissingMinVitalTypes: SESSION_MISSING_MIN_VITALS,
   sourceSwitchMaxPreviousShare: SOURCE_SWITCH_MAX_PREVIOUS_SHARE,
+  // Not a threshold but a rule of the same finding: see `isUnfinishedDay`.
+  sourceSwitchJudgesUnfinishedDay: false,
   precisionRoundedMaxDecimals: PRECISION_ROUNDED_MAX_DECIMALS,
   precisionUnroundedMinDecimals: PRECISION_UNROUNDED_MIN_DECIMALS,
   windowDays: QUALITY_WINDOW_DAYS,
@@ -806,14 +825,16 @@ interface Lead {
  * {@link SOURCE_SWITCH_MAX_PREVIOUS_SHARE} of that day's total. Two apps
  * recording side by side trade the lead without either leaving, and that is
  * not reported -- the "previous" supplier stays the one last established,
- * so when it does stop the switch is still found.
+ * so when it does stop the switch is still found. The local day that holds
+ * "now" is not judged at all: see {@link isUnfinishedDay}. It is the last day
+ * there is, so leaving the supplier as it was changes nothing after it.
  *
  * `lead` continues a silence that began before the first of `days`.
  */
 function gapsAndSwitches(
   type: string,
   days: ReadonlyMap<string, Map<string, DayShare>>,
-  lead: Lead | null = null,
+  { lead, request }: { lead: Lead | null; request: QualityRequest },
 ): Finding[] {
   const labels = listOf(days.keys());
   const withData = labels.filter((label) => (days.get(label)?.size ?? 0) > 0);
@@ -850,17 +871,32 @@ function gapsAndSwitches(
       previous = source;
       continue;
     }
-    if (source === previous) continue;
-    const previousShare = shareOf(origins, previous);
-    if (previousShare > SOURCE_SWITCH_MAX_PREVIOUS_SHARE) continue;
-    out.push({
-      type,
-      kind: "source_switch",
-      detail: { date: label, from: previous, to: source, previousShare },
-    });
+    if (isUnfinishedDay(label, request)) continue;
+    const change = switchFinding(type, { label, origins, source }, previous);
+    if (change === null) continue;
+    out.push(change);
     previous = source;
   }
   return out;
+}
+
+/**
+ * The switch on one finished day, or null: another app recorded the most and
+ * the one that supplied the type before is absent, or nearly.
+ */
+function switchFinding(
+  type: string,
+  day: { label: string; origins: ReadonlyMap<string, DayShare>; source: string },
+  previous: string,
+): Finding | null {
+  if (day.source === previous) return null;
+  const previousShare = shareOf(day.origins, previous);
+  if (previousShare > SOURCE_SWITCH_MAX_PREVIOUS_SHARE) return null;
+  return {
+    type,
+    kind: "source_switch",
+    detail: { date: day.label, from: previous, to: day.source, previousShare },
+  };
 }
 
 /** `days` after `day` (`YYYY-MM-DD`); negative for before. Calendar arithmetic, no zone. */
@@ -930,9 +966,10 @@ async function dayFindings(scan: Scan): Promise<Finding[]> {
   const findings: Finding[] = [];
   for (const type of request.types) {
     const days = await scan.days(type, range);
+    const lead = await leadInto(scan, type, days);
     const found = [
       ...overlappingOrigins(type, days),
-      ...gapsAndSwitches(type, days, await leadInto(scan, type, days)),
+      ...gapsAndSwitches(type, days, { lead, request }),
     ];
     findings.push(...found.filter((finding) => datedHere(finding, startDay)));
   }

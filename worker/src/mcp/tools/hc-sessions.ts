@@ -32,11 +32,12 @@
 
 import { z } from "zod";
 
+import { dayBoundsMs } from "../../hc/rollup/day.ts";
 import { isOverThreeHours } from "../../hc/rules.ts";
 import { AVAILABILITY_NOTE, BUDGET_NOTE, RANGE_NOTE, hcArgs, rangeArgs } from "../hc/args.ts";
 import { openStampedPage } from "../hc/page.ts";
 import { JOINED_FIELDS, deniedJoins, stripJoined } from "../hc/policy.ts";
-import { groupSessions, leftRunningReasons } from "../hc/sessions.ts";
+import { groupSessions, leftRunningReasons, restingHrByDay } from "../hc/sessions.ts";
 import {
   beginHcCall,
   deviceCoverageFor,
@@ -145,14 +146,22 @@ function leftRunningReadable(call: HcCall): boolean {
   );
 }
 
+/** What a sleep row is built with besides its group. */
+interface SleepRowContext {
+  recordIds: RecordIds;
+  /** The resting heart rate of each row, by its primary's key: `restingHrByDay`. */
+  restingHr: ReadonlyMap<string, number | null>;
+  includeStages: boolean;
+}
+
 function sleepRow(
   call: HcCall,
   device: HcDevice,
   group: Group<SleepNight>,
-  recordIds: RecordIds,
-  includeStages: boolean,
+  context: SleepRowContext,
 ): Record<string, unknown> {
   const { clock } = call;
+  const { recordIds, includeStages } = context;
   const night = group.primary.summary;
   return stripJoined(call.rules, "sleep_sessions", {
     ...rowTags(device, TYPE_SLEEP),
@@ -174,7 +183,9 @@ function sleepRow(
     hrv: night.hrv === null ? null : { ...night.hrv, iqr: night.hrv.q3 - night.hrv.q1 },
     respiratoryRate: night.respiratoryRate,
     skinTempDelta: night.skinTempDelta,
-    restingHr: night.restingHr,
+    // The day's figure, on the longest sleep of the date and not on whichever
+    // session's end it was stamped at.
+    restingHr: context.restingHr.get(group.primary.id) ?? null,
     contextClamped: night.contextClamped ?? false,
     ...groupFields(call, group, recordIds),
     ...(includeStages && {
@@ -240,6 +251,60 @@ async function sessionIds(
   });
 }
 
+/** A stored night as the store's reader returns it: its key and its summary. */
+type StoredNight = Awaited<ReturnType<ToolDeps["hc"]["sleepNights"]>>[number];
+
+/**
+ * The sleeps OUTSIDE the range that ended on a local date the answer has a
+ * row for. They are never returned and never counted: they are read so that
+ * which sleep of a date carries the day's resting heart rate
+ * (`restingHrByDay`) does not depend on where the range was cut.
+ *
+ * Only two dates can be cut: the one the range starts in, and whatever lies
+ * between the range's end and the end of the last date a returned sleep ended
+ * on. So this is at most two reads a phone however long the range is, and none
+ * when the range is whole days that hold every sleep's end, the usual case.
+ */
+async function sleepsBeyondRange(
+  deps: ToolDeps,
+  call: HcCall,
+  device: HcDevice,
+  { range, nights }: { range: Range; nights: readonly StoredNight[] },
+): Promise<StoredNight[]> {
+  if (nights.length === 0) return [];
+  const { clock } = call;
+  let firstEnd = Infinity;
+  let lastEnd = -Infinity;
+  for (const { night } of nights) {
+    firstEnd = Math.min(firstEnd, night.endMs);
+    lastEnd = Math.max(lastEnd, night.endMs);
+  }
+  const fromMs = dayBoundsMs(clock.day(firstEnd), clock.timeZone).startMs;
+  const toMs = dayBoundsMs(clock.day(lastEnd), clock.timeZone).endMs;
+  const found: StoredNight[] = [];
+  if (fromMs < range.startMs) {
+    found.push(
+      ...(await deps.hc.sleepNights({
+        deviceId: device.id,
+        startMs: fromMs,
+        endMs: range.startMs,
+      })),
+    );
+  }
+  if (toMs > range.endMs) {
+    found.push(
+      ...(await deps.hc.sleepNights({ deviceId: device.id, startMs: range.endMs, endMs: toMs })),
+    );
+  }
+  // A window's edge is shared with the range's: a sleep read twice is one sleep.
+  const seen = new Set(nights.map(({ id }) => id));
+  return found.filter(({ id }) => {
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
 async function sleepRows(
   deps: ToolDeps,
   call: HcCall,
@@ -254,7 +319,19 @@ async function sleepRows(
       TYPE_SLEEP,
       nights.map(({ id, night }) => ({ id, summary: night })),
     );
-    for (const group of groups) rows.push(sleepRow(call, device, group, recordIds, includeStages));
+    // Judged over every sleep of the dates answered about, so that a range
+    // which cuts a date between its night and its nap answers as a whole one does.
+    const beyond = await sleepsBeyondRange(deps, call, device, { range, nights });
+    const judged =
+      beyond.length === 0
+        ? groups
+        : groupSessions(
+            TYPE_SLEEP,
+            [...nights, ...beyond].map(({ id, night }) => ({ id, summary: night })),
+          );
+    const restingHr = restingHrByDay(judged, (ms) => call.clock.day(ms));
+    const context = { recordIds, restingHr, includeStages };
+    for (const group of groups) rows.push(sleepRow(call, device, group, context));
   }
   return rows;
 }
@@ -319,7 +396,13 @@ export function registerHcSessionTools(server: McpServer, deps: ToolDeps): void 
         "per-minute means (not of the samples), so a densely sampled stretch does not " +
         "outweigh a sparse one. `hrv` (`median`, `q1`, `q3`, `iqr` of RMSSD), " +
         "`respiratoryRate`, `skinTempDelta` (versus the wearable's own baseline), " +
-        "`restingHr`, and `origin`. Sessions two apps wrote for the same night are one " +
+        "`restingHr` (the DAY's resting heart rate, one figure a day: when several sleeps " +
+        "ended on one `date` it is on the longest of them, the night, and null on a nap, " +
+        "wherever in the day the wearable stamped it -- unless the night and a nap each " +
+        "have a reading of their own, which each keeps. Every sleep of the date is " +
+        "weighed, also one outside `[start, end)`, so a row's `restingHr` is the same " +
+        "whatever range returned it; `daily_summary` has the day's " +
+        "figure too), and `origin`. Sessions two apps wrote for the same night are one " +
         "row (`mergedSessions`, `origins`), described by the longest, with every session " +
         "it stands for listed in `members` (`id`, `start`, `end`, `origin`) and the stretch " +
         "they cover together in `spanStart`, `spanEnd`, `spanMin`. A session longer than 18 " +

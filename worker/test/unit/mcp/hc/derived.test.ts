@@ -279,6 +279,136 @@ describe("sleep that was never closed", () => {
   });
 });
 
+const nap = (): HcRecord => interval("nap", "SleepSession", at(16), at(17), { title: "Nap" });
+
+const resting = (id: string, ms: number, bpm: number): HcRecord =>
+  instantRecord(id, "RestingHeartRate", ms, { bpm });
+
+/** The wearable's one record of the day, written again under its id at another time. */
+function restamp(ms: number, bpm: number): void {
+  world.state.hc.records.set(
+    DEVICE_ID,
+    records().map((record) => (record.id === "rhr-1" ? resting("rhr-1", ms, bpm) : record)),
+  );
+}
+
+/** `restingHr` of every sleep row, by the row's title. */
+async function restingByTitle(
+  args: Record<string, unknown> = RANGE,
+): Promise<Record<string, unknown>> {
+  const answer = await call("sleep_sessions", args);
+  expect(answer.isError, answer.text).toBe(false);
+  return Object.fromEntries(answer.items.map((item) => [String(item.title), item.restingHr]));
+}
+
+/** Every read of stored nights the store has logged. */
+const sleepReads = (): unknown[] =>
+  world.state.hc.calls.filter((entry) => entry.reader === "sleepNights");
+
+describe("sleep_sessions' resting heart rate", () => {
+  it("is the night's own reading on a date with one sleep", async () => {
+    expect(await restingByTitle()).toStrictEqual({ Night: 52 });
+  });
+
+  it("stays on the night when a nap moves the day's one record to its own end", async () => {
+    // The wearable writes one record a day, at the end of the day's last sleep.
+    records().push(nap());
+    restamp(at(17, 2), 62);
+
+    // Was: null on the night and 62 on the nap.
+    expect(await restingByTitle()).toStrictEqual({ Night: 62, Nap: null });
+    const days = await call("daily_summary", { date: TODAY });
+    expect(days.items.map((item) => item.restingHr)).toStrictEqual([62]);
+  });
+
+  it("leaves a night and a nap that each have a reading with their own", async () => {
+    records().push(nap(), resting("rhr-nap", at(17, 2), 58));
+
+    expect(await restingByTitle()).toStrictEqual({ Night: 52, Nap: 58 });
+  });
+
+  it("moves nothing from one date to another", async () => {
+    // The night before, 23:00 to 07:00, with no reading of its own.
+    records().push(
+      interval("sleep-0", "SleepSession", at(-25), at(-17), { title: "Night before" }),
+      nap(),
+    );
+    restamp(at(17, 2), 62);
+
+    expect(await restingByTitle()).toStrictEqual({ "Night before": null, Night: 62, Nap: null });
+  });
+
+  describe("whatever range the row is asked for in", () => {
+    beforeEach(() => {
+      records().push(nap());
+      restamp(at(17, 2), 62);
+      world.state.hc.calls.length = 0;
+    });
+
+    it("is on the night when the range ends before the nap", async () => {
+      const answer = await call("sleep_sessions", { start: YESTERDAY, end: iso(at(12)) });
+
+      // Was: null, the nap that holds the day's record not being in the range.
+      expect(answer.items.map((item) => [item.title, item.restingHr])).toStrictEqual([
+        ["Night", 62],
+      ]);
+      // The nap informs the answer and is not part of it.
+      expect(answer.total).toBe(1);
+      // One read more: the rest of the date the range cut.
+      expect(sleepReads()).toStrictEqual([
+        { reader: "sleepNights", startMs: at(-24), endMs: at(12) },
+        { reader: "sleepNights", startMs: at(12), endMs: at(24) },
+      ]);
+    });
+
+    it("is not on the nap when the range holds the nap alone", async () => {
+      const answer = await call("sleep_sessions", { start: iso(at(15)), end: iso(at(18)) });
+
+      // Was: 62, the night it belongs to not being in the range.
+      expect(answer.items.map((item) => [item.title, item.restingHr])).toStrictEqual([
+        ["Nap", null],
+      ]);
+      expect(answer.total).toBe(1);
+    });
+
+    it("reads nothing more when the range holds its dates whole", async () => {
+      expect(await restingByTitle()).toStrictEqual({ Night: 62, Nap: null });
+      expect(sleepReads()).toHaveLength(1);
+    });
+
+    it("is the same on every page of an answer split between the night and the nap", async () => {
+      const first = await call("sleep_sessions", { ...RANGE, limit: 1 });
+      const { cursor } = envelope(first);
+      const second = await call("sleep_sessions", { ...RANGE, limit: 1, cursor });
+
+      expect(first.truncated).toBe(true);
+      expect(second.isError, second.text).toBe(false);
+      expect(
+        [...first.items, ...second.items].map((item) => [item.title, item.restingHr]),
+      ).toStrictEqual([
+        ["Night", 62],
+        ["Nap", null],
+      ]);
+    });
+  });
+
+  it("is not handed to a session that was never closed, however long it is", async () => {
+    // Thirty hours ending on the night's own date: longer than the night, and not a night.
+    records().push(
+      interval(
+        "sleep-stuck",
+        "SleepSession",
+        at(-20),
+        at(10),
+        { title: "Stuck" },
+        { origin: PHONE },
+      ),
+    );
+
+    expect(await restingByTitle()).toStrictEqual({ Stuck: null, Night: 52 });
+  });
+});
+
 /** The summary's phone items, picked out with `jq`. */
 async function lastNight(): Promise<Record<string, unknown> | undefined> {
   const answer = await call("get_health_summary", {
@@ -415,6 +545,69 @@ describe("data_quality's source_switch", () => {
         previousShare: 0,
       }),
     ]);
+  });
+
+  describe("on a day that is not over", () => {
+    /** The local day the fake clock has just begun: nothing of it is in the fixture. */
+    const NEW_DAY = date(NOW_MS);
+    const asked = { start: date(DAY - 6 * DAY_MS), end: NEW_DAY, types: ["Distance"] };
+
+    /** The same question, asked when the clock reads `nowMs`: the clock is pinned, never read. */
+    async function findingsAt(nowMs: number): Promise<Record<string, unknown>[]> {
+      const deps = { ...fakeDeps(world.state), now: () => Math.floor(nowMs / 1000) };
+      const answer = await callTool(await connectTools(deps), "data_quality", {
+        ...asked,
+        ...EVERYTHING,
+      });
+      expect(answer.isError, answer.text).toBe(false);
+      return answer.items;
+    }
+
+    beforeEach(() => {
+      // The wearable supplies distance every day (the fixture has the invented day's).
+      for (let daysAgo = 5; daysAgo >= 1; daysAgo -= 1) {
+        const start = DAY - daysAgo * DAY_MS + 10 * HOUR_MS;
+        records().push(
+          interval(`dist-w-${String(daysAgo)}`, "Distance", start, start + MINUTE_MS, {
+            distance: 3000,
+          }),
+        );
+      }
+      // Ten minutes into the new day the phone's own tracker has written; the
+      // wearable's app has not uploaded anything of the day yet.
+      records().push(
+        interval(
+          "dist-p-new-day",
+          "Distance",
+          NOW_MS + 10 * MINUTE_MS,
+          NOW_MS + 15 * MINUTE_MS,
+          { distance: 40 },
+          { origin: PHONE },
+        ),
+      );
+    });
+
+    it("does not judge the current day: the usual app has only not uploaded yet", async () => {
+      const items = await findingsAt(NOW_MS + 20 * MINUTE_MS);
+
+      // Was: a switch from the wearable to the phone, dated the day twenty minutes old.
+      expect(items.filter((item) => item.kind === "source_switch")).toStrictEqual([]);
+    });
+
+    it("reports the switch once that day is over, if the app never came back", async () => {
+      const items = await findingsAt(NOW_MS + DAY_MS + 20 * MINUTE_MS);
+
+      expect(items.filter((item) => item.kind === "source_switch")).toStrictEqual([
+        expect.objectContaining({ date: NEW_DAY, from: WEARABLE, to: PHONE, previousShare: 0 }),
+      ]);
+    });
+
+    it("says so among its rules", async () => {
+      expect(envelope(await call("data_quality", asked)).rules).toMatchObject({
+        sourceSwitchMaxPreviousShare: 0.1,
+        sourceSwitchJudgesUnfinishedDay: false,
+      });
+    });
   });
 });
 

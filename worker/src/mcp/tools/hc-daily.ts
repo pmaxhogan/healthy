@@ -310,7 +310,10 @@ export function registerHcDailyTools(server: McpServer, deps: ToolDeps): void {
         "blood-pressure reading is not a gap), `source_switch` (the app supplying a " +
         "type went away and another took over: reported only when the earlier app is " +
         "absent, or nearly, on the day of the change -- `previousShare` is its share of " +
-        "that day's total -- so two apps recording side by side are not a switch), " +
+        "that day's total -- so two apps recording side by side are not a switch; the " +
+        "current local day is never judged, because it is unfinished and an app that has " +
+        "not uploaded yet looks like one that left, so a switch that happens today is " +
+        "reported from tomorrow on), " +
         "`precision_change` (an app's values went from rounded to unrounded " +
         "or back, usually a unit conversion), and `noisy_series` (floors climbed are " +
         "barometric estimates). `types` narrows which findings are reported, never what a " +
