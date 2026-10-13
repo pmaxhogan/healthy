@@ -32,6 +32,7 @@ import { makePortalMessageAttachmentsRepo } from "./repos/portal-message-attachm
 import { makePortalMessagesRepo } from "./repos/portal-messages.ts";
 import { makePortalVisitsRepo } from "./repos/portal-visits.ts";
 import { makeRunLogRepo } from "./repos/run-log.ts";
+import { makeSyncFailuresRepo } from "./repos/sync-failures.ts";
 
 import type { Ctx, CtxOptions } from "./client.ts";
 import type { Env } from "../env.ts";
@@ -47,6 +48,7 @@ export function makeRepos(ctx: Ctx) {
     fhirSyncState: makeFhirSyncStateRepo(ctx),
     calendarEvents: makeCalendarEventsRepo(ctx),
     alerts: makeAlertsRepo(ctx),
+    syncFailures: makeSyncFailuresRepo(ctx),
     mcpAudit: makeMcpAuditRepo(ctx),
     mcpPolicy: makeMcpPolicyRepo(ctx),
     runLog: makeRunLogRepo(ctx),

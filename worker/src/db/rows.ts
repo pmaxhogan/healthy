@@ -204,13 +204,31 @@ export interface CalendarEventDbRow extends Omit<CalendarEventRow, "calendar_id"
 
 export interface AlertRow {
   id: string;
-  /** `reconnect`: a grant or session to renew. `hc_parked`: a phone's uploads set aside. */
-  kind: "reconnect" | "hc_parked";
-  /** 'health_system:<id>', 'portal:<id>', 'google' or 'device:<id>'. */
+  /**
+   * `reconnect`: a grant or session to renew. `hc_parked`: a phone's uploads set
+   * aside. `sync_failing`: a sync that keeps failing though nothing needs renewing.
+   */
+  kind: "reconnect" | "hc_parked" | "sync_failing";
+  /** 'health_system:<id>', 'portal:<id>', 'google', 'sync' or 'device:<id>'. */
   subject: string;
   trello_card_id: string | null;
   opened_at: number;
   resolved_at: number | null;
+  /** The stable error code the alert was opened with. Null on rows older than 0019. */
+  reason_code: string | null;
+}
+
+/** One failing streak. See `worker/src/db/repos/sync-failures.ts`. */
+export interface SyncFailureRow {
+  /** An `alerts.subject`: 'health_system:<id>', 'portal:<id>', 'google' or 'sync'. */
+  subject: string;
+  /** Which pass of the subject is failing; they run on different schedules. */
+  check_name: "calendar" | "refresh" | "visits" | "messages";
+  /** Consecutive failed attempts. */
+  failures: number;
+  first_failed_at: number;
+  last_failed_at: number;
+  last_error_code: string;
 }
 
 export interface McpAuditRow {

@@ -240,6 +240,7 @@ const TABLES = [
   "mcp_audit",
   "run_log",
   "alerts",
+  "sync_failures",
   "calendar_events",
   "fhir_sync_state",
   "fhir_cache",

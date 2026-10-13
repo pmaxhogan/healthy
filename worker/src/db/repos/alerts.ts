@@ -45,6 +45,13 @@ export function deviceSubject(deviceId: string): string {
 /** The subject the Google calendar account's alerts use. */
 export const GOOGLE_SUBJECT = "google";
 
+/**
+ * The subject of a run that stops before it reaches any of the above: the sync
+ * itself, with nobody in particular to blame. See `noteRunOutcome` in
+ * `worker/src/sync/alerts.ts`.
+ */
+export const RUN_SUBJECT = "sync";
+
 export function makeAlertsRepo(ctx: Ctx) {
   const openFor = async (subject: string): Promise<AlertRow | null> =>
     one<AlertRow>(
@@ -58,12 +65,15 @@ export function makeAlertsRepo(ctx: Ctx) {
      * The open alert for a subject, creating one if there is none.
      *
      * Returns `{ alert, created }` so the caller knows whether it also needs to
-     * open a Trello card, which is the expensive half. `kind` is only what a
-     * new row is given: one subject is one kind, and one open alert.
+     * open a Trello card, which is the expensive half. `kind` and `reasonCode`
+     * are only what a new row is given: a subject has one open alert, of
+     * whichever kind got there first, and the caller reads `alert.kind` to see
+     * which.
      */
     async openOrGet(
       subject: string,
       kind: AlertRow["kind"],
+      reasonCode: string | null = null,
     ): Promise<{ alert: AlertRow; created: boolean }> {
       const existing = await openFor(subject);
       if (existing !== null) return { alert: existing, created: false };
@@ -71,10 +81,11 @@ export function makeAlertsRepo(ctx: Ctx) {
       const { changes } = await run(
         ctx.db
           .prepare(
-            `INSERT INTO alerts (id, kind, subject, opened_at) VALUES (?, ?, ?, ?)
+            `INSERT INTO alerts (id, kind, subject, opened_at, reason_code)
+             VALUES (?, ?, ?, ?, ?)
              ON CONFLICT (subject) WHERE resolved_at IS NULL DO NOTHING`,
           )
-          .bind(newId(), kind, subject, ctx.now()),
+          .bind(newId(), kind, subject, ctx.now(), reasonCode),
       );
       const alert = await openFor(subject);
       if (alert === null) throw new Error("alert row disappeared after insert");

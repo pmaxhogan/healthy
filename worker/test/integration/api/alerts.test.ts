@@ -46,6 +46,28 @@ describe("GET /api/alerts", () => {
     expect(healthSystem?.resolvedAt).toBeNull();
   });
 
+  it("says what kind an alert is and the code it was opened with", async () => {
+    const repos = testRepos();
+    await repos.alerts.openOrGet("portal:PROV1", "sync_failing", "portal_parse_failed");
+    await repos.alerts.openOrGet("sync", "sync_failing", "internal");
+    await repos.alerts.openOrGet("google", "reconnect");
+
+    const alerts = await json<AlertDto[]>(await owner().get("/api/alerts"));
+
+    const portal = alerts.find((alert) => alert.subject === "portal:PROV1");
+    expect(portal).toMatchObject({
+      kind: "sync_failing",
+      reasonCode: "portal_parse_failed",
+      healthSystemId: "PROV1",
+    });
+    expect(alerts.find((alert) => alert.subject === "sync")).toMatchObject({
+      kind: "sync_failing",
+      reasonCode: "internal",
+      healthSystemId: null,
+    });
+    expect(alerts.find((alert) => alert.subject === "google")?.reasonCode).toBeNull();
+  });
+
   it("honours ?limit=", async () => {
     const repos = testRepos();
     for (const subject of ["a", "b", "c"]) await repos.alerts.openOrGet(subject, "reconnect");

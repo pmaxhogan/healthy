@@ -404,6 +404,7 @@ export function toAlertDto(row: AlertRow): AlertDto {
     trelloCardId: row.trello_card_id,
     openedAt: toIso(row.opened_at),
     resolvedAt: isoOrNull(row.resolved_at),
+    reasonCode: row.reason_code,
   };
 }
 

@@ -183,13 +183,19 @@ export interface RunDto {
 
 export interface AlertDto {
   id: string;
-  /** `reconnect`: something to sign in to again. `hc_parked`: a phone's uploads set aside. */
-  kind: "reconnect" | "hc_parked";
+  /**
+   * `reconnect`: something to sign in to again. `hc_parked`: a phone's uploads
+   * set aside. `sync_failing`: a sync that keeps failing though nothing needs
+   * signing in to.
+   */
+  kind: "reconnect" | "hc_parked" | "sync_failing";
   subject: string;
   healthSystemId: string | null;
   trelloCardId: string | null;
   openedAt: string;
   resolvedAt: string | null;
+  /** The stable error code the alert was opened with, when it recorded one. */
+  reasonCode: string | null;
 }
 
 // ---------------------------------------------------------------------------

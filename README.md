@@ -64,7 +64,9 @@ are largely in place; hardening and the first real deployment are ongoing.
   `obtainium://add/https://github.com/pmaxhogan/healthy`.
 - **Alerts.** When a connection's refresh token stops working, opens a Trello
   card with a one-click reconnect link, and closes it automatically once the
-  connection is restored. A phone whose uploads have been set aside gets a card
+  connection is restored. A sync that keeps failing for any other reason (three
+  runs in a row) gets a card that says what is failing and completes itself on
+  the next run that works. A phone whose uploads have been set aside gets a card
   of its own, which completes itself when nothing from the phone is waiting.
 - **Admin UI.** A small Vue SPA, served by the Worker, for adding
   connections, choosing the target calendar, tuning how events look,

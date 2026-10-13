@@ -177,6 +177,7 @@ describe("reposFor", () => {
         "portalVisits",
         "healthSystems",
         "runLog",
+        "syncFailures",
       ]),
     );
     expect(repos.ctx.now()).toBe(T0);

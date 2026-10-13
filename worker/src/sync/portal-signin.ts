@@ -120,56 +120,34 @@ export interface SignInOutcome {
 
 const OK: SignInOutcome = { phase: "signed_in", code: null };
 
-/**
- * Codes that mean "stop, and tell the owner" rather than "try again later".
- *
- * A bot block or a locked account is not going to resolve itself, and the next
- * hourly run retrying it is how a temporary block becomes a permanent one. These
- * two open the Trello reconnect card; every other failure marks the account and
- * waits for the owner to look at the admin UI -- except a *repeated* missing
- * code, see `isRepeatedCodeMiss`.
- */
-const ALERTING_CODES: ReadonlySet<string> = new Set([
-  "portal_bot_blocked",
-  "portal_locked",
-  // A script cannot solve a captcha; only the owner signing in once themselves
-  // can, so this is the same "stop and tell the owner" shape as a lockout.
-  "portal_captcha_required",
-  // A portal that signs in with a password alone asked for a one-time code.
-  // Nothing unattended can answer it, and retrying hourly only repeats it.
-  "portal_code_challenge",
-  // The portal now signs in somewhere the owner never confirmed. Nothing is
-  // sent there, and nothing unattended can fix it: the owner has to look at the
-  // new address on the Health systems page and save again.
-  "portal_origin_unconfirmed",
-  // Not a portal failure at all, but the one state the owner has to be told about
-  // out of band: the sync has given up for the day and will not try again until
-  // the counter rolls over, so nothing else would surface it before tomorrow.
-  "portal_attempts_exhausted",
-  // The scheduled sync has stopped signing in on its own for the day. Nothing
-  // on the Health systems page is looked at unprompted, so the card is what tells
-  // the owner the next sign-in is theirs.
-  "portal_signin_needs_owner",
-]);
-
 /** The emailed verification code never arrived. */
 const CODE_MISS = "portal_2fa_required";
 
 /**
- * The emailed code never arrived, and it did not arrive last time either.
+ * Whether a failed sign-in opens the reconnect card straight away.
  *
- * One miss is not worth a card: a slow mail hop explains it, and the Health systems
- * page already shows it. Two in a row -- with no successful sign-in between,
- * because `markActive` clears the stored code -- means the forwarding path is
- * broken, and nothing else tells the owner that out of band. The card goes
- * through `openReconnectAlert`, whose one-open-alert-per-subject rule keeps a
- * third and fourth miss from opening more.
+ * Every failure does, bar one. A failed sign-in parks the account
+ * (`needs_reauth`), and the scheduled sync only ever signs in to `active`
+ * accounts -- retrying a bot block or a lockout hourly is how a temporary one
+ * becomes permanent, and the same caution holds for a portal that is down or
+ * whose pages stopped parsing, because every look costs one of the day's
+ * attempts. So whatever the code, nothing more happens until the owner presses
+ * "Sign in now", and a failure that waited to be noticed on the Health systems
+ * page was a portal that silently stopped syncing. The card is how they find
+ * out.
  *
- * The scheduled sync only signs in to `active` accounts, so after the first miss
- * the second one normally comes from the owner's own "Sign in now".
+ * The exception is a *first* missing code. A slow mail hop explains one, and
+ * the owner who pressed the button is watching it happen. Two in a row -- with
+ * no successful sign-in between, because `markActive` clears the stored code --
+ * means the forwarding path is broken. A first miss nobody was watching (the
+ * scheduled sync's own) is not left either: `sweepReconnectAlerts` runs at the
+ * end of every scheduled sync and cards whatever is still parked.
+ *
+ * The card goes through `openReconnectAlert`, whose one-open-alert-per-subject
+ * rule keeps a third and fourth failure from opening more.
  */
-function isRepeatedCodeMiss(code: string, previous: string | null): boolean {
-  return code === CODE_MISS && previous === CODE_MISS;
+function alertsNow(code: string, previous: string | null): boolean {
+  return code !== CODE_MISS || previous === CODE_MISS;
 }
 
 /** A stable code for any thrown value. */
@@ -334,7 +312,7 @@ export async function failSignIn(
   try {
     const repos = makeRepos(ctx);
     const previous = await repos.portalAccounts.markNeedsReauth(healthSystemId, code);
-    if (ALERTING_CODES.has(code) || isRepeatedCodeMiss(code, previous)) {
+    if (alertsNow(code, previous)) {
       await openReconnectAlert(ctx, { healthSystemId, portal: true }, code, deps.deps);
     }
   } catch (error) {

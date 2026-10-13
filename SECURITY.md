@@ -549,10 +549,15 @@ a type) is refused when it is saved rather than saved and silently ineffective.
 A type the owner has not permitted to the app is reported as "not permitted",
 never silently absent. [docs/mcp.md](docs/mcp.md) has the rule syntax.
 
-**Alert cards.** Two conditions open a Trello card and complete it when they clear:
-a connection that needs reconnecting, and a phone whose uploads are parked. What
+**Alert cards.** Three conditions open a Trello card and complete it when they clear:
+a connection that needs reconnecting, a sync that keeps failing, and a phone whose
+uploads are parked. What
 the card says leaves this system's encryption and is plaintext at Trello. A
 reconnect card carries the health system's display name, as the owner entered it. A
+failing-sync card carries that name too (or "Google Calendar", or nothing when
+it is the sync itself that stops), which pass is failing, a stable error code,
+how many runs and since when in UTC, and a link to an admin page with no id in
+it; never a message or anything from a response. A
 parked-uploads card carries the name the owner gave the phone, how many uploads
 are parked, a stable error code, the time in UTC, and the link to the Phone page. It
 carries **no id, record type, value or origin app**, and the link is the page's own

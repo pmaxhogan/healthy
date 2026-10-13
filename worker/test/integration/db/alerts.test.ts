@@ -112,3 +112,131 @@ describe("alerts.resolve", () => {
     expect(await repos.alerts.setCard("NOPE", "trello-card-1")).toBe(false);
   });
 });
+
+describe("alerts.openOrGet, kinds and reasons", () => {
+  it("records the kind and the code a new alert was opened with", async () => {
+    const repos = testRepos();
+
+    const { alert } = await repos.alerts.openOrGet(GOOGLE_SUBJECT, "sync_failing", "upstream_auth");
+
+    expect(alert.kind).toBe("sync_failing");
+    expect(alert.reason_code).toBe("upstream_auth");
+  });
+
+  it("leaves the reason null when none is given", async () => {
+    const repos = testRepos();
+
+    const { alert } = await repos.alerts.openOrGet(GOOGLE_SUBJECT, "reconnect");
+
+    expect(alert.reason_code).toBeNull();
+  });
+
+  it("hands back the alert that is already open, whatever kind was asked for", async () => {
+    // One open alert per subject: the caller reads `kind` to see which it got.
+    const repos = testRepos();
+    const first = await repos.alerts.openOrGet(GOOGLE_SUBJECT, "reconnect", "needs_reauth");
+
+    const second = await repos.alerts.openOrGet(GOOGLE_SUBJECT, "sync_failing", "upstream_error");
+
+    expect(second.created).toBe(false);
+    expect(second.alert).toMatchObject({
+      id: first.alert.id,
+      kind: "reconnect",
+      reason_code: "needs_reauth",
+    });
+  });
+});
+
+describe("syncFailures", () => {
+  it("starts a streak at one and remembers when it began", async () => {
+    const repos = testRepos();
+
+    const row = await repos.syncFailures.fail("google", "calendar", "upstream_error");
+
+    expect(row).toStrictEqual({
+      subject: "google",
+      check_name: "calendar",
+      failures: 1,
+      first_failed_at: T0,
+      last_failed_at: T0,
+      last_error_code: "upstream_error",
+    });
+  });
+
+  it("counts each further failure, keeping the start and taking the newest code", async () => {
+    const time = clock();
+    const repos = testRepos({ now: time.now });
+    await repos.syncFailures.fail("google", "calendar", "upstream_error");
+
+    time.advance(3600);
+    await repos.syncFailures.fail("google", "calendar", "upstream_error");
+    time.advance(3600);
+    const row = await repos.syncFailures.fail("google", "calendar", "upstream_unavailable");
+
+    expect(row).toMatchObject({
+      failures: 3,
+      first_failed_at: T0,
+      last_failed_at: T0 + 7200,
+      last_error_code: "upstream_unavailable",
+    });
+  });
+
+  it("counts both of two failures that land at once", async () => {
+    const repos = testRepos();
+
+    await Promise.all([
+      repos.syncFailures.fail("google", "calendar", "upstream_error"),
+      repos.syncFailures.fail("google", "calendar", "upstream_error"),
+    ]);
+
+    expect(await repos.syncFailures.listForSubject("google")).toMatchObject([{ failures: 2 }]);
+  });
+
+  it("keeps one streak per pass of a subject", async () => {
+    const repos = testRepos();
+    const subject = healthSystemSubject(await seedHealthSystem(repos));
+    await repos.syncFailures.fail(subject, "refresh", "upstream_auth");
+    await repos.syncFailures.fail(subject, "calendar", "upstream_error");
+    await repos.syncFailures.fail(subject, "calendar", "upstream_error");
+
+    const rows = await repos.syncFailures.listForSubject(subject);
+
+    expect(rows.map((row) => [row.check_name, row.failures])).toStrictEqual([
+      ["calendar", 2],
+      ["refresh", 1],
+    ]);
+  });
+
+  it("ends a streak on success, and says whether there was one", async () => {
+    const repos = testRepos();
+    await repos.syncFailures.fail("google", "calendar", "upstream_error");
+
+    expect(await repos.syncFailures.clear("google", "calendar")).toBe(true);
+    expect(await repos.syncFailures.clear("google", "calendar")).toBe(false);
+    expect(await repos.syncFailures.listForSubject("google")).toStrictEqual([]);
+
+    // A streak after a success starts from one again.
+    const again = await repos.syncFailures.fail("google", "calendar", "upstream_error");
+    expect(again.failures).toBe(1);
+  });
+
+  it("forgets every streak of a subject, and only that subject's", async () => {
+    const repos = testRepos();
+    await repos.syncFailures.fail("portal:P1", "visits", "portal_parse_failed");
+    await repos.syncFailures.fail("portal:P1", "messages", "portal_unreachable");
+    await repos.syncFailures.fail("google", "calendar", "upstream_error");
+
+    expect(await repos.syncFailures.clearSubject("portal:P1")).toBe(2);
+
+    expect(await repos.syncFailures.listForSubject("portal:P1")).toStrictEqual([]);
+    expect(await repos.syncFailures.listForSubject("google")).toHaveLength(1);
+  });
+
+  it("refuses a pass the schema does not know", async () => {
+    const repos = testRepos();
+
+    await expect(
+      repos.syncFailures.fail("google", "everything" as "calendar", "upstream_error"),
+    ).rejects.toThrow();
+  });
+});

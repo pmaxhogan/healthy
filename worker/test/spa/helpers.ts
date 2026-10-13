@@ -222,6 +222,7 @@ function alert(overrides: Partial<AlertDto> = {}): AlertDto {
     trelloCardId: "card-1",
     openedAt: "2026-09-21T09:00:00.000Z",
     resolvedAt: null,
+    reasonCode: null,
     ...overrides,
   };
 }

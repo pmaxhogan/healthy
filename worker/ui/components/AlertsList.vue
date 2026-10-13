@@ -1,12 +1,13 @@
 <script setup lang="ts">
 // Open (and, on /alerts, recently resolved) alerts: a connection to sign in to
-// again, or a phone whose uploads were set aside.
+// again, a sync that keeps failing, or a phone whose uploads were set aside.
 //
-// An alert's subject is `health_system:<id>` or `google`, so the list needs the
-// health system names to say anything useful; it takes a lookup rather than fetching
+// An alert's subject is `health_system:<id>`, `portal:<id>`, `google` or `sync`
+// (a run that stops before reaching any of them), so the list needs the health
+// system names to say anything useful; it takes a lookup rather than fetching
 // them itself.
 
-import { formatDateTime, relativeTime } from "../lib/format.ts";
+import { formatDateTime, humanizeCode, relativeTime } from "../lib/format.ts";
 
 import type { AlertDto } from "@shared/types.ts";
 
@@ -24,11 +25,16 @@ function subjectLabel(alert: AlertDto): string {
   // The subject of a phone's alert is this app's own device id, which says
   // nothing to the owner; the Phone page names the phone.
   if (alert.kind === "hc_parked") return "Phone uploads";
-  if (alert.healthSystemId === null)
-    return alert.subject === "google" ? "Google Calendar" : alert.subject;
-  return Object.hasOwn(props.healthSystemNames, alert.healthSystemId)
+  if (alert.healthSystemId === null) {
+    if (alert.subject === "google") return "Google Calendar";
+    return alert.subject === "sync" ? "Scheduled sync" : alert.subject;
+  }
+  const name = Object.hasOwn(props.healthSystemNames, alert.healthSystemId)
     ? (props.healthSystemNames[alert.healthSystemId] ?? alert.healthSystemId)
     : alert.healthSystemId;
+  // A portal and a FHIR connection are two alerts about one health system,
+  // fixed in different places: say which this is.
+  return alert.subject.startsWith("portal:") ? `${name} patient portal` : name;
 }
 </script>
 
@@ -44,7 +50,18 @@ function subjectLabel(alert: AlertDto): string {
           could not be applied and are being kept ·
           <RouterLink to="/phone">see the Phone page</RouterLink> ·
         </template>
-        <template v-else>needs re-auth ·</template>
+        <template v-else-if="alert.kind === 'sync_failing'">
+          sync keeps failing<template v-if="alert.reasonCode">
+            ({{ humanizeCode(alert.reasonCode) }})</template
+          >
+          · nothing to reconnect, it is retried every hour ·
+        </template>
+        <template v-else>
+          needs re-auth<template v-if="alert.reasonCode">
+            ({{ humanizeCode(alert.reasonCode) }})</template
+          >
+          ·
+        </template>
         opened {{ relativeTime(alert.openedAt) }}
         <span :title="formatDateTime(alert.openedAt, timezone)" />
         <template v-if="alert.resolvedAt !== null">
