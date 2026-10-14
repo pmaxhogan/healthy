@@ -150,7 +150,7 @@ describe("the hours a record covers", () => {
 describe("a stale total", () => {
   const window = { fromHour: H, toHour: H + 10 };
 
-  it("names an app with no record in its hour, or has a figure where there is none", () => {
+  it("has a figure where the type has no record, and is not judged by the apps it names", () => {
     const presence: Presence = new Map();
     addPresence(presence, WEARABLE, { startMs: H * HOUR_MS, endMs: H * HOUR_MS + 60_000 }, window);
     // A record of the hour before the window running into its second hour.
@@ -173,7 +173,6 @@ describe("a stale total", () => {
     );
 
     expect(stale).toStrictEqual([
-      { hourUtc: H + 1, reason: "origin_without_records", missing: [WEARABLE] },
       { hourUtc: H + 4, reason: "no_records", missing: [WEARABLE] },
       { hourUtc: H + 5, reason: "no_records", missing: [] },
     ]);

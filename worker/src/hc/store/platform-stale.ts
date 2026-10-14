@@ -41,8 +41,12 @@
  *
  * Totals that went stale before marks were kept were never marked. So the
  * runner walks every stored `Agg.<Metric>` hour once, a bounded pass at a time
- * when it has nothing else to do, and marks the hours whose total names an app
- * with no record of the type there (`scanPlatformTotals`). `SCAN_REVISION`
+ * when it has nothing else to do, and marks the hours whose total has a figure
+ * where the type has no record at all (`scanPlatformTotals`; `staleTotals` in
+ * worker/src/hc/platform-totals.ts says why it cannot also judge the apps a
+ * total names). Revision 1 did judge them, and marked hours whose total was
+ * fresh: those cost the phone one request each and were cleared by it, so
+ * the revision is not raised for the change. `SCAN_REVISION`
  * says which making of the scan a device has been through: raising it walks
  * every device again after the next deploy, with nothing to run by hand.
  */

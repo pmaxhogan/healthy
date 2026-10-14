@@ -4,8 +4,8 @@
     "lib": ["ES2022"],
     // Integration tests execute inside workerd, so they get the Worker runtime
     // globals (from worker-configuration.d.ts) plus the `cloudflare:test`
-    // module declarations that @cloudflare/vitest-pool-workers ships.
-    "types": ["@cloudflare/vitest-pool-workers/types"]
+    // module declarations that @cloudflare/vitest-plugin ships.
+    "types": ["@cloudflare/vitest-plugin/types"]
   },
   "include": [
     "test/integration/**/*.ts",

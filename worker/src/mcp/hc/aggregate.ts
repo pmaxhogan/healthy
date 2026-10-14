@@ -222,6 +222,13 @@ export interface AggregateRow {
   durationMs?: number | null;
   /** Sleep only, with the `in_bed` metric: the nights' length from start to end. */
   inBedMs?: number | null;
+  /**
+   * The key under `values` that holds the type's headline figure (`count` for
+   * steps, `energy` for calories, `bpm` for heart rate), so that a caller can
+   * read `.values[.field]` without knowing each type's name for it. Absent
+   * for a type without fields (sleep, exercise).
+   */
+  field?: string;
   /** Per field of the type, the metrics asked for. */
   values: Record<string, Partial<Record<FieldMetric, number | null>>>;
   /**
@@ -657,6 +664,7 @@ function buildRow(run: Run, input: RowInput): AggregateRow {
   const excluded = excludedIn(run, input);
   const dropped = input.duplicatesDropped ?? 0;
   const long = longShare(type, rollup);
+  const primary = primaryField(type);
   return {
     bucket: span.label,
     start: clock.iso(span.fromMs),
@@ -673,6 +681,7 @@ function buildRow(run: Run, input: RowInput): AggregateRow {
       metrics.includes("in_bed") && {
         inBedMs: rollup === null ? emptyCount : (input.inBedMs ?? 0),
       }),
+    ...(primary !== undefined && { field: primary }),
     values: fieldValues(type, rollup, metrics, fill),
     ...(dropped > 0 && { duplicatesDropped: dropped }),
     ...(excluded > 0 && { artefactsExcluded: excluded }),

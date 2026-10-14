@@ -113,7 +113,7 @@ Three separate vitest projects, configured in `worker/vitest.config.ts`:
   Trello dedupe logic, log redaction, CSRF/session helpers, the brands
   slimmer.
 - **`integration`** (`npm run test:integration`) — real `workerd`, real D1,
-  real Durable Objects via `@cloudflare/vitest-pool-workers`, driven from
+  real Durable Objects via `@cloudflare/vitest-plugin`, driven from
   the actual `worker/wrangler.jsonc`, so schema and binding changes are exercised
   the same way production would see them: migrations applying cleanly, the
   auth gates in `DEV_MODE`, OAuth flows against mocked token endpoints,
