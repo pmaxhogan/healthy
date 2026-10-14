@@ -13,6 +13,7 @@ import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { app } from "../../../src/app.ts";
+import { STALE_HOURS_PER_ANSWER } from "../../../src/hc/store/platform-stale.ts";
 import { MAX_BATCH_RECORDS, MAX_EPOCH_MS } from "../../../src/hc/wire.ts";
 import {
   INGEST_PATH,
@@ -492,5 +493,99 @@ describe("what it refuses after authenticating", () => {
 
     expect(response.headers.get("retry-after")).toBe(String(INGEST_RATE_WINDOW_SECONDS));
     await expect(refusalOf(response)).resolves.toStrictEqual(refusal(429, "rate_limited"));
+  });
+});
+
+/** Mark hours of a device's platform totals stale, as an applied batch would have. */
+async function markStale(deviceId: string, type: string, hours: number[]): Promise<void> {
+  await env.DB.batch(
+    hours.map((at) =>
+      env.DB.prepare(
+        `INSERT INTO hc_platform_stale (device_id, record_type, hour_utc, marked_seq, marked_at)
+         VALUES (?, ?, ?, 1, 0)`,
+      ).bind(deviceId, type, at),
+    ),
+  );
+}
+
+describe("the stale platform totals in the answer", () => {
+  const HOUR = 3_600_000;
+  const hour = Math.floor(T / HOUR) - 24 * 30;
+
+  function total(hourUtc: number): Record<string, unknown> {
+    return {
+      id: `agg:Steps:${String(hourUtc * HOUR)}`,
+      type: "Agg.Steps",
+      origin: "healthconnect",
+      lastModified: T,
+      start: hourUtc * HOUR,
+      end: (hourUtc + 1) * HOUR,
+      data: { value: 12, unit: "count", origins: ["com.example.wearable"] },
+    };
+  }
+
+  it("names the device's own stale hours, as hour starts, less the ones this batch carries", async () => {
+    const { device, token } = await repos.devices.mint("Test phone");
+    const other = await repos.devices.mint("Other phone");
+    await markStale(device.id, "Steps", [hour, hour + 1, hour + 2]);
+    await markStale(device.id, "Distance", [hour + 5]);
+    await markStale(other.device.id, "Steps", [hour + 9]);
+
+    // The phone's repair of two of them: a total, and the deletion of one.
+    const response = await post(
+      batch(device.id, {
+        upserts: [total(hour)],
+        deletes: [`agg:Steps:${String((hour + 2) * HOUR)}`],
+      }),
+      { token },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json<Record<string, unknown>>();
+    expect(body.staleHours).toStrictEqual({
+      Distance: [(hour + 5) * HOUR],
+      Steps: [(hour + 1) * HOUR],
+    });
+  });
+
+  it("says nothing while another batch of the device waits to be applied, and none is an empty list", async () => {
+    const { device, token } = await repos.devices.mint("Test phone");
+    // Nothing stale, nothing queued: the answer says so.
+    const first = await post(batch(device.id), { token });
+    await expect(first.json()).resolves.toMatchObject({ staleHours: {} });
+
+    // The first batch is still queued (no runner here): it may be the repair.
+    await markStale(device.id, "Steps", [hour]);
+    const second = await post(batch(device.id), { token });
+    expect(second.status).toBe(200);
+    const body = await second.json<Record<string, unknown>>();
+    expect(body).not.toHaveProperty("staleHours");
+  });
+
+  it("names no more than a page of one type's hours, the earliest, and every type", async () => {
+    const { device, token } = await repos.devices.mint("Test phone");
+    const many = Array.from(
+      { length: STALE_HOURS_PER_ANSWER + 20 },
+      (_unused, index) => hour + index,
+    );
+    for (let from = 0; from < many.length; from += 90) {
+      await markStale(device.id, "Steps", many.slice(from, from + 90));
+    }
+    await markStale(device.id, "Hydration", [hour]);
+
+    const response = await post(batch(device.id), { token });
+    const body = await response.json<{ staleHours: Record<string, number[]> }>();
+
+    expect(body.staleHours.Steps).toStrictEqual(
+      many.slice(0, STALE_HOURS_PER_ANSWER).map((at) => at * HOUR),
+    );
+    expect(body.staleHours.Hydration).toStrictEqual([hour * HOUR]);
+    // Nothing is dropped: the rest are still marked for a later answer.
+    const left = await env.DB.prepare(
+      "SELECT count(*) AS n FROM hc_platform_stale WHERE device_id = ?",
+    )
+      .bind(device.id)
+      .first<{ n: number }>();
+    expect(left?.n).toBe(many.length + 1);
   });
 });

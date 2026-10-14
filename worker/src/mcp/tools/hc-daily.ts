@@ -315,7 +315,15 @@ export function registerHcDailyTools(server: McpServer, deps: ToolDeps): void {
         "not uploaded yet looks like one that left, so a switch that happens today is " +
         "reported from tomorrow on), " +
         "`precision_change` (an app's values went from rounded to unrounded " +
-        "or back, usually a unit conversion), and `noisy_series` (floors climbed are " +
+        "or back, usually a unit conversion), `stale_platform_total` (hours whose stored " +
+        "platform total -- Health Connect's own hourly figure, which `hc_aggregate`'s " +
+        "`hc_priority` and `daily_summary` use -- counts an app that has no record of the " +
+        "type in those hours, listed in `origins`, or has a figure where the type has no " +
+        "record at all (`reason`: `origin_without_records` or `no_records`); one finding per " +
+        "run of such hours, `start` to `end`, `count` hours. That is a total from before " +
+        "those records were deleted, and the figures built from it read high there until " +
+        "the phone works the hours out again, which it is asked to do on its next syncs), " +
+        "and `noisy_series` (floors climbed are " +
         "barometric estimates). `types` narrows which findings are reported, never what a " +
         "rule may look at: asking about `Weight` alone still finds a profile weight by the " +
         "height beside it, unless the owner's policy withholds heights. `rules` in the " +

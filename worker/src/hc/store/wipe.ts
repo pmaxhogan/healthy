@@ -49,6 +49,9 @@ const WIPE_TABLES: readonly WipeTable[] = [
   { table: "hc_sleep_night", key: ["record_id_blind"], slice: 1000 },
   { table: "hc_exercise_session", key: ["record_id_blind"], slice: 1000 },
   { table: "hc_record_index", key: ["record_id_blind"], slice: 5000 },
+  { table: "hc_platform_stale", key: ["record_type", "hour_utc"], slice: 5000 },
+  // One row a device: any column of it will do as the key.
+  { table: "hc_platform_scan", key: ["record_type"], slice: 5000 },
   { table: "hc_sync_state", key: ["record_type"], slice: 5000 },
   { table: "hc_ingest_log", key: ["batch_id"], slice: 5000 },
 ];

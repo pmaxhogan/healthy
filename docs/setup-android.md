@@ -242,7 +242,15 @@ privacy screen Health Connect also opens from its permission dialog.
   duration, sleep duration, hydration) the app asks Health Connect for its own
   totals per UTC hour, which de-duplicate overlapping apps, and uploads them as
   records of type `Agg.<Metric>` (for example `Agg.Steps`). They are not counted
-  in the per-type _Uploaded_ numbers.
+  in the per-type _Uploaded_ numbers. A record's change comes with its times, so
+  the hours it touches are worked out again in the same upload; a deletion does
+  not (Health Connect says which record went, not when it was), so on one the app
+  works out again only the last 30 days. The server knows when a deleted record
+  was, and every answer to an upload names the hours whose stored total it now
+  holds out of date; each sync then works some of those out again, at most eight
+  requests of Health Connect a run, and uploads them, so deleting months of an
+  app's history is repaired over the next few syncs. An hour leaves the list once
+  the upload carrying its total has been acknowledged.
 - **Backfill.** **Full backfill** is started by you; it is not automatic. It
   reads all of history as a foreground service with a visible notification,
   **newest month first** (UTC calendar months), so recent data is useful within

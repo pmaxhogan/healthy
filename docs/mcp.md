@@ -963,7 +963,14 @@ or within 30 minutes of either end. It is a `hc:SleepSession` finding. A
 platform total named in `types` (`Agg.Steps`) is not something to judge the
 quality of: it yields no finding and the answer warns
 `not_assessed:hc:Agg.<Metric>`, so that silence does not read as "nothing
-found".
+found". What `stale_platform_total` reports is about the totals' agreement with
+the records, under the type they are totals of: a run of hours whose stored
+platform total counts an app with no record of the type in those hours (listed
+in `origins`, `reason: origin_without_records`), or has a figure where the type
+has no record at all (`no_records`), `start` to `end`, `count` hours. That is a
+total from before those records were deleted; `hc_priority` and `daily_summary`
+read high there until the phone works the hours out again, which the server asks
+it to do on its next syncs.
 
 `data_quality` answers a long range **in pages**. It assesses the range half a
 year at a time, oldest first, each window with the half year before it in

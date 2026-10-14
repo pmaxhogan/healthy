@@ -176,6 +176,13 @@ class BackfillRun {
  * leaves behind the type it was on ([GlobalState.resume]), and the next run starts there instead:
  * otherwise the types at the tail of a cut run would be at the tail again.
  *
+ * **The server can say which totals are stale.** A deletion arrives as an id with no time, so
+ * the platform totals of the hours a deleted record covered cannot be found here: on a deletion
+ * the change feed only works out again the trailing [REREAD_WINDOW_MS]. The server knows when
+ * the record was, and its answers name the hours whose total it holds stale
+ * ([TypeState.staleHours]). Each run works some of them out again once every type is read, a
+ * few requests at a time so that a large repair is spread over runs: see [repairTotals].
+ *
  * **The store may fail too.** See [SyncStateStore] for the rule; [storeFailure] is where a
  * failed write shows.
  *
@@ -402,6 +409,13 @@ class SyncEngine(
                 if (failedTypes == order.size) {
                     // Every type failed on its own: that is not a sync, whatever the server says next.
                     failure = Outcome.RunFailed(lastTypeError ?: "sync_failed")
+                }
+            }
+            if (failure == null) {
+                when (val outcome = repairTotals(session, order)) {
+                    is Outcome.RunFailed -> failure = outcome
+                    is Outcome.Rejected -> return RunResult.PairingRejected(notify = outcome.fresh)
+                    Outcome.Ok, is Outcome.TypeFailed -> Unit
                 }
             }
         }
@@ -686,6 +700,101 @@ class SyncEngine(
             }
             if (!page.hasMore || next == token) return Outcome.Ok
             token = next
+        }
+    }
+
+    /**
+     * Works out again, for each of [granted] in turn, the platform totals the server holds stale
+     * ([TypeState.staleHours]), and uploads them: a total for each hour that has one, and the
+     * deletion of its record for each hour that has none any more. At most
+     * [MAX_REPAIR_REQUESTS] requests of Health Connect a run, each one span of nearby hours
+     * ([Hours.spans]); whatever is left waits for the next run. The hours leave the list as the
+     * server acknowledges the batches that carry them ([noteTotals]), never before.
+     *
+     * Health Connect's rate limit stops the repair like any other read, and nothing is lost by
+     * it: the hours stay where they are.
+     */
+    private suspend fun repairTotals(session: Session, granted: List<String>): Outcome {
+        var requests = 0
+        for (type in granted) {
+            val metric = AggMetric.forType(type) ?: continue
+            val pending = store.snapshot().type(type).staleHours
+            if (pending.isEmpty()) continue
+            val left = MAX_REPAIR_REQUESTS - requests
+            if (left <= 0) break
+            val spans = Hours.spans(pending, REPAIR_BRIDGE_HOURS).take(left)
+            requests += spans.size
+            val outcome = guarded(type, backfill = false, clock()) { repairType(session, type, metric, spans, pending) }
+            if (outcome is Outcome.RunFailed || outcome is Outcome.Rejected) return outcome
+        }
+        return Outcome.Ok
+    }
+
+    private suspend fun repairType(
+        session: Session,
+        type: String,
+        metric: AggMetric,
+        spans: List<LongRange>,
+        pending: List<Long>,
+    ): Outcome {
+        val now = clock()
+        val wanted = pending.toHashSet()
+        val items = ArrayList<BatchItem>()
+        for (span in spans) {
+            val found = try {
+                source.aggregateHourly(metric, span.first, span.last + 1)
+            } catch (e: HealthSourceException) {
+                if (e.kind != HealthSourceException.Kind.INVALID) throw e
+                // As in [aggregateItems]: the hours stay on the list, and are asked for again.
+                store.updateType(type) { it.copy(lastError = StoredError(ERROR_AGGREGATE, clock())) }
+                continue
+            }.associateBy { it.hourStartMs }
+            var hour = span.first
+            while (hour <= span.last) {
+                if (hour in wanted) {
+                    val total = found[hour]
+                    items.add(
+                        if (total != null) {
+                            BatchItem.aggregate(metric, total, now)
+                        } else {
+                            BatchItem.Delete(metric.recordId(hour), synthetic = true)
+                        },
+                    )
+                }
+                hour += Hours.MS
+            }
+        }
+        if (items.isEmpty()) return Outcome.Ok
+        val position = position("repair", type, spans.first().first)
+        return deliverAndCommit(session, type, position, items, IN_RUN_ATTEMPTS) { it }
+    }
+
+    /**
+     * What one acknowledged batch says about stale platform totals. The hours whose totals it
+     * carried are no longer stale, whoever sent them; and an answer that names the stale hours is
+     * the server's whole list, which replaces the one held. (It leaves out the hours this very
+     * batch carried, which the server has not applied yet.)
+     */
+    private suspend fun noteTotals(batch: EncodedBatch, ok: UploadResult.Ok) {
+        val carried = HashMap<String, MutableSet<Long>>()
+        for (item in batch.items) {
+            if (!item.synthetic) continue
+            val id = when (item) {
+                is BatchItem.Upsert -> item.id
+                is BatchItem.Delete -> item.id
+            }
+            val (metric, hour) = AggMetric.hourOf(id) ?: continue
+            carried.getOrPut(metric.sourceType) { HashSet() }.add(hour)
+        }
+        val reported = ok.staleHours
+        if (carried.isEmpty() && reported == null) return
+        val snapshot = store.snapshot()
+        for (type in types) {
+            if (AggMetric.forType(type) == null) continue
+            val held = snapshot.type(type).staleHours
+            val told = if (reported == null) held else reported[type].orEmpty()
+            val next = carried[type]?.let { done -> told.filter { it !in done } } ?: told
+            if (next != held) store.updateType(type) { it.copy(staleHours = next) }
         }
     }
 
@@ -1329,6 +1438,7 @@ class SyncEngine(
             when (val result = send(session, batch, attempts)) {
                 is UploadResult.Ok -> {
                     tally.absorb(batch, result)
+                    noteTotals(batch, result)
                     queue.removeFirst()
                 }
                 UploadResult.TooLarge ->
@@ -1561,6 +1671,16 @@ class SyncEngine(
         /** Something nobody foresaw. Nothing was lost: no position moves without an acknowledgement. */
         const val ERROR_INTERNAL = "internal_error"
         private const val HTTP_TOO_MANY_REQUESTS = 429
+
+        /**
+         * Requests of Health Connect one run may spend working out stale platform totals again.
+         * Each covers a span of up to a month of hours, so a few months of history deleted at
+         * once are repaired over a handful of runs without crowding out the sync itself.
+         */
+        const val MAX_REPAIR_REQUESTS = 8
+
+        /** Stale hours this far apart, or nearer, are asked for in one request. */
+        const val REPAIR_BRIDGE_HOURS = 24
 
         /** Tries per batch within one scheduled run before the run gives up until next time. */
         const val IN_RUN_ATTEMPTS = 3

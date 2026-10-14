@@ -206,6 +206,15 @@ data class TypeState(
      * rest are not sent again. Pruned to the window on every re-read, so it stays a few entries.
      */
     val recent: Map<String, Long> = emptyMap(),
+    /**
+     * For a type the platform keeps hourly totals of ([AggMetric]): the hours, as the epoch ms of
+     * their start, whose total the server holds stale and wants worked out again. Health Connect
+     * says which record was deleted but not when it was, so the phone cannot find these hours
+     * itself; the server can, and names them in its answers. Replaced by every answer that names
+     * them, and an hour leaves only once a batch carrying its total has been acknowledged.
+     * Ascending.
+     */
+    val staleHours: List<Long> = emptyList(),
 )
 
 @Serializable

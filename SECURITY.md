@@ -68,6 +68,7 @@ Three treatments, and every column is in exactly one of them:
 | Uploads waiting to be applied, or parked (set aside, kept until retried or wiped)             | D1 `hc_ingest_queue`                                                      | The whole gzip body sealed (`v3:`)                                                  |
 | Alert card about parked uploads: the phone's name, a count, a stable error code, a UTC time   | Trello                                                                    | Plaintext at Trello; no id, record type or value (see "Alert cards")                |
 | Upload log, per-type sync state                                                               | D1 `hc_ingest_log`, `hc_sync_state`                                       | Plaintext: counts, instants, permission states, stable codes                        |
+| Hours whose platform total is stale, and the one-off scan for them                            | D1 `hc_platform_stale`, `hc_platform_scan`                                | Plaintext: record type names, UTC hours, queue sequence numbers, instants           |
 | Device token on the phone                                                                     | Android app storage                                                       | Encrypted under a non-exportable Android Keystore key                               |
 | MCP access and refresh tokens                                                                 | Workers KV                                                                | Managed by `@cloudflare/workers-oauth-provider`                                     |
 | Admin password                                                                                | Worker secret                                                             | PBKDF2-SHA256, 100k iterations, per-hash salt                                       |
@@ -165,8 +166,9 @@ schema, so it is listed plainly:
   refused.
 - **Instants**: the UTC hour of every chunk and rollup row, the day of every
   daily rollup (a civil date), the moment a queued upload was set aside
-  (`hc_ingest_queue.parked_at`), and the start and end of every sleep night and
-  exercise session. A reader of a snapshot can therefore see _when_ the phone
+  (`hc_ingest_queue.parked_at`), the start and end of every sleep night and
+  exercise session, and the UTC hours whose stored platform total is out of date
+  because a record of that type in them was deleted or moved (`hc_platform_stale`). A reader of a snapshot can therefore see _when_ the phone
   held data of each type: the hours a heart-rate series exists, and the times
   of every recorded sleep and workout. They cannot see a value.
 - **Counts and sizes**: records per chunk and per type, first and last record
@@ -359,9 +361,13 @@ the phone's own sync report, which sets that device's per-type permission states
 battery and background flags and last error as the Phone page and the MCP
 `hc_coverage` and `hc_sync_status` tools show them. So a thief can add false
 records, delete or overwrite records whose ids it knows, and misreport the
-phone's state. It cannot read anything back (no response carries a stored
-record), cannot touch another device, and cannot reach the admin API, the MCP or
-the calendar. The route reads no record in order to answer.
+phone's state. It can read back one thing: the answer to an upload names the UTC
+hours of its own device whose stored platform total is out of date, by record
+type name, so that the phone can work them out again. That says when the owner
+had activity of a type, to the hour, and nothing more: no value, no origin, no
+record. Beyond that it cannot read anything back (no response carries a stored
+record or a total), cannot touch another device, and cannot reach the admin API,
+the MCP or the calendar. The route reads no record in order to answer.
 
 The thief chooses every string it sends, and **Health Connect free text is
 untrusted input that reaches the MCP client.** Titles, notes, nutrition names, the

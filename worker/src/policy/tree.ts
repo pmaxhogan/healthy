@@ -1890,7 +1890,10 @@ const HC_DAY = {
 
 const HC_FINDING = {
   ...HC_TAGS,
-  kind: ["string", "duplicate, artefact, gap, source_switch, overlapping_origins, ..."],
+  kind: [
+    "string",
+    "duplicate, artefact, gap, source_switch, overlapping_origins, stale_platform_total, ...",
+  ],
   reason: "string",
   origin: "string",
   origins: ["object?", "The apps involved"],

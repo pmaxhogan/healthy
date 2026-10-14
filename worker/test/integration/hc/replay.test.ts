@@ -26,12 +26,14 @@ import { HOUR_MS } from "../../../src/hc/store/keys.ts";
 import { openJson, payloadAad } from "../../../src/hc/store/sealed.ts";
 
 import {
+  aggSteps,
   enqueue,
   heartRate,
   instant,
   interval,
   MINUTE_MS,
   PHONE,
+  WEARABLE,
   resetHc,
   seedDevice,
   steps,
@@ -262,6 +264,23 @@ async function snapshot(deviceId: string): Promise<Record<string, unknown>> {
       deviceId,
     ),
     queued: await rowsOf("SELECT batch_id FROM hc_ingest_queue WHERE device_id = ?", deviceId),
+    // A stale platform total's mark, by the rank of the batch that marked it
+    // (as for tombstones above). `marked_at` is a clock reading, and only the
+    // scan's marks -- the ones with no batch -- go by it: which marks those
+    // are is compared, not when they were written.
+    stale: await rowsOf(
+      `SELECT record_type, hour_utc,
+              (SELECT count(DISTINCT other.marked_seq) FROM hc_platform_stale other
+                WHERE other.device_id = s.device_id AND other.marked_seq <= s.marked_seq
+              ) AS marked_seq_rank,
+              marked_seq IS NULL AS scanned
+         FROM hc_platform_stale s WHERE device_id = ? ORDER BY record_type, hour_utc`,
+      deviceId,
+    ),
+    scan: await rowsOf(
+      "SELECT revision, record_type, next_hour, done FROM hc_platform_scan WHERE device_id = ?",
+      deviceId,
+    ),
   };
 }
 
@@ -279,6 +298,8 @@ const STORE_TABLES = [
   "hc_sleep_night",
   "hc_exercise_session",
   "hc_sync_state",
+  "hc_platform_stale",
+  "hc_platform_scan",
 ];
 
 async function clearStore(): Promise<void> {
@@ -361,6 +382,9 @@ function scenario(): TestBatch[] {
       series("hr-gone", T + 4 * HOUR_MS, 30 * MINUTE_MS),
       interval("night", "SleepSession", T - 2 * HOUR_MS, T + 5 * HOUR_MS, {}),
       instant("hrv-1", "HeartRateVariabilityRmssd", T + 30 * MINUTE_MS, { rmssd: 41 }),
+      // Platform totals of the hours the deletes below empty.
+      aggSteps(T + 3 * HOUR_MS, 3),
+      aggSteps(T + 6 * HOUR_MS, 3),
     ],
   };
   const second: TestBatch = {
@@ -391,7 +415,17 @@ function scenario(): TestBatch[] {
         { lastModified: 2000 },
       ),
     ],
-    deletes: ["gone-1", "gone-2", "gone-3", "hr-gone", "never-seen"],
+    // The deletes of steps mark their hours' totals stale (T + 3h, T + 6h).
+    // The hour `c` leaves has no total any more, and the batch that moves it
+    // says so: that hour is not marked.
+    deletes: [
+      "gone-1",
+      "gone-2",
+      "gone-3",
+      "hr-gone",
+      "never-seen",
+      `agg:Steps:${String(T + 2 * HOUR_MS)}`,
+    ],
   };
   const third: TestBatch = {
     batchId: "batch-0003",
@@ -406,8 +440,11 @@ function scenario(): TestBatch[] {
       series("hr-next", T + 5 * HOUR_MS + MINUTE_MS, 30 * MINUTE_MS, { lastModified: 3000 }),
       series("hr-spill", T + 2 * HOUR_MS + 30 * MINUTE_MS, 20 * MINUTE_MS, { lastModified: 2000 }),
       instant("hrv-2", "HeartRateVariabilityRmssd", T + 4 * HOUR_MS, { rmssd: 39 }),
+      // The repair of the hour the second batch marked: a later batch, so it clears.
+      aggSteps(T + 3 * HOUR_MS, 1, [WEARABLE], { lastModified: 4000 }),
     ],
-    deletes: ["sparse-5", "hr-midnight", "workout"],
+    // And the other marked hour has no total any more.
+    deletes: ["sparse-5", "hr-midnight", "workout", `agg:Steps:${String(T + 6 * HOUR_MS)}`],
   };
   return [first, second, third];
 }
@@ -500,9 +537,34 @@ describe("a slice that dies", () => {
     const tombstones = (stored.index as { deleted_at: number | null }[]).filter(
       (row) => row.deleted_at !== null,
     );
-    // gone-2 and gone-3, hr-gone, never-seen, sparse-5, hr-midnight, workout.
-    // Not gone-1: the last batch wrote it again.
-    expect(tombstones).toHaveLength(7);
+    // gone-2 and gone-3, hr-gone, never-seen, sparse-5, hr-midnight, workout,
+    // and the totals of T + 2h and T + 6h. Not gone-1: the last batch wrote
+    // it again.
+    expect(tombstones).toHaveLength(9);
+    // The stale totals: of steps, the hours `a` (moved by the second batch)
+    // and `sparse-3` and `sparse-5` (moved and deleted by the third) left --
+    // not T + 2h, whose total the second batch carried, nor T + 3h or T + 6h,
+    // which the third batch's totals cleared; every hour the night covered
+    // before the second batch lengthened it; and the hours of the workout the
+    // third batch deleted.
+    const first = T / HOUR_MS;
+    const stale = (stored.stale as { record_type: string; hour_utc: number }[]).map(
+      (row) => `${row.record_type}:${String(row.hour_utc - first)}`,
+    );
+    expect(stale).toStrictEqual([
+      "ExerciseSession:2",
+      "ExerciseSession:3",
+      "SleepSession:-2",
+      "SleepSession:-1",
+      "SleepSession:0",
+      "SleepSession:1",
+      "SleepSession:2",
+      "SleepSession:3",
+      "SleepSession:4",
+      "Steps:0",
+      "Steps:13",
+      "Steps:15",
+    ]);
   });
 
   it("reaches the same store whatever the slices' budget", async () => {

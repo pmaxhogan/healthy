@@ -68,6 +68,8 @@ const TABLES = [
   "hc_sleep_night",
   "hc_exercise_session",
   "hc_sync_state",
+  "hc_platform_stale",
+  "hc_platform_scan",
   "devices",
   "settings",
 ];
@@ -93,6 +95,32 @@ export function steps(id: string, startMs: number, count: number, extra: Extra =
     start: startMs,
     end: startMs + MINUTE_MS,
     data: { count },
+    ...extra,
+  };
+}
+
+/** The origin the companion app uploads the platform's own totals under. */
+const PLATFORM = "healthconnect";
+
+/**
+ * The phone's synthetic platform total of one UTC hour of steps, as it uploads
+ * it: id `agg:Steps:<hour start>`, `data.origins` the apps Health Connect
+ * counted.
+ */
+export function aggSteps(
+  hourMs: number,
+  value: number,
+  origins: readonly string[] = [WEARABLE],
+  extra: Extra = {},
+): HcRecord {
+  return {
+    id: `agg:Steps:${String(hourMs)}`,
+    type: "Agg.Steps",
+    origin: PLATFORM,
+    lastModified: 1000,
+    start: hourMs,
+    end: hourMs + HOUR_MS,
+    data: { value, unit: "count", origins: [...origins] },
     ...extra,
   };
 }

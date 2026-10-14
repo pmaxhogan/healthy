@@ -10,8 +10,10 @@
  * that follows an upsert has to land after it -- and work through it in three
  * phases: its deletes, its upserts one destination chunk at a time, then the
  * bookkeeping that closes it. When the queue is empty, rebuild what the
- * batches marked (worker/src/hc/store/rebuild.ts). Stop when the budget is
- * spent and say whether anything is left.
+ * batches marked (worker/src/hc/store/rebuild.ts), and -- once, with nothing
+ * else left -- walk the stored platform totals for stale hours
+ * (worker/src/hc/store/platform-stale.ts). Stop when the budget is spent and
+ * say whether anything is left.
  *
  * ### Why a slice that dies is simply run again
  *
@@ -19,7 +21,8 @@
  * and any of them may be cut off. Nothing here needs that not to happen:
  *
  *   - Each chunk is written with its hour rollup, its heart-rate minutes, its
- *     index rows and its dirty marks in ONE `db.batch`, which D1 runs as a
+ *     index rows, its dirty marks and the marks of the platform totals it made
+ *     stale in ONE `db.batch`, which D1 runs as a
  *     transaction. A chunk and the index never disagree. (The mark of a day
  *     this batch has already marked is not written again: see `BatchRun`.)
  *     Several chunks share one `db.batch` where they can (`Buffered`): a
@@ -59,6 +62,14 @@ import { errorFields } from "../lib/log.ts";
 import { openParkedAlert, resolveParkedAlert } from "../sync/alerts.ts";
 
 import { unpackJson } from "./codec.ts";
+import {
+  aggRecordHour,
+  carriedPlatformHours,
+  hoursOfRecord,
+  isPlatformSourceType,
+  parseAggId,
+  platformHourKey,
+} from "./platform-totals.ts";
 import { hrHoursTouched } from "./rollup/hr-minute.ts";
 import { DEFAULT_SLICE_BUDGET, Meter } from "./store/budget.ts";
 import { chunkStatements, hrMinuteWrite, hrSpillIn, readChunks } from "./store/chunks.ts";
@@ -86,6 +97,12 @@ import {
   sameKey,
   samplesInInterval,
 } from "./store/keys.ts";
+import {
+  clearStaleStatements,
+  SCAN_REVISION,
+  markStaleStatements,
+  scanPlatformTotals,
+} from "./store/platform-stale.ts";
 import {
   EXERCISE_CONTEXT_TYPES,
   SLEEP_CONTEXT_MARGIN_MS,
@@ -144,6 +161,13 @@ export interface HcRunnerState {
    * when that has to be checked against the table.
    */
   tzDigest: string | null;
+  /**
+   * The `SCAN_REVISION` of the one-off scan of the stored platform totals that
+   * is known to be finished for this device (worker/src/hc/store/platform-stale.ts),
+   * so an idle slice does not ask the table again. Absent, or an older
+   * revision: ask.
+   */
+  platformScanned?: number;
 }
 
 export const EMPTY_RUNNER_STATE: HcRunnerState = { cursor: null, tzDigest: null };
@@ -306,6 +330,13 @@ interface BatchRun {
    */
   arrival: BatchArrival;
   /**
+   * The hours whose platform total the batch itself carries, by
+   * `platformHourKey`: `Head.carried`. Taking a record out of one of those
+   * hours leaves its total as fresh as the batch, so the hour is not marked
+   * stale (worker/src/hc/store/platform-stale.ts).
+   */
+  carried: ReadonlySet<string>;
+  /**
    * The `day` marks this batch is known to have written, by key: `Head.marked`.
    * A day is two dozen chunks, and each of them would write the same mark.
    *
@@ -414,10 +445,61 @@ function dependantStatements(
 }
 
 /**
+ * The marks of the platform totals that taking `leaving` -- old copies of
+ * records of a totalled type -- out of their hours made stale: every hour each
+ * copy covered, less the hours whose total the batch carries itself. See
+ * worker/src/hc/store/platform-stale.ts.
+ */
+function staleTotalStatements(
+  job: BatchRun,
+  type: string,
+  leaving: readonly HcRecord[],
+): D1PreparedStatement[] {
+  if (leaving.length === 0 || !isPlatformSourceType(type)) return [];
+  const hours = new Set<number>();
+  for (const record of leaving) {
+    for (const hourUtc of hoursOfRecord(record)) {
+      if (!job.carried.has(platformHourKey({ sourceType: type, hourUtc }))) hours.add(hourUtc);
+    }
+  }
+  return hours.size === 0
+    ? []
+    : markStaleStatements(job.ctx, job.deviceId, type, listOf(hours), job.arrival);
+}
+
+/**
+ * The statements that clear the stale marks of the hours whose platform
+ * totals `records` (accepted `Agg.<Metric>` upserts) are. Any other record is
+ * passed over.
+ */
+function freshTotalStatements(job: BatchRun, records: readonly HcRecord[]): D1PreparedStatement[] {
+  const byType = new Map<string, number[]>();
+  for (const record of records) {
+    const hour = aggRecordHour(record);
+    if (hour !== null) fileHour(byType, hour.sourceType, hour.hourUtc);
+  }
+  return clearsOf(job, byType);
+}
+
+function fileHour(byType: Map<string, number[]>, type: string, hourUtc: number): void {
+  const hours = byType.get(type) ?? [];
+  hours.push(hourUtc);
+  byType.set(type, hours);
+}
+
+function clearsOf(job: BatchRun, byType: ReadonlyMap<string, number[]>): D1PreparedStatement[] {
+  return listOf(byType).flatMap(([type, hours]) =>
+    clearStaleStatements(job.ctx, job.deviceId, type, hours, job.arrival),
+  );
+}
+
+/**
  * The statements that take the chunk at `key` from `before` to `records`, and
  * keep what depends on it in step. `touched` is every record version that was
  * added, replaced or removed -- old copies and new -- which is what decides
- * which days, sessions and heart-rate hours have to be rebuilt.
+ * which days, sessions and heart-rate hours have to be rebuilt. `leaving` is
+ * the old copies alone: the records deleted from the chunk, moved out of it,
+ * or replaced in it, whose hours' platform totals counted them.
  *
  * Empty when the chunk would not change.
  */
@@ -428,6 +510,7 @@ async function rewriteChunk(
   before: StoredChunk | undefined,
   records: readonly HcRecord[],
   touched: readonly HcRecord[],
+  leaving: readonly HcRecord[],
 ): Promise<D1PreparedStatement[]> {
   const { ctx, deviceId } = job;
   // Told of every heart-rate chunk built, changed or not: what the view
@@ -452,6 +535,7 @@ async function rewriteChunk(
   statements.push(
     ...markStatements(ctx, deviceId, marks),
     ...dependantStatements(job, key.type, touched),
+    ...staleTotalStatements(job, key.type, leaving),
   );
   return statements;
 }
@@ -697,7 +781,15 @@ async function deleteSlot(
   const statements: D1PreparedStatement[] = [];
   if (stored !== undefined) {
     const { records, removed } = removeFromChunk(stored.records, slot.ids);
-    const rewrite = await rewriteChunk(job, slot.key, stored.origin, stored, records, removed);
+    const rewrite = await rewriteChunk(
+      job,
+      slot.key,
+      stored.origin,
+      stored,
+      records,
+      removed,
+      removed,
+    );
     statements.push(...rewrite);
   }
   statements.push(tombstoneStatement(ctx, deviceId, slot.blinds, job.arrival));
@@ -730,6 +822,19 @@ async function deletePage(job: BatchRun, page: readonly string[]): Promise<boole
   // already or not: a slice that died after the delete was committed left its
   // note of the type behind with it, and the replay only sees the tombstone.
   for (const entry of index.values()) noteShrunk(job.cursor, entry.key.type);
+
+  // The deletion of an hour's platform total is the phone's word that the hour
+  // has none any more: as of this batch, that is the hour's total. Built from
+  // the page itself and not from the index, so a replay of a page whose
+  // tombstones are already written still clears.
+  const totals = new Map<string, number[]>();
+  for (const id of page) {
+    const hour = parseAggId(id);
+    if (hour !== null) fileHour(totals, hour.sourceType, hour.hourUtc);
+  }
+  if (totals.size > 0) {
+    await defer(job, { statements: clearsOf(job, totals), chunks: [], settle: countNothing });
+  }
 
   const unknown = every.filter((blind) => !index.has(blind));
   if (unknown.length > 0) {
@@ -886,7 +991,7 @@ async function sourceStatements(
     if (source === undefined) continue;
     const { records, removed } = removeFromChunk(source.records, ids);
     const { key, origin } = source;
-    statements.push(...(await rewriteChunk(job, key, origin, source, records, removed)));
+    statements.push(...(await rewriteChunk(job, key, origin, source, records, removed, removed)));
   }
   return statements;
 }
@@ -933,7 +1038,18 @@ async function applyGroup(job: BatchRun, work: GroupJob, held: HeldChunks): Prom
   const touched = [...merged.changed, ...merged.replaced];
   const statements = [
     ...moved,
-    ...(await rewriteChunk(job, key, group.origin, target, merged.records, touched)),
+    ...(await rewriteChunk(
+      job,
+      key,
+      group.origin,
+      target,
+      merged.records,
+      touched,
+      merged.replaced,
+    )),
+    // A platform total that is now the stored copy -- new, changed or the same
+    // as before -- is the hour's total as of this batch.
+    ...freshTotalStatements(job, merged.accepted),
   ];
   // Index rows for what is new here or has just arrived from another chunk,
   // and for what is back after a tombstone -- those in a statement of their
@@ -1034,6 +1150,8 @@ interface Head {
   marked: Set<string>;
   /** The ids the batch deletes: see `BatchRun.arrival`. */
   deleted: ReadonlySet<string>;
+  /** The hours whose platform total the batch carries: see `BatchRun.carried`. */
+  carried: ReadonlySet<string>;
 }
 
 /**
@@ -1165,7 +1283,13 @@ async function openHead(
     await failBatch(ctx, deviceId, queued.batchId, "batch_mismatch", null, deps);
     return "failed";
   }
-  return { queued, batch, marked: new Set(), deleted: new Set(batch.deletes) };
+  return {
+    queued,
+    batch,
+    marked: new Set(),
+    deleted: new Set(batch.deletes),
+    carried: carriedPlatformHours(batch),
+  };
 }
 
 /**
@@ -1279,6 +1403,7 @@ async function applyHead(
       receivedAt: head.queued.receivedAt,
       deletes: (id) => head.deleted.has(id),
     },
+    carried: head.carried,
     marked: head.marked,
     pending: [],
     pendingBytes: 0,
@@ -1539,6 +1664,8 @@ interface SliceRun {
   memo: SliceMemo;
   /** `HcRunnerState.tzDigest`, as the slice now knows it. */
   tzDigest: string | null;
+  /** `HcRunnerState.platformScanned`, as the slice now knows it. */
+  platformScanned: boolean;
 }
 
 /** Run the rebuild within `part`, and keep what it learned and how long it took. */
@@ -1581,10 +1708,23 @@ async function workSlice(
   tally: SliceTally,
 ): Promise<{ result: SliceResult; phase: "apply" | "rebuild" }> {
   let cursor = state.cursor;
-  const run: SliceRun = { ctx, deviceId, meter, tally, memo: {}, tzDigest: state.tzDigest };
+  const run: SliceRun = {
+    ctx,
+    deviceId,
+    meter,
+    tally,
+    memo: {},
+    tzDigest: state.tzDigest,
+    platformScanned: state.platformScanned === SCAN_REVISION,
+  };
+  const stateOf = (next: ApplyCursor | null): HcRunnerState => ({
+    cursor: next,
+    tzDigest: run.tzDigest,
+    ...(run.platformScanned && { platformScanned: SCAN_REVISION }),
+  });
   const paused = (next: ApplyCursor | null): { result: SliceResult; phase: "apply" } => ({
     result: {
-      state: { cursor: next, tzDigest: run.tzDigest },
+      state: stateOf(next),
       more: true,
       progressed: meter.progressed,
     },
@@ -1607,15 +1747,30 @@ async function workSlice(
     if (!meter.mayStart(BATCH_OVERHEAD + CHUNK_COST)) return paused(null);
   }
 
-  const more = (await rebuildWithin(run, meter)) || (await pruneLog(ctx, deviceId, meter));
+  const more =
+    (await rebuildWithin(run, meter)) ||
+    (await pruneLog(ctx, deviceId, meter)) ||
+    (await scanWithin(run));
   return {
     result: {
-      state: { cursor: null, tzDigest: run.tzDigest },
+      state: stateOf(null),
       more,
       progressed: meter.progressed,
     },
     phase: "rebuild",
   };
+}
+
+/**
+ * The one-off scan of the stored platform totals, last of all: only once
+ * nothing is queued, nothing is marked for rebuilding and the log is pruned.
+ * True when it has more to walk.
+ */
+async function scanWithin(run: SliceRun): Promise<boolean> {
+  if (run.platformScanned) return false;
+  const more = await scanPlatformTotals(run.ctx, run.deviceId, run.meter);
+  if (!more) run.platformScanned = true;
+  return more;
 }
 
 /** The marks waiting to be rebuilt, for a batch that closed without reading them. */

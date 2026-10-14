@@ -45,6 +45,32 @@ object Hours {
         if (count > 0) out.add(start until start + count * MS)
         return out
     }
+
+    /**
+     * Groups [hours] into `[start, end)` spans for asking Health Connect about scattered hours:
+     * consecutive hours, and hours at most [bridgeHours] apart, share a span, which is at most
+     * [maxHours] long. A day whose stale hours are its waking ones is then one request rather
+     * than one per run of hours. Ascending.
+     */
+    fun spans(hours: Collection<Long>, bridgeHours: Int, maxHours: Int = MAX_PER_REQUEST): List<LongRange> {
+        val out = ArrayList<LongRange>()
+        var start = 0L
+        var last = 0L
+        var open = false
+        for (hour in hours.toSortedSet()) {
+            if (open && (hour - last > bridgeHours * MS || hour - start >= maxHours * MS)) {
+                out.add(start until last + MS)
+                open = false
+            }
+            if (!open) {
+                start = hour
+                open = true
+            }
+            last = hour
+        }
+        if (open) out.add(start until last + MS)
+        return out
+    }
 }
 
 /**

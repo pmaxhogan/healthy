@@ -175,6 +175,8 @@ const TABLES = [
   "hc_exercise_session",
   "hc_dirty",
   "hc_sync_state",
+  "hc_platform_stale",
+  "hc_platform_scan",
   "devices",
 ];
 
