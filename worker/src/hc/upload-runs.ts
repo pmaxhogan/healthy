@@ -1,22 +1,22 @@
 /**
- * Sync runs, read out of the upload log.
- *
- * The phone syncs in runs: one start (the periodic job, the watchdog alarm,
- * the owner pressing Sync now), then a batch per page of what Health Connect
- * has changed, then a closing batch that carries only its state report. Each
- * batch says which run it is part of -- when the run began, by the phone's
- * clock, and what started it -- and `hc_ingest_log` keeps that beside the
- * batch's counts. A run is the batches that name the same start.
- *
- * So the log answers what the store cannot: whether a sync ran at all when it
- * found nothing new (a run of one closing batch), what set it off, and whether
- * it got to the end. A run that is cut off never sends its closing batch and
- * cannot say so; the next run says it for it (`prevRunEnd`).
- *
- * Pure, with no D1 in it: the repo reads the rows
- * (worker/src/db/repos/hc-status.ts) and the unit tests' in-memory store
- * groups its own with the same function.
- */
+Sync runs, read out of the upload log.
+
+The phone syncs in runs: one start (the periodic job, the watchdog alarm,
+the owner pressing Sync now), then a batch per page of what Health Connect
+has changed, then a closing batch that carries only its state report. Each
+batch says which run it is part of -- when the run began, by the phone's
+clock, and what started it -- and `hc_ingest_log` keeps that beside the
+batch's counts. A run is the batches that name the same start.
+
+So the log answers what the store cannot: whether a sync ran at all when it
+found nothing new (a run of one closing batch), what set it off, and whether
+it got to the end. A run that is cut off never sends its closing batch and
+cannot say so; the next run says it for it (`prevRunEnd`).
+
+Pure, with no D1 in it: the repo reads the rows
+(worker/src/db/repos/hc-status.ts) and the unit tests' in-memory store
+groups its own with the same function.
+*/
 
 /** What grouping needs of one `hc_ingest_log` row. */
 export interface RunLogRow {
@@ -45,10 +45,10 @@ export interface UploadRun {
   upserts: number;
   deletes: number;
   /**
-   * True when one of its batches is the closing report (nothing upserted,
-   * deleted or rejected): the run reached its end. False when none is: it
-   * stopped before reporting. Null for a batch that names no run.
-   */
+  True when one of its batches is the closing report (nothing upserted,
+  deleted or rejected): the run reached its end. False when none is: it
+  stopped before reporting. Null for a batch that names no run.
+  */
   closed: boolean | null;
   /** How a later batch says the run ended (`ok`, `interrupted`, an error code), or null. */
   ended: string | null;
@@ -58,20 +58,20 @@ interface Found {
   /** The newest `limit` runs among the rows, newest first. */
   runs: UploadRun[];
   /**
-   * True when the rows reach past the last of them: a row of a run older than
-   * every one returned was read. Until then the oldest run returned may have
-   * batches further back than the rows go.
-   */
+  True when the rows reach past the last of them: a row of a run older than
+  every one returned was read. Until then the oldest run returned may have
+  batches further back than the rows go.
+  */
   whole: boolean;
 }
 
 /**
- * Group log rows into runs. `rows` are a device's newest, newest first; the
- * runs come back in the order their newest batch arrived, newest first.
- *
- * A row that names no run (an app from before runs were reported) is a run of
- * its own: there is nothing to say which other batches it came with.
- */
+Group log rows into runs. `rows` are a device's newest, newest first; the
+runs come back in the order their newest batch arrived, newest first.
+
+A row that names no run (an app from before runs were reported) is a run of
+its own: there is nothing to say which other batches it came with.
+*/
 export function newestRuns(rows: readonly RunLogRow[], limit: number): Found {
   const keyed = new Map<number, UploadRun>();
   const runs: UploadRun[] = [];

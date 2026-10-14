@@ -1,9 +1,9 @@
 /**
- * Small helpers the Health Connect tool modules share. Pure.
- *
- * Several exist only because the Worker compiles against the ES2022 lib:
- * `Iterator#toArray()` and `Array#toSorted()` are newer than that.
- */
+Small helpers the Health Connect tool modules share. Pure.
+
+Several exist only because the Worker compiles against the ES2022 lib:
+`Iterator#toArray()` and `Array#toSorted()` are newer than that.
+*/
 
 /** Every item of an iterable, as an array. */
 export function listOf<T>(items: Iterable<T>): T[] {

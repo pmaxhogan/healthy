@@ -1,41 +1,41 @@
 /**
- * Secure messages as MCP items: one item per message, deduped across health
- * systems, windowed, with honest coverage.
- *
- * The portal pass stores every message each health system's Message Center shows
- * (`portal_messages`), including the copies one portal shows of another
- * organisation's conversations. This module turns those rows into the
- * per-message items both message tools hand the exposure policy; only what the
- * policy releases is then grouped into conversations (`message-threads.ts`).
- *
- * ### One message, one item
- *
- * Exactly the visits' rule (`worker/src/mcp/appointment-items.ts`), with the message
- * identity of `worker/src/sync/message-dedupe.ts`: every health system's copies are
- * read, the copies of one message are collapsed to the one that outranks the rest
- * -- the first-party copy, whose own organisation the conversation belongs to --
- * and only then are the caller's health systems picked out. A copy is kept as a
- * fallback, marked `firstParty: false` with `via`, only when no first-party copy
- * is stored anywhere.
- *
- * A denied health system is read too, for matching only: another organisation's
- * portal can show its messages, stored under the showing organisation, and any
- * such copy is dropped (the same rule as appointments, security review M1). A
- * copy it has no stored record of cannot be recognised -- the limit SECURITY.md
- * states for visits applies here as well.
- *
- * ### Policy
- *
- * Items are tagged `resourceType: "Communication"`, so a `resource` rule on
- * Communication removes them and every `Communication.<field>` rule reaches them.
- * The names in an item are addressable as the people they are: the sender's name
- * (`from.name`) and the care team (`practitioners[].name`) are reference fields
- * (`worker/src/policy/references.ts`), judged by the role of whoever they name --
- * a clinician's name goes wherever the owner's rules withhold clinicians' names,
- * the patient's wherever the patient's name is withheld. The judging uses a
- * synthetic FHIR-shaped `source` per item that names only those roles; it is never
- * returned. There is no raw resource behind a message, so `raw` is not offered.
- */
+Secure messages as MCP items: one item per message, deduped across health
+systems, windowed, with honest coverage.
+
+The portal pass stores every message each health system's Message Center shows
+(`portal_messages`), including the copies one portal shows of another
+organisation's conversations. This module turns those rows into the
+per-message items both message tools hand the exposure policy; only what the
+policy releases is then grouped into conversations (`message-threads.ts`).
+
+### One message, one item
+
+Exactly the visits' rule (`worker/src/mcp/appointment-items.ts`), with the message
+identity of `worker/src/sync/message-dedupe.ts`: every health system's copies are
+read, the copies of one message are collapsed to the one that outranks the rest
+-- the first-party copy, whose own organisation the conversation belongs to --
+and only then are the caller's health systems picked out. A copy is kept as a
+fallback, marked `firstParty: false` with `via`, only when no first-party copy
+is stored anywhere.
+
+A denied health system is read too, for matching only: another organisation's
+portal can show its messages, stored under the showing organisation, and any
+such copy is dropped (the same rule as appointments, security review M1). A
+copy it has no stored record of cannot be recognised -- the limit SECURITY.md
+states for visits applies here as well.
+
+### Policy
+
+Items are tagged `resourceType: "Communication"`, so a `resource` rule on
+Communication removes them and every `Communication.<field>` rule reaches them.
+The names in an item are addressable as the people they are: the sender's name
+(`from.name`) and the care team (`practitioners[].name`) are reference fields
+(`worker/src/policy/references.ts`), judged by the role of whoever they name --
+a clinician's name goes wherever the owner's rules withhold clinicians' names,
+the patient's wherever the patient's name is withheld. The judging uses a
+synthetic FHIR-shaped `source` per item that names only those roles; it is never
+returned. There is no raw resource behind a message, so `raw` is not offered.
+*/
 
 import { toIso } from "../lib/time.ts";
 import { isHealthSystemDenied } from "../policy/rules.ts";
@@ -64,10 +64,10 @@ import type { MessageSighting } from "../sync/message-dedupe.ts";
 const MESSAGE_RESOURCE_TYPE = "Communication";
 
 /**
- * How long since a health system's Message Center was last read before its
- * messages are called `stale`. The portal pass runs hourly; six hours is the
- * slack the portal's visits get too.
- */
+How long since a health system's Message Center was last read before its
+messages are called `stale`. The portal pass runs hourly; six hours is the
+slack the portal's visits get too.
+*/
 const MESSAGES_STALE_AFTER_SECONDS = 6 * 60 * 60;
 
 /** Who a message is from, as a FHIR reference type: what the policy judges a name by. */
@@ -167,9 +167,9 @@ const conversationOf = (entry: Entry): string =>
   `${entry.healthSystem.id}\u{0}${entry.record.threadId}`;
 
 /**
- * Only the conversations whose newest message falls inside the window, every
- * message of each: a window picks conversations, it does not cut them in half.
- */
+Only the conversations whose newest message falls inside the window, every
+message of each: a window picks conversations, it does not cut them in half.
+*/
 function inWindow(entries: readonly Entry[], filters: MessageFilters): Entry[] {
   if (filters.from === undefined && filters.to === undefined) return [...entries];
   const newest = new Map<string, string>();
@@ -195,12 +195,12 @@ function compare(a: Entry, b: Entry): number {
 }
 
 /**
- * Every message the selected health systems speak for, one item per message.
- *
- * `all` is every health system that has not been deleted, deny-list not applied:
- * each one's copies take part in the dedupe (see the module comment). Only the
- * `selected` ones are answered from.
- */
+Every message the selected health systems speak for, one item per message.
+
+`all` is every health system that has not been deleted, deny-list not applied:
+each one's copies take part in the dedupe (see the module comment). Only the
+`selected` ones are answered from.
+*/
 export async function collectMessages(
   deps: ToolDeps,
   all: readonly HealthSystemInfo[],
@@ -274,10 +274,10 @@ function coverageStatus(
 }
 
 /**
- * Per health system: is the stored Message Center current? From the portal pass's
- * own record of its last read, not a proxy for it. A `Communication` resource rule
- * hides the coverage with the items, and a denied health system never appears.
- */
+Per health system: is the stored Message Center current? From the portal pass's
+own record of its last read, not a proxy for it. A `Communication` resource rule
+hides the coverage with the items, and a denied health system never appears.
+*/
 export async function messageCoverage(
   deps: ToolDeps,
   selected: readonly HealthSystemInfo[],

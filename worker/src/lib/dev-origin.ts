@@ -1,25 +1,25 @@
 /**
- * Put a `wrangler dev` request back on the loopback origin it really arrived on.
- *
- * `wrangler.jsonc` routes the Worker to a custom domain, and `wrangler dev`
- * honours that by presenting every local request as `http://<that domain>/...`
- * (Host header included) even though it came in on `127.0.0.1`. Two things then
- * break: the OAuth provider refuses to start, because its resource
- * (`resourceFor`, built from the request's origin) is plain http on a host that
- * is not loopback, and every route answers 500. And anything that builds a link
- * from the request would point the browser at production.
- *
- * So, in development only, such a request is re-addressed to the loopback
- * origin before anything reads it: `DEV_ORIGIN` from `.dev.vars` when set
- * (`http://localhost:<port>` for a non-default port), otherwise the origin of
- * `npm run dev:worker`'s own port. Everything downstream -- the provider's
- * resource and the `/mcp` bearer check that recomputes it -- then sees one
- * consistent loopback origin.
- *
- * Production is untouched twice over: `DEV_MODE` is `"false"` in
- * `wrangler.jsonc` and only `.dev.vars` turns it on, and a production request
- * is https, which this never rewrites.
- */
+Put a `wrangler dev` request back on the loopback origin it really arrived on.
+
+`wrangler.jsonc` routes the Worker to a custom domain, and `wrangler dev`
+honours that by presenting every local request as `http://<that domain>/...`
+(Host header included) even though it came in on `127.0.0.1`. Two things then
+break: the OAuth provider refuses to start, because its resource
+(`resourceFor`, built from the request's origin) is plain http on a host that
+is not loopback, and every route answers 500. And anything that builds a link
+from the request would point the browser at production.
+
+So, in development only, such a request is re-addressed to the loopback
+origin before anything reads it: `DEV_ORIGIN` from `.dev.vars` when set
+(`http://localhost:<port>` for a non-default port), otherwise the origin of
+`npm run dev:worker`'s own port. Everything downstream -- the provider's
+resource and the `/mcp` bearer check that recomputes it -- then sees one
+consistent loopback origin.
+
+Production is untouched twice over: `DEV_MODE` is `"false"` in
+`wrangler.jsonc` and only `.dev.vars` turns it on, and a production request
+is https, which this never rewrites.
+*/
 
 /** `npm run dev:worker` listens here. `DEV_ORIGIN` overrides it. */
 const DEFAULT_DEV_ORIGIN = "http://localhost:8787";

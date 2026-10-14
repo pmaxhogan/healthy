@@ -129,7 +129,6 @@ describe("parseSmartConfiguration", () => {
     const error = appErrorFrom(() =>
       parseSmartConfiguration({
         authorization_endpoint: "https://example.test/authorize",
-        // eslint-disable-next-line unicorn/prefer-https -- a non-https endpoint is the input under test; the assertion is that it is refused.
         token_endpoint: "http://example.test/token",
       }),
     );

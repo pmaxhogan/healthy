@@ -31,12 +31,12 @@ const SIBLING = "https://alias.example-portal.test";
 /** A different registrable domain entirely. */
 const OFFSITE = "https://attacker.example";
 /**
- * The same host over plain http.
- *
- * Derived rather than written out: a literal `http://` URL in this repository is
- * rewritten to `https://` by an eslint fixer, which would quietly turn the two
- * downgrade tests below into tests of nothing.
- */
+The same host over plain http.
+
+Derived rather than written out: a literal `http://` URL in this repository is
+rewritten to `https://` by an eslint fixer, which would quietly turn the two
+downgrade tests below into tests of nothing.
+*/
 const INSECURE = SITE.replace("https://", "http://");
 
 function deps(stub: PortalFetchStub) {

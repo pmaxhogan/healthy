@@ -61,11 +61,11 @@ export interface FakeFetch {
 }
 
 /**
- * Installs a fetch that answers from `routes`, keyed by the path it is asked for.
- *
- * A key may be an exact path or a prefix ending in `*`. Anything unmatched
- * answers 404, which is how a test notices a request it did not expect.
- */
+Installs a fetch that answers from `routes`, keyed by the path it is asked for.
+
+A key may be an exact path or a prefix ending in `*`. Anything unmatched
+answers 404, which is how a test notices a request it did not expect.
+*/
 export function installFakeApi(routes: Record<string, () => Response>): FakeFetch {
   const calls: RecordedCall[] = [];
   const table = new Map(Object.entries(routes));

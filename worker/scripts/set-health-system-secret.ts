@@ -125,14 +125,14 @@ async function readStdin(): Promise<string> {
 }
 
 /**
- * The client secret: `HEALTH_SYSTEM_CLIENT_SECRET` if set, otherwise stdin.
- *
- * Reading from stdin rather than a prompt (unlike `set-password.ts`) is
- * deliberate -- the caller in practice pipes it in from a gitignored file or a
- * secrets manager, e.g. `HEALTH_SYSTEM_CLIENT_SECRET="$(...)" npm run ...` or
- * `npm run set-health_system-secret -- ... < secret.txt`. Either way it is never a
- * process argument, so it never lands in shell history or `ps`.
- */
+The client secret: `HEALTH_SYSTEM_CLIENT_SECRET` if set, otherwise stdin.
+
+Reading from stdin rather than a prompt (unlike `set-password.ts`) is
+deliberate -- the caller in practice pipes it in from a gitignored file or a
+secrets manager, e.g. `HEALTH_SYSTEM_CLIENT_SECRET="$(...)" npm run ...` or
+`npm run set-health_system-secret -- ... < secret.txt`. Either way it is never a
+process argument, so it never lands in shell history or `ps`.
+*/
 async function readSecret(): Promise<string> {
   const fromEnv = process.env.HEALTH_SYSTEM_CLIENT_SECRET;
   if (fromEnv !== undefined && fromEnv !== "") return fromEnv;
@@ -179,19 +179,19 @@ function resolveDataKey(): string {
 }
 
 /**
- * Wrangler's own CLI entry point, resolved from this repo's `node_modules`
- * rather than run via `npx`/PATH.
- *
- * `set-password.ts` and `gen-data-key.ts` shell out with
- * `spawnSync("npx", ["wrangler", ...], { shell: true })`, which is only safe
- * because every argument they pass is a single token. This script's
- * `--command` argument is a whole SQL string with spaces and quotes in it,
- * and `shell: true` on Windows joins argv with spaces and hands it to
- * `cmd.exe`, which re-splits on those spaces -- so `--command "SELECT ... "`
- * arrives at wrangler as several separate arguments instead of one. Invoking
- * Node directly on wrangler's own entry script sidesteps the shell (and its
- * quoting) entirely: argv reaches wrangler exactly as this process built it.
- */
+Wrangler's own CLI entry point, resolved from this repo's `node_modules`
+rather than run via `npx`/PATH.
+
+`set-password.ts` and `gen-data-key.ts` shell out with
+`spawnSync("npx", ["wrangler", ...], { shell: true })`, which is only safe
+because every argument they pass is a single token. This script's
+`--command` argument is a whole SQL string with spaces and quotes in it,
+and `shell: true` on Windows joins argv with spaces and hands it to
+`cmd.exe`, which re-splits on those spaces -- so `--command "SELECT ... "`
+arrives at wrangler as several separate arguments instead of one. Invoking
+Node directly on wrangler's own entry script sidesteps the shell (and its
+quoting) entirely: argv reaches wrangler exactly as this process built it.
+*/
 const WRANGLER_BIN = path.join(
   path.dirname(createRequire(import.meta.url).resolve("wrangler/package.json")),
   "bin",
@@ -253,20 +253,20 @@ function healthSystemExists(id: string, target: Target): boolean {
 }
 
 /**
- * `wrangler d1 execute --command` takes a single SQL string with no bind-
- * parameter support, so this builds the statement by hand instead of binding.
- * That is only as safe as its inputs: `id` is ULID-validated (Crockford
- * base32, no punctuation) and `sealed` is checked against
- * `SEALED_ENVELOPE_PATTERN` (base64url plus a literal `v1:`) before either
- * touches this string, so neither can contain a quote to break out of the
- * SQL string literals below.
- *
- * Success is confirmed with a SELECT afterwards rather than by trusting
- * `meta.changes` in the UPDATE's own `--json` output: a local D1 (miniflare)
- * only ever reports `meta.duration` for a write, never `meta.changes`, so
- * checking that field would make this refuse every local write it just made.
- * Reading the row back is the one check that is true regardless of target.
- */
+`wrangler d1 execute --command` takes a single SQL string with no bind-
+parameter support, so this builds the statement by hand instead of binding.
+That is only as safe as its inputs: `id` is ULID-validated (Crockford
+base32, no punctuation) and `sealed` is checked against
+`SEALED_ENVELOPE_PATTERN` (base64url plus a literal `v1:`) before either
+touches this string, so neither can contain a quote to break out of the
+SQL string literals below.
+
+Success is confirmed with a SELECT afterwards rather than by trusting
+`meta.changes` in the UPDATE's own `--json` output: a local D1 (miniflare)
+only ever reports `meta.duration` for a write, never `meta.changes`, so
+checking that field would make this refuse every local write it just made.
+Reading the row back is the one check that is true regardless of target.
+*/
 function updateHealthSystemSecret(
   id: string,
   sealed: string,
@@ -301,14 +301,14 @@ function updateHealthSystemSecret(
 }
 
 /**
- * The AAD one health system's `client_secret_enc` cell is sealed under.
- *
- * Must equal `secretAad` in `worker/src/db/repos/health-systems.ts` exactly -- that
- * private helper is what `healthSystemsRepo.getClientSecret` calls `open()` with,
- * so a value this script writes is only ever legible to the Worker if this
- * matches it byte for byte. See `worker/test/unit/set-health_system-secret.test.ts` for
- * the round trip that catches a future divergence.
- */
+The AAD one health system's `client_secret_enc` cell is sealed under.
+
+Must equal `secretAad` in `worker/src/db/repos/health-systems.ts` exactly -- that
+private helper is what `healthSystemsRepo.getClientSecret` calls `open()` with,
+so a value this script writes is only ever legible to the Worker if this
+matches it byte for byte. See `worker/test/unit/set-health_system-secret.test.ts` for
+the round trip that catches a future divergence.
+*/
 export function healthSystemSecretAad(healthSystemId: string): string {
   return aadFor("providers", "client_secret_enc", healthSystemId);
 }

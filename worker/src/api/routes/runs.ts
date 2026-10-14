@@ -1,19 +1,19 @@
 /**
- * `/api/runs` -- the run log.
- *
- * Counts and stable error codes only, which is a property of the table rather than
- * of this route: `run_log.summary_json` has nowhere to put an appointment, a name or
- * an organisation. A run with `finishedAt: null` is one that was cut off mid-flight
- * (a Worker that hit its CPU limit, a deploy during a sync) and is shown as such
- * rather than hidden.
- *
- * ### Why `refresh` is hidden unless asked for
- *
- * The token keepalive runs every hour and writes a `refresh` row each time, so a
- * plain "last 25 runs" is 25 keepalives and none of the syncs the owner came to
- * look at. `?kind=refresh` asks for them specifically, and `?kind=` any other value
- * narrows to that kind alone.
- */
+`/api/runs` -- the run log.
+
+Counts and stable error codes only, which is a property of the table rather than
+of this route: `run_log.summary_json` has nowhere to put an appointment, a name or
+an organisation. A run with `finishedAt: null` is one that was cut off mid-flight
+(a Worker that hit its CPU limit, a deploy during a sync) and is shown as such
+rather than hidden.
+
+### Why `refresh` is hidden unless asked for
+
+The token keepalive runs every hour and writes a `refresh` row each time, so a
+plain "last 25 runs" is 25 keepalives and none of the syncs the owner came to
+look at. `?kind=refresh` asks for them specifically, and `?kind=` any other value
+narrows to that kind alone.
+*/
 
 import { Hono } from "hono";
 
@@ -30,12 +30,12 @@ const DEFAULT_RUN_LIMIT = 25;
 const INTERESTING: ReadonlySet<RunKind> = new Set<RunKind>(["calendar", "full", "manual"]);
 
 /**
- * How many rows to read when filtering in memory.
- *
- * The repo can filter by one kind, not by a set, so an unfiltered request reads a
- * wider window and narrows it here. Four times the page is enough for the hourly
- * keepalive not to crowd out a daily full refresh.
- */
+How many rows to read when filtering in memory.
+
+The repo can filter by one kind, not by a set, so an unfiltered request reads a
+wider window and narrows it here. Four times the page is enough for the hourly
+keepalive not to crowd out a daily full refresh.
+*/
 const FILTER_FACTOR = 4;
 
 export const runsRouter = new Hono<AppHonoEnv>();

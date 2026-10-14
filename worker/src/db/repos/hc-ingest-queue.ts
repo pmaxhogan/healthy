@@ -1,20 +1,20 @@
 /**
- * Batches the ingest route has accepted and the runner has not yet applied:
- * `hc_ingest_queue` and `hc_ingest_log` (worker/migrations/0016_health_connect.sql).
- *
- * The route's side is `enqueue`: seal the gzip body exactly as it arrived and
- * write it with its log row in one transaction, so "acknowledged" always means
- * "durably queued". The runner's side is `head` / `remove` / `park`: take the
- * oldest batch of a device, apply it, delete it -- or, when it cannot be
- * applied, set it aside. A parked batch is never deleted by the runner: the
- * phone has already moved past it, so its body is the only copy of its records.
- * It no longer blocks the queue, and `unpark` puts it back.
- *
- * A body is stored compressed, as the phone sent it, split across rows when it
- * is larger than one row may hold. Each part is sealed with an AAD naming the
- * device, the batch and the part, so parts cannot be reordered or moved
- * between batches without failing to open.
- */
+Batches the ingest route has accepted and the runner has not yet applied:
+`hc_ingest_queue` and `hc_ingest_log` (worker/migrations/0016_health_connect.sql).
+
+The route's side is `enqueue`: seal the gzip body exactly as it arrived and
+write it with its log row in one transaction, so "acknowledged" always means
+"durably queued". The runner's side is `head` / `remove` / `park`: take the
+oldest batch of a device, apply it, delete it -- or, when it cannot be
+applied, set it aside. A parked batch is never deleted by the runner: the
+phone has already moved past it, so its body is the only copy of its records.
+It no longer blocks the queue, and `unpark` puts it back.
+
+A body is stored compressed, as the phone sent it, split across rows when it
+is larger than one row may hold. Each part is sealed with an AAD naming the
+device, the batch and the part, so parts cannot be reordered or moved
+between batches without failing to open.
+*/
 
 import { blinderFor } from "../blind.ts";
 import { all, batch, one, run } from "../client.ts";
@@ -24,9 +24,9 @@ import type { BatchRunStamp } from "../../hc/wire.ts";
 import type { Ctx } from "../client.ts";
 
 /**
- * Compressed bytes per queue row. D1 caps a value at 2 MB and the envelope is
- * base64 (four characters per three bytes), so this leaves comfortable room.
- */
+Compressed bytes per queue row. D1 caps a value at 2 MB and the envelope is
+base64 (four characters per three bytes), so this leaves comfortable room.
+*/
 const PART_BYTES = 1_200_000;
 
 export interface EnqueueInput {
@@ -42,9 +42,9 @@ export interface EnqueueInput {
   /** The phone's clock when it built the batch, epoch ms, as it claimed. */
   phoneTime: number | null;
   /**
-   * The sync run the batch says it belongs to, and how the one before it
-   * ended. Omitted, like a batch that says neither: every column NULL.
-   */
+  The sync run the batch says it belongs to, and how the one before it
+  ended. Omitted, like a batch that says neither: every column NULL.
+  */
   run?: BatchRunStamp | undefined;
 }
 
@@ -52,9 +52,9 @@ export interface EnqueueResult {
   /** True when this exact batch had been accepted before: nothing was written. */
   duplicate: boolean;
   /**
-   * True when this batch id had been accepted before with a DIFFERENT body:
-   * nothing was written, and the caller must not acknowledge it.
-   */
+  True when this batch id had been accepted before with a DIFFERENT body:
+  nothing was written, and the caller must not acknowledge it.
+  */
   conflict: boolean;
 }
 
@@ -116,10 +116,10 @@ function replay(stored: string, digest: string): EnqueueResult {
 }
 
 /**
- * The statement `head` runs: every row of the oldest batch a device has
- * waiting, in part order. Bound: the device, twice. Exported so its plan can
- * be asserted.
- */
+The statement `head` runs: every row of the oldest batch a device has
+waiting, in part order. Bound: the device, twice. Exported so its plan can
+be asserted.
+*/
 export const HEAD_SQL = `SELECT * FROM hc_ingest_queue
   WHERE device_id = ?
     AND batch_id = (SELECT batch_id FROM hc_ingest_queue
@@ -170,9 +170,9 @@ export function makeHcIngestQueueRepo(ctx: Ctx) {
   };
 
   /**
-   * A keyed digest of a body: SHA-256 of the bytes, then the blinding HMAC, so
-   * the column says "same batch or not" and nothing about the content.
-   */
+  A keyed digest of a body: SHA-256 of the bytes, then the blinding HMAC, so
+  the column says "same batch or not" and nothing about the content.
+  */
   const digestOf = async (deviceId: string, body: Uint8Array<ArrayBuffer>): Promise<string> => {
     const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", body));
     const hex = [...hash].map((byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -181,10 +181,10 @@ export function makeHcIngestQueueRepo(ctx: Ctx) {
 
   return {
     /**
-     * Queue one batch, once. A batch id this device has sent before is reported
-     * as a duplicate and not written again: the phone retries until it hears a
-     * 200, and the retry of a batch that did land must not apply twice.
-     */
+    Queue one batch, once. A batch id this device has sent before is reported
+    as a duplicate and not written again: the phone retries until it hears a
+    200, and the retry of a batch that did land must not apply twice.
+    */
     async enqueue(input: EnqueueInput): Promise<EnqueueResult> {
       const digest = await digestOf(input.deviceId, input.body);
       const stored = await seenDigest(input.deviceId, input.batchId);
@@ -281,9 +281,9 @@ export function makeHcIngestQueueRepo(ctx: Ctx) {
     },
 
     /**
-     * The oldest batch a device has waiting, reassembled, or null. Strictly in
-     * arrival order: a delete that follows an upsert must be applied after it.
-     */
+    The oldest batch a device has waiting, reassembled, or null. Strictly in
+    arrival order: a delete that follows an upsert must be applied after it.
+    */
     async head(deviceId: string): Promise<QueuedBatch | null> {
       // One statement, so one round trip: which batch is oldest, and its rows.
       const rows = await all<QueueRow>(ctx.db.prepare(HEAD_SQL).bind(deviceId, deviceId));
@@ -311,15 +311,15 @@ export function makeHcIngestQueueRepo(ctx: Ctx) {
     },
 
     /**
-     * The statement that drops a batch from the queue once it is applied. A
-     * batch that failed is parked, never dropped.
-     *
-     * A statement and not a call, because of where it has to run: in the same
-     * `db.batch` -- the same transaction -- as the statement that records the
-     * batch as applied (`outcomeStatement`). The queued body is the only copy
-     * of what the phone sent, so it goes at the moment the log says its records
-     * are in the store, and not a round trip before or after.
-     */
+    The statement that drops a batch from the queue once it is applied. A
+    batch that failed is parked, never dropped.
+
+    A statement and not a call, because of where it has to run: in the same
+    `db.batch` -- the same transaction -- as the statement that records the
+    batch as applied (`outcomeStatement`). The queued body is the only copy
+    of what the phone sent, so it goes at the moment the log says its records
+    are in the store, and not a round trip before or after.
+    */
     removeStatement(deviceId: string, batchId: string): D1PreparedStatement {
       return ctx.db
         .prepare("DELETE FROM hc_ingest_queue WHERE device_id = ? AND batch_id = ?")
@@ -327,9 +327,9 @@ export function makeHcIngestQueueRepo(ctx: Ctx) {
     },
 
     /**
-     * Set a batch aside: it could not be applied, and must neither be lost nor
-     * hold up the batches behind it. Its log row says why (`recordOutcome`).
-     */
+    Set a batch aside: it could not be applied, and must neither be lost nor
+    hold up the batches behind it. Its log row says why (`recordOutcome`).
+    */
     async park(deviceId: string, batchId: string): Promise<void> {
       await run(
         ctx.db
@@ -342,13 +342,13 @@ export function makeHcIngestQueueRepo(ctx: Ctx) {
     },
 
     /**
-     * Put every parked batch of a device back in the queue, in its original
-     * order, and mark its log row queued again. Returns how many batches.
-     *
-     * Applying an old batch after newer ones is safe by construction: an upsert
-     * only replaces a stored record with a greater `lastModified`, and an
-     * upsert for an id deleted since is dropped by its tombstone.
-     */
+    Put every parked batch of a device back in the queue, in its original
+    order, and mark its log row queued again. Returns how many batches.
+
+    Applying an old batch after newer ones is safe by construction: an upsert
+    only replaces a stored record with a greater `lastModified`, and an
+    upsert for an id deleted since is dropped by its tombstone.
+    */
     async unpark(deviceId: string): Promise<number> {
       const rows = await all<{ batch_id: string }>(
         ctx.db
@@ -376,10 +376,10 @@ export function makeHcIngestQueueRepo(ctx: Ctx) {
     },
 
     /**
-     * The statement that records what became of a batch, for a caller that
-     * commits it with other statements. Counts, a duration and a stable error
-     * code only.
-     */
+    The statement that records what became of a batch, for a caller that
+    commits it with other statements. Counts, a duration and a stable error
+    code only.
+    */
     outcomeStatement,
 
     /** Record what became of a batch, by itself. */

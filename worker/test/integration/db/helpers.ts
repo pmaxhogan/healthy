@@ -22,12 +22,12 @@ function randomDataKey(): string {
 }
 
 /**
- * A DATA_KEY for this test isolate.
- *
- * Generated rather than fixed: nothing may commit a key, not even a throwaway
- * one, because a committed AES key is indistinguishable from a leaked one to
- * every scanner that will look at this repository.
- */
+A DATA_KEY for this test isolate.
+
+Generated rather than fixed: nothing may commit a key, not even a throwaway
+one, because a committed AES key is indistinguishable from a leaked one to
+every scanner that will look at this repository.
+*/
 const TEST_DATA_KEY = randomDataKey();
 
 /** A second, unrelated key, for proving that the wrong key cannot open a column. */
@@ -181,11 +181,11 @@ const TABLES = [
 ];
 
 /**
- * Empty every table and put `google_account` back to its seeded state.
- *
- * The test pool shares one D1 instance across the tests in a file, so each test
- * starts from a clean database only if it says so. Call this from `beforeEach`.
- */
+Empty every table and put `google_account` back to its seeded state.
+
+The test pool shares one D1 instance across the tests in a file, so each test
+starts from a clean database only if it says so. Call this from `beforeEach`.
+*/
 export async function resetDb(): Promise<void> {
   await env.DB.batch(TABLES.map((table) => env.DB.prepare(`DELETE FROM ${table}`)));
   await env.DB.prepare(
@@ -199,12 +199,12 @@ export async function resetDb(): Promise<void> {
 }
 
 /**
- * Await a list of rows and project one column, in order.
- *
- * Almost every list assertion here wants "which rows, in what order", and this
- * says that in one expression -- while keeping the member access off the await,
- * which `unicorn/no-await-expression-member` rightly objects to.
- */
+Await a list of rows and project one column, in order.
+
+Almost every list assertion here wants "which rows, in what order", and this
+says that in one expression -- while keeping the member access off the await,
+which `unicorn/no-await-expression-member` rightly objects to.
+*/
 export async function column<T, K extends keyof T>(promise: Promise<T[]>, key: K): Promise<T[K][]> {
   const rows = await promise;
   // `row[key]`: `K extends keyof T`, so the compiler has already proved the index.

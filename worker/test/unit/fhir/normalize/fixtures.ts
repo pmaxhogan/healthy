@@ -39,7 +39,7 @@ const EXAMPLE_PATIENT: fhir4.Patient = {
 };
 
 /** A resolver plus context over the standard fixture pool, for tests that
- * don't need to construct their own reference graph. */
+don't need to construct their own reference graph. */
 export function testCtx(resources: fhir4.Resource[] = []): NormalizeCtx {
   return {
     healthSystem: "example-health_system",

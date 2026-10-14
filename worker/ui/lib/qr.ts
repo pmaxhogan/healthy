@@ -311,10 +311,10 @@ class QrSymbol {
   }
 
   /**
-   * Every module that carries data, in the order the specification fills them:
-   * column pairs from the right, alternately upward and downward, the vertical
-   * timing column skipped, function modules passed over.
-   */
+  Every module that carries data, in the order the specification fills them:
+  column pairs from the right, alternately upward and downward, the vertical
+  timing column skipped, function modules passed over.
+  */
   private dataPositions(): [number, number][] {
     const rights: number[] = [];
     for (let right = this.size - 1; right >= 8; right -= 2) rights.push(right);
@@ -482,9 +482,9 @@ export interface EncodeOptions {
 }
 
 /**
- * Encode text as a QR Code. Throws a `RangeError` when it does not fit even
- * version 40 at level M (2331 bytes of UTF-8).
- */
+Encode text as a QR Code. Throws a `RangeError` when it does not fit even
+version 40 at level M (2331 bytes of UTF-8).
+*/
 export function encodeQr(text: string, options: EncodeOptions = {}): QrCode {
   const bytes = new TextEncoder().encode(text);
   let version = Math.max(MIN_VERSION, options.minVersion ?? MIN_VERSION);

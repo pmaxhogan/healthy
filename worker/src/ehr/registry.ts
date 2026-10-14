@@ -1,9 +1,9 @@
 /**
- * vendor -> adapter.
- *
- * The only place in the Worker that names a vendor. Adding another means one
- * entry here and one implementation under `ehr/`.
- */
+vendor -> adapter.
+
+The only place in the Worker that names a vendor. Adding another means one
+entry here and one implementation under `ehr/`.
+*/
 
 import { AppError } from "../lib/errors.ts";
 
@@ -26,12 +26,12 @@ export function isVendor(value: string): value is Vendor {
 }
 
 /**
- * Build the adapter for a vendor.
- *
- * A new adapter per call: adapters hold only the injected dependencies, so they
- * are cheap, and giving each request its own keeps the request-scoped logger
- * attached to the right request.
- */
+Build the adapter for a vendor.
+
+A new adapter per call: adapters hold only the injected dependencies, so they
+are cheap, and giving each request its own keeps the request-scoped logger
+attached to the right request.
+*/
 export function adapterFor(vendor: string, deps: AdapterDeps): EhrAdapter {
   if (!isVendor(vendor)) {
     throw new AppError("bad_request", "unknown health system vendor", { vendor });

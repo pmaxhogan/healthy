@@ -1,25 +1,25 @@
 /**
- * `/api/phone` -- paired phones (Health Connect devices) and what each has sent.
- *
- * Three behaviours are worth reading before changing anything here.
- *
- * **The token is shown once.** Minting and rotating return `{ device, pairing }`, and the token is inside `pairing`;
- * only the token's digest is stored (`worker/src/hc/device-token.ts`), so nothing
- * here can show it again, and a response carrying one is never cached (every
- * /api response is `no-store`). It is not logged: no handler here logs a body,
- * and the error handler logs codes and paths only.
- *
- * **`pairing` is exactly what the QR encodes.** A JSON object with the Worker's
- * origin, the device id and the token, so the companion app scans one thing and
- * needs nothing typed. The origin comes from this request, not from a setting:
- * the owner is looking at the admin UI on the very origin the phone must reach.
- *
- * **Wiping is two steps and may take several calls.** The body must carry the
- * device's id (the UI makes the owner type the device's name first), and a
- * phone's history is far more rows than one request may delete, so the route
- * deletes a bounded number of slices and answers `{ done }`; the UI calls again
- * while it is false.
- */
+`/api/phone` -- paired phones (Health Connect devices) and what each has sent.
+
+Three behaviours are worth reading before changing anything here.
+
+**The token is shown once.** Minting and rotating return `{ device, pairing }`, and the token is inside `pairing`;
+only the token's digest is stored (`worker/src/hc/device-token.ts`), so nothing
+here can show it again, and a response carrying one is never cached (every
+/api response is `no-store`). It is not logged: no handler here logs a body,
+and the error handler logs codes and paths only.
+
+**`pairing` is exactly what the QR encodes.** A JSON object with the Worker's
+origin, the device id and the token, so the companion app scans one thing and
+needs nothing typed. The origin comes from this request, not from a setting:
+the owner is looking at the admin UI on the very origin the phone must reach.
+
+**Wiping is two steps and may take several calls.** The body must carry the
+device's id (the UI makes the owner type the device's name first), and a
+phone's history is far more rows than one request may delete, so the route
+deletes a bounded number of slices and answers `{ done }`; the UI calls again
+while it is false.
+*/
 
 import { Hono } from "hono";
 import { z } from "zod";
@@ -107,9 +107,9 @@ const reportSchema = z.looseObject({
 });
 
 /**
- * The phone's last sync report, reduced to the fields the page shows. Tolerant:
- * a report this version cannot read is no report, not a failed page.
- */
+The phone's last sync report, reduced to the fields the page shows. Tolerant:
+a report this version cannot read is no report, not a failed page.
+*/
 function readReport(json: string | null): DeviceReportDto | null {
   if (json === null) return null;
   let raw: unknown;
@@ -169,12 +169,12 @@ async function projectOne(api: ApiContext, device: Device): Promise<DeviceDto> {
 }
 
 /**
- * The text the QR code encodes.
- *
- * The origin is this request's, upgraded to https: the phone sends a bearer
- * token, and nothing but a loopback address (a developer's `adb reverse` to a
- * local Worker) is allowed to stay on plain http.
- */
+The text the QR code encodes.
+
+The origin is this request's, upgraded to https: the phone sends a bearer
+token, and nothing but a loopback address (a developer's `adb reverse` to a
+local Worker) is allowed to stay on plain http.
+*/
 function pairingString(c: Context<AppHonoEnv>, deviceId: string, token: string): string {
   const url = new URL(c.req.url);
   const loopback = LOOPBACK_HOSTS.has(url.hostname);

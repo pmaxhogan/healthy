@@ -31,12 +31,12 @@ async function readPipedLines(): Promise<string[]> {
 }
 
 /**
- * Two implementations, because readline is push-based: on a pipe every line
- * arrives at once, and a line emitted between two `question()` calls is simply
- * dropped. So a non-TTY stdin is drained up front and consumed a line at a
- * time, while a real terminal keeps interactive readline with its echo
- * suppressed.
- */
+Two implementations, because readline is push-based: on a pipe every line
+arrives at once, and a line emitted between two `question()` calls is simply
+dropped. So a non-TTY stdin is drained up front and consumed a line at a
+time, while a real terminal keeps interactive readline with its echo
+suppressed.
+*/
 function createReader(): Reader {
   if (!process.stdin.isTTY) {
     // Say so rather than silently echoing a password the caller believed was

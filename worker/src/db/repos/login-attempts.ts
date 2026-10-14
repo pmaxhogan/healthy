@@ -1,16 +1,16 @@
 /**
- * Rate limiting for the admin password gate.
- *
- * Keyed by a keyed HMAC of the client IP (`hashClientIp` in
- * `worker/src/auth/ratelimit.ts`, over the blinding key in `worker/src/db/blind.ts`), so
- * a copy of this table cannot confirm a guessed address without `DATA_KEY`. The
- * caller hashes, so this table never sees an address. A fixed window rather than a sliding one -- one row, one
- * counter, and a lockout that is easy to explain and easy to wait out.
- *
- * `increment` is a single statement so two simultaneous guesses cannot both read
- * a stale count. The window roll happens inside the `ON CONFLICT` expression:
- * when the stored window has expired, the count resets to 1 instead of growing.
- */
+Rate limiting for the admin password gate.
+
+Keyed by a keyed HMAC of the client IP (`hashClientIp` in
+`worker/src/auth/ratelimit.ts`, over the blinding key in `worker/src/db/blind.ts`), so
+a copy of this table cannot confirm a guessed address without `DATA_KEY`. The
+caller hashes, so this table never sees an address. A fixed window rather than a sliding one -- one row, one
+counter, and a lockout that is easy to explain and easy to wait out.
+
+`increment` is a single statement so two simultaneous guesses cannot both read
+a stale count. The window roll happens inside the `ON CONFLICT` expression:
+when the stored window has expired, the count resets to 1 instead of growing.
+*/
 
 import { all, one, run } from "../client.ts";
 
@@ -35,11 +35,11 @@ export function makeLoginAttemptsRepo(ctx: Ctx) {
 
   return {
     /**
-     * Count one failed attempt and return the count inside the current window.
-     *
-     * A count that comes back above the limit is the signal to lock out; the
-     * caller does not have to re-read.
-     */
+    Count one failed attempt and return the count inside the current window.
+
+    A count that comes back above the limit is the signal to lock out; the
+    caller does not have to re-read.
+    */
     async increment(ipHash: string, options: Limits = {}): Promise<number> {
       const windowSeconds = options.windowSeconds ?? LOGIN_WINDOW_SECONDS;
       const at = ctx.now();
@@ -63,9 +63,9 @@ export function makeLoginAttemptsRepo(ctx: Ctx) {
     },
 
     /**
-     * True when this client has used up its attempts and the window has not yet
-     * rolled. An expired window is not blocked, whatever the stored count says.
-     */
+    True when this client has used up its attempts and the window has not yet
+    rolled. An expired window is not blocked, whatever the stored count says.
+    */
     async isBlocked(ipHash: string, options: Limits = {}): Promise<boolean> {
       const limit = options.limit ?? LOGIN_MAX_ATTEMPTS;
       const windowSeconds = options.windowSeconds ?? LOGIN_WINDOW_SECONDS;

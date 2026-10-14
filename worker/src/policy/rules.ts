@@ -1,39 +1,39 @@
 /**
- * The exposure deny-list, parsed.
- *
- * `mcp_policy` rows are parsed once per MCP request into the shape
- * {@link applyPolicy} can enforce without re-parsing, and a row that parses to
- * nothing is reported rather than silently ignored.
- *
- * The model is allow-all with a deny-list, in four kinds:
- *
- *   `tool`           the tool name. A denied tool answers `policy_denied` and
- *                    reads nothing at all.
- *   `resource`       a FHIR resource type. Items of that type are dropped from
- *                    every tool's output, the raw projection and the summary.
- *   `health_system`  a health system id. The health system disappears
- *                    everywhere, `list_health_systems` included, and is never
- *                    even queried.
- *   `field`          one or more paths (`worker/shared/policy-path.ts`), removed from
- *                    every item the rule's scope reaches, in the normalized item
- *                    AND the raw resource behind it. The scope is a tool, a
- *                    resource type, a health system, any combination of the
- *                    three, or none of them (every item of every tool).
- *
- * A `field` rule's effect is `hide` -- or `allow`, the one kind of rule that
- * adds rather than removes: fields an item names in its own `sensitive` array
- * (birth date, subscriber id) are withheld by DEFAULT, and an `allow` rule for
- * `birthDate` on Patient is how the owner puts it back. Nothing else can widen
- * exposure.
- *
- * A disabled row (`enabled = 0`) is skipped here, so it enforces nothing and
- * the admin UI can switch it back on without retyping it.
- *
- * Rows written before migration 0012 carry a `field` rule as one string,
- * `ResourceType.path` (or `allow:ResourceType.field`) with no `paths_json`. The
- * migration converts them; the legacy parser below still reads one, so a row
- * written by an older Worker mid-deploy is enforced rather than dropped.
- */
+The exposure deny-list, parsed.
+
+`mcp_policy` rows are parsed once per MCP request into the shape
+{@link applyPolicy} can enforce without re-parsing, and a row that parses to
+nothing is reported rather than silently ignored.
+
+The model is allow-all with a deny-list, in four kinds:
+
+  `tool`           the tool name. A denied tool answers `policy_denied` and
+                   reads nothing at all.
+  `resource`       a FHIR resource type. Items of that type are dropped from
+                   every tool's output, the raw projection and the summary.
+  `health_system`  a health system id. The health system disappears
+                   everywhere, `list_health_systems` included, and is never
+                   even queried.
+  `field`          one or more paths (`worker/shared/policy-path.ts`), removed from
+                   every item the rule's scope reaches, in the normalized item
+                   AND the raw resource behind it. The scope is a tool, a
+                   resource type, a health system, any combination of the
+                   three, or none of them (every item of every tool).
+
+A `field` rule's effect is `hide` -- or `allow`, the one kind of rule that
+adds rather than removes: fields an item names in its own `sensitive` array
+(birth date, subscriber id) are withheld by DEFAULT, and an `allow` rule for
+`birthDate` on Patient is how the owner puts it back. Nothing else can widen
+exposure.
+
+A disabled row (`enabled = 0`) is skipped here, so it enforces nothing and
+the admin UI can switch it back on without retyping it.
+
+Rows written before migration 0012 carry a `field` rule as one string,
+`ResourceType.path` (or `allow:ResourceType.field`) with no `paths_json`. The
+migration converts them; the legacy parser below still reads one, so a row
+written by an older Worker mid-deploy is enforced rather than dropped.
+*/
 
 import { ARRAY_SEGMENT, formatPath, parsePath } from "@shared/policy-path.ts";
 
@@ -89,9 +89,9 @@ export const EMPTY_RULES: PolicyRules = {
 };
 
 /**
- * The shape of an `mcp_policy` row this module reads. The 0012 columns are
- * optional so a test (or a pre-0012 row) can be just `{ rule_type, target }`.
- */
+The shape of an `mcp_policy` row this module reads. The 0012 columns are
+optional so a test (or a pre-0012 row) can be just `{ rule_type, target }`.
+*/
 export type PolicyRuleInput = Pick<McpPolicyRow, "rule_type" | "target"> &
   Partial<
     Pick<
@@ -116,12 +116,12 @@ export interface LegacyFieldTarget {
 }
 
 /**
- * Parse one legacy `field` target, `ResourceType.path.to.field`.
- *
- * Returns null for anything that does not name a field below a resource type:
- * a bare `Patient` (a `resource` rule, not a `field` one), an empty target, or
- * a path that is nothing but array markers.
- */
+Parse one legacy `field` target, `ResourceType.path.to.field`.
+
+Returns null for anything that does not name a field below a resource type:
+a bare `Patient` (a `resource` rule, not a `field` one), an empty target, or
+a path that is nothing but array markers.
+*/
 export function parseFieldTarget(target: string): LegacyFieldTarget | null {
   const trimmed = target.trim();
   const dot = trimmed.indexOf(".");
@@ -173,9 +173,9 @@ function storedPaths(json: string | null | undefined): string[] | null {
 }
 
 /**
- * An `allow` rule can only name a top-level field: `sensitive` lists top-level
- * keys of the normalized item, so a deeper path has nothing to put back.
- */
+An `allow` rule can only name a top-level field: `sensitive` lists top-level
+keys of the normalized item, so a deeper path has nothing to put back.
+*/
 function allowable(path: readonly string[]): boolean {
   return path.length === 1 && path[0] !== ARRAY_SEGMENT;
 }
@@ -232,12 +232,12 @@ function addLegacyField(buckets: Buckets, target: string): void {
 }
 
 /**
- * Sort one row into its bucket.
- *
- * A function rather than inline in `buildRules`'s loop: each case returns, and
- * the switch keeps the exhaustiveness check over `PolicyRuleType` -- so adding
- * a fifth rule kind is a compile error rather than a silent no-op.
- */
+Sort one row into its bucket.
+
+A function rather than inline in `buildRules`'s loop: each case returns, and
+the switch keeps the exhaustiveness check over `PolicyRuleType` -- so adding
+a fifth rule kind is a compile error rather than a silent no-op.
+*/
 function addRule(buckets: Buckets, row: PolicyRuleInput, target: string): void {
   switch (row.rule_type) {
     case "tool": {
@@ -275,10 +275,10 @@ export function buildRules(rows: readonly PolicyRuleInput[]): PolicyRules {
 }
 
 /**
- * The structured form of one `field` row, for the admin UI: the 0012 columns,
- * or a legacy target read as a resource-type-scoped rule with one path. Null
- * for the other rule kinds, and for a legacy target that does not parse.
- */
+The structured form of one `field` row, for the admin UI: the 0012 columns,
+or a legacy target read as a resource-type-scoped rule with one path. Null
+for the other rule kinds, and for a legacy target that does not parse.
+*/
 export function fieldSpecOf(row: PolicyRuleInput): FieldRuleSpec | null {
   if (row.rule_type !== "field") return null;
   const paths = storedPaths(row.paths_json);
@@ -330,13 +330,13 @@ export function isSensitiveAllowed(rules: PolicyRules, scope: ItemScope, field: 
 }
 
 /**
- * The hide rules that may reach one of a paired phone's rows (`hc:<Type>`):
- * every rule in its tool and health-system scope that is on a Health Connect
- * type or on every type. NOT only the rules on the row's own type: a phone's
- * row can carry another type's data (a night's heart rate), and
- * `worker/src/policy/hc-aliases.ts` decides, per rule, what on this row is
- * that type's.
- */
+The hide rules that may reach one of a paired phone's rows (`hc:<Type>`):
+every rule in its tool and health-system scope that is on a Health Connect
+type or on every type. NOT only the rules on the row's own type: a phone's
+row can carry another type's data (a night's heart rate), and
+`worker/src/policy/hc-aliases.ts` decides, per rule, what on this row is
+that type's.
+*/
 export function phoneFieldRulesFor(rules: PolicyRules, scope: ItemScope): FieldRule[] {
   return rules.fields.filter(
     (rule) =>

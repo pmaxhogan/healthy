@@ -1,56 +1,56 @@
 /**
- * `run_log` bookkeeping, and the two summary shapes that have to be kept apart.
- *
- * There are genuinely two here. `RunSummary` in `worker/shared/types.ts` is the sync
- * engine's own working shape, built up while a run is in flight: camelCase, with
- * `filteredView` and `backedOff` flags and errors as `{healthSystemId, code}` pairs --
- * the health system id is what lets a caller (and a test) say *which* connection
- * failed. `runSummarySchema` in `worker/src/db/schemas.ts` is what `run_log.summary_json`
- * stores: shorter names, warnings as both a count and the distinct codes, errors
- * as plain strings, and an `unchanged` count the working shape has no field for.
- * `toStoredSummary` is the one place that translates, and every field the working
- * shape has now survives the round trip -- a run that reports no changes is
- * explained by `filteredView` or `backedOff` or by nothing, and reading the row
- * back has to be able to say which. `healthSystemId` is dropped on the way in --
- * the run log is the table an operator reads casually, and a health system id there is
- * one join away from naming a health system.
- *
- * A third shape, `RunSummaryDto` (also `worker/shared/types.ts`), is what actually
- * reaches the admin UI: built by `worker/src/api/dto.ts` from the *stored* row, so its
- * `errors` and `warningCodes` are the bare codes above, never a health system id --
- * there was never one to reconstruct.
- *
- * A run row is opened before any work and closed after it, so a run cut off
- * mid-flight (CPU limit, a deploy) leaves `finished_at IS NULL`. That is the only
- * way to see those at all, which is why `record` opens the row itself rather than
- * writing one row at the end.
- *
- * ### Two things close a row, and only one of them is `finally`
- *
- * `finish` runs in a `finally`, so a throw the `catch` somehow does not see still
- * closes the row. That is not the whole answer and cannot be: when the platform
- * *cancels* an invocation -- a `waitUntil` past its 30 second post-response
- * deadline, a CPU limit, an eviction -- the isolate is torn down mid-`await` and
- * no `catch`, no `finally` and no alarm inside that invocation ever runs. The row
- * stays open forever. So `record` also **sweeps** at the head of every run: any
- * row still open after `STALE_RUN_SECONDS` belongs to an invocation that no longer
- * exists and is closed as `aborted`. The sweep happens before this run's own row
- * is opened, so it can never sweep itself.
- *
- * ### Resuming
- *
- * A chunked run (`worker/src/sync/full-refresh.ts`, driven by the Durable Object in
- * `runner.ts`) spans several invocations but must be *one* row: the Runs page
- * showing five rows for one button press would be a worse bug than the one this
- * fixes. So `record` takes an existing `runId` and a `RunStateSnapshot` of the
- * counts so far, and the work callback sets `state.unfinished` to say "leave the row
- * open, I am coming back". Only the chunk that finishes the work calls `finish`.
- *
- * `record` never throws. A sync is driven by cron and by a fire-and-forget
- * `waitUntil`, and there is nobody to catch: an unexpected failure becomes an
- * error on the summary, `ok = 0` on the row, and a returned summary the caller can
- * render.
- */
+`run_log` bookkeeping, and the two summary shapes that have to be kept apart.
+
+There are genuinely two here. `RunSummary` in `worker/shared/types.ts` is the sync
+engine's own working shape, built up while a run is in flight: camelCase, with
+`filteredView` and `backedOff` flags and errors as `{healthSystemId, code}` pairs --
+the health system id is what lets a caller (and a test) say *which* connection
+failed. `runSummarySchema` in `worker/src/db/schemas.ts` is what `run_log.summary_json`
+stores: shorter names, warnings as both a count and the distinct codes, errors
+as plain strings, and an `unchanged` count the working shape has no field for.
+`toStoredSummary` is the one place that translates, and every field the working
+shape has now survives the round trip -- a run that reports no changes is
+explained by `filteredView` or `backedOff` or by nothing, and reading the row
+back has to be able to say which. `healthSystemId` is dropped on the way in --
+the run log is the table an operator reads casually, and a health system id there is
+one join away from naming a health system.
+
+A third shape, `RunSummaryDto` (also `worker/shared/types.ts`), is what actually
+reaches the admin UI: built by `worker/src/api/dto.ts` from the *stored* row, so its
+`errors` and `warningCodes` are the bare codes above, never a health system id --
+there was never one to reconstruct.
+
+A run row is opened before any work and closed after it, so a run cut off
+mid-flight (CPU limit, a deploy) leaves `finished_at IS NULL`. That is the only
+way to see those at all, which is why `record` opens the row itself rather than
+writing one row at the end.
+
+### Two things close a row, and only one of them is `finally`
+
+`finish` runs in a `finally`, so a throw the `catch` somehow does not see still
+closes the row. That is not the whole answer and cannot be: when the platform
+*cancels* an invocation -- a `waitUntil` past its 30 second post-response
+deadline, a CPU limit, an eviction -- the isolate is torn down mid-`await` and
+no `catch`, no `finally` and no alarm inside that invocation ever runs. The row
+stays open forever. So `record` also **sweeps** at the head of every run: any
+row still open after `STALE_RUN_SECONDS` belongs to an invocation that no longer
+exists and is closed as `aborted`. The sweep happens before this run's own row
+is opened, so it can never sweep itself.
+
+### Resuming
+
+A chunked run (`worker/src/sync/full-refresh.ts`, driven by the Durable Object in
+`runner.ts`) spans several invocations but must be *one* row: the Runs page
+showing five rows for one button press would be a worse bug than the one this
+fixes. So `record` takes an existing `runId` and a `RunStateSnapshot` of the
+counts so far, and the work callback sets `state.unfinished` to say "leave the row
+open, I am coming back". Only the chunk that finishes the work calls `finish`.
+
+`record` never throws. A sync is driven by cron and by a fire-and-forget
+`waitUntil`, and there is nobody to catch: an unexpected failure becomes an
+error on the summary, `ok = 0` on the row, and a returned summary the caller can
+render.
+*/
 
 import { makeRepos } from "../db/index.ts";
 import { errorFields } from "../lib/log.ts";
@@ -61,12 +61,12 @@ import type { RunSummaryInput } from "../db/schemas.ts";
 import type { RunKind, RunSummary } from "@shared/types.ts";
 
 /**
- * How long an open row may sit before it is presumed dead.
- *
- * Generously longer than any real run: the daily refresh is minutes, and a chunked
- * one is capped well below this, so the threshold only ever catches a run whose
- * invocation is gone.
- */
+How long an open row may sit before it is presumed dead.
+
+Generously longer than any real run: the daily refresh is minutes, and a chunked
+one is capped well below this, so the threshold only ever catches a run whose
+invocation is gone.
+*/
 export const STALE_RUN_SECONDS = 30 * 60;
 
 /** A zeroed DTO summary. Every run starts from one and counts upward. */
@@ -91,26 +91,26 @@ export function emptySummary(): RunSummary {
 }
 
 /**
- * The run's mutable state.
- *
- * `unchanged` and `warningCodes` exist because the stored row wants them and the
- * DTO does not: the DTO reports how *many* warnings, the row reports that *and*
- * which codes, which is what makes "this org has been returning 4119 all week"
- * visible.
- */
+The run's mutable state.
+
+`unchanged` and `warningCodes` exist because the stored row wants them and the
+DTO does not: the DTO reports how *many* warnings, the row reports that *and*
+which codes, which is what makes "this org has been returning 4119 all week"
+visible.
+*/
 export interface RunState {
   summary: RunSummary;
   unchanged: number;
   warningCodes: Set<string>;
   /**
-   * The work will be back, so leave the row open.
-   *
-   * On the state rather than returned from the callback because the two callbacks
-   * that never defer are `async` functions returning nothing, and a return type of
-   * `Promise<Progress | void>` is both a lint error and a worse thing to read than
-   * one assignment. Deliberately *not* part of `RunStateSnapshot`: it describes this
-   * invocation, not the run, and a chunk that inherited it would never close its row.
-   */
+  The work will be back, so leave the row open.
+
+  On the state rather than returned from the callback because the two callbacks
+  that never defer are `async` functions returning nothing, and a return type of
+  `Promise<Progress | void>` is both a lint error and a worse thing to read than
+  one assignment. Deliberately *not* part of `RunStateSnapshot`: it describes this
+  invocation, not the run, and a chunk that inherited it would never close its row.
+  */
   unfinished: boolean;
 }
 
@@ -119,14 +119,14 @@ function newRunState(): RunState {
 }
 
 /**
- * `RunState` in a shape that survives Durable Object storage and JSON.
- *
- * `warningCodes` is the reason this exists: a `Set` is not something to rely on
- * round-tripping through a serializer. Everything a chunk must carry forward is
- * listed explicitly rather than derived, so a count added to `RunState` and
- * forgotten here shows up as a type error instead of as a total silently reset to
- * zero by the next chunk. `unfinished` is the one field left out, on purpose.
- */
+`RunState` in a shape that survives Durable Object storage and JSON.
+
+`warningCodes` is the reason this exists: a `Set` is not something to rely on
+round-tripping through a serializer. Everything a chunk must carry forward is
+listed explicitly rather than derived, so a count added to `RunState` and
+forgotten here shows up as a type error instead of as a total silently reset to
+zero by the next chunk. `unfinished` is the one field left out, on purpose.
+*/
 export interface RunStateSnapshot {
   summary: RunSummary;
   unchanged: number;
@@ -206,13 +206,13 @@ export interface RunOutcome {
 }
 
 /**
- * Open (or resume) a run row, do the work, close the row, report the outcome.
- *
- * The callback is handed the mutable state and counts into it. A throw is caught,
- * recorded as an `internal` error on the summary, and the row closed with
- * `ok = 0`; the outcome is still returned. Setting `state.unfinished` leaves the row
- * open for the next chunk -- see the module comment.
- */
+Open (or resume) a run row, do the work, close the row, report the outcome.
+
+The callback is handed the mutable state and counts into it. A throw is caught,
+recorded as an `internal` error on the summary, and the row closed with
+`ok = 0`; the outcome is still returned. Setting `state.unfinished` leaves the row
+open for the next chunk -- see the module comment.
+*/
 export async function record(
   ctx: Ctx,
   kind: RunKind,
@@ -248,13 +248,13 @@ export async function record(
 }
 
 /**
- * Close a resumable run that will not in fact be resumed.
- *
- * The chunk driver calls this when it gives up -- a refresh that has used its whole
- * chunk allowance and is still not done. Without it the row would sit open until
- * the sweeper got to it half an hour later, reported as `aborted` when the truthful
- * answer is the code passed here.
- */
+Close a resumable run that will not in fact be resumed.
+
+The chunk driver calls this when it gives up -- a refresh that has used its whole
+chunk allowance and is still not done. Without it the row would sit open until
+the sweeper got to it half an hour later, reported as `aborted` when the truthful
+answer is the code passed here.
+*/
 export async function abandon(
   ctx: Ctx,
   runId: string,

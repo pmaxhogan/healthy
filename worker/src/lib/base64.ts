@@ -1,8 +1,8 @@
 /**
- * Bytes to and from standard base64, for files: an attachment's stored pieces
- * (`worker/src/db/repos/portal-message-attachments.ts`) and an MCP image content
- * block (`worker/src/mcp/message-attachment.ts`). Pure, no bindings.
- */
+Bytes to and from standard base64, for files: an attachment's stored pieces
+(`worker/src/db/repos/portal-message-attachments.ts`) and an MCP image content
+block (`worker/src/mcp/message-attachment.ts`). Pure, no bindings.
+*/
 
 /** Bytes per `String.fromCodePoint` call: far below any engine's argument limit. */
 const SLICE = 0x80_00;

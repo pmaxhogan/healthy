@@ -1,29 +1,29 @@
 /**
- * The hour rollup: summary statistics of one (record type, origin, bucket).
- *
- * `rollupBucket` is given the records of one chunk and says, per numeric field
- * that means something for the type, how many values there were and their sum,
- * extremes, mean, first and last. `mergeRollups` folds several such summaries
- * into one, which is how a local day is built from its UTC hours without the
- * raw chunks being opened again.
- *
- * Which fields are summarised is the table below, and nothing else decides it.
- * The Worker keeps no allowlist of record types, so a type that is not in the
- * table is still counted (`records`, and `durationMs` when its records are
- * intervals) -- it just has no `fields`. Never an error: a newer Health Connect
- * SDK's type must roll up to something.
- *
- * A record is counted whole in the rollup of the hour it STARTS in. For the
- * running counts (`isSpreadType`) a record that runs past the end of that hour
- * is also listed (`crossing`), so an answer can divide it among the buckets it
- * spans; and every rollup says which UTC hours its records start in (`hours`).
- *
- * Tolerant by design. `data` arrives as the phone serialised it; a field that
- * is missing, not a number, or not finite is skipped and not counted in `n`. A
- * field no record carried is left out of `fields` rather than written as NaN.
- *
- * Pure: no D1, no `Env`. See `./types.ts` for the shapes.
- */
+The hour rollup: summary statistics of one (record type, origin, bucket).
+
+`rollupBucket` is given the records of one chunk and says, per numeric field
+that means something for the type, how many values there were and their sum,
+extremes, mean, first and last. `mergeRollups` folds several such summaries
+into one, which is how a local day is built from its UTC hours without the
+raw chunks being opened again.
+
+Which fields are summarised is the table below, and nothing else decides it.
+The Worker keeps no allowlist of record types, so a type that is not in the
+table is still counted (`records`, and `durationMs` when its records are
+intervals) -- it just has no `fields`. Never an error: a newer Health Connect
+SDK's type must roll up to something.
+
+A record is counted whole in the rollup of the hour it STARTS in. For the
+running counts (`isSpreadType`) a record that runs past the end of that hour
+is also listed (`crossing`), so an answer can divide it among the buckets it
+spans; and every rollup says which UTC hours its records start in (`hours`).
+
+Tolerant by design. `data` arrives as the phone serialised it; a field that
+is missing, not a number, or not finite is skipped and not counted in `n`. A
+field no record carried is left out of `fields` rather than written as NaN.
+
+Pure: no D1, no `Env`. See `./types.ts` for the shapes.
+*/
 
 import { recordEndMs, recordStartMs } from "../wire.ts";
 
@@ -33,12 +33,12 @@ import type { BucketRollup, CrossingRecord, FieldStats, SpreadShare } from "./ty
 const HOUR_MS = 3_600_000;
 
 /**
- * One summarised field.
- *
- * - `scalar`: `data[path]`, one value per record, timed at the record's start.
- * - `series`: `path` is `<list>[].<key>`; one value per element of the nested
- *   list, timed at the element's own `t`. `n` then counts samples, not records.
- */
+One summarised field.
+
+- `scalar`: `data[path]`, one value per record, timed at the record's start.
+- `series`: `path` is `<list>[].<key>`; one value per element of the nested
+  list, timed at the element's own `t`. `n` then counts samples, not records.
+*/
 export interface RollupFieldSpec {
   /** The key the statistics are filed under in `BucketRollup.fields`. */
   name: string;
@@ -64,10 +64,10 @@ function series(list: string, key: string): RollupFieldSpec {
 const SERIES_TIME_KEY = "t";
 
 /**
- * Every field NutritionRecord carries as a Mass or an Energy, lowerCamel with
- * the unit dropped. Units are whatever the Android mapper fixes per field; that
- * table is the authority, and its test should assert against this list.
- */
+Every field NutritionRecord carries as a Mass or an Energy, lowerCamel with
+the unit dropped. Units are whatever the Android mapper fixes per field; that
+table is the authority, and its test should assert against this list.
+*/
 const NUTRITION_FIELDS = [
   "energy",
   "energyFromFat",
@@ -114,18 +114,18 @@ const NUTRITION_FIELDS = [
 ];
 
 /**
- * The per-type field table. Plain data, exported so the Android mapper's test
- * and the query tools can assert against the same list.
- *
- * Field names follow the wire convention: the SDK property in lowerCamel with
- * its unit dropped. Units are fixed per field (see the design notes) and are
- * not repeated here.
- *
- * SleepSession and ExerciseSession are listed with no fields on purpose: what
- * an hour or a day wants from them is how many there were and how long they
- * ran, which `records` and `durationMs` already say. Their own summaries
- * (`./sleep.ts`, `./exercise.ts`) carry the rest.
- */
+The per-type field table. Plain data, exported so the Android mapper's test
+and the query tools can assert against the same list.
+
+Field names follow the wire convention: the SDK property in lowerCamel with
+its unit dropped. Units are fixed per field (see the design notes) and are
+not repeated here.
+
+SleepSession and ExerciseSession are listed with no fields on purpose: what
+an hour or a day wants from them is how many there were and how long they
+ran, which `records` and `durationMs` already say. Their own summaries
+(`./sleep.ts`, `./exercise.ts`) carry the rest.
+*/
 export const ROLLUP_FIELD_TABLE: readonly RollupTypeSpec[] = [
   { type: "Steps", fields: scalar("count") },
   { type: "Distance", fields: scalar("distance") },
@@ -163,12 +163,12 @@ export const ROLLUP_FIELD_TABLE: readonly RollupTypeSpec[] = [
 ];
 
 /**
- * The running counts: types whose interval records say "this much between
- * these two instants", so that a record spanning several buckets belongs to
- * each in proportion to the time it spends there -- which is how Health
- * Connect's own aggregation divides one. A logged entry (a drink, a meal) is
- * not one of them: it is an event with a length, not a rate.
- */
+The running counts: types whose interval records say "this much between
+these two instants", so that a record spanning several buckets belongs to
+each in proportion to the time it spends there -- which is how Health
+Connect's own aggregation divides one. A logged entry (a drink, a meal) is
+not one of them: it is an event with a length, not a rate.
+*/
 const SPREAD_TYPES: ReadonlySet<string> = new Set([
   "Steps",
   "Distance",
@@ -185,18 +185,18 @@ export function isSpreadType(type: string): boolean {
 }
 
 /**
- * The longest record that is divided. One that claims to run for longer says
- * nothing usable about when its count happened, and looking for it from every
- * bucket it might reach would mean reading back without limit: it is counted
- * whole where it starts, as a long record. Two days, the bound the session
- * summaries use for the same reason.
- */
+The longest record that is divided. One that claims to run for longer says
+nothing usable about when its count happened, and looking for it from every
+bucket it might reach would mean reading back without limit: it is counted
+whole where it starts, as a long record. Two days, the bound the session
+summaries use for the same reason.
+*/
 export const SPREAD_MAX_MS = 48 * HOUR_MS;
 
 /**
- * Above this a record is "long": a total someone wrote for a stretch, not a
- * count of what happened in any one hour of it.
- */
+Above this a record is "long": a total someone wrote for a stretch, not a
+count of what happened in any one hour of it.
+*/
 export const LONG_RECORD_MS = HOUR_MS;
 
 /** The synthetic platform-aggregate family: `Agg.<Metric>`, one record per UTC hour. */
@@ -227,14 +227,14 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Fold statistics into a field's running total. The one place the arithmetic
- * lives: `rollupBucket` folds each value in as statistics of that one value,
- * and `mergeRollups` folds whole parts in, so the two cannot drift apart.
- *
- * Ties on the instant go to encounter order: `first` keeps what was met first
- * and `last` takes what was met last. That is why merging rollups in order
- * gives exactly what rolling the concatenated records up would have.
- */
+Fold statistics into a field's running total. The one place the arithmetic
+lives: `rollupBucket` folds each value in as statistics of that one value,
+and `mergeRollups` folds whole parts in, so the two cannot drift apart.
+
+Ties on the instant go to encounter order: `first` keeps what was met first
+and `last` takes what was met last. That is why merging rollups in order
+gives exactly what rolling the concatenated records up would have.
+*/
 function absorb(stats: Map<string, FieldStats>, name: string, incoming: FieldStats): void {
   const current = stats.get(name);
   if (current === undefined) {
@@ -306,12 +306,12 @@ function finish(stats: Map<string, FieldStats>): Record<string, FieldStats> {
 }
 
 /**
- * Summarise the records of one bucket. Every record passed is counted, whole:
- * the caller decides which records belong (those that START in the bucket).
- *
- * `durationMs` is present when at least one record is an interval, and is the
- * total of the interval records' lengths.
- */
+Summarise the records of one bucket. Every record passed is counted, whole:
+the caller decides which records belong (those that START in the bucket).
+
+`durationMs` is present when at least one record is an interval, and is the
+total of the interval records' lengths.
+*/
 export function rollupBucket(type: string, records: readonly HcRecord[]): BucketRollup {
   const specs = rollupFieldsFor(type);
   const spread = isSpreadType(type);
@@ -381,23 +381,23 @@ export function addShares(left: SpreadShare | undefined, right: SpreadShare): Sp
 }
 
 /**
- * Fold several rollups of the same (type, origin) into one: hours into a day.
- *
- * Exact for `records`, `durationMs`, and each field's `n`, `sum`, `min`, `max`,
- * `first` and `last`; `mean` is recomputed from the merged `sum` and `n`, never
- * averaged from the parts' means. (`sum` is exact up to floating-point
- * addition order, as any sum of non-integers is.)
- *
- * Parts need not be in time order -- `first` and `last` go by `firstMs` and
- * `lastMs` -- but when two parts tie on the instant, the earlier part in the
- * array keeps `first` and the later takes `last`, the rule `rollupBucket` uses.
- * A field only some parts carry is merged over the parts that carry it. No
- * parts at all is an empty rollup.
- *
- * `hours` is the union of the parts' -- and absent as soon as one part that
- * holds records does not say, since the union would then claim to be complete
- * when it is not. `crossing` lists and `spread` shares are added together.
- */
+Fold several rollups of the same (type, origin) into one: hours into a day.
+
+Exact for `records`, `durationMs`, and each field's `n`, `sum`, `min`, `max`,
+`first` and `last`; `mean` is recomputed from the merged `sum` and `n`, never
+averaged from the parts' means. (`sum` is exact up to floating-point
+addition order, as any sum of non-integers is.)
+
+Parts need not be in time order -- `first` and `last` go by `firstMs` and
+`lastMs` -- but when two parts tie on the instant, the earlier part in the
+array keeps `first` and the later takes `last`, the rule `rollupBucket` uses.
+A field only some parts carry is merged over the parts that carry it. No
+parts at all is an empty rollup.
+
+`hours` is the union of the parts' -- and absent as soon as one part that
+holds records does not say, since the union would then claim to be complete
+when it is not. `crossing` lists and `spread` shares are added together.
+*/
 export function mergeRollups(parts: readonly BucketRollup[]): BucketRollup {
   const stats = new Map<string, FieldStats>();
   let records = 0;

@@ -75,13 +75,13 @@ app.use("*", ownerGate);
 // --- 5. The password endpoints (inside Access, outside the session check) ----
 
 /**
- * Exchanges the admin password for a session cookie.
- *
- * The limiter runs before the password is read, and counts the attempt whether or
- * not it succeeds -- a success then clears the counter, so ordinary use never
- * accumulates. Deriving the PBKDF2 key is by far the most expensive thing this
- * Worker does on a request path, which is the whole reason the limiter is first.
- */
+Exchanges the admin password for a session cookie.
+
+The limiter runs before the password is read, and counts the attempt whether or
+not it succeeds -- a success then clears the counter, so ordinary use never
+accumulates. Deriving the PBKDF2 key is by far the most expensive thing this
+Worker does on a request path, which is the whole reason the limiter is first.
+*/
 app.post("/auth/login", async (c) => {
   const nonce = c.get("nonce");
   const next = safeNextPath(c.req.query("next")) ?? undefined;
@@ -167,12 +167,12 @@ app.post("/auth/login", async (c) => {
 });
 
 /**
- * Ends the session.
- *
- * Reachable without a valid session on purpose (see SESSION_EXEMPT_PATHS in
- * gate.ts): the useful case for "sign out" is a cookie the owner no longer trusts,
- * and answering that with a 401 would leave it in the browser.
- */
+Ends the session.
+
+Reachable without a valid session on purpose (see SESSION_EXEMPT_PATHS in
+gate.ts): the useful case for "sign out" is a cookie the owner no longer trusts,
+and answering that with a 401 would leave it in the browser.
+*/
 app.post("/auth/logout", () => {
   return new Response(null, {
     status: 303,
@@ -187,17 +187,17 @@ app.post("/auth/logout", () => {
 // --- 6. The MCP consent page ------------------------------------------------
 
 /**
- * Approving an MCP grant is the single most sensitive action in the app, and this
- * screen is what stands between a registered client and the whole medical record.
- * It is reached only after Cloudflare Access and the password session; its POST is
- * additionally Origin-checked by the guard registered above. See
- * `worker/src/mcp/consent-page.ts` for the rest of the reasoning.
- *
- * `@cloudflare/workers-oauth-provider` does NOT serve `/authorize` itself -- it
- * advertises the path in its metadata and forwards the request to this handler,
- * which is why the consent page lives inside the gated app rather than beside the
- * token endpoint.
- */
+Approving an MCP grant is the single most sensitive action in the app, and this
+screen is what stands between a registered client and the whole medical record.
+It is reached only after Cloudflare Access and the password session; its POST is
+additionally Origin-checked by the guard registered above. See
+`worker/src/mcp/consent-page.ts` for the rest of the reasoning.
+
+`@cloudflare/workers-oauth-provider` does NOT serve `/authorize` itself -- it
+advertises the path in its metadata and forwards the request to this handler,
+which is why the consent page lives inside the gated app rather than beside the
+token endpoint.
+*/
 app.get("/authorize", (c) => consentPage(c.req.raw, c.env, c.get("nonce")));
 app.post("/authorize", (c) => consentDecision(c.req.raw, c.env, c.get("nonce")));
 app.all("/authorize", (c) =>
@@ -211,47 +211,47 @@ app.route("/oauth", oauthRouter);
 // --- 8. The SPA ------------------------------------------------------------
 
 /**
- * Last, so a request only reaches the built assets after clearing both gates.
- *
- * `run_worker_first: true` in wrangler.jsonc is what routes asset requests through
- * this Worker at all, and `not_found_handling: single-page-application` is what
- * makes an unknown path return index.html so the Vue router can own it.
- *
- * Caching, and the gotcha:
- *   - /assets/* are content-hashed by Vite, so they are immutable forever.
- *   - The 304 case has to be rewritten too. A revalidation response's headers
- *     REPLACE the ones the browser stored, so returning Workers Assets' default
- *     `max-age=0, must-revalidate` on a 304 silently downgrades an entry that was
- *     cached as immutable, and every later load pays a round trip again.
- *   - The content-type check keeps the SPA fallback from being marked immutable:
- *     a MISSING /assets/... path returns index.html with status 200, and freezing
- *     that for a year under an asset URL would be unrecoverable.
- *   - index.html itself is `no-store`. It names the hashed bundles, so a cached
- *     copy pins the app to an old deploy.
- *
- * The response is always re-wrapped: headers on a response that came from a
- * subrequest are immutable, and the securityHeaders middleware has to be able to
- * write to them on the way out.
- *
- * `MCP_SANDBOX_PATH` gets one more rewrite: its `<script>` tag has no `src` at
- * all. It is built by a *second*, separate Vite config
- * (`vite.sandbox.config.ts`) that inlines the script and its CSS straight into
- * the HTML, with no `/assets/*` files of its own -- an ES module fetched via
- * `<script src>` is always CORS-mode with credentials "same-origin", and this
- * page's sandboxed, opaque origin (`sandbox="allow-scripts"`, no
- * `allow-same-origin`; see `worker/shared/mcp-sandbox.ts`) makes that fetch
- * cross-origin, sent with no cookie at all -- so `ownerGate` would answer with
- * the login page instead of the script, which fails silently: no console line,
- * no failed network entry, nothing but a page that never mounts. The
- * *document's own* navigation is unaffected (a top-level frame navigation
- * always carries credentials, CORS or not), which is what made this take a
- * real browser and a lot of curling to find. Inlining sidesteps the whole
- * problem by making the navigation the only request this page ever makes -- but
- * an inline script still needs a CSP nonce, and a static build cannot bake in
- * something that has to be fresh per response, so it is stamped on here,
- * server-side, right before the matching CSP (`sandboxContentSecurityPolicy`,
- * `worker/src/auth/security-headers.ts`) goes out with the same nonce.
- */
+Last, so a request only reaches the built assets after clearing both gates.
+
+`run_worker_first: true` in wrangler.jsonc is what routes asset requests through
+this Worker at all, and `not_found_handling: single-page-application` is what
+makes an unknown path return index.html so the Vue router can own it.
+
+Caching, and the gotcha:
+  - /assets/* are content-hashed by Vite, so they are immutable forever.
+  - The 304 case has to be rewritten too. A revalidation response's headers
+    REPLACE the ones the browser stored, so returning Workers Assets' default
+    `max-age=0, must-revalidate` on a 304 silently downgrades an entry that was
+    cached as immutable, and every later load pays a round trip again.
+  - The content-type check keeps the SPA fallback from being marked immutable:
+    a MISSING /assets/... path returns index.html with status 200, and freezing
+    that for a year under an asset URL would be unrecoverable.
+  - index.html itself is `no-store`. It names the hashed bundles, so a cached
+    copy pins the app to an old deploy.
+
+The response is always re-wrapped: headers on a response that came from a
+subrequest are immutable, and the securityHeaders middleware has to be able to
+write to them on the way out.
+
+`MCP_SANDBOX_PATH` gets one more rewrite: its `<script>` tag has no `src` at
+all. It is built by a *second*, separate Vite config
+(`vite.sandbox.config.ts`) that inlines the script and its CSS straight into
+the HTML, with no `/assets/*` files of its own -- an ES module fetched via
+`<script src>` is always CORS-mode with credentials "same-origin", and this
+page's sandboxed, opaque origin (`sandbox="allow-scripts"`, no
+`allow-same-origin`; see `worker/shared/mcp-sandbox.ts`) makes that fetch
+cross-origin, sent with no cookie at all -- so `ownerGate` would answer with
+the login page instead of the script, which fails silently: no console line,
+no failed network entry, nothing but a page that never mounts. The
+*document's own* navigation is unaffected (a top-level frame navigation
+always carries credentials, CORS or not), which is what made this take a
+real browser and a lot of curling to find. Inlining sidesteps the whole
+problem by making the navigation the only request this page ever makes -- but
+an inline script still needs a CSP nonce, and a static build cannot bake in
+something that has to be fresh per response, so it is stamped on here,
+server-side, right before the matching CSP (`sandboxContentSecurityPolicy`,
+`worker/src/auth/security-headers.ts`) goes out with the same nonce.
+*/
 app.all("*", async (c) => {
   const asset = await c.env.ASSETS.fetch(c.req.raw);
   const headers = new Headers(asset.headers);

@@ -1,24 +1,24 @@
 /**
- * The ModMed patient portal's wire contract, in one place.
- *
- * Everything here was read out of the portal's own public JavaScript and the
- * pages it serves before anyone signs in, then confirmed against a signed-in
- * session. None of it names a practice: a practice is a hostname, and that is
- * configuration (`portal_accounts.base_url`), never source.
- *
- * Shape of the deployment, for orientation:
- *
- *  - Each practice is one host. `/patient-portal/` is an Angular app; its data
- *    comes from a JSON API under `/ema/ws/v3/`.
- *  - Sign-in is Keycloak (OpenID Connect, authorization-code flow, public
- *    client). Where Keycloak lives, which realm and which client are all read at
- *    runtime from the practice's own unauthenticated `auth/data/patient`
- *    document -- see `discovery.ts`.
- *  - That document also says `stateless: true`: the API wants
- *    `Authorization: Bearer <access token>` on every call and keeps no server
- *    session of its own. So "the session" is the token pair, which the client
- *    keeps in the cookie jar's sealed extras, plus Keycloak's own SSO cookies.
- */
+The ModMed patient portal's wire contract, in one place.
+
+Everything here was read out of the portal's own public JavaScript and the
+pages it serves before anyone signs in, then confirmed against a signed-in
+session. None of it names a practice: a practice is a hostname, and that is
+configuration (`portal_accounts.base_url`), never source.
+
+Shape of the deployment, for orientation:
+
+ - Each practice is one host. `/patient-portal/` is an Angular app; its data
+   comes from a JSON API under `/ema/ws/v3/`.
+ - Sign-in is Keycloak (OpenID Connect, authorization-code flow, public
+   client). Where Keycloak lives, which realm and which client are all read at
+   runtime from the practice's own unauthenticated `auth/data/patient`
+   document -- see `discovery.ts`.
+ - That document also says `stateless: true`: the API wants
+   `Authorization: Bearer <access token>` on every call and keeps no server
+   session of its own. So "the session" is the token pair, which the client
+   keeps in the cookie jar's sealed extras, plus Keycloak's own SSO cookies.
+*/
 
 /** The practice's unauthenticated sign-in configuration for patients. */
 export const AUTH_DATA_PATH = "/ema/ws/v3/auth/data/patient";
@@ -27,17 +27,17 @@ export const AUTH_DATA_PATH = "/ema/ws/v3/auth/data/patient";
 export const PORTAL_APP_PATH = "/patient-portal/";
 
 /**
- * The redirect URI the portal's own app registers with Keycloak, byte for byte:
- * the app page plus its `initialLogin` marker. Keycloak validates it against the
- * client's registered list, so it has to be exactly what the app sends.
- */
+The redirect URI the portal's own app registers with Keycloak, byte for byte:
+the app page plus its `initialLogin` marker. Keycloak validates it against the
+client's registered list, so it has to be exactly what the app sends.
+*/
 export const REDIRECT_QUERY = "initialLogin";
 
 /**
- * The portal app's own pages, relative to its mount. There is no page per
- * appointment: the upcoming list is the page, and a video visit is joined from
- * the video-visits page once the practice has opened the meeting.
- */
+The portal app's own pages, relative to its mount. There is no page per
+appointment: the upcoming list is the page, and a video visit is joined from
+the video-visits page once the practice has opened the meeting.
+*/
 export const MODMED_PAGES = {
   upcoming: "appointments/upcoming-visits",
   videoVisits: "appointments/video-visits",
@@ -50,10 +50,10 @@ export const UPCOMING_PATH = "/ema/ws/v3/patientPortal/appointments/upcoming";
 export const PAST_PATH = "/ema/ws/v3/patientPortal/appointments/past";
 
 /**
- * The `selector` the app sends with the upcoming list: which nested objects the
- * API should expand. Without it `facility` and `physician` come back as bare
- * references. Whitespace-free, exactly as the app sends it.
- */
+The `selector` the app sends with the upcoming list: which nested objects the
+API should expand. Without it `facility` and `physician` come back as bare
+references. Whitespace-free, exactly as the app sends it.
+*/
 export const UPCOMING_SELECTOR =
   "facility(name,timeZone,address(id,street1,street2,city,state,countryDisplayValue,zipcode,fullStreetAddress),mainPhone,workPhoneNumber,facilityPhoneNumbers),reason,physician(fullNameComplete)";
 
@@ -62,9 +62,9 @@ export const PAST_SELECTOR =
   "facility(name,timeZone,address(street1,street2,city,state,zipcode,fullStreetAddress),mainPhone)";
 
 /**
- * Page size for the list calls. The app asks for 10 at a time; a larger page
- * is the same data in fewer requests, and the loop reads to the end either way.
- */
+Page size for the list calls. The app asks for 10 at a time; a larger page
+is the same data in fewer requests, and the loop reads to the end either way.
+*/
 export const PAGE_SIZE = 50;
 
 /** Secure messages ("intramail"): the inbox and the sent folder. Paged like the visits. */
@@ -72,9 +72,9 @@ export const INBOX_PATH = "/ema/ws/v3/intramail/inbox";
 export const SENT_PATH = "/ema/ws/v3/intramail/sent";
 
 /**
- * The app's own selectors for the two lists, which expand the body, the
- * attachments and the owner's read flags into each row.
- */
+The app's own selectors for the two lists, which expand the body, the
+attachments and the owner's read flags into each row.
+*/
 export const INBOX_SELECTOR =
   "to(locations),cc(locations),messageLinks,fileAttachments(formattedFileSize),messageBody,received,dateCreated";
 export const SENT_SELECTOR =
@@ -95,13 +95,13 @@ export const PAGING = {
 } as const;
 
 /**
- * Keycloak's login page, as this deployment themes it.
- *
- * The default form asks for name and date of birth and then emails a code; the
- * "Login with Username" button (a submit with this `submitAction`) swaps it for
- * a username/password form. Only the latter is driven: it is the one the owner
- * uses, and it asks for no code.
- */
+Keycloak's login page, as this deployment themes it.
+
+The default form asks for name and date of birth and then emails a code; the
+"Login with Username" button (a submit with this `submitAction`) swaps it for
+a username/password form. Only the latter is driven: it is the one the owner
+uses, and it asks for no code.
+*/
 export const LOGIN = {
   switchToUsernameField: "submitAction",
   switchToUsernameValue: "loginWithUsername",
@@ -111,11 +111,11 @@ export const LOGIN = {
 } as const;
 
 /**
- * Markers on a Keycloak page that mean "the credentials were not enough".
- *
- * A code field is a one-time-code challenge; this client never answers one
- * (the owner's login does not ask for it) and surfaces it as needing the owner.
- */
+Markers on a Keycloak page that mean "the credentials were not enough".
+
+A code field is a one-time-code challenge; this client never answers one
+(the owner's login does not ask for it) and surfaces it as needing the owner.
+*/
 export const KEYCLOAK_MARKERS = {
   codeChallenge: [/name="code"/iu, /name="otp"/iu, /name="totp"/iu, /id="otpCode"/iu],
   locked: [/account is (?:temporarily )?(?:locked|disabled)/iu, /account.{0,40}disabled/iu],

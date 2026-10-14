@@ -1,26 +1,26 @@
 /**
- * OperationOutcome parsing and classification.
- *
- * Epic reports most search problems two ways at once: a FHIR `issue.code` and
- * `issue.severity` from the standard value sets, and its own numeric code buried
- * in `issue.details.coding[].code`. The numeric code is the one that says what
- * actually happened, so it is what this module keys off.
- *
- * The numeric codes that matter here (all confirmed against Epic's published
- * error list):
- *
- *   4101   no results for the search           -> not an error, empty result
- *   4113   paged search session expired        -> restart the search once
- *   4118   user not authorized for this data   -> upstream_auth, do not retry
- *   4119   patient-facing view filtered results-> warning, results are partial
- *   4122   unknown search parameter            -> warning, parameter ignored
- *   4135   daily document-query cap reached    -> stop pulling Binary today
- *   59109  optional parameter invalid          -> warning, parameter ignored
- *
- * `severity` is not a reliable discriminator on its own: Epic has been observed
- * sending 4101 as `information`, `warning` and `error` depending on version, so
- * `classifyOutcome` checks the numeric code before it looks at severity.
- */
+OperationOutcome parsing and classification.
+
+Epic reports most search problems two ways at once: a FHIR `issue.code` and
+`issue.severity` from the standard value sets, and its own numeric code buried
+in `issue.details.coding[].code`. The numeric code is the one that says what
+actually happened, so it is what this module keys off.
+
+The numeric codes that matter here (all confirmed against Epic's published
+error list):
+
+  4101   no results for the search           -> not an error, empty result
+  4113   paged search session expired        -> restart the search once
+  4118   user not authorized for this data   -> upstream_auth, do not retry
+  4119   patient-facing view filtered results-> warning, results are partial
+  4122   unknown search parameter            -> warning, parameter ignored
+  4135   daily document-query cap reached    -> stop pulling Binary today
+  59109  optional parameter invalid          -> warning, parameter ignored
+
+`severity` is not a reliable discriminator on its own: Epic has been observed
+sending 4101 as `information`, `warning` and `error` depending on version, so
+`classifyOutcome` checks the numeric code before it looks at severity.
+*/
 
 import { isRecord } from "./bundle.ts";
 
@@ -35,9 +35,9 @@ export const EPIC_DOCUMENT_CAP = "4135";
 export const EPIC_OPTIONAL_PARAM_INVALID = "59109";
 
 /**
- * Codes that arrive with an error-ish severity but are not failures: the search
- * succeeded, it just has nothing or less than everything to say.
- */
+Codes that arrive with an error-ish severity but are not failures: the search
+succeeded, it just has nothing or less than everything to say.
+*/
 const BENIGN_EPIC_CODES: ReadonlySet<string> = new Set([
   EPIC_NO_RESULTS,
   EPIC_FILTERED_VIEW,
@@ -86,12 +86,12 @@ function parseIssue(issue: unknown): ParsedIssue | null {
 }
 
 /**
- * Every issue in an OperationOutcome, flattened.
- *
- * Takes `unknown` so callers can hand it a parsed response body or the resource
- * out of a `search.mode === "outcome"` entry without checking first; anything
- * that is not an OperationOutcome yields an empty list.
- */
+Every issue in an OperationOutcome, flattened.
+
+Takes `unknown` so callers can hand it a parsed response body or the resource
+out of a `search.mode === "outcome"` entry without checking first; anything
+that is not an OperationOutcome yields an empty list.
+*/
 export function parseIssues(value: unknown): ParsedIssue[] {
   if (!isOperationOutcome(value)) return [];
   const raw: unknown = value.issue;
@@ -117,11 +117,11 @@ export interface OutcomeClass {
   /** Epic 4135: the organisation's daily document-query cap is reached. */
   documentCapReached: boolean;
   /**
-   * An error or fatal issue that is none of the benign codes above.
-   *
-   * `pagingExpired` and `notAuthorized` also set this: they are real failures,
-   * they just have a specific recovery. Check them first.
-   */
+  An error or fatal issue that is none of the benign codes above.
+
+  `pagingExpired` and `notAuthorized` also set this: they are real failures,
+  they just have a specific recovery. Check them first.
+  */
   fatal: boolean;
   /** Every numeric Epic code seen, in order, for logging. */
   codes: string[];

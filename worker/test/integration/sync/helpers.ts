@@ -62,15 +62,15 @@ export interface TestEnvOptions {
 }
 
 /**
- * A deliberately *clean* Env: the bindings, and fake secrets.
- *
- * Emphatically not `{ ...env }`. Miniflare loads `.dev.vars`, which holds the
- * developer's real `TRELLO_KEY`, `DATA_KEY` and Google client secret, so
- * spreading `env` would make "is Trello configured?" depend on the machine the
- * suite runs on -- and would put real credentials one stubbing mistake away from
- * a real API. Listing the bindings by hand is the only version of this that is
- * both deterministic and safe.
- */
+A deliberately *clean* Env: the bindings, and fake secrets.
+
+Emphatically not `{ ...env }`. Miniflare loads `.dev.vars`, which holds the
+developer's real `TRELLO_KEY`, `DATA_KEY` and Google client secret, so
+spreading `env` would make "is Trello configured?" depend on the machine the
+suite runs on -- and would put real credentials one stubbing mistake away from
+a real API. Listing the bindings by hand is the only version of this that is
+both deterministic and safe.
+*/
 export function syncEnv(options: TestEnvOptions = {}): Env {
   const bindings = env as unknown as Record<string, unknown>;
   const base = {
@@ -183,12 +183,12 @@ export interface SeededHealthSystem {
 }
 
 /**
- * A health system with a connected, usable connection.
- *
- * `accessTtlSeconds` is the lever the refresh tests pull: a token already inside
- * the five-minute skew forces the token manager down the refresh path on the very
- * first request.
- */
+A health system with a connected, usable connection.
+
+`accessTtlSeconds` is the lever the refresh tests pull: a token already inside
+the five-minute skew forces the token manager down the refresh path on the very
+first request.
+*/
 export async function seedConnectedHealthSystem(
   ctx: Ctx,
   options: SeedHealthSystemOptions = {},
@@ -260,7 +260,7 @@ interface FakeCalendar {
   /** This app's events across every calendar, by `extendedProperties.private.key`. */
   byKey: () => Map<string, StoredEvent>;
   /** This app's events on one calendar only -- for asserting *where* an event
-   * ended up after a target change, not just that it exists somewhere. */
+  ended up after a target change, not just that it exists somewhere. */
   byKeyOn: (calendarId: string) => Map<string, StoredEvent>;
   /** Drop an event as though the owner deleted it by hand, on whichever calendar it is on. */
   remove: (eventId: string) => void;
@@ -271,11 +271,11 @@ interface FakeCalendar {
   /** `events.move` calls that actually relocated an event. */
   moves: number;
   /**
-   * Set to answer every write (insert, patch, move, delete) with this status
-   * while reads still work: a calendar that lists and refuses changes. 403 is
-   * the one to use, because the client reports it at once where a 5xx would
-   * spend its retries.
-   */
+  Set to answer every write (insert, patch, move, delete) with this status
+  while reads still work: a calendar that lists and refuses changes. 403 is
+  the one to use, because the client reports it at once where a 5xx would
+  spend its retries.
+  */
   writeStatus: number | null;
   /** Set to answer the event listing with this status. */
   listStatus: number | null;
@@ -474,12 +474,12 @@ function keyOf(event: Record<string, unknown>): string | null {
 }
 
 /**
- * `events.list`, honouring the two parameters the sync depends on.
- *
- * The `privateExtendedProperty` filter is the invariant that makes the sync safe,
- * so the stub enforces it rather than returning everything: a test can plant an
- * event the app does not own and prove it is never seen.
- */
+`events.list`, honouring the two parameters the sync depends on.
+
+The `privateExtendedProperty` filter is the invariant that makes the sync safe,
+so the stub enforces it rather than returning everything: a test can plant an
+event the app does not own and prove it is never seen.
+*/
 function listEvents(url: URL, store: readonly StoredEvent[]): Response {
   const wanted = url.searchParams.get("privateExtendedProperty");
   const timeMin = url.searchParams.get("timeMin");
@@ -506,13 +506,13 @@ export interface FhirServer {
   /** Extra search bundles for the full refresh, keyed by resource type. */
   searches: Map<string, fhir4.Bundle>;
   /**
-   * Per-category, per-page overrides for a `byCategory` search (CarePlan,
-   * Condition, Observation, DocumentReference), keyed
-   * `<resourceType>:<category>:<page>` (`page` is `"1"` for the first request,
-   * then whatever `?page=` a `link.relation: "next"` this map produced carries).
-   * Falls back to `searches` when no entry matches, so every existing test that
-   * never sets this is unaffected.
-   */
+  Per-category, per-page overrides for a `byCategory` search (CarePlan,
+  Condition, Observation, DocumentReference), keyed
+  `<resourceType>:<category>:<page>` (`page` is `"1"` for the first request,
+  then whatever `?page=` a `link.relation: "next"` this map produced carries).
+  Falls back to `searches` when no entry matches, so every existing test that
+  never sets this is unaffected.
+  */
   categorySearches: Map<string, fhir4.Bundle>;
   capability: fhir4.CapabilityStatement;
   /** Echoed back by the token endpoint, as Epic's `patient` field. */
@@ -568,12 +568,12 @@ export interface Upstreams {
 }
 
 /**
- * A `fetch` that answers every upstream the sync talks to.
- *
- * `servers` is keyed by hostname, so a two-health system test can make one
- * organisation fail while the other succeeds -- which is the whole point of the
- * per-health system isolation this suite is proving.
- */
+A `fetch` that answers every upstream the sync talks to.
+
+`servers` is keyed by hostname, so a two-health system test can make one
+organisation fail while the other succeeds -- which is the whole point of the
+per-health system isolation this suite is proving.
+*/
 export function stubUpstreams(servers: Record<string, FhirServer>): Upstreams {
   const { calendar, handle: handleCalendar } = makeFakeCalendar();
   const trelloCalls: { method: string; path: string }[] = [];
@@ -708,10 +708,10 @@ function handleFhir(server: FhirServer, url: URL): Response {
 }
 
 /**
- * Every search but Encounter's: a `categorySearches` override for one
- * `?category=`/`?page=` combination when the test set one, else the plain
- * per-resource-type bundle every other test already relies on.
- */
+Every search but Encounter's: a `categorySearches` override for one
+`?category=`/`?page=` combination when the test set one, else the plain
+per-resource-type bundle every other test already relies on.
+*/
 function genericSearch(server: FhirServer, resourceType: string, url: URL): Response {
   const status = server.searchStatus.get(resourceType);
   if (status !== undefined) return new Response(null, { status });
@@ -814,12 +814,12 @@ export function referencePool(): Map<string, fhir4.FhirResource> {
 }
 
 /**
- * A CapabilityStatement listing the types these tests exercise.
- *
- * `status` is deliberately absent from Encounter's search parameters, so the
- * status filter runs client-side -- which is the behaviour at organisations that
- * do not expose it, and the one more likely to be wrong.
- */
+A CapabilityStatement listing the types these tests exercise.
+
+`status` is deliberately absent from Encounter's search parameters, so the
+status filter runs client-side -- which is the behaviour at organisations that
+do not expose it, and the one more likely to be wrong.
+*/
 function capabilityStatement(
   extra: readonly fhir4.CapabilityStatementRestResource[] = [],
 ): fhir4.CapabilityStatement {
@@ -858,9 +858,9 @@ function capabilityStatement(
 }
 
 /**
- * The stored form of a logical event key (`<healthSystemId>:<encounterId>` or
- * `<healthSystemId>:csn:<csn>`): what the rows and the Google markers carry.
- */
+The stored form of a logical event key (`<healthSystemId>:<encounterId>` or
+`<healthSystemId>:csn:<csn>`): what the rows and the Google markers carry.
+*/
 export function sk(logicalKey: string): Promise<string> {
   return blindEventKey(blinderFor(DATA_KEY), logicalKey);
 }

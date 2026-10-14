@@ -1,19 +1,19 @@
 /**
- * Failing streaks: which sync passes are failing right now, and for how long.
- *
- * One row per (subject, check) that has failed since it last succeeded. A
- * failure upserts the row and counts; a success deletes it. So the table is the
- * list of what is broken at this moment and is empty when everything works, and
- * a streak is exact: it counts attempts that failed with no success between
- * them, not time since something last worked. A run that never happened (a
- * rate-limit backoff, a platform outage) is not an attempt and is not counted.
- *
- * `subject` is an `alerts.subject`; see `alerts.ts` beside this file for the
- * builders. `worker/src/sync/alerts.ts` is the only thing that decides what a
- * streak means.
- *
- * Codes and counts only: nothing here can hold a message or a response.
- */
+Failing streaks: which sync passes are failing right now, and for how long.
+
+One row per (subject, check) that has failed since it last succeeded. A
+failure upserts the row and counts; a success deletes it. So the table is the
+list of what is broken at this moment and is empty when everything works, and
+a streak is exact: it counts attempts that failed with no success between
+them, not time since something last worked. A run that never happened (a
+rate-limit backoff, a platform outage) is not an attempt and is not counted.
+
+`subject` is an `alerts.subject`; see `alerts.ts` beside this file for the
+builders. `worker/src/sync/alerts.ts` is the only thing that decides what a
+streak means.
+
+Codes and counts only: nothing here can hold a message or a response.
+*/
 
 import { all, one, run } from "../client.ts";
 
@@ -23,11 +23,11 @@ import type { SyncFailureRow } from "../rows.ts";
 export function makeSyncFailuresRepo(ctx: Ctx) {
   return {
     /**
-     * Count one failed attempt, and return the streak as it now stands.
-     *
-     * One statement, so two runs failing at once both count. `first_failed_at`
-     * is only written by the insert: it is when the streak began.
-     */
+    Count one failed attempt, and return the streak as it now stands.
+
+    One statement, so two runs failing at once both count. `first_failed_at`
+    is only written by the insert: it is when the streak began.
+    */
     async fail(
       subject: string,
       check: SyncFailureRow["check_name"],

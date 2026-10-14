@@ -1,45 +1,45 @@
 /**
- * The Durable Object that applies what the ingest route queued.
- *
- * ### Why this exists
- *
- * `POST /ingest/health-connect` only authenticates, validates and queues: a
- * batch of backfill touches hundreds of stored rows, which is more than one
- * request may ask of D1, and work handed to `waitUntil` is cancelled about
- * thirty seconds after the response with nothing left to clean up. The same
- * reasoning as the full-refresh runner (worker/src/sync/runner.ts), and the
- * same answer: an alarm. Each alarm is its own invocation, does one budgeted
- * slice (worker/src/hc/apply.ts) and re-arms itself while work remains.
- *
- * ### One object per device
- *
- * Addressed by device id, so two phones apply independently and one phone's
- * batches are applied strictly one after another: an object runs one alarm at
- * a time, which is the whole of the concurrency control the store needs.
- *
- * ### What is stored, and what it is worth
- *
- * The device id, where the apply of the head batch has got to, the digest of
- * the zone the day rollups are built for, and how often the head batch has
- * failed. All of it is a saving, none of it is the truth: the queue and the
- * `hc_dirty` list in D1 are. An object that lost its storage would replay the
- * head batch from its start, to the same result. Nothing personal is kept: ids
- * of this app's own rows, positions and counts.
- *
- * The parsed head batch is also held, in the instance's memory only, so that
- * consecutive slices do not each open and validate it again. It is gone when
- * the instance is evicted, and the next slice reads the queue.
- *
- * ### Failure
- *
- * A slice that throws is not rethrown to the platform, which gives up on an
- * alarm after a few retries. It is logged and the alarm re-armed after a
- * growing delay. A batch that can never be applied is closed as failed inside
- * the slice. One that keeps making slices throw for a reason the slice does
- * not recognise is retried `MAX_BATCH_FAILURES` times -- enough for D1 to
- * recover, not enough to hold the device's ordered queue for ever -- and then
- * closed as failed with `apply_gave_up`, so the batches behind it are applied.
- */
+The Durable Object that applies what the ingest route queued.
+
+### Why this exists
+
+`POST /ingest/health-connect` only authenticates, validates and queues: a
+batch of backfill touches hundreds of stored rows, which is more than one
+request may ask of D1, and work handed to `waitUntil` is cancelled about
+thirty seconds after the response with nothing left to clean up. The same
+reasoning as the full-refresh runner (worker/src/sync/runner.ts), and the
+same answer: an alarm. Each alarm is its own invocation, does one budgeted
+slice (worker/src/hc/apply.ts) and re-arms itself while work remains.
+
+### One object per device
+
+Addressed by device id, so two phones apply independently and one phone's
+batches are applied strictly one after another: an object runs one alarm at
+a time, which is the whole of the concurrency control the store needs.
+
+### What is stored, and what it is worth
+
+The device id, where the apply of the head batch has got to, the digest of
+the zone the day rollups are built for, and how often the head batch has
+failed. All of it is a saving, none of it is the truth: the queue and the
+`hc_dirty` list in D1 are. An object that lost its storage would replay the
+head batch from its start, to the same result. Nothing personal is kept: ids
+of this app's own rows, positions and counts.
+
+The parsed head batch is also held, in the instance's memory only, so that
+consecutive slices do not each open and validate it again. It is gone when
+the instance is evicted, and the next slice reads the queue.
+
+### Failure
+
+A slice that throws is not rethrown to the platform, which gives up on an
+alarm after a few retries. It is logged and the alarm re-armed after a
+growing delay. A batch that can never be applied is closed as failed inside
+the slice. One that keeps making slices throw for a reason the slice does
+not recognise is retried `MAX_BATCH_FAILURES` times -- enough for D1 to
+recover, not enough to hold the device's ordered queue for ever -- and then
+closed as failed with `apply_gave_up`, so the batches behind it are applied.
+*/
 
 import { DurableObject } from "cloudflare:workers";
 
@@ -60,13 +60,13 @@ const RETRY_BASE_MS = 5000;
 const RETRY_MAX_MS = 10 * 60 * 1000;
 
 /**
- * A backstop against a stuck alarm, not a ceiling on work. A slice always
- * finishes at least one unit, so "there is more, and this slice finished
- * nothing" should not happen even once; this many in a row means a bug, and
- * the object stops re-arming itself rather than spin. The scheduled poke
- * (worker/src/hc/store/poke.ts) wakes it again within minutes, so even then
- * nothing is abandoned.
- */
+A backstop against a stuck alarm, not a ceiling on work. A slice always
+finishes at least one unit, so "there is more, and this slice finished
+nothing" should not happen even once; this many in a row means a bug, and
+the object stops re-arming itself rather than spin. The scheduled poke
+(worker/src/hc/store/poke.ts) wakes it again within minutes, so even then
+nothing is abandoned.
+*/
 const MAX_IDLE_SLICES = 20;
 
 interface StoredJob {
@@ -75,9 +75,9 @@ interface StoredJob {
   /** Consecutive slices that threw, whatever they were working on: sets the delay. */
   failures: number;
   /**
-   * Slices started on what is at the head of the queue without one finishing,
-   * written before each slice and cleared after it: see `beginAttempt`.
-   */
+  Slices started on what is at the head of the queue without one finishing,
+  written before each slice and cleared after it: see `beginAttempt`.
+  */
   head: HeadFailures;
   /** Consecutive slices that reported more work and finished none. */
   idle: number;
@@ -88,9 +88,9 @@ export class HcIngestRunner extends DurableObject<Env> {
   private readonly cache: HeadCache = { head: null };
 
   /**
-   * Log a slice that threw and come back later, after a growing delay. The
-   * attempt was already counted, before it began (`beginAttempt`).
-   */
+  Log a slice that threw and come back later, after a growing delay. The
+  attempt was already counted, before it began (`beginAttempt`).
+  */
   private async retryLater(ctx: Ctx, job: StoredJob, error: unknown): Promise<void> {
     const { deviceId } = job;
     // Whatever the slice had half read is not worth trusting after a throw.
@@ -107,12 +107,12 @@ export class HcIngestRunner extends DurableObject<Env> {
   }
 
   /**
-   * Make sure this device's work is being done, and return.
-   *
-   * Fast by construction -- at most a storage write and an alarm -- so the
-   * ingest route can call it on its way out. Calling it while a slice is
-   * running is fine: the alarm set here fires when that slice has returned.
-   */
+  Make sure this device's work is being done, and return.
+
+  Fast by construction -- at most a storage write and an alarm -- so the
+  ingest route can call it on its way out. Calling it while a slice is
+  running is fine: the alarm set here fires when that slice has returned.
+  */
   async wake(deviceId: string): Promise<void> {
     const job = await this.ctx.storage.get<StoredJob>(JOB_KEY);
     if (job === undefined) {
@@ -130,10 +130,10 @@ export class HcIngestRunner extends DurableObject<Env> {
   }
 
   /**
-   * Forget everything: the stored job, the alarm, the cached batch. What a
-   * device wipe calls last (worker/src/hc/store/wipe.ts), so that no alarm is
-   * left to fire for a device that no longer exists.
-   */
+  Forget everything: the stored job, the alarm, the cached batch. What a
+  device wipe calls last (worker/src/hc/store/wipe.ts), so that no alarm is
+  left to fire for a device that no longer exists.
+  */
   async reset(): Promise<void> {
     this.cache.head = null;
     await this.ctx.storage.deleteAlarm();

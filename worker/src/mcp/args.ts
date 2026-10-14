@@ -1,12 +1,12 @@
 /**
- * The argument schemas every tool shares.
- *
- * All strict: `z.strictObject` rejects an unknown key rather than ignoring it.
- * That matters more here than it usually does, because the caller is a language
- * model. A model that invents `patient: "me"` or misspells `from` as `since`
- * should be told, not quietly served the unfiltered list -- silently ignoring an
- * argument is how a filter the caller believed in stops existing.
- */
+The argument schemas every tool shares.
+
+All strict: `z.strictObject` rejects an unknown key rather than ignoring it.
+That matters more here than it usually does, because the caller is a language
+model. A model that invents `patient: "me"` or misspells `from` as `since`
+should be told, not quietly served the unfiltered list -- silently ignoring an
+argument is how a filter the caller believed in stops existing.
+*/
 
 import { z } from "zod";
 
@@ -19,20 +19,20 @@ import type { ToolName } from "./tool-names.ts";
 const JQ_MAX_LENGTH = 4096;
 
 /**
- * An ISO-8601 date or instant, at any precision a caller is likely to write:
- * `2026`, `2026-01`, `2026-01-31`, `2026-01-31T09:00`, `2026-01-31T09:00:00Z`,
- * `2026-01-31T09:00:00.000+02:00`. Anything else is rejected rather than
- * guessed at; `worker/src/mcp/window.ts` has the rules and what each form bounds.
- */
+An ISO-8601 date or instant, at any precision a caller is likely to write:
+`2026`, `2026-01`, `2026-01-31`, `2026-01-31T09:00`, `2026-01-31T09:00:00Z`,
+`2026-01-31T09:00:00.000+02:00`. Anything else is rejected rather than
+guessed at; `worker/src/mcp/window.ts` has the rules and what each form bounds.
+*/
 const instant = z.string().refine(isIsoDateOrInstant, {
   message: "must be an ISO-8601 date (2026-01-31, 2026-01, 2026) or instant",
 });
 
 /**
- * What every tool's `jq` description says before that tool's own examples.
- * One sentence: `MCP_INSTRUCTIONS` (worker/src/mcp/instructions.ts) explains the
- * rest once for every tool.
- */
+What every tool's `jq` description says before that tool's own examples.
+One sentence: `MCP_INSTRUCTIONS` (worker/src/mcp/instructions.ts) explains the
+rest once for every tool.
+*/
 const JQ_CORE =
   "Optional jq program (jq 1.8) run server-side on the `items` array, after the " +
   "owner's exposure policy and before `limit`; each value it emits becomes one item, " +
@@ -48,16 +48,16 @@ function jqSchema(description: string) {
 }
 
 /**
- * The optional jq program, described with one tool's own examples from
- * `JQ_EXAMPLES` (worker/src/mcp/jq-examples.ts). Spread it into the tool's schema
- * shape -- `toolArgs({ ...jqArg("get_x"), ... })`, or into a strict object of
- * the tool's own -- and it replaces the generic description `toolArgs` starts
- * from.
- *
- * It runs in `respond()` (worker/src/mcp/respond.ts) on data the exposure policy
- * has already filtered, and before `limit`. The length ceiling bounds the
- * caller's program, not any data; worker/src/mcp/jq/engine.ts has the other bounds.
- */
+The optional jq program, described with one tool's own examples from
+`JQ_EXAMPLES` (worker/src/mcp/jq-examples.ts). Spread it into the tool's schema
+shape -- `toolArgs({ ...jqArg("get_x"), ... })`, or into a strict object of
+the tool's own -- and it replaces the generic description `toolArgs` starts
+from.
+
+It runs in `respond()` (worker/src/mcp/respond.ts) on data the exposure policy
+has already filtered, and before `limit`. The length ceiling bounds the
+caller's program, not any data; worker/src/mcp/jq/engine.ts has the other bounds.
+*/
 export function jqArg(tool: ToolName, semantics: "raw" | "paged" | "plain" = "raw") {
   const examples = JQ_EXAMPLES[tool].map((example) => `\`${example}\``).join("; ");
   const leads = { raw: JQ_SEMANTICS, paged: JQ_SEMANTICS_PAGED, plain: JQ_CORE };
@@ -66,21 +66,21 @@ export function jqArg(tool: ToolName, semantics: "raw" | "paged" | "plain" = "ra
 }
 
 /**
- * The generic `jq` argument, for a schema built with `toolArgs` that has not
- * spread its tool's {@link jqArg} over it. Every registered tool does; a test
- * holds them to it.
- */
+The generic `jq` argument, for a schema built with `toolArgs` that has not
+spread its tool's {@link jqArg} over it. Every registered tool does; a test
+holds them to it.
+*/
 const JQ_ARGS = {
   jq: jqSchema(`${JQ_SEMANTICS} Example: \`.[] | select(.date >= "2026-01-01")\`.`),
 } as const;
 
 /**
- * The arguments every tool takes.
- *
- * `health_systems` accepts either a health system id (as `list_health_systems` reports it) or a
- * case-insensitive substring of a display name, because a model that has just
- * read "Example Health" will try to pass that back.
- */
+The arguments every tool takes.
+
+`health_systems` accepts either a health system id (as `list_health_systems` reports it) or a
+case-insensitive substring of a display name, because a model that has just
+read "Example Health" will try to pass that back.
+*/
 const SHARED_ARGS = {
   healthSystems: z
     .array(z.string().min(1))
@@ -111,18 +111,18 @@ const SHARED_ARGS = {
 } as const;
 
 /**
- * A date window, on the tools that have one, saying which of the item's fields
- * it compares -- `field` is how that tool's description names it, e.g.
- * "`start`" or "`effective` (else `issued`)".
- *
- * The rules, which `worker/src/mcp/window.ts` and `collect.ts`'s `inWindow` implement
- * and docs/mcp.md repeats: both ends inclusive; a value without a time is a
- * whole UTC period (`to: "2026-01-31"` runs to the end of that UTC day, `to:
- * "2026-01"` to the end of January, `from` starts at the period's first
- * instant); a time without an offset is UTC; an item missing the field falls
- * back to when the health system last updated it, and an item with no usable
- * date at all is left out of any windowed call.
- */
+A date window, on the tools that have one, saying which of the item's fields
+it compares -- `field` is how that tool's description names it, e.g.
+"`start`" or "`effective` (else `issued`)".
+
+The rules, which `worker/src/mcp/window.ts` and `collect.ts`'s `inWindow` implement
+and docs/mcp.md repeats: both ends inclusive; a value without a time is a
+whole UTC period (`to: "2026-01-31"` runs to the end of that UTC day, `to:
+"2026-01"` to the end of January, `from` starts at the period's first
+instant); a time without an offset is UTC; an item missing the field falls
+back to when the health system last updated it, and an item with no usable
+date at all is left out of any windowed call.
+*/
 export function windowArgs(field: string) {
   return {
     from: instant
@@ -144,9 +144,9 @@ export function windowArgs(field: string) {
 }
 
 /**
- * Build a strict schema from the shared arguments plus a tool's own. The tool
- * spreads its {@link jqArg} into `shape` so its `jq` carries its own examples.
- */
+Build a strict schema from the shared arguments plus a tool's own. The tool
+spreads its {@link jqArg} into `shape` so its `jq` carries its own examples.
+*/
 export function toolArgs<Shape extends z.ZodRawShape>(shape: Shape) {
   return z.strictObject({ ...SHARED_ARGS, ...shape });
 }

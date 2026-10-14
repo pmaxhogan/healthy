@@ -1,14 +1,14 @@
 /**
- * `list_health_systems` and `get_sync_status`: the two tools that describe the server
- * rather than the record.
- *
- * Both still go through `respond`, and so through the policy filter. That is not
- * ceremony. `list_health_systems` is exactly where a `health_system` deny rule has to bite
- * -- a denied health system that still appears in a directory listing has been
- * announced, which is most of what the rule was meant to prevent -- and
- * `get_sync_status` names resource types, so a `resource` deny rule has to reach
- * it too or the deny-list would leak the shape of what it is hiding.
- */
+`list_health_systems` and `get_sync_status`: the two tools that describe the server
+rather than the record.
+
+Both still go through `respond`, and so through the policy filter. That is not
+ceremony. `list_health_systems` is exactly where a `health_system` deny rule has to bite
+-- a denied health system that still appears in a directory listing has been
+announced, which is most of what the rule was meant to prevent -- and
+`get_sync_status` names resource types, so a `resource` deny rule has to reach
+it too or the deny-list would leak the shape of what it is hiding.
+*/
 
 import { toIso } from "../../lib/time.ts";
 import { explainSyncCode, explainSyncWarnings } from "../../sync/sync-state-codes.ts";

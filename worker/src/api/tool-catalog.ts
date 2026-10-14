@@ -1,34 +1,34 @@
 /**
- * The MCP tool catalogue the admin UI lists next to the exposure deny-list.
- *
- * ### Why this is a hard-coded table
- *
- * The obvious source is the MCP server itself -- `worker/src/mcp/` registers these
- * tools and knows their real descriptions. It does not export a catalogue today,
- * and importing the server module to enumerate them would drag `McpAgent`, the
- * Durable Object base class and the MCP SDK into every `/api` request.
- *
- * So this is a *description* of that surface, not its definition, and the two can
- * drift. The guard against drift is `worker/test/unit/api/tool-catalog.test.ts`, which
- * pins the names, plus this note:
- *
- * WHEN `worker/src/mcp/` EXPORTS `TOOL_CATALOG`, delete this file and re-export from
- * there. The names below are the locked list from the build spec, and the
- * `resourceTypes` are what the exposure filter matches a `resource` deny-rule
- * against -- so a name that exists here and not there is a deny-rule the owner can
- * write and that will never fire, which is the failure mode worth avoiding.
- */
+The MCP tool catalogue the admin UI lists next to the exposure deny-list.
+
+### Why this is a hard-coded table
+
+The obvious source is the MCP server itself -- `worker/src/mcp/` registers these
+tools and knows their real descriptions. It does not export a catalogue today,
+and importing the server module to enumerate them would drag `McpAgent`, the
+Durable Object base class and the MCP SDK into every `/api` request.
+
+So this is a *description* of that surface, not its definition, and the two can
+drift. The guard against drift is `worker/test/unit/api/tool-catalog.test.ts`, which
+pins the names, plus this note:
+
+WHEN `worker/src/mcp/` EXPORTS `TOOL_CATALOG`, delete this file and re-export from
+there. The names below are the locked list from the build spec, and the
+`resourceTypes` are what the exposure filter matches a `resource` deny-rule
+against -- so a name that exists here and not there is a deny-rule the owner can
+write and that will never fire, which is the failure mode worth avoiding.
+*/
 
 import { HC_RECORD_TYPES } from "../hc/record-types.ts";
 
 import type { McpToolInfoDto } from "@shared/types.ts";
 
 /**
- * What a `resource` deny-rule matches the Health Connect tools' rows by:
- * `hc:<Type>` for every record type the companion app maps -- the ones with
- * nothing numeric to summarise included. The tools that read whichever type
- * the caller names list all of them.
- */
+What a `resource` deny-rule matches the Health Connect tools' rows by:
+`hc:<Type>` for every record type the companion app maps -- the ones with
+nothing numeric to summarise included. The tools that read whichever type
+the caller names list all of them.
+*/
 const HC_TYPES: readonly string[] = HC_RECORD_TYPES.map((type) => `hc:${type}`);
 
 export const TOOL_CATALOG: readonly McpToolInfoDto[] = [

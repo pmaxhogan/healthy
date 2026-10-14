@@ -1,57 +1,57 @@
 /**
- * App-layer encryption for the `_enc` columns.
- *
- * Envelope: `v1:` + base64url(iv(12) || ciphertext||tag), AES-GCM-256, key from
- * the `DATA_KEY` secret (base64 of 32 bytes).
- *
- * `v2:` is the same envelope around a *padded* plaintext: a 4-byte big-endian
- * length, the UTF-8 bytes, then zeros up to a size bucket (64, 128, 256, ...
- * bytes). AES-GCM hides content but not length, so without padding the
- * ciphertext of a 15-character password says "15 characters" to anyone with a
- * D1 snapshot, and an 18-byte sealed sender matches an 18-character domain
- * stored elsewhere. Short, human-chosen values -- credentials, addresses,
- * URLs, names, subjects, settings -- are sealed with `{ pad: true }`. Bulk
- * payloads (cached FHIR resources, visits) are not: their size class is an
- * accepted leak (SECURITY.md), and doubling the cache is not worth hiding it.
- * `open` reads both versions, so no existing row has to be rewritten for this.
- *
- * The AAD is not decoration. It binds a ciphertext to exactly one
- * `<table>.<column>.<rowId>`, so a value copied from one row to another -- say a
- * revoked health system's client secret pasted over a live one, or a cached payload
- * moved between patients -- fails to open rather than quietly decrypting. Every
- * caller must therefore pass the same `aadFor(...)` on open as it did on seal.
- *
- * The envelope version is authenticated too. What AES-GCM is actually given is
- * `<version>\0<aad>` (the NUL is a byte no `aadFor` result contains), so a `v2:`
- * value relabelled `v1:` -- or the reverse -- fails to open instead of being
- * parsed under the other version's rule. Values sealed before that (security
- * review L1, 2026-09) were sealed under the bare AAD, and `open` still accepts
- * them: it tries the version-bound AAD first and falls back to the bare one. So
- * no stored row has to be rewritten, every new seal is protected, and a legacy
- * value stops being relabel-able the next time its cell is written. Most are, in
- * the ordinary course (a token refresh, a calendar upsert, a portal fetch); one
- * that is only written when the owner re-enters it (a client secret, portal
- * credentials) stays legacy until then. The fallback costs one failed decrypt
- * per legacy value opened.
- *
- * Why app-layer at all, when D1 is encrypted at rest: at-rest encryption protects
- * the disks, not a database dump, a mis-scoped read from another Worker, or an
- * accidental log of a row. Tokens, patient identifiers and cached clinical
- * payloads need to be unreadable in all of those.
- *
- * The imported CryptoKey is cached in module scope, keyed by the secret string,
- * so a warm isolate imports once however many rows it touches. Keying on the
- * secret (rather than a single slot) means a test that swaps `DATA_KEY` gets a
- * different key instead of the previous one.
- */
+App-layer encryption for the `_enc` columns.
+
+Envelope: `v1:` + base64url(iv(12) || ciphertext||tag), AES-GCM-256, key from
+the `DATA_KEY` secret (base64 of 32 bytes).
+
+`v2:` is the same envelope around a *padded* plaintext: a 4-byte big-endian
+length, the UTF-8 bytes, then zeros up to a size bucket (64, 128, 256, ...
+bytes). AES-GCM hides content but not length, so without padding the
+ciphertext of a 15-character password says "15 characters" to anyone with a
+D1 snapshot, and an 18-byte sealed sender matches an 18-character domain
+stored elsewhere. Short, human-chosen values -- credentials, addresses,
+URLs, names, subjects, settings -- are sealed with `{ pad: true }`. Bulk
+payloads (cached FHIR resources, visits) are not: their size class is an
+accepted leak (SECURITY.md), and doubling the cache is not worth hiding it.
+`open` reads both versions, so no existing row has to be rewritten for this.
+
+The AAD is not decoration. It binds a ciphertext to exactly one
+`<table>.<column>.<rowId>`, so a value copied from one row to another -- say a
+revoked health system's client secret pasted over a live one, or a cached payload
+moved between patients -- fails to open rather than quietly decrypting. Every
+caller must therefore pass the same `aadFor(...)` on open as it did on seal.
+
+The envelope version is authenticated too. What AES-GCM is actually given is
+`<version>\0<aad>` (the NUL is a byte no `aadFor` result contains), so a `v2:`
+value relabelled `v1:` -- or the reverse -- fails to open instead of being
+parsed under the other version's rule. Values sealed before that (security
+review L1, 2026-09) were sealed under the bare AAD, and `open` still accepts
+them: it tries the version-bound AAD first and falls back to the bare one. So
+no stored row has to be rewritten, every new seal is protected, and a legacy
+value stops being relabel-able the next time its cell is written. Most are, in
+the ordinary course (a token refresh, a calendar upsert, a portal fetch); one
+that is only written when the owner re-enters it (a client secret, portal
+credentials) stays legacy until then. The fallback costs one failed decrypt
+per legacy value opened.
+
+Why app-layer at all, when D1 is encrypted at rest: at-rest encryption protects
+the disks, not a database dump, a mis-scoped read from another Worker, or an
+accidental log of a row. Tokens, patient identifiers and cached clinical
+payloads need to be unreadable in all of those.
+
+The imported CryptoKey is cached in module scope, keyed by the secret string,
+so a warm isolate imports once however many rows it touches. Keying on the
+secret (rather than a single slot) means a test that swaps `DATA_KEY` gets a
+different key instead of the previous one.
+*/
 
 import { AppError } from "../lib/errors.ts";
 
 /**
- * Either the raw base64 key or anything carrying a `DATA_KEY`, which `Env` is.
- * Declared structurally on purpose: it keeps this module importable from the
- * plain-Node unit tests, which have no Worker runtime types.
- */
+Either the raw base64 key or anything carrying a `DATA_KEY`, which `Env` is.
+Declared structurally on purpose: it keeps this module importable from the
+plain-Node unit tests, which have no Worker runtime types.
+*/
 export type KeySource = string | { DATA_KEY?: string | undefined };
 
 const VERSION = "v1";
@@ -79,14 +79,14 @@ function toBase64Url(bytes: Uint8Array): string {
 }
 
 /**
- * Decode base64 or base64url into bytes.
- *
- * The return type is `Uint8Array<ArrayBuffer>`, not a bare `Uint8Array`: the
- * WebCrypto signatures require a view over a plain ArrayBuffer (not a
- * SharedArrayBuffer), and allocating the buffer here is what proves it. A
- * `Uint8Array.from(...)` result is `ArrayBufferLike` and will not type-check
- * against `crypto.subtle`.
- */
+Decode base64 or base64url into bytes.
+
+The return type is `Uint8Array<ArrayBuffer>`, not a bare `Uint8Array`: the
+WebCrypto signatures require a view over a plain ArrayBuffer (not a
+SharedArrayBuffer), and allocating the buffer here is what proves it. A
+`Uint8Array.from(...)` result is `ArrayBufferLike` and will not type-check
+against `crypto.subtle`.
+*/
 function fromBase64(value: string, what: string): Uint8Array<ArrayBuffer> {
   const normalised = value.replaceAll("-", "+").replaceAll("_", "/");
   let binary: string;
@@ -131,10 +131,10 @@ function keyFor(source: KeySource): Promise<CryptoKey> {
 }
 
 /**
- * UTF-8 bytes over a plain ArrayBuffer. `TextEncoder#encode` is typed
- * `ArrayBufferLike` under some of this repo's lib settings, which WebCrypto will
- * not accept once the value passes through a variable; see `fromBase64`.
- */
+UTF-8 bytes over a plain ArrayBuffer. `TextEncoder#encode` is typed
+`ArrayBufferLike` under some of this repo's lib settings, which WebCrypto will
+not accept once the value passes through a variable; see `fromBase64`.
+*/
 function utf8(text: string): Uint8Array<ArrayBuffer> {
   const encoded = encoder.encode(text);
   const out = new Uint8Array(encoded.length);
@@ -148,18 +148,18 @@ function boundAad(version: string, aad: string): Uint8Array<ArrayBuffer> {
 }
 
 /**
- * The AAD for one cell. `rowId` is whatever uniquely names the row in its table:
- * a primary key, or a composite like `<healthSystemId>:<type>:<id>` for the cache.
- */
+The AAD for one cell. `rowId` is whatever uniquely names the row in its table:
+a primary key, or a composite like `<healthSystemId>:<type>:<id>` for the cache.
+*/
 export function aadFor(table: string, column: string, rowId: string | number): string {
   return `${table}.${column}.${String(rowId)}`;
 }
 
 export interface SealOptions {
   /**
-   * Pad the plaintext to a size bucket before sealing (a `v2:` envelope), so the
-   * ciphertext's length stops disclosing the value's exact length.
-   */
+  Pad the plaintext to a size bucket before sealing (a `v2:` envelope), so the
+  ciphertext's length stops disclosing the value's exact length.
+  */
   pad?: boolean;
 }
 
@@ -215,13 +215,13 @@ export async function seal(
 }
 
 /**
- * Decrypt one cell.
- *
- * Throws `AppError("crypto")` for a wrong key, a wrong AAD, a tampered
- * ciphertext and a malformed envelope alike -- deliberately one code, because
- * telling those cases apart to a caller is an oracle and none of them is
- * recoverable.
- */
+Decrypt one cell.
+
+Throws `AppError("crypto")` for a wrong key, a wrong AAD, a tampered
+ciphertext and a malformed envelope alike -- deliberately one code, because
+telling those cases apart to a caller is an oracle and none of them is
+recoverable.
+*/
 export async function open(source: KeySource, sealed: string, aad: string): Promise<string> {
   const key = await keyFor(source);
   const separator = sealed.indexOf(":");
@@ -273,9 +273,9 @@ export function isUnpadded(value: string): boolean {
 }
 
 /**
- * Seal a short, human-chosen value: always padded. The one call every such
- * column uses, so "is this one padded?" has a single answer per column.
- */
+Seal a short, human-chosen value: always padded. The one call every such
+column uses, so "is this one padded?" has a single answer per column.
+*/
 export async function sealShort(
   source: KeySource,
   plaintext: string,
@@ -293,13 +293,13 @@ export async function sealShort(
 const VERSION_BYTES = "v3";
 
 /**
- * Encrypt bytes for one cell. A `v3:` envelope, unpadded -- it is for bulk
- * payloads, whose size class is an accepted leak (see the module comment).
- *
- * The version is bound into the AAD exactly as for `v1:` and `v2:`, so a `v3:`
- * value relabelled as text (or text relabelled as bytes) fails to open; and
- * `open` refuses a `v3:` envelope outright, as `openBytes` refuses the others.
- */
+Encrypt bytes for one cell. A `v3:` envelope, unpadded -- it is for bulk
+payloads, whose size class is an accepted leak (see the module comment).
+
+The version is bound into the AAD exactly as for `v1:` and `v2:`, so a `v3:`
+value relabelled as text (or text relabelled as bytes) fails to open; and
+`open` refuses a `v3:` envelope outright, as `openBytes` refuses the others.
+*/
 export async function sealBytes(
   source: KeySource,
   plaintext: Uint8Array<ArrayBuffer>,

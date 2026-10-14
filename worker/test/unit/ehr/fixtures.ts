@@ -1,15 +1,15 @@
 /**
- * Fixture loading and a scripted `fetch` for the health system and FHIR unit tests.
- *
- * The fixtures under `test/fixtures/epic/` are synthetic: invented ids, invented
- * place names, invented token values. Nothing here came from a real chart, and
- * nothing here may.
- *
- * They are read from disk rather than imported as JSON modules on purpose: a
- * JSON import is typed as its literal shape, which will not satisfy
- * `fhir4.Bundle` (`resourceType: string` is not `"Bundle"`), so the tests would
- * end up asserting against a structurally different type than the code sees.
- */
+Fixture loading and a scripted `fetch` for the health system and FHIR unit tests.
+
+The fixtures under `test/fixtures/epic/` are synthetic: invented ids, invented
+place names, invented token values. Nothing here came from a real chart, and
+nothing here may.
+
+They are read from disk rather than imported as JSON modules on purpose: a
+JSON import is typed as its literal shape, which will not satisfy
+`fhir4.Bundle` (`resourceType: string` is not `"Bundle"`), so the tests would
+end up asserting against a structurally different type than the code sees.
+*/
 
 import { readFileSync } from "node:fs";
 

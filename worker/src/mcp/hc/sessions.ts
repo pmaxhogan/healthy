@@ -1,19 +1,19 @@
 /**
- * Stored sleep and exercise summaries, grouped into stretches of time.
- *
- * Which sessions are the same stretch -- overlapping, or written twice -- is
- * decided by `mergeOverlappingSessions` in `worker/src/hc/rules.ts`, the one
- * module for those rules. This only carries the stored summaries to it and
- * back, and tells it what the rules need to know about each: its kind (an
- * exercise type; two different activities that overlap are not one), whether
- * it was flagged as left running (such a session is never merged: it would
- * swallow every real workout that happened while it ran), and the bound past
- * which a session of this record type stands alone.
- *
- * One more thing is decided over the grouped rows, here because it needs them
- * all: which sleep of a date the day's resting heart rate is shown on
- * ({@link restingHrByDay}).
- */
+Stored sleep and exercise summaries, grouped into stretches of time.
+
+Which sessions are the same stretch -- overlapping, or written twice -- is
+decided by `mergeOverlappingSessions` in `worker/src/hc/rules.ts`, the one
+module for those rules. This only carries the stored summaries to it and
+back, and tells it what the rules need to know about each: its kind (an
+exercise type; two different activities that overlap are not one), whether
+it was flagged as left running (such a session is never merged: it would
+swallow every real workout that happened while it ran), and the bound past
+which a session of this record type stands alone.
+
+One more thing is decided over the grouped rows, here because it needs them
+all: which sleep of a date the day's resting heart rate is shown on
+({@link restingHrByDay}).
+*/
 
 import {
   EXERCISE_MERGE_MAX_MS,
@@ -53,17 +53,17 @@ export interface Group<Summary> {
 const TYPE_SLEEP = "SleepSession";
 
 /**
- * Stored summaries grouped by the session rules. The rules take records, so
- * each summary is handed over as the record it summarises: its id, origin and
- * span, which is all they read. Which member then speaks for a group is
- * decided here, where the summaries are: see {@link speaker}.
- *
- * `leftRunningReadable` is false for a call whose policy withholds the
- * left-running flag (it is read off heart rate and steps). The grouping must
- * not then depend on it, or the shape of the answer would give it away: every
- * session over three hours stands alone instead, which the session's own
- * times decide.
- */
+Stored summaries grouped by the session rules. The rules take records, so
+each summary is handed over as the record it summarises: its id, origin and
+span, which is all they read. Which member then speaks for a group is
+decided here, where the summaries are: see {@link speaker}.
+
+`leftRunningReadable` is false for a call whose policy withholds the
+left-running flag (it is read off heart rate and steps). The grouping must
+not then depend on it, or the shape of the answer would give it away: every
+session over three hours stands alone instead, which the session's own
+times decide.
+*/
 export function groupSessions<Summary extends Spanned>(
   type: string,
   stored: readonly Stored<Summary>[],
@@ -109,11 +109,11 @@ function seconds(summary: Spanned): number {
 }
 
 /**
- * How much a summary carries beyond its times: one for every figure that is
- * there (a heart rate, steps, a route ...). Two copies of one workout are
- * equally long, and the copy from the app that measured it is the one worth
- * describing the row by.
- */
+How much a summary carries beyond its times: one for every figure that is
+there (a heart rate, steps, a route ...). Two copies of one workout are
+equally long, and the copy from the app that measured it is the one worth
+describing the row by.
+*/
 function richness(summary: object): number {
   let count = 0;
   for (const value of Object.values(summary)) {
@@ -123,10 +123,10 @@ function richness(summary: object): number {
 }
 
 /**
- * The member that describes a group's row: the longest; among equally long
- * ones the one carrying the most (see {@link richness}), then the lower origin
- * name, then the lower id -- so the choice is the same on every call.
- */
+The member that describes a group's row: the longest; among equally long
+ones the one carrying the most (see {@link richness}), then the lower origin
+name, then the lower id -- so the choice is the same on every call.
+*/
 function speaker<Summary extends Spanned>(
   members: readonly Stored<Summary>[],
 ): Stored<Summary> | undefined {
@@ -165,36 +165,36 @@ function longerRow<Summary extends Rested>(
 }
 
 /**
- * The resting heart rate each sleep row carries, by the key of the session
- * that describes the row.
- *
- * A stored night holds the reading stamped at its own end
- * (`summariseSleep`), and that is right for a date with one sleep. But resting
- * heart rate is ONE figure a day, and a wearable that writes one record a day
- * stamps it at the end of the day's LAST sleep: once a nap is recorded the
- * record moves from the night's end to the nap's, and the stored night has
- * none while the nap has the day's. So, among the rows that ended on one date
- * (`dayOf`, the `date` a row carries):
- *
- *  - the longest row keeps the reading it has, and nothing moves: a date with
- *    one sleep, and a date whose night has a reading of its own whatever a nap
- *    has (several records in the day);
- *  - when the longest has none and another row of the date has one, the
- *    longest gets it and that row gives it up -- it is the day's figure, and
- *    it is said once. Of several such rows the one that ended last gives: that
- *    is where a once-a-day record is stamped.
- *
- * A session longer than `SLEEP_MERGE_MAX_MS` was never closed: it is not a
- * night, so it neither takes a reading nor gives one.
- *
- * Decided when an answer is made, from the rows handed in: the stored
- * summaries are not changed. For the answer not to depend on where a range
- * was cut, the caller hands in EVERY sleep of each date it answers about, the
- * ones outside its range included (`sleep_sessions` reads them). The map is
- * therefore keyed by every session of a row, not only the one that describes
- * it: a caller whose own rows were grouped from fewer sessions still finds
- * each of them here.
- */
+The resting heart rate each sleep row carries, by the key of the session
+that describes the row.
+
+A stored night holds the reading stamped at its own end
+(`summariseSleep`), and that is right for a date with one sleep. But resting
+heart rate is ONE figure a day, and a wearable that writes one record a day
+stamps it at the end of the day's LAST sleep: once a nap is recorded the
+record moves from the night's end to the nap's, and the stored night has
+none while the nap has the day's. So, among the rows that ended on one date
+(`dayOf`, the `date` a row carries):
+
+ - the longest row keeps the reading it has, and nothing moves: a date with
+   one sleep, and a date whose night has a reading of its own whatever a nap
+   has (several records in the day);
+ - when the longest has none and another row of the date has one, the
+   longest gets it and that row gives it up -- it is the day's figure, and
+   it is said once. Of several such rows the one that ended last gives: that
+   is where a once-a-day record is stamped.
+
+A session longer than `SLEEP_MERGE_MAX_MS` was never closed: it is not a
+night, so it neither takes a reading nor gives one.
+
+Decided when an answer is made, from the rows handed in: the stored
+summaries are not changed. For the answer not to depend on where a range
+was cut, the caller hands in EVERY sleep of each date it answers about, the
+ones outside its range included (`sleep_sessions` reads them). The map is
+therefore keyed by every session of a row, not only the one that describes
+it: a caller whose own rows were grouped from fewer sessions still finds
+each of them here.
+*/
 export function restingHrByDay<Summary extends Rested>(
   groups: readonly Group<Summary>[],
   dayOf: (ms: number) => string,
@@ -262,17 +262,17 @@ interface LeftRunningSubject {
 }
 
 /**
- * Why each flagged session was flagged, by summary key.
- *
- * Both rules are applied when a session's summary is built
- * (`leftRunningReason` in `worker/src/hc/rules.ts`), so the flag and its
- * reason are stored and every tool reads the same ones: nothing is judged, and
- * nothing is read, when a tool answers. A summary written before the reason
- * was stored was flagged by the only rule there was then.
- *
- * The flag is heart rate and steps, so a caller whose policy withholds either
- * must not report it: `leftRunningReadable` in the tools decides.
- */
+Why each flagged session was flagged, by summary key.
+
+Both rules are applied when a session's summary is built
+(`leftRunningReason` in `worker/src/hc/rules.ts`), so the flag and its
+reason are stored and every tool reads the same ones: nothing is judged, and
+nothing is read, when a tool answers. A summary written before the reason
+was stored was flagged by the only rule there was then.
+
+The flag is heart rate and steps, so a caller whose policy withholds either
+must not report it: `leftRunningReadable` in the tools decides.
+*/
 export function leftRunningReasons<Summary extends LeftRunningSubject>(
   stored: readonly Stored<Summary>[],
 ): Map<string, LeftRunningReason> {

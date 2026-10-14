@@ -1,21 +1,21 @@
 /**
- * Write-time checks for a `field` rule, and the one canonical form it is
- * stored in.
- *
- * A rule already stored is applied as-is regardless of anything here, so
- * tightening these checks never breaks a rule that got in before them. What
- * this refuses is a rule that cannot remove anything: a path that names no
- * field in any shape the rule's scope can reach, in either vocabulary, a tool
- * that does not exist, a tool/resource-type pair that never meet. Each refusal
- * says why in a sentence the admin UI shows verbatim, with a suggestion when a
- * near miss is obvious.
- *
- * The check walks `worker/src/policy/tree.ts`: the path as written against every
- * shape in scope, plus its alias translations (`aliases.ts`) against the shapes
- * of the other vocabulary -- so `Observation.value` (normalized) and
- * `Observation.component[].valueQuantity.value` (raw) are both accepted, each
- * because it names something real.
- */
+Write-time checks for a `field` rule, and the one canonical form it is
+stored in.
+
+A rule already stored is applied as-is regardless of anything here, so
+tightening these checks never breaks a rule that got in before them. What
+this refuses is a rule that cannot remove anything: a path that names no
+field in any shape the rule's scope can reach, in either vocabulary, a tool
+that does not exist, a tool/resource-type pair that never meet. Each refusal
+says why in a sentence the admin UI shows verbatim, with a suggestion when a
+near miss is obvious.
+
+The check walks `worker/src/policy/tree.ts`: the path as written against every
+shape in scope, plus its alias translations (`aliases.ts`) against the shapes
+of the other vocabulary -- so `Observation.value` (normalized) and
+`Observation.component[].valueQuantity.value` (raw) are both accepted, each
+because it names something real.
+*/
 
 import { ARRAY_SEGMENT, formatPath, parsePath } from "@shared/policy-path.ts";
 
@@ -80,10 +80,10 @@ function deeper(a: Failure | null, b: Failure): Failure {
 }
 
 /**
- * Try one parsed path against one shape: as written, then as translated into
- * the shape's vocabulary. The canonical form when it resolves as written; the
- * path itself when only a translation resolves; else the failure.
- */
+Try one parsed path against one shape: as written, then as translated into
+the shape's vocabulary. The canonical form when it resolves as written; the
+path itself when only a translation resolves; else the failure.
+*/
 function resolveOne(
   path: readonly string[],
   shape: string,
@@ -215,11 +215,11 @@ function parseAll(texts: readonly string[]): { parsed: string[][]; issues: strin
 }
 
 /**
- * True when one candidate path names something a row of `rowType` can really
- * carry in this shape. The tree alone cannot say: a record's `data` and a
- * bucket's `values` are open nodes, since their keys depend on the record
- * type, so those two are checked against the type's own field lists.
- */
+True when one candidate path names something a row of `rowType` can really
+carry in this shape. The tree alone cannot say: a record's `data` and a
+bucket's `values` are open nodes, since their keys depend on the record
+type, so those two are checked against the type's own field lists.
+*/
 function phoneCandidateResolves(
   shape: string,
   rowType: string,
@@ -235,11 +235,11 @@ function phoneCandidateResolves(
 }
 
 /**
- * True when a rule on a Health Connect type, with this path, removes
- * something from at least one tool's rows: in some tool of the scope, on some
- * row that can carry the type or its data, one of the path's spellings
- * (`./hc-aliases.ts`) names a real field.
- */
+True when a rule on a Health Connect type, with this path, removes
+something from at least one tool's rows: in some tool of the scope, on some
+row that can carry the type or its data, one of the path's spellings
+(`./hc-aliases.ts`) names a real field.
+*/
 function phonePathReaches(spec: FieldRuleSpec, ruleType: string, path: readonly string[]): boolean {
   const tools = spec.tool === null ? TOOL_NAMES : [spec.tool];
   for (const tool of tools) {
@@ -322,10 +322,10 @@ function resolveAll(
 }
 
 /**
- * Check a `field` rule and return it canonicalized: trimmed scope, each path
- * in its canonical spelling (with `[]` written in where it steps into an
- * array), duplicates dropped, sorted.
- */
+Check a `field` rule and return it canonicalized: trimmed scope, each path
+in its canonical spelling (with `[]` written in where it steps into an
+array), duplicates dropped, sorted.
+*/
 export function checkFieldSpec(
   input: FieldRuleSpec,
   healthSystemIds: ReadonlySet<string>,
@@ -356,16 +356,16 @@ export function checkFieldSpec(
 const PHONE_AGGREGATE_PREFIX = "hc:Agg.";
 
 /**
- * Check an `hc:<Type>` named by a `resource` rule (or a `field` rule's scope).
- * Null when it is fine, or when the target is not a Health Connect type at
- * all; otherwise the sentence that says what is wrong.
- *
- * A resource rule matches a row's tag exactly, so a mistyped type is a rule
- * that silently denies nothing -- and the types most worth denying are the
- * ones least likely to have a record yet to check the spelling against. So
- * the type must be one the companion app maps, or one a paired phone has
- * actually reported (`reported`, as `hc:<Type>`), spelled as it is tagged.
- */
+Check an `hc:<Type>` named by a `resource` rule (or a `field` rule's scope).
+Null when it is fine, or when the target is not a Health Connect type at
+all; otherwise the sentence that says what is wrong.
+
+A resource rule matches a row's tag exactly, so a mistyped type is a rule
+that silently denies nothing -- and the types most worth denying are the
+ones least likely to have a record yet to check the spelling against. So
+the type must be one the companion app maps, or one a paired phone has
+actually reported (`reported`, as `hc:<Type>`), spelled as it is tagged.
+*/
 export function checkPhoneType(target: string, reported: ReadonlySet<string>): string | null {
   if (!target.toLowerCase().startsWith("hc:")) return null;
   if (target.toLowerCase().startsWith(PHONE_AGGREGATE_PREFIX.toLowerCase())) {

@@ -1,15 +1,15 @@
 /**
- * The argument schemas the Health Connect tools share.
- *
- * Strict, like every other tool's (`../args.ts` says why). They do not start
- * from `toolArgs`: `healthSystems` and `raw` mean nothing for phone data, and
- * an argument a tool accepts and ignores is a filter the caller only believed
- * in. A phone is chosen with `devices`.
- *
- * Argument names are the ones the tool specification fixed (`max_bytes`,
- * `origin_mode`, `include_metadata`, ...); item fields stay lowerCamel like
- * every other item this server returns.
- */
+The argument schemas the Health Connect tools share.
+
+Strict, like every other tool's (`../args.ts` says why). They do not start
+from `toolArgs`: `healthSystems` and `raw` mean nothing for phone data, and
+an argument a tool accepts and ignores is a filter the caller only believed
+in. A phone is chosen with `devices`.
+
+Argument names are the ones the tool specification fixed (`max_bytes`,
+`origin_mode`, `include_metadata`, ...); item fields stay lowerCamel like
+every other item this server returns.
+*/
 
 import { z } from "zod";
 
@@ -85,11 +85,11 @@ export function hcArgs<Shape extends z.ZodRawShape>(tool: ToolName, shape: Shape
 }
 
 /**
- * A range of instants, half-open: `[start, end)`. `subject` is what the range
- * selects, for the description. An `end` given as a calendar date names the
- * whole of that local day, so the instant the range ends at is the NEXT
- * midnight: the date is included, the instant is not (`parseRange`).
- */
+A range of instants, half-open: `[start, end)`. `subject` is what the range
+selects, for the description. An `end` given as a calendar date names the
+whole of that local day, so the instant the range ends at is the NEXT
+midnight: the date is included, the instant is not (`parseRange`).
+*/
 export function rangeArgs(subject: string) {
   return {
     start: moment.describe(
@@ -109,9 +109,9 @@ export function rangeArgs(subject: string) {
 }
 
 /**
- * What a tool that takes a range says about `[start, end)` beside the
- * notation, which on its own reads as "the end is never included".
- */
+What a tool that takes a range says about `[start, end)` beside the
+notation, which on its own reads as "the end is never included".
+*/
 export const RANGE_NOTE =
   "In `[start, end)` an `end` written as an instant is exclusive, and an `end` written " +
   "as a calendar date includes that whole local day (two dates a day apart are two days).";

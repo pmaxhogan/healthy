@@ -1,17 +1,17 @@
 /**
- * The MCP exposure deny-list.
- *
- * Allow-all with a deny-list: absent a matching rule, data is exposed. The rules
- * are read by the single server-side filter in `worker/src/policy/` and applied
- * before serialisation, which is the only place they can be enforced completely.
- *
- * Adding the same rule twice is a no-op that returns the existing row rather
- * than an error -- the admin UI can be fire and forget. For a `tool`,
- * `resource` or `health_system` rule "the same" is `(rule_type, target)`, which
- * a partial unique index enforces; for a `field` rule it is the signature the
- * caller computes (`fieldSignature` in `worker/src/policy/validate.ts`) and passes
- * as `target`, checked here.
- */
+The MCP exposure deny-list.
+
+Allow-all with a deny-list: absent a matching rule, data is exposed. The rules
+are read by the single server-side filter in `worker/src/policy/` and applied
+before serialisation, which is the only place they can be enforced completely.
+
+Adding the same rule twice is a no-op that returns the existing row rather
+than an error -- the admin UI can be fire and forget. For a `tool`,
+`resource` or `health_system` rule "the same" is `(rule_type, target)`, which
+a partial unique index enforces; for a `field` rule it is the signature the
+caller computes (`fieldSignature` in `worker/src/policy/validate.ts`) and passes
+as `target`, checked here.
+*/
 
 import { newId } from "../../lib/ids.ts";
 import { all, one, run } from "../client.ts";
@@ -79,14 +79,14 @@ export function makeMcpPolicyRepo(ctx: Ctx) {
 
   return {
     /**
-     * Add a `tool`, `resource` or `health_system` rule, or return the one already
-     * there.
-     *
-     * A `field` target here is stored the pre-0012 way, as one
-     * `ResourceType.path` string with no structured columns. The API never
-     * writes one (it uses {@link addField}); the tests do, to pin that such a
-     * row is still enforced.
-     */
+    Add a `tool`, `resource` or `health_system` rule, or return the one already
+    there.
+
+    A `field` target here is stored the pre-0012 way, as one
+    `ResourceType.path` string with no structured columns. The API never
+    writes one (it uses {@link addField}); the tests do, to pin that such a
+    row is still enforced.
+    */
     async add(
       ruleType: PolicyRuleType,
       target: string,

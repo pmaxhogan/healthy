@@ -32,10 +32,10 @@ beforeEach(resetDb);
 const DAY_MS = 86_400_000;
 
 /**
- * Synthetic resources. Nothing here comes from a real record: the ids, the
- * timestamps and the one distinctive string are invented so the plaintext test
- * below has something unmistakable to look for.
- */
+Synthetic resources. Nothing here comes from a real record: the ids, the
+timestamps and the one distinctive string are invented so the plaintext test
+below has something unmistakable to look for.
+*/
 function encounter(id: string, lastUpdated?: string): CacheableResource {
   return {
     resourceType: "Encounter",

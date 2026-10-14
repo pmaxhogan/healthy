@@ -1,12 +1,12 @@
 /**
- * One stored Health Connect record as a tool row.
- *
- * The store keeps a record exactly as the phone serialised it: epoch
- * milliseconds everywhere, `data` untouched. A row keeps every value and
- * changes only how instants are written -- ISO-8601 with the answer's zone
- * offset -- at the top level and inside the nested lists the wire contract
- * names. Numbers stay numbers, and no unit is repeated on a row.
- */
+One stored Health Connect record as a tool row.
+
+The store keeps a record exactly as the phone serialised it: epoch
+milliseconds everywhere, `data` untouched. A row keeps every value and
+changes only how instants are written -- ISO-8601 with the answer's zone
+offset -- at the top level and inside the nested lists the wire contract
+names. Numbers stay numbers, and no unit is repeated on a row.
+*/
 
 import { recordEndMs, recordStartMs } from "../../hc/wire.ts";
 

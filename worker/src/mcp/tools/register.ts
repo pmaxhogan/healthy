@@ -1,22 +1,22 @@
 /**
- * How a tool gets onto the server.
- *
- * Three functions, and every tool uses one of them:
- *
- *  - `readTool` registers a hand-written body. It is the one that stamps the
- *    read-only annotations, so no reading tool can be registered without them.
- *  - `collectionTool` registers the common shape: pick health systems, read the cache,
- *    normalize, window, filter, respond. Nineteen of the tools are nothing but a
- *    description and a `CollectSpec`, and writing each of them out longhand would
- *    be nineteen chances to forget the policy call.
- *  - `actionTool` registers a tool that makes this server do something. There
- *    is exactly one, `sync_health_systems`, and a second should be argued for.
- *
- * The annotations are not decoration. `readOnlyHint` is what lets a client run a
- * tool without a confirmation prompt, so it is stamped by the registrar and is
- * never a per-tool choice: a tool is read-only because it went through
- * `readTool`, and one that acts cannot claim to be.
- */
+How a tool gets onto the server.
+
+Three functions, and every tool uses one of them:
+
+ - `readTool` registers a hand-written body. It is the one that stamps the
+   read-only annotations, so no reading tool can be registered without them.
+ - `collectionTool` registers the common shape: pick health systems, read the cache,
+   normalize, window, filter, respond. Nineteen of the tools are nothing but a
+   description and a `CollectSpec`, and writing each of them out longhand would
+   be nineteen chances to forget the policy call.
+ - `actionTool` registers a tool that makes this server do something. There
+   is exactly one, `sync_health_systems`, and a second should be argued for.
+
+The annotations are not decoration. `readOnlyHint` is what lets a client run a
+tool without a confirmation prompt, so it is stamped by the registrar and is
+never a per-tool choice: a tool is read-only because it went through
+`readTool`, and one that acts cannot claim to be.
+*/
 
 import { withAudit } from "../audit.ts";
 import { collect, effectiveLimit, selectHealthSystems } from "../collect.ts";
@@ -31,12 +31,12 @@ import type { McpServer, ToolCallback } from "@modelcontextprotocol/sdk/server/m
 import type { z } from "zod";
 
 /**
- * Every reading tool on this server, always.
- *
- * `openWorldHint: false` is the honest answer: with the single exception of
- * `get_document_text`, a reading tool reads the local cache and cannot reach
- * outside it.
- */
+Every reading tool on this server, always.
+
+`openWorldHint: false` is the honest answer: with the single exception of
+`get_document_text`, a reading tool reads the local cache and cannot reach
+outside it.
+*/
 const READ_ONLY_ANNOTATIONS = {
   readOnlyHint: true,
   destructiveHint: false,
@@ -45,13 +45,13 @@ const READ_ONLY_ANNOTATIONS = {
 } as const;
 
 /**
- * A tool that acts.
- *
- * Not read-only, so a client asks before running it. Not destructive: nothing
- * it starts deletes or overwrites what the owner has, it re-reads it. Not
- * idempotent: the second identical call is refused by a cooldown rather than
- * repeated. Open world: what it starts makes requests to health systems.
- */
+A tool that acts.
+
+Not read-only, so a client asks before running it. Not destructive: nothing
+it starts deletes or overwrites what the owner has, it re-reads it. Not
+idempotent: the second identical call is refused by a cooldown rather than
+repeated. Open world: what it starts makes requests to health systems.
+*/
 const ACTION_ANNOTATIONS = {
   readOnlyHint: false,
   destructiveHint: false,
@@ -90,11 +90,11 @@ export function readTool<S extends z.ZodType>(
 }
 
 /**
- * Register a tool that makes this server act.
- *
- * The same audit wrapper as every other tool: the MCP switch, the `tool` deny
- * rule, the stable error codes and the audit row all apply unchanged.
- */
+Register a tool that makes this server act.
+
+The same audit wrapper as every other tool: the MCP switch, the `tool` deny
+rule, the stable error codes and the audit row all apply unchanged.
+*/
 export function actionTool<S extends z.ZodType>(
   server: McpServer,
   deps: ToolDeps,
@@ -119,24 +119,24 @@ export interface CollectionToolOptions<
   /** Which resource types to read, and how, given the caller's arguments. */
   specs: (args: z.output<S>) => CollectSpec[];
   /**
-   * Extra notes to put in the answer's `warnings`, e.g. "this window defaults to
-   * upcoming only". Stable strings, never anything from the record.
-   */
+  Extra notes to put in the answer's `warnings`, e.g. "this window defaults to
+  upcoming only". Stable strings, never anything from the record.
+  */
   notes?: (args: z.output<S>) => string[];
   /**
-   * A step of the tool's own between the exposure policy and `jq` (see
-   * `RespondInput.reshape`): filtering on a normalized field, grouping.
-   */
+  A step of the tool's own between the exposure policy and `jq` (see
+  `RespondInput.reshape`): filtering on a normalized field, grouping.
+  */
   reshape?: (args: z.output<S>) => RespondInput["reshape"];
 }
 
 /**
- * Register a tool that is "read these resource types and hand them back".
- *
- * The body is identical for all of them, which is the point: the policy call
- * lives in `respond`, `respond` is called here, and a new tool cannot be added in
- * a way that skips it without visibly not using this function.
- */
+Register a tool that is "read these resource types and hand them back".
+
+The body is identical for all of them, which is the point: the policy call
+lives in `respond`, `respond` is called here, and a new tool cannot be added in
+a way that skips it without visibly not using this function.
+*/
 export function collectionTool<S extends z.ZodType<SharedArgs & WindowArgs>>(
   server: McpServer,
   deps: ToolDeps,

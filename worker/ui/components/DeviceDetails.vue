@@ -65,9 +65,9 @@ const filter = ref<LogFilter | null>(null);
 const limit = ref<number>(LOG_STEPS[0]);
 
 /**
- * During a backfill the newest uploads are all still waiting, so a list of the
- * newest shows no progress at all. Start on the finished ones exactly then.
- */
+During a backfill the newest uploads are all still waiting, so a list of the
+newest shows no progress at all. Start on the finished ones exactly then.
+*/
 function startingFilter(summary: DeviceIngestSummaryDto): LogFilter {
   const waiting = summary.queued + summary.applying;
   return waiting >= LOG_STEPS[0] && summary.applied + summary.failed > 0 ? "finished" : "all";

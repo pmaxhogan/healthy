@@ -1,16 +1,16 @@
 /**
- * What the Health Connect tools may read: the `hc` half of `ToolDeps`.
- *
- * The same reasoning as the rest of the seam (`../deps.ts`): the tools are
- * written against this interface and never against D1, so the list below is
- * the whole of what a Health Connect tool can reach, and every tool runs in a
- * plain-Node test over an in-memory implementation of it.
- *
- * Nothing here writes, and nothing here caps: every reader returns everything
- * in the window it is given. Windows are half-open `[startMs, endMs)` in epoch
- * milliseconds. The real implementation is `worker/src/hc/store/read.ts`
- * behind `worker/src/mcp/deps-d1.ts`.
- */
+What the Health Connect tools may read: the `hc` half of `ToolDeps`.
+
+The same reasoning as the rest of the seam (`../deps.ts`): the tools are
+written against this interface and never against D1, so the list below is
+the whole of what a Health Connect tool can reach, and every tool runs in a
+plain-Node test over an in-memory implementation of it.
+
+Nothing here writes, and nothing here caps: every reader returns everything
+in the window it is given. Windows are half-open `[startMs, endMs)` in epoch
+milliseconds. The real implementation is `worker/src/hc/store/read.ts`
+behind `worker/src/mcp/deps-d1.ts`.
+*/
 
 import type { IngestLogRow, SyncStateRow } from "../../hc/device.ts";
 import type { BucketRollup, ExerciseSummary, HrMinute, SleepNight } from "../../hc/rollup/types.ts";
@@ -65,10 +65,10 @@ interface HrMinuteRow {
 
 interface StoredSleepNight {
   /**
-   * The summary's key, a keyed blind of the session's record id. Internal: it
-   * groups and orders, and is never put in an answer. What an answer carries is
-   * the record's own id, from {@link HcReads.sessionRecordIds}.
-   */
+  The summary's key, a keyed blind of the session's record id. Internal: it
+  groups and orders, and is never put in an answer. What an answer carries is
+  the record's own id, from {@link HcReads.sessionRecordIds}.
+  */
   id: string;
   night: SleepNight;
 }
@@ -83,16 +83,16 @@ export interface StoreBacklog {
   /** Batches accepted and waiting to be applied. */
   queuedBatches: number;
   /**
-   * Batches that could not be applied and are set aside. Their records are
-   * not in the store, so a non-zero count means data is missing.
-   */
+  Batches that could not be applied and are set aside. Their records are
+  not in the store, so a non-zero count means data is missing.
+  */
   parkedBatches: number;
   /** Rollups and summaries marked for rebuilding and not yet rebuilt. */
   dirty: number;
   /**
-   * True while day rollups built for another zone are still there: the
-   * `timezone` setting changed and the runner has not been round yet.
-   */
+  True while day rollups built for another zone are still there: the
+  `timezone` setting changed and the runner has not been round yet.
+  */
   rezonePending: boolean;
 }
 
@@ -123,9 +123,9 @@ export interface HcReads {
   /** The newest `limit` batches, newest first. Counts and stable codes only. */
   ingestLog(deviceId: string, limit: number): Promise<IngestLogRow[]>;
   /**
-   * The newest `limit` sync runs the phone uploaded in, newest first, each
-   * whole: every batch of it counted, however many that is.
-   */
+  The newest `limit` sync runs the phone uploaded in, newest first, each
+  whole: every batch of it counted, however many that is.
+  */
   recentUploads(deviceId: string, limit: number): Promise<UploadRun[]>;
   /** Package names of the apps that have written records of one type. */
   origins(deviceId: string, type: string): Promise<string[]>;
@@ -134,30 +134,30 @@ export interface HcReads {
   /** Hour rollups whose UTC hour starts in the window. */
   hourRollups(window: RecordWindow): Promise<HourRollupRow[]>;
   /**
-   * Day rollups, in the configured zone ONLY: a caller answering in another
-   * zone must not use them.
-   */
+  Day rollups, in the configured zone ONLY: a caller answering in another
+  zone must not use them.
+  */
   dayRollups(window: DayWindow): Promise<DayRollupRow[]>;
   /** Per-minute heart rate: whole UTC-hour rows for every hour the window touches. */
   hrMinutes(window: Omit<RecordWindow, "type">): Promise<HrMinuteRow[]>;
   sleepNights(window: DeviceWindow): Promise<StoredSleepNight[]>;
   exerciseSessions(window: DeviceWindow): Promise<StoredExerciseSession[]>;
   /**
-   * For every session record of `type` (`SleepSession`, `ExerciseSession`) that
-   * `sleepNights` / `exerciseSessions` would return for the same window: the
-   * summary's key, mapped to the record's own id -- the `id` `hc_records` emits
-   * for it, so a session row can be joined to its raw record.
-   */
+  For every session record of `type` (`SleepSession`, `ExerciseSession`) that
+  `sleepNights` / `exerciseSessions` would return for the same window: the
+  summary's key, mapped to the record's own id -- the `id` `hc_records` emits
+  for it, so a session row can be joined to its raw record.
+  */
   sessionRecordIds(window: DeviceWindow & { type: string }): Promise<Map<string, string>>;
   /**
-   * Let go of what this call has memoised of the readers above that return
-   * stored data (records, rollups, heart-rate minutes, nights, sessions), when
-   * the implementation memoises at all. For a tool that walks a long range a
-   * window at a time: without it every window's rows stay alive until the call
-   * ends, and the walk holds the whole range after all. It changes no answer
-   * -- a reader asked again simply reads again -- and the bookkeeping readers
-   * (`devices`, `syncRows`, `backlog` ...) are left alone.
-   */
+  Let go of what this call has memoised of the readers above that return
+  stored data (records, rollups, heart-rate minutes, nights, sessions), when
+  the implementation memoises at all. For a tool that walks a long range a
+  window at a time: without it every window's rows stay alive until the call
+  ends, and the walk holds the whole range after all. It changes no answer
+  -- a reader asked again simply reads again -- and the bookkeeping readers
+  (`devices`, `syncRows`, `backlog` ...) are left alone.
+  */
   releaseReads?(): void;
 }
 

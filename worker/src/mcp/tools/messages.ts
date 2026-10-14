@@ -1,18 +1,18 @@
 /**
- * `get_messages` and `get_message_thread`: the patient portals' secure messages.
- *
- * Every conversation in every Message Center folder of every connected health
- * system's portal, as the portal pass last stored them. `get_messages` lists
- * the conversations, one item each with a preview of its newest message;
- * `get_message_thread` answers one conversation with every message in full.
- *
- * Both read the same per-message items (`worker/src/mcp/message-items.ts` explains
- * the dedupe and the policy), which `respond()` filters one message at a time
- * and only then groups (`worker/src/mcp/message-threads.ts`).
- *
- * Nothing here talks to a portal: like every tool but `get_document_text`, these
- * read only what the scheduled sync stored.
- */
+`get_messages` and `get_message_thread`: the patient portals' secure messages.
+
+Every conversation in every Message Center folder of every connected health
+system's portal, as the portal pass last stored them. `get_messages` lists
+the conversations, one item each with a preview of its newest message;
+`get_message_thread` answers one conversation with every message in full.
+
+Both read the same per-message items (`worker/src/mcp/message-items.ts` explains
+the dedupe and the policy), which `respond()` filters one message at a time
+and only then groups (`worker/src/mcp/message-threads.ts`).
+
+Nothing here talks to a portal: like every tool but `get_document_text`, these
+read only what the scheduled sync stored.
+*/
 
 import { z } from "zod";
 

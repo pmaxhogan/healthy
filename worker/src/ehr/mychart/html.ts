@@ -1,17 +1,17 @@
 /**
- * The little bit of HTML reading the scrape needs, done with string scanning.
- *
- * Deliberately not a parser and deliberately not a dynamic regular expression.
- * Everything here is driven by a handful of *static* patterns plus indexOf, for
- * three reasons: a Worker has no DOM; a regex built from a field name is both an
- * injection surface and a lint failure (`security/detect-non-literal-regexp`);
- * and a catastrophically backtracking pattern on an attacker-influenced page is
- * a denial of service. The patterns below are all bounded and linear.
- *
- * Nothing here returns markup to a caller, and nothing here is ever logged: the
- * page is a patient's own chart, so its text never leaves this module except as
- * a token value, a field name, or a boolean.
- */
+The little bit of HTML reading the scrape needs, done with string scanning.
+
+Deliberately not a parser and deliberately not a dynamic regular expression.
+Everything here is driven by a handful of *static* patterns plus indexOf, for
+three reasons: a Worker has no DOM; a regex built from a field name is both an
+injection surface and a lint failure (`security/detect-non-literal-regexp`);
+and a catastrophically backtracking pattern on an attacker-influenced page is
+a denial of service. The patterns below are all bounded and linear.
+
+Nothing here returns markup to a caller, and nothing here is ever logged: the
+page is a patient's own chart, so its text never leaves this module except as
+a token value, a field name, or a boolean.
+*/
 
 /** Every `<input>` tag on the page, whole. Bounded: no nesting to backtrack on. */
 const INPUT_TAG = /<input\b[^>]*>/giu;
@@ -23,41 +23,41 @@ const FORM_TAG = /<form\b[^>]*>/giu;
 const ID_ATTRIBUTE = /\bid\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/iu;
 const ACTION_ATTRIBUTE = /\baction\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/iu;
 /**
- * A whole `<noscript>...</noscript>` element, including its content.
- *
- * A lazy `[\s\S]*?` bounded by a literal closing tag: one scan for the nearest
- * `</noscript>`, not a pattern that can backtrack across the page.
- */
+A whole `<noscript>...</noscript>` element, including its content.
+
+A lazy `[\s\S]*?` bounded by a literal closing tag: one scan for the nearest
+`</noscript>`, not a pattern that can backtrack across the page.
+*/
 const NOSCRIPT_ELEMENT = /<noscript\b[^>]*>[\s\S]*?<\/noscript\s*>/giu;
 /** `<meta http-equiv="refresh" content="0;url=...">`, in either attribute order. */
 const META_REFRESH = /<meta\b[^>]*http-equiv\s*=\s*["']?refresh["']?[^>]*>/iu;
 const CONTENT_ATTRIBUTE = /\bcontent\s*=\s*(?:"([^"]*)"|'([^']*)')/iu;
 const REFRESH_URL = /url\s*=\s*['"]?([^'";\s]+)/iu;
 /**
- * `window.location = "..."` / `location.href = '...'`, restricted to the
- * page's OWN location: bare `location`, or `window.`/`self.`/`document.`
- * prefixed. Never `top.location`, `parent.location`, or either through
- * `window.` -- those fire only when the page is framed, and a classic login
- * page's own clickjacking guard is exactly
- * `if (self === top) { ... } else { top.location = "..."; }`. Unconditional
- * string-scanning has no way to know the `if` never took that `else` branch
- * on an un-framed load, so the one safe rule is to never treat a
- * `top.location` or `parent.location` assignment -- however it is reached --
- * as a same-page redirect at all.
- *
- * The leading `(?<![\w$.])` is what makes that precise rather than a
- * denylist of the two known bad prefixes: it refuses a match whose
- * `location` (or its allowed prefix) is itself preceded by an identifier
- * character or a `.`, which is what `top.location`, `window.top.location`,
- * `opener.location` and the rest all have in common -- and it is a
- * single-character, fixed-width lookbehind, so it stays exactly as bounded
- * and linear as every other pattern in this module.
- *
- * Two simple patterns rather than one that covers both assignment and the
- * `.replace()`/`.assign()` calls: a single alternation with optional
- * prefixes backtracks badly on a long page, and these run on a body a
- * stranger controls.
- */
+`window.location = "..."` / `location.href = '...'`, restricted to the
+page's OWN location: bare `location`, or `window.`/`self.`/`document.`
+prefixed. Never `top.location`, `parent.location`, or either through
+`window.` -- those fire only when the page is framed, and a classic login
+page's own clickjacking guard is exactly
+`if (self === top) { ... } else { top.location = "..."; }`. Unconditional
+string-scanning has no way to know the `if` never took that `else` branch
+on an un-framed load, so the one safe rule is to never treat a
+`top.location` or `parent.location` assignment -- however it is reached --
+as a same-page redirect at all.
+
+The leading `(?<![\w$.])` is what makes that precise rather than a
+denylist of the two known bad prefixes: it refuses a match whose
+`location` (or its allowed prefix) is itself preceded by an identifier
+character or a `.`, which is what `top.location`, `window.top.location`,
+`opener.location` and the rest all have in common -- and it is a
+single-character, fixed-width lookbehind, so it stays exactly as bounded
+and linear as every other pattern in this module.
+
+Two simple patterns rather than one that covers both assignment and the
+`.replace()`/`.assign()` calls: a single alternation with optional
+prefixes backtracks badly on a long page, and these run on a body a
+stranger controls.
+*/
 const SCRIPT_ASSIGN =
   /(?<![\w$.])(?:(?:window|self|document)\.)?location(?:\.href)?\s*=\s*["']([^"']+)["']/iu;
 /** `location.replace("...")` / `location.assign("...")`, same restriction. */
@@ -65,15 +65,15 @@ const SCRIPT_REPLACE =
   /(?<![\w$.])(?:(?:window|self|document)\.)?location\.(?:replace|assign)\s*\(\s*["']([^"']+)["']/iu;
 const NAMED_ENTITY = /&(amp|lt|gt|quot|apos|#\d{1,7}|#x[0-9a-f]{1,6});/giu;
 /**
- * [guess] A quoted absolute path whose first segment ends in `webapi`.
- *
- * The one shape of API base a login shell has been seen to mount its JSON
- * endpoints under. Bounded: a single segment of at most 32 characters, anchored
- * on the quote or paren that opens the string literal it sits in, so it cannot
- * backtrack across a bundle. Deliberately a *hint* -- the real value names the
- * organisation and can have no default, so a miss is normal and the caller
- * supplies the value instead.
- */
+[guess] A quoted absolute path whose first segment ends in `webapi`.
+
+The one shape of API base a login shell has been seen to mount its JSON
+endpoints under. Bounded: a single segment of at most 32 characters, anchored
+on the quote or paren that opens the string literal it sits in, so it cannot
+backtrack across a bundle. Deliberately a *hint* -- the real value names the
+organisation and can have no default, so a miss is normal and the caller
+supplies the value instead.
+*/
 const API_BASE_HINT = /["'(](\/[a-z][\w-]{0,31}webapi)(?=[/"'?)])/iu;
 
 const NAMED: Readonly<Record<string, string>> = {
@@ -85,13 +85,13 @@ const NAMED: Readonly<Record<string, string>> = {
 };
 
 /**
- * Decode the entity references an HTML attribute value can carry.
- *
- * Load-bearing, not cosmetic: a framework-generated antiforgery token is
- * base64 and its `+` characters are commonly emitted as `&#x2B;`. A token sent
- * back with the escape still in it is rejected, and the failure looks exactly
- * like a wrong password.
- */
+Decode the entity references an HTML attribute value can carry.
+
+Load-bearing, not cosmetic: a framework-generated antiforgery token is
+base64 and its `+` characters are commonly emitted as `&#x2B;`. A token sent
+back with the escape still in it is rejected, and the failure looks exactly
+like a wrong password.
+*/
 function decodeEntities(value: string): string {
   return value.replaceAll(NAMED_ENTITY, (whole, entity: string) => {
     const lower = entity.toLowerCase();
@@ -114,12 +114,12 @@ function attribute(tag: string, pattern: RegExp): string | null {
 }
 
 /**
- * Every named `<input>` on the page as name -> value.
- *
- * First occurrence wins: a login page that renders the form twice (a mobile
- * variant below the desktop one is common) must not have its token overwritten
- * by the copy the user cannot see.
- */
+Every named `<input>` on the page as name -> value.
+
+First occurrence wins: a login page that renders the form twice (a mobile
+variant below the desktop one is common) must not have its token overwritten
+by the copy the user cannot see.
+*/
 export function inputFields(html: string): Map<string, string> {
   const fields = new Map<string, string>();
   for (const [tag] of html.matchAll(INPUT_TAG)) {
@@ -131,13 +131,13 @@ export function inputFields(html: string): Map<string, string> {
 }
 
 /**
- * The antiforgery field on this page, found by shape rather than by name.
- *
- * Reading the name out of the page is what makes this work across deployments
- * that renamed the field: `candidates` is only consulted for ordering when the
- * page has more than one, and the shape rule ("a hidden field whose name
- * mentions a verification or antiforgery token") is what actually finds it.
- */
+The antiforgery field on this page, found by shape rather than by name.
+
+Reading the name out of the page is what makes this work across deployments
+that renamed the field: `candidates` is only consulted for ordering when the
+page has more than one, and the shape rule ("a hidden field whose name
+mentions a verification or antiforgery token") is what actually finds it.
+*/
 export function findAntiforgeryField(
   html: string,
   candidates: readonly string[] = [],
@@ -160,41 +160,41 @@ export function findAntiforgeryField(
 }
 
 /**
- * [confirmed from capture] The hand-off stub's controller call:
- * `OpenIdRequestController(nonce, state, codeVerifier, url, workflow,
- * submitForm)`, all six arguments filled in server-side.
- *
- * The controller's own script parks the first three and the workflow in
- * `sessionStorage` -- the response controller later posts them back to the
- * classic side as `EncryptedNonce`, `EncryptedState` and
- * `EncryptedCodeVerifier` -- and then either submits a form (`submitForm`
- * true, never observed) or navigates to `url` (false, as captured). Those
- * values are only ever in the page as literal arguments, so this is the one
- * place they can be read from.
- */
+[confirmed from capture] The hand-off stub's controller call:
+`OpenIdRequestController(nonce, state, codeVerifier, url, workflow,
+submitForm)`, all six arguments filled in server-side.
+
+The controller's own script parks the first three and the workflow in
+`sessionStorage` -- the response controller later posts them back to the
+classic side as `EncryptedNonce`, `EncryptedState` and
+`EncryptedCodeVerifier` -- and then either submits a form (`submitForm`
+true, never observed) or navigates to `url` (false, as captured). Those
+values are only ever in the page as literal arguments, so this is the one
+place they can be read from.
+*/
 const OIDC_REQUEST_CALL = /OpenIdRequestController\(([^()]*)\)/iu;
 
 /**
- * [confirmed from capture] The `AuthorizeResult` page's controller call:
- * `OpenIdResponseController(code, state, error, responseMode, issuer)`.
- */
+[confirmed from capture] The `AuthorizeResult` page's controller call:
+`OpenIdResponseController(code, state, error, responseMode, issuer)`.
+*/
 const OIDC_RESPONSE_CALL = /OpenIdResponseController\(([^()]*)\)/iu;
 
 /**
- * One argument of either call: a double-quoted string, or a bare boolean.
- * Applied to the short, already-isolated argument list the call pattern
- * captured -- never the whole page -- so a comma inside a quoted value never
- * gets mistaken for an argument separator: this tokenises quoted spans
- * instead of splitting on `,`.
- */
+One argument of either call: a double-quoted string, or a bare boolean.
+Applied to the short, already-isolated argument list the call pattern
+captured -- never the whole page -- so a comma inside a quoted value never
+gets mistaken for an argument separator: this tokenises quoted spans
+instead of splitting on `,`.
+*/
 const OIDC_ARG = /"([^"]*)"|(true|false)/giu;
 
 /**
- * A `\uXXXX` escape, exactly as a JS string literal inside a `<script>` tag
- * carries one -- the captured stub's URL argument writes every `&` as
- * `\u0026`. Distinct from `decodeEntities`'s HTML character references, which
- * this text never goes through at all (it is JS source, not markup).
- */
+A `\uXXXX` escape, exactly as a JS string literal inside a `<script>` tag
+carries one -- the captured stub's URL argument writes every `&` as
+`\u0026`. Distinct from `decodeEntities`'s HTML character references, which
+this text never goes through at all (it is JS source, not markup).
+*/
 const JS_UNICODE_ESCAPE = /\\u([0-9a-f]{4})/giu;
 
 function decodeJsUnicodeEscapes(value: string): string {
@@ -225,10 +225,10 @@ export interface OpenIdRequest {
 }
 
 /**
- * The hand-off stub's controller call, parsed. Null when the page carries none,
- * or when any of the four strings the hand-off needs is missing or empty --
- * an incomplete call is as useless as an absent one.
- */
+The hand-off stub's controller call, parsed. Null when the page carries none,
+or when any of the four strings the hand-off needs is missing or empty --
+an incomplete call is as useless as an absent one.
+*/
 export function parseOpenIdRequest(html: string): OpenIdRequest | null {
   const args = controllerArgs(html, OIDC_REQUEST_CALL);
   if (args === null) return null;
@@ -259,10 +259,10 @@ export interface OpenIdResponse {
 }
 
 /**
- * The `AuthorizeResult` page's controller call, parsed. Null when the page
- * carries none, or when it carries no code -- a page that echoes no code has
- * nothing to finalize.
- */
+The `AuthorizeResult` page's controller call, parsed. Null when the page
+carries none, or when it carries no code -- a page that echoes no code has
+nothing to finalize.
+*/
 export function parseOpenIdResponse(html: string): OpenIdResponse | null {
   const args = controllerArgs(html, OIDC_RESPONSE_CALL);
   if (args === null) return null;
@@ -271,20 +271,20 @@ export function parseOpenIdResponse(html: string): OpenIdResponse | null {
 }
 
 /**
- * The inputs of one `<form>`, scoped to that form alone -- never the whole
- * page.
- *
- * Matched by `id`, by an `action` ending in `actionSuffix`, or both when both
- * are given (a form must satisfy every criterion supplied). A form's own
- * closing tag is the next literal `</form` after its opening tag: forms do not
- * nest in HTML, so that is exact rather than a heuristic, bounded and linear
- * the same way every other scan in this module is.
- *
- * The scoping matters: a classic login page can render a second,
- * never-submitted form next to the one a script actually posts (see
- * `client.ts`'s "envelope" handling), and echoing that other form's fields
- * back on a POST is a field a real browser never would have sent.
- */
+The inputs of one `<form>`, scoped to that form alone -- never the whole
+page.
+
+Matched by `id`, by an `action` ending in `actionSuffix`, or both when both
+are given (a form must satisfy every criterion supplied). A form's own
+closing tag is the next literal `</form` after its opening tag: forms do not
+nest in HTML, so that is exact rather than a heuristic, bounded and linear
+the same way every other scan in this module is.
+
+The scoping matters: a classic login page can render a second,
+never-submitted form next to the one a script actually posts (see
+`client.ts`'s "envelope" handling), and echoing that other form's fields
+back on a POST is a field a real browser never would have sent.
+*/
 export function formFields(
   html: string,
   match: { id?: string; actionSuffix?: string },
@@ -308,25 +308,25 @@ export function formFields(
 }
 
 /**
- * Where this page redirects to without an HTTP redirect, if anywhere.
- *
- * Vanity hostnames in the wild answer a login request with a 200 whose body is
- * nothing but a redirect -- as a `<meta http-equiv="refresh">` or a one-line
- * `window.location` assignment. A client that only follows `Location` headers
- * sees a successful page with no login form on it and concludes the mount is
- * wrong, so discovery has to read both.
- *
- * A `<noscript>` element's content is stripped before either pattern is tried.
- * It exists for a browser that will not run the page's scripts, so its own
- * `<meta refresh>` or inline script is exactly the fallback a browser *with*
- * JavaScript -- which this client impersonates -- never reaches. Reading it
- * anyway walks the scrape one hop past every page that has both a real handoff
- * and a no-JS fallback, onto a page with none of the markers that identify it.
- *
- * A `top.location` or `parent.location` assignment is never read as a
- * redirect, framed or not: see `SCRIPT_ASSIGN`'s comment for why a classic
- * login page's own clickjacking guard would otherwise look exactly like one.
- */
+Where this page redirects to without an HTTP redirect, if anywhere.
+
+Vanity hostnames in the wild answer a login request with a 200 whose body is
+nothing but a redirect -- as a `<meta http-equiv="refresh">` or a one-line
+`window.location` assignment. A client that only follows `Location` headers
+sees a successful page with no login form on it and concludes the mount is
+wrong, so discovery has to read both.
+
+A `<noscript>` element's content is stripped before either pattern is tried.
+It exists for a browser that will not run the page's scripts, so its own
+`<meta refresh>` or inline script is exactly the fallback a browser *with*
+JavaScript -- which this client impersonates -- never reaches. Reading it
+anyway walks the scrape one hop past every page that has both a real handoff
+and a no-JS fallback, onto a page with none of the markers that identify it.
+
+A `top.location` or `parent.location` assignment is never read as a
+redirect, framed or not: see `SCRIPT_ASSIGN`'s comment for why a classic
+login page's own clickjacking guard would otherwise look exactly like one.
+*/
 export function bodyRedirectTarget(html: string): string | null {
   const scripted = html.replaceAll(NOSCRIPT_ELEMENT, "");
   const meta = META_REFRESH.exec(scripted);
@@ -344,13 +344,13 @@ export function bodyRedirectTarget(html: string): string | null {
 }
 
 /**
- * A best-effort guess at the path a login shell mounts its JSON API under.
- *
- * Returns null far more often than not, and that is the expected outcome: the
- * value names an organisation, so there is nothing to fall back to and the owner
- * supplies it. Never logged, and only ever returned to discovery, which stores it
- * in the same sealed-adjacent endpoint JSON the mount path lives in.
- */
+A best-effort guess at the path a login shell mounts its JSON API under.
+
+Returns null far more often than not, and that is the expected outcome: the
+value names an organisation, so there is nothing to fall back to and the owner
+supplies it. Never logged, and only ever returned to discovery, which stores it
+in the same sealed-adjacent endpoint JSON the mount path lives in.
+*/
 export function apiBasePathHint(html: string): string | null {
   return API_BASE_HINT.exec(html)?.[1] ?? null;
 }

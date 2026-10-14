@@ -1,38 +1,38 @@
 /**
- * Resolving the Practitioner, Location and Organization an Encounter points at.
- *
- * Epic routinely omits `Reference.display`, so an appointment whose references
- * are not resolved has no practitioner name, no clinic address and no
- * organisation -- which is most of the calendar event. The normalizers are pure
- * and take a synchronous `RefResolver`, so everything has to be in hand before
- * they run: that is what this module assembles.
- *
- * Three deliberate limits:
- *
- *   - **30-day cache.** A practitioner's name and a clinic's address change on a
- *     scale of years. Re-reading them hourly would be the single largest source of
- *     upstream requests in the whole app.
- *   - **50 reads per health system per run -- a pace, not a ceiling.** This is the
- *     hourly cron pass, which gets one invocation and no alarm to resume in (the
- *     Durable Object chunking `full-refresh.ts` uses does not apply here). A first
- *     sync of a long history, or a wide `window_past_days`, can reference hundreds
- *     of clinicians in one pass; without a per-run cap the run would spend its
- *     whole CPU budget on `Practitioner.Read` calls and never write an event. What
- *     it defers is not lost: `collectEncounterReferences` recomputes the same
- *     references from the same encounters next hour, so a deferred name or
- *     address resolves within a few runs rather than never -- and every run that
- *     defers any says so loudly, both in the logs (`sync.refs.deferred` at `warn`)
- *     and in the run's own warnings (`references_deferred`), never silently.
- *   - **A failed read is a miss, not a failure.** An organisation that refuses one
- *     Practitioner (Epic's 4118, or a 404 for a clinician who has left) must not
- *     fail the appointment that mentions them -- the event is simply written
- *     without that name.
- *
- * `parseReference` is local rather than imported because `refs.ts` keeps its
- * equivalent private. It handles the three forms Epic sends: a relative
- * `Practitioner/123`, an absolute URL under the FHIR base, and either with a
- * `/_history/N` suffix.
- */
+Resolving the Practitioner, Location and Organization an Encounter points at.
+
+Epic routinely omits `Reference.display`, so an appointment whose references
+are not resolved has no practitioner name, no clinic address and no
+organisation -- which is most of the calendar event. The normalizers are pure
+and take a synchronous `RefResolver`, so everything has to be in hand before
+they run: that is what this module assembles.
+
+Three deliberate limits:
+
+  - **30-day cache.** A practitioner's name and a clinic's address change on a
+    scale of years. Re-reading them hourly would be the single largest source of
+    upstream requests in the whole app.
+  - **50 reads per health system per run -- a pace, not a ceiling.** This is the
+    hourly cron pass, which gets one invocation and no alarm to resume in (the
+    Durable Object chunking `full-refresh.ts` uses does not apply here). A first
+    sync of a long history, or a wide `window_past_days`, can reference hundreds
+    of clinicians in one pass; without a per-run cap the run would spend its
+    whole CPU budget on `Practitioner.Read` calls and never write an event. What
+    it defers is not lost: `collectEncounterReferences` recomputes the same
+    references from the same encounters next hour, so a deferred name or
+    address resolves within a few runs rather than never -- and every run that
+    defers any says so loudly, both in the logs (`sync.refs.deferred` at `warn`)
+    and in the run's own warnings (`references_deferred`), never silently.
+  - **A failed read is a miss, not a failure.** An organisation that refuses one
+    Practitioner (Epic's 4118, or a 404 for a clinician who has left) must not
+    fail the appointment that mentions them -- the event is simply written
+    without that name.
+
+`parseReference` is local rather than imported because `refs.ts` keeps its
+equivalent private. It handles the three forms Epic sends: a relative
+`Practitioner/123`, an absolute URL under the FHIR base, and either with a
+`/_history/N` suffix.
+*/
 
 import { errorFields } from "../lib/log.ts";
 
@@ -49,11 +49,11 @@ const REFERENCE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_REFERENCE_READS = 50;
 
 /**
- * Reference targets worth resolving for a calendar event.
- *
- * `PractitionerRole` is absent on purpose: nothing in the appointment view reads
- * it, and fetching it would spend reads for no visible change.
- */
+Reference targets worth resolving for a calendar event.
+
+`PractitionerRole` is absent on purpose: nothing in the appointment view reads
+it, and fetching it would spend reads for no visible change.
+*/
 const RESOLVABLE: ReadonlySet<string> = new Set(["Practitioner", "Location", "Organization"]);
 
 export interface ParsedReference {
@@ -107,11 +107,11 @@ export interface ResolveReport {
 }
 
 /**
- * Resolve references through `fhir_cache`, reading the misses upstream.
- *
- * Newly read resources are written back with a 30-day TTL, so the next run's
- * misses are only the genuinely new ones.
- */
+Resolve references through `fhir_cache`, reading the misses upstream.
+
+Newly read resources are written back with a 30-day TTL, so the next run's
+misses are only the genuinely new ones.
+*/
 export async function resolveReferences(
   ctx: Ctx,
   repos: Repos,

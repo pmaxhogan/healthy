@@ -24,9 +24,9 @@ type Placeholder = (typeof PLACEHOLDERS)[number];
 export type TemplateView = Partial<Record<Placeholder, string>>;
 
 /**
- * A synthetic appointment used for the preview. Entirely invented -- no real
- * organisation, practitioner or department appears anywhere in this repository.
- */
+A synthetic appointment used for the preview. Entirely invented -- no real
+organisation, practitioner or department appears anywhere in this repository.
+*/
 export const SAMPLE_VIEW: Readonly<Required<TemplateView>> = Object.freeze({
   visitType: "Annual physical",
   practitioner: "Dr. A. Reyes",
@@ -43,13 +43,13 @@ export const DEFAULT_TITLE_TEMPLATE = "{visitType} · {practitioner}";
 const TOKEN = /\{(?<name>[A-Za-z]+)\}/gu;
 
 /**
- * Characters that only earn their place between two values.
- *
- * The tidy-up below is token based rather than a regex: a pattern that matched
- * "a separator with optional space on both sides, followed by another" needs
- * nested quantifiers and backtracks badly on adversarial input, and a template
- * is user-typed.
- */
+Characters that only earn their place between two values.
+
+The tidy-up below is token based rather than a regex: a pattern that matched
+"a separator with optional space on both sides, followed by another" needs
+nested quantifiers and backtracks badly on adversarial input, and a template
+is user-typed.
+*/
 const SEPARATORS = new Set(["·", "|", ",", "-", "–", "—", "/"]);
 const WHITESPACE = /\s+/u;
 
@@ -67,14 +67,14 @@ function isPlaceholder(name: string): name is Placeholder {
 }
 
 /**
- * Substitutes `{placeholder}` tokens from `view`.
- *
- * An unknown token is left verbatim so a typo is visible in the preview rather
- * than silently swallowed. A known token with no value renders as nothing, and
- * the separator that would have been left stranded next to it is removed -- so
- * `{visitType} · {practitioner}` with no practitioner gives `Annual physical`,
- * not `Annual physical ·`.
- */
+Substitutes `{placeholder}` tokens from `view`.
+
+An unknown token is left verbatim so a typo is visible in the preview rather
+than silently swallowed. A known token with no value renders as nothing, and
+the separator that would have been left stranded next to it is removed -- so
+`{visitType} · {practitioner}` with no practitioner gives `Annual physical`,
+not `Annual physical ·`.
+*/
 export function renderTitleTemplate(template: string, view: TemplateView): RenderResult {
   const unknown: string[] = [];
   const empty: Placeholder[] = [];
@@ -113,14 +113,14 @@ export function renderTitleTemplate(template: string, view: TemplateView): Rende
 }
 
 /**
- * Drops separators that no longer sit between two values, and normalises runs of
- * whitespace to one space.
- *
- * Whitespace-delimited, so a separator written without spaces around it
- * (`{visitType}·{practitioner}`) is part of a token and survives even when one
- * side is empty. That is a preview limitation, not a rule: the Worker's own
- * renderer is what the calendar sees.
- */
+Drops separators that no longer sit between two values, and normalises runs of
+whitespace to one space.
+
+Whitespace-delimited, so a separator written without spaces around it
+(`{visitType}·{practitioner}`) is part of a token and survives even when one
+side is empty. That is a preview limitation, not a rule: the Worker's own
+renderer is what the calendar sees.
+*/
 function tidy(rendered: string): string {
   const kept: string[] = [];
   // Named `word`, not `token`: security/detect-possible-timing-attacks reads any

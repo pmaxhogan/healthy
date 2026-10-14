@@ -49,12 +49,12 @@ function randomDataKey(): string {
 }
 
 /**
- * The secrets these tests need.
- *
- * Generated rather than fixed, for the key: nothing may commit an AES key, not even
- * a throwaway one, because a committed key is indistinguishable from a leaked one to
- * every scanner that will look at this repository.
- */
+The secrets these tests need.
+
+Generated rather than fixed, for the key: nothing may commit an AES key, not even
+a throwaway one, because a committed key is indistinguishable from a leaked one to
+every scanner that will look at this repository.
+*/
 const overrides: Partial<Env> = {
   DEV_MODE: "true",
   PASSWORD_HASH: await hashPassword(PASSWORD, MIN_PBKDF2_ITERATIONS),
@@ -73,20 +73,20 @@ const overrides: Partial<Env> = {
 };
 
 /**
- * The cast is load-bearing only for `HEALTHY_MCP`: `wrangler types` narrows it to
- * `DurableObjectNamespace<HealthyMcp>`, which is not assignable to the
- * unparameterised `DurableObjectNamespace` that worker/src/env.ts declares. `overrides`
- * is typed, so the cast cannot hide a typo in one of them.
- *
- * No `HC_INGEST`. The Durable Object behind it reads the runtime's own
- * `DATA_KEY`, not the one above, so it cannot open a batch these requests queue:
- * left bound, the ingest route wakes a real runner that fails each batch as
- * `crypto` from its alarm, some time later, while a test is asserting on the
- * queue (`phone.test.ts` does). Without it the wake fails, which the route
- * treats as harmless (`worker/src/hc/kick.ts`), and so does a wipe's last step
- * (`worker/src/hc/store/wipe.ts`). The runner behind the real route is
- * `mcp/hc-tools.test.ts`'s job, and a wipe resetting it `hc/runner.test.ts`'s.
- */
+The cast is load-bearing only for `HEALTHY_MCP`: `wrangler types` narrows it to
+`DurableObjectNamespace<HealthyMcp>`, which is not assignable to the
+unparameterised `DurableObjectNamespace` that worker/src/env.ts declares. `overrides`
+is typed, so the cast cannot hide a typo in one of them.
+
+No `HC_INGEST`. The Durable Object behind it reads the runtime's own
+`DATA_KEY`, not the one above, so it cannot open a batch these requests queue:
+left bound, the ingest route wakes a real runner that fails each batch as
+`crypto` from its alarm, some time later, while a test is asserting on the
+queue (`phone.test.ts` does). Without it the wake fails, which the route
+treats as harmless (`worker/src/hc/kick.ts`), and so does a wipe's last step
+(`worker/src/hc/store/wipe.ts`). The runner behind the real route is
+`mcp/hc-tools.test.ts`'s job, and a wipe resetting it `hc/runner.test.ts`'s.
+*/
 const TEST_ENV = { ...env, ...overrides, HC_INGEST: undefined } as unknown as Env;
 
 export function testCtx(): Ctx {
@@ -170,12 +170,12 @@ export interface FetchStub {
 }
 
 /**
- * A fetch that answers the given routes and fails loudly on anything else.
- *
- * Loudly is the point: a test that silently receives an empty 200 from an upstream
- * it forgot to stub passes for the wrong reason. An unmatched URL throws, which
- * surfaces as the request failing.
- */
+A fetch that answers the given routes and fails loudly on anything else.
+
+Loudly is the point: a test that silently receives an empty 200 from an upstream
+it forgot to stub passes for the wrong reason. An unmatched URL throws, which
+surfaces as the request failing.
+*/
 export function stubFetch(routes: readonly StubRoute[]): FetchStub {
   const requests: { method: string; url: string; body: string }[] = [];
   const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -205,18 +205,19 @@ export function usePorts(overridePorts: Partial<Ports>): void {
   setPorts(overridePorts);
 }
 
+// eslint-disable-next-line vitest/no-commented-out-tests -- a usage example in the doc comment, not a disabled test.
 /**
- * A clean database and a logged-in caller, per test.
- *
- * Returns an accessor rather than assigning to a `let` in the test file: a
- * top-level binding written from inside a hook is exactly the pattern that makes a
- * shared fixture hard to follow, and eslint refuses it.
- *
- * ```ts
- * const owner = freshOwner();
- * it("...", async () => { await owner().get("/api/overview"); });
- * ```
- */
+A clean database and a logged-in caller, per test.
+
+Returns an accessor rather than assigning to a `let` in the test file: a
+top-level binding written from inside a hook is exactly the pattern that makes a
+shared fixture hard to follow, and eslint refuses it.
+
+```ts
+const owner = freshOwner();
+it("...", async () => { await owner().get("/api/overview"); });
+```
+*/
 export function freshOwner(): () => Session {
   const state: { session: Session | null } = { session: null };
   beforeEach(async () => {
@@ -256,11 +257,11 @@ export function blindKey(logicalKey: string): Promise<string> {
 }
 
 /**
- * Empty every table and put `google_account` back to its seeded state.
- *
- * The pool shares one D1 instance across the tests in a file, so each test starts
- * clean only if it says so. Call this from `beforeEach`.
- */
+Empty every table and put `google_account` back to its seeded state.
+
+The pool shares one D1 instance across the tests in a file, so each test starts
+clean only if it says so. Call this from `beforeEach`.
+*/
 async function resetDb(): Promise<void> {
   await env.DB.batch(TABLES.map((table) => env.DB.prepare(`DELETE FROM ${table}`)));
   await env.DB.prepare(

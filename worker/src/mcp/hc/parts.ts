@@ -1,36 +1,36 @@
 /**
- * Reading one record type's statistics for a range with as little decryption
- * as the question allows.
- *
- * The store keeps three levels of the same numbers: a day rollup per local
- * day (in the configured zone), an hour rollup per UTC hour, and the raw
- * records. A bucketed question is answered from the coarsest level whose rows
- * fall wholly inside one bucket:
- *
- *  - whole local days, when the answer is in the configured zone, the buckets
- *    are calendar units and nothing is waiting to be rebuilt: day rollups;
- *  - every remaining UTC hour that lies inside the range and has no bucket
- *    boundary strictly inside it: hour rollups;
- *  - what is left -- the ragged edges of the range, an hour a boundary cuts
- *    (a zone on a half-hour offset, an `<N>min` bucket): the raw records of
- *    just those hours, each summarised on its own.
- *
- * So a year by day is a few hundred rows, a day by hour is twenty-four, and
- * only a sub-hour question opens chunks -- and then only the range's own.
- *
- * Everything comes back as "parts": one summary, one origin, one instant that
- * decides its bucket. A record counts in the bucket its START falls in, whole
- * (`bucketing: "start_time"`), which is the rule the rollups were built by and
- * what makes the three levels add up to the same totals.
- *
- * A query may carry an artefact rule (`cleaner`). A rollup cannot say which of
- * its values a rule would flag, only -- by its extremes -- that one could be
- * inside it. So a summary the rule calls suspect is opened one level down, a
- * day into its hours and an hour into its records, the records are put
- * through the rule, and the part is rebuilt from what the rule kept. What it
- * took out is counted in `excluded`, never dropped silently. Only the suspect
- * hours are opened: a year of heart rate with one bad minute reads one chunk.
- */
+Reading one record type's statistics for a range with as little decryption
+as the question allows.
+
+The store keeps three levels of the same numbers: a day rollup per local
+day (in the configured zone), an hour rollup per UTC hour, and the raw
+records. A bucketed question is answered from the coarsest level whose rows
+fall wholly inside one bucket:
+
+ - whole local days, when the answer is in the configured zone, the buckets
+   are calendar units and nothing is waiting to be rebuilt: day rollups;
+ - every remaining UTC hour that lies inside the range and has no bucket
+   boundary strictly inside it: hour rollups;
+ - what is left -- the ragged edges of the range, an hour a boundary cuts
+   (a zone on a half-hour offset, an `<N>min` bucket): the raw records of
+   just those hours, each summarised on its own.
+
+So a year by day is a few hundred rows, a day by hour is twenty-four, and
+only a sub-hour question opens chunks -- and then only the range's own.
+
+Everything comes back as "parts": one summary, one origin, one instant that
+decides its bucket. A record counts in the bucket its START falls in, whole
+(`bucketing: "start_time"`), which is the rule the rollups were built by and
+what makes the three levels add up to the same totals.
+
+A query may carry an artefact rule (`cleaner`). A rollup cannot say which of
+its values a rule would flag, only -- by its extremes -- that one could be
+inside it. So a summary the rule calls suspect is opened one level down, a
+day into its hours and an hour into its records, the records are put
+through the rule, and the part is rebuilt from what the rule kept. What it
+took out is counted in `excluded`, never dropped silently. Only the suspect
+hours are opened: a year of heart rate with one bad minute reads one chunk.
+*/
 
 import { dayBoundsMs, daysTouched } from "../../hc/rollup/day.ts";
 import { rollupBucket } from "../../hc/rollup/hour.ts";
@@ -82,15 +82,15 @@ export interface PartsQuery {
   type: string;
   range: Range;
   /**
-   * Every bucket boundary, ascending. A part is only read whole from a rollup
-   * when no boundary falls strictly inside it.
-   */
+  Every bucket boundary, ascending. A part is only read whole from a rollup
+  when no boundary falls strictly inside it.
+  */
   boundaries: readonly number[];
   /**
-   * The zone whose local days the day rollups hold, when they may be used:
-   * the answer is in the configured zone, every boundary is a local midnight,
-   * and the store has nothing left to rebuild. Null otherwise.
-   */
+  The zone whose local days the day rollups hold, when they may be used:
+  the answer is in the configured zone, every boundary is a local midnight,
+  and the store has nothing left to rebuild. Null otherwise.
+  */
   dayRollupZone: string | null;
   /** Package names. Omitted: every origin. */
   origins?: readonly string[] | undefined;
@@ -139,9 +139,9 @@ function excludedFrom(
 }
 
 /**
- * The raw records that START in `window`, each as its own part, the query's
- * artefact rule applied. `only` narrows them to the records it accepts.
- */
+The raw records that START in `window`, each as its own part, the query's
+artefact rule applied. `only` narrows them to the records it accepts.
+*/
 async function rawParts(
   reads: HcReads,
   query: PartsQuery,
@@ -283,10 +283,10 @@ function hourRuns(starts: readonly number[]): Range[] {
 }
 
 /**
- * Open every rollup part the query's artefact rule calls suspect one level
- * down, until what is left is either beyond suspicion or rebuilt from records
- * the rule has been through. See the module comment.
- */
+Open every rollup part the query's artefact rule calls suspect one level
+down, until what is left is either beyond suspicion or rebuilt from records
+the rule has been through. See the module comment.
+*/
 async function cleanSuspects(
   reads: HcReads,
   query: PartsQuery,

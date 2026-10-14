@@ -1,21 +1,21 @@
 /**
- * The one place a ModMed request is made.
- *
- * Two kinds of request, with different rules:
- *
- *  - **Sign-in hops** go to the identity provider recorded at discovery and to
- *    nowhere else. Redirects are followed by hand so every `Set-Cookie` lands in
- *    the jar, and only while they stay on that origin: the one redirect that
- *    leaves it is Keycloak handing the authorization code back to the portal,
- *    which is read off the `Location` header and never followed (its fragment
- *    *is* the answer, and following it would only fetch the app's HTML).
- *  - **API calls** go to the practice's origin with the bearer token and no
- *    cookies at all; the deployment is stateless, so there is nothing a cookie
- *    could add except the load balancer's stickiness, which it does not need.
- *
- * Neither ever leaves https. Nothing here logs a URL, a host, a header or a
- * body: stable endpoint labels, statuses and hop counts only.
- */
+The one place a ModMed request is made.
+
+Two kinds of request, with different rules:
+
+ - **Sign-in hops** go to the identity provider recorded at discovery and to
+   nowhere else. Redirects are followed by hand so every `Set-Cookie` lands in
+   the jar, and only while they stay on that origin: the one redirect that
+   leaves it is Keycloak handing the authorization code back to the portal,
+   which is read off the `Location` header and never followed (its fragment
+is* the answer, and following it would only fetch the app's HTML).
+ - **API calls** go to the practice's origin with the bearer token and no
+   cookies at all; the deployment is stateless, so there is nothing a cookie
+   could add except the load balancer's stickiness, which it does not need.
+
+Neither ever leaves https. Nothing here logs a URL, a host, a header or a
+body: stable endpoint labels, statuses and hop counts only.
+*/
 
 import { AppError } from "../../lib/errors.ts";
 
@@ -34,9 +34,9 @@ export interface SignInResponse {
   url: string;
   body: string;
   /**
-   * Set when the chain was redirected off the identity provider's origin: the
-   * absolute target, unfollowed. Keycloak's hand-back carries the code here.
-   */
+  Set when the chain was redirected off the identity provider's origin: the
+  absolute target, unfollowed. Keycloak's hand-back carries the code here.
+  */
   leftTo: string | null;
 }
 
@@ -111,13 +111,13 @@ function redirectTarget(response: Response, url: string): URL | null {
 }
 
 /**
- * One sign-in request on the identity provider's origin, redirects followed by
- * hand while they stay there.
- *
- * `form` is urlencoded into the body of a POST; absent means a GET with no body.
- * A 302/303 continues as a GET without the body; a cross-origin hop of any kind
- * stops and is reported in `leftTo`.
- */
+One sign-in request on the identity provider's origin, redirects followed by
+hand while they stay there.
+
+`form` is urlencoded into the body of a POST; absent means a GET with no body.
+A 302/303 continues as a GET without the body; a cross-origin hop of any kind
+stops and is reported in `leftTo`.
+*/
 export async function signInRequest(
   deps: ModMedHttpDeps,
   request: {
@@ -125,10 +125,10 @@ export async function signInRequest(
     form?: Record<string, string>;
     endpoint: string;
     /**
-     * The identity provider's origin, which the request must start on. A form
-     * whose action points anywhere else is refused before anything is sent,
-     * so a password can only ever be POSTed to the provider the owner confirmed.
-     */
+    The identity provider's origin, which the request must start on. A form
+    whose action points anywhere else is refused before anything is sent,
+    so a password can only ever be POSTed to the provider the owner confirmed.
+    */
     home: string;
   },
 ): Promise<SignInResponse> {
@@ -168,9 +168,9 @@ export async function signInRequest(
 }
 
 /**
- * POST a form to the token endpoint and return its JSON. `invalid_grant` is
- * `portal_session_expired`: the refresh token (or the code) is no good any more.
- */
+POST a form to the token endpoint and return its JSON. `invalid_grant` is
+`portal_session_expired`: the refresh token (or the code) is no good any more.
+*/
 export async function tokenRequest(
   deps: Pick<ModMedHttpDeps, "fetchImpl">,
   url: string,

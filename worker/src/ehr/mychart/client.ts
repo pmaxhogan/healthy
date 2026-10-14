@@ -1,38 +1,38 @@
 /**
- * The authenticated portal client: sign in, answer the emailed code, read the
- * upcoming visits.
- *
- * Shape of the thing: every call is "fetch a page, take its antiforgery token,
- * post to the action next to it, then look at where you landed". There is no
- * status field to read -- the portal answers a wrong password, a pending code
- * and a dead session all with an HTTP 200 and a different page -- so *where the
- * redirect chain stopped* is the primary signal, and a body marker is only the
- * tie-breaker. `http.ts` is what makes that signal available at all, by
- * following redirects by hand.
- *
- * What this module is careful about:
- *
- *  - **A fresh token per POST.** The token is per-page and short-lived; reusing
- *    the login page's token for the code POST is one of the ways this silently
- *    starts failing. `validate()` therefore re-fetches the challenge page even
- *    though `sendCode()` has just been there.
- *  - **`LoadUpcoming` gets no body at all**, and so no `Content-Type`. The token
- *    rides in a header instead, because there is nowhere else to put it.
- *  - **Session-expired detection is opt-in per call.** The sign-in flow lands on
- *    login pages legitimately, so only the calls that are supposed to be
- *    authenticated treat a login page as `portal_session_expired`.
- *  - **It holds no state but the jar.** No health system id, no D1, no env: the
- *    caller owns the account row, loads the jar into this client and seals
- *    whatever the jar looks like afterwards. That is also why nothing here can
- *    log a health system id -- the caller's child logger carries it.
- *  - **Nothing from the portal is logged.** Not a URL, not a host, not a mount,
- *    not a body, not a name. Stable endpoint labels, HTTP statuses and counts.
- *  - **The credential POST has two shapes.** Some deployments post the
- *    username and password as sibling form fields; a live capture found
- *    others post an "envelope" instead -- a form with no credential fields of
- *    its own, carrying a single `LoginInfo` value that is base64'd JSON. See
- *    `LOGIN_INFO` in `wire.ts` and `login()`'s own comments for the shape.
- */
+The authenticated portal client: sign in, answer the emailed code, read the
+upcoming visits.
+
+Shape of the thing: every call is "fetch a page, take its antiforgery token,
+post to the action next to it, then look at where you landed". There is no
+status field to read -- the portal answers a wrong password, a pending code
+and a dead session all with an HTTP 200 and a different page -- so *where the
+redirect chain stopped* is the primary signal, and a body marker is only the
+tie-breaker. `http.ts` is what makes that signal available at all, by
+following redirects by hand.
+
+What this module is careful about:
+
+ - **A fresh token per POST.** The token is per-page and short-lived; reusing
+   the login page's token for the code POST is one of the ways this silently
+   starts failing. `validate()` therefore re-fetches the challenge page even
+   though `sendCode()` has just been there.
+ - **`LoadUpcoming` gets no body at all**, and so no `Content-Type`. The token
+   rides in a header instead, because there is nowhere else to put it.
+ - **Session-expired detection is opt-in per call.** The sign-in flow lands on
+   login pages legitimately, so only the calls that are supposed to be
+   authenticated treat a login page as `portal_session_expired`.
+ - **It holds no state but the jar.** No health system id, no D1, no env: the
+   caller owns the account row, loads the jar into this client and seals
+   whatever the jar looks like afterwards. That is also why nothing here can
+   log a health system id -- the caller's child logger carries it.
+ - **Nothing from the portal is logged.** Not a URL, not a host, not a mount,
+   not a body, not a name. Stable endpoint labels, HTTP statuses and counts.
+ - **The credential POST has two shapes.** Some deployments post the
+   username and password as sibling form fields; a live capture found
+   others post an "envelope" instead -- a form with no credential fields of
+   its own, carrying a single `LoginInfo` value that is base64'd JSON. See
+   `LOGIN_INFO` in `wire.ts` and `login()`'s own comments for the shape.
+*/
 
 import { AppError } from "../../lib/errors.ts";
 import { base64Utf8 } from "../adapter.ts";
@@ -94,11 +94,11 @@ export interface PortalClientDeps {
   /** The cache-buster's randomness. Injected so a test can pin the URL. */
   random?: (() => number) | undefined;
   /**
-   * Mints a device id for the `custom_oidc` strategy, which does generate its
-   * own. The classic client never uses it: its `DeviceId` is issued by the
-   * portal -- see `DEVICE_ID_EXTRA_KEY`. Injected so a test can pin the value;
-   * defaults to `crypto.randomUUID()`.
-   */
+  Mints a device id for the `custom_oidc` strategy, which does generate its
+  own. The classic client never uses it: its `DeviceId` is issued by the
+  portal -- see `DEVICE_ID_EXTRA_KEY`. Injected so a test can pin the value;
+  defaults to `crypto.randomUUID()`.
+  */
   generateDeviceId?: (() => string) | undefined;
   maxRedirects?: number | undefined;
 }
@@ -106,19 +106,19 @@ export interface PortalClientDeps {
 /** The two-step challenge, as two calls because a human sits between them. */
 export interface SecondaryValidation {
   /**
-   * Ask the portal to send a code.
-   *
-   * Only `"email"` is implemented: it is the channel the design settled on, and
-   * an SMS code has nowhere to arrive. The parameter exists so adding one later
-   * does not change the shape of this interface.
-   */
+  Ask the portal to send a code.
+
+  Only `"email"` is implemented: it is the channel the design settled on, and
+  an SMS code has nowhere to arrive. The parameter exists so adding one later
+  does not change the shape of this interface.
+  */
   sendCode(channel: "email"): Promise<void>;
   /**
-   * Submit a code. `rememberMe` asks the portal to trust this device, and a
-   * success issues the remembered-device id (kept in the jar's extras, see
-   * `DEVICE_ID_EXTRA_KEY`) that a later sign-in presents -- so it defaults to
-   * true. A success then walks the page's own navigation to `Home`.
-   */
+  Submit a code. `rememberMe` asks the portal to trust this device, and a
+  success issues the remembered-device id (kept in the jar's extras, see
+  `DEVICE_ID_EXTRA_KEY`) that a later sign-in presents -- so it defaults to
+  true. A success then walks the page's own navigation to `Home`.
+  */
   validate(code: string, rememberMe?: boolean): Promise<void>;
 }
 
@@ -133,41 +133,41 @@ export interface PortalClient {
   login(credentials: PortalCredentials): Promise<PortalSignInStatus>;
   readonly secondaryValidation: SecondaryValidation;
   /**
-   * The upcoming visits, in the clinic's own zone.
-   *
-   * `timeZone` is what the portal is asked to render in and the fallback for a
-   * row that does not name its own; the owner's zone from `settings` is what to
-   * pass.
-   */
+  The upcoming visits, in the clinic's own zone.
+
+  `timeZone` is what the portal is asked to render in and the fallback for a
+  row that does not name its own; the owner's zone from `settings` is what to
+  pass.
+  */
   loadUpcoming(timeZone: string): Promise<PortalVisit[]>;
   /**
-   * Past visits, most recent first, in the clinic's own zone.
-   *
-   * `oldestRenderedDate` is the paging boundary: the portal answers with the page
-   * of visits older than it, and omitting it asks for the first page. The reply
-   * groups its rows by organisation because a chart account can be linked to
-   * several; this flattens them, because the calendar does not care.
-   */
+  Past visits, most recent first, in the clinic's own zone.
+
+  `oldestRenderedDate` is the paging boundary: the portal answers with the page
+  of visits older than it, and omitting it asks for the first page. The reply
+  groups its rows by organisation because a chart account can be linked to
+  several; this flattens them, because the calendar does not care.
+  */
   loadPast(timeZone: string, oldestRenderedDate?: string): Promise<PortalVisit[]>;
   /**
-   * One visit's details page, by the `csn` token the same visits list gave:
-   * its wait list, directions and instructions. One GET, read-only. Throws
-   * `portal_session_expired` on a login page and `portal_parse_failed` on a
-   * non-200.
-   */
+  One visit's details page, by the `csn` token the same visits list gave:
+  its wait list, directions and instructions. One GET, read-only. Throws
+  `portal_session_expired` on a login page and `portal_parse_failed` on a
+  non-200.
+  */
   loadVisitDetails(csn: string): Promise<VisitDetails>;
   /**
-   * Every secure-message conversation in every Message Center folder, with every
-   * message in each, read to the end. Read-only: nothing is marked read. See
-   * `messages.ts`.
-   */
+  Every secure-message conversation in every Message Center folder, with every
+  message in each, read to the end. Read-only: nothing is marked read. See
+  `messages.ts`.
+  */
   loadMessages(): Promise<PortalMessagesResult>;
   /**
-   * One message attachment's file, by the handle the same session's
-   * `loadMessages` read: its document details, then the download they name.
-   * Throws `portal_parse_failed` when the portal answers with a page or with
-   * details that name no download, and `portal_session_expired` on a login page.
-   */
+  One message attachment's file, by the handle the same session's
+  `loadMessages` read: its document details, then the download they name.
+  Throws `portal_parse_failed` when the portal answers with a page or with
+  details that name no download, and `portal_session_expired` on a login page.
+  */
   loadMessageAttachment(handle: AttachmentHandle): Promise<PortalAttachmentFile>;
   /** A cheap authenticated GET. False means the session is gone, not that it failed. */
   isSessionAlive(): Promise<boolean>;
@@ -205,14 +205,14 @@ function landingOf(response: Pick<PortalResponse, "url" | "body">): Landing {
 export type SessionLanding = "login" | "home" | "other";
 
 /**
- * Classify a liveness probe's landing.
- *
- * `home` only for a page at `<mount>Home` (or below it) that is not itself a
- * login page, challenge or handoff stub: that is the one answer that proves a
- * signed-in session. `login` for every flavour of "go and sign in". Anything
- * else -- a shell page, an interstitial, an error page -- is `other`, and is not
- * alive: see `isSessionAlive`.
- */
+Classify a liveness probe's landing.
+
+`home` only for a page at `<mount>Home` (or below it) that is not itself a
+login page, challenge or handoff stub: that is the one answer that proves a
+signed-in session. `login` for every flavour of "go and sign in". Anything
+else -- a shell page, an interstitial, an error page -- is `other`, and is not
+alive: see `isSessionAlive`.
+*/
 export function sessionLandingOf(
   response: Pick<PortalResponse, "url" | "body">,
   mountPath: string,
@@ -241,11 +241,11 @@ function assertSession(response: PortalResponse, endpoint: string): void {
 }
 
 /**
- * A locked account, a captcha challenge and a wrong password all land back on
- * the login page. The captcha check runs first: it is the one case where
- * retrying with the same credentials cannot possibly work and the owner has to
- * do something a script cannot, same as a lockout.
- */
+A locked account, a captcha challenge and a wrong password all land back on
+the login page. The captcha check runs first: it is the one case where
+retrying with the same credentials cannot possibly work and the owner has to
+do something a script cannot, same as a lockout.
+*/
 function loginFailure(response: PortalResponse, endpoint: string): AppError {
   const details = { endpoint, status: response.status };
   if (bodyMentions(response.body, MARKERS.captchaRequired)) {
@@ -257,19 +257,19 @@ function loginFailure(response: PortalResponse, endpoint: string): AppError {
 }
 
 /**
- * The hidden fields to echo back with a form POST.
- *
- * Everything the page already filled in, which is how a browser behaves: these
- * forms carry per-request state beyond the antiforgery token, and dropping it
- * fails in a way indistinguishable from a wrong password. Empty inputs are the
- * boxes the user types into and are supplied by the caller instead.
- *
- * A `Map`, not an object literal, for the same reason `visits.ts` uses one: the
- * keys come from the page's own `<input name=...>` attributes, and that is the one
- * place untrusted markup would otherwise reach a bare object. Harmless today (the
- * values are strings, so a `__proto__` assignment is a silent no-op) but it is not
- * a property worth depending on.
- */
+The hidden fields to echo back with a form POST.
+
+Everything the page already filled in, which is how a browser behaves: these
+forms carry per-request state beyond the antiforgery token, and dropping it
+fails in a way indistinguishable from a wrong password. Empty inputs are the
+boxes the user types into and are supplied by the caller instead.
+
+A `Map`, not an object literal, for the same reason `visits.ts` uses one: the
+keys come from the page's own `<input name=...>` attributes, and that is the one
+place untrusted markup would otherwise reach a bare object. Harmless today (the
+values are strings, so a `__proto__` assignment is a silent no-op) but it is not
+a property worth depending on.
+*/
 function echoedFrom(
   fields: ReadonlyMap<string, string>,
   exclude: readonly string[],
@@ -283,10 +283,10 @@ function echoedFrom(
 }
 
 /**
- * The portal-issued remembered-device id, or `""` before one has been issued --
- * which is exactly what the page's own script sends on a first sign-in. See
- * `DEVICE_ID_EXTRA_KEY`.
- */
+The portal-issued remembered-device id, or `""` before one has been issued --
+which is exactly what the page's own script sends on a first sign-in. See
+`DEVICE_ID_EXTRA_KEY`.
+*/
 function storedDeviceId(jar: CookieJar): string {
   return jar.getExtra(DEVICE_ID_EXTRA_KEY) ?? "";
 }
@@ -310,14 +310,14 @@ function usernameFieldOn(html: string, fallback: UsernameField): UsernameField {
 }
 
 /**
- * True when a body could plausibly be the JSON that was asked for.
- *
- * Content type first, because these endpoints label their answers, and a leading
- * `{` or `[` second, because a deployment behind a proxy that rewrites the header
- * would otherwise be unreadable. Deliberately *not* "did JSON.parse succeed":
- * the distinction being drawn is between "JSON arrived" and "an HTML page
- * arrived with a 200 on it", and the second one has to fail loudly.
- */
+True when a body could plausibly be the JSON that was asked for.
+
+Content type first, because these endpoints label their answers, and a leading
+`{` or `[` second, because a deployment behind a proxy that rewrites the header
+would otherwise be unreadable. Deliberately *not* "did JSON.parse succeed":
+the distinction being drawn is between "JSON arrived" and "an HTML page
+arrived with a 200 on it", and the second one has to fail loudly.
+*/
 /** One string field of an attachment's document details, or "". */
 function detailString(details: unknown, key: string): string {
   if (typeof details !== "object" || details === null || !Object.hasOwn(details, key)) return "";
@@ -326,13 +326,13 @@ function detailString(details: unknown, key: string): string {
 }
 
 /**
- * The absolute URL an attachment's `downloadUrl` names.
- *
- * The portal hands it back relative to the MOUNT (a leading slash, no mount), so
- * it is resolved under `mountRoot`. Anything that would leave the mount -- an
- * absolute URL, a protocol-relative one, a `..` -- is refused rather than
- * followed: the value is the portal's, not ours.
- */
+The absolute URL an attachment's `downloadUrl` names.
+
+The portal hands it back relative to the MOUNT (a leading slash, no mount), so
+it is resolved under `mountRoot`. Anything that would leave the mount -- an
+absolute URL, a protocol-relative one, a `..` -- is refused rather than
+followed: the value is the portal's, not ours.
+*/
 export function downloadTarget(details: unknown, mountRoot: string): string {
   const relative = detailString(details, "downloadUrl");
   if (relative === "" || !relative.startsWith("/") || relative.startsWith("//")) {
@@ -357,11 +357,11 @@ function looksLikeJson(response: PortalResponse): boolean {
 }
 
 /**
- * A JSON object body as a `Map`, or null for anything else.
- *
- * A `Map` for the same reason `echoedFrom` returns one: the keys are the
- * portal's, not ours.
- */
+A JSON object body as a `Map`, or null for anything else.
+
+A `Map` for the same reason `echoedFrom` returns one: the keys are the
+portal's, not ours.
+*/
 function jsonObject(response: PortalResponse): Map<string, unknown> | null {
   if (!looksLikeJson(response)) return null;
   let parsed: unknown;
@@ -382,20 +382,20 @@ function stringField(object: ReadonlyMap<string, unknown>, key: string): string 
 }
 
 /**
- * True when a `SendCode` POST looks like it worked.
- *
- * The captured answer is `{"Success":true}`, and the page's own script treats
- * anything without a truthy `Success` as a failure. This stays a little more
- * generous than that -- any object that does not explicitly say `success:
- * false`, and an empty 200, still count -- because the refusal shape was never
- * captured. **Not generous about a populated HTML body.** A 200 carrying a page
- * is what a missed antiforgery header or an unrelated shell page looks like,
- * and either one means no code was actually sent -- so a non-empty, non-JSON
- * body counts as accepted only when the page it rendered is a code-entry form,
- * i.e. it carries a `TwoFactorCode` input. Treating any old 200 as success
- * would report `awaiting_code` for a run that never got a code sent and had
- * nothing for the owner to wait for.
- */
+True when a `SendCode` POST looks like it worked.
+
+The captured answer is `{"Success":true}`, and the page's own script treats
+anything without a truthy `Success` as a failure. This stays a little more
+generous than that -- any object that does not explicitly say `success:
+false`, and an empty 200, still count -- because the refusal shape was never
+captured. **Not generous about a populated HTML body.** A 200 carrying a page
+is what a missed antiforgery header or an unrelated shell page looks like,
+and either one means no code was actually sent -- so a non-empty, non-JSON
+body counts as accepted only when the page it rendered is a code-entry form,
+i.e. it carries a `TwoFactorCode` input. Treating any old 200 as success
+would report `awaiting_code` for a run that never got a code sent and had
+nothing for the owner to wait for.
+*/
 function sendCodeAccepted(response: PortalResponse): boolean {
   if (response.status >= 400 || bodyMentions(response.body, MARKERS.badCredentials)) return false;
   const trimmed = response.body.trim();
@@ -572,21 +572,21 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
   };
 
   /**
-   * The challenge page's token, fetched the way a browser reaches it.
-   *
-   * With `RAN_DEVICE_CHECK_QUERY`: the bare path is a device-check stub, and the
-   * page the portal's own script posts `SendCode` and `Validate` from is the one
-   * that stub navigates to.
-   */
+  The challenge page's token, fetched the way a browser reaches it.
+
+  With `RAN_DEVICE_CHECK_QUERY`: the bare path is a device-check stub, and the
+  page the portal's own script posts `SendCode` and `Validate` from is the one
+  that stub navigates to.
+  */
   const challengeToken = (): ReturnType<typeof tokenPage> =>
     tokenPage(PATHS.secondaryValidation, "SecondaryValidation", RAN_DEVICE_CHECK_QUERY);
 
   /**
-   * One of the challenge page's own XHR POSTs: form-urlencoded, the token in a
-   * header rather than the body, and a cache-buster on the URL -- the shape a
-   * capture of the page's script showed for `SendCode`, `Validate` and
-   * `ReconcileWebDevice` alike.
-   */
+  One of the challenge page's own XHR POSTs: form-urlencoded, the token in a
+  header rather than the body, and a cache-buster on the URL -- the shape a
+  capture of the page's script showed for `SendCode`, `Validate` and
+  `ReconcileWebDevice` alike.
+  */
   const xhrPost = (
     path: string,
     label: string,
@@ -620,11 +620,11 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
   };
 
   /**
-   * GET `Home` (or a hop that ends there) and classify where it landed.
-   *
-   * Shared by the liveness check and by the navigation after a successful
-   * `Validate`, which must end on the same positive evidence.
-   */
+  GET `Home` (or a hop that ends there) and classify where it landed.
+
+  Shared by the liveness check and by the navigation after a successful
+  `Validate`, which must end on the same positive evidence.
+  */
   const fetchHome = async (
     path: string,
     label: string,
@@ -643,13 +643,13 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
   };
 
   /**
-   * What a signed-in page's own script does on load: reconcile the stored
-   * remembered-device id, and take the portal's answer when it says to.
-   *
-   * Best effort, as the browser's own call is -- fired detached, its failure
-   * shown to nobody. It never fails the sign-in, and it logs only whether the
-   * id changed, never the id.
-   */
+  What a signed-in page's own script does on load: reconcile the stored
+  remembered-device id, and take the portal's answer when it says to.
+
+  Best effort, as the browser's own call is -- fired detached, its failure
+  shown to nobody. It never fails the sign-in, and it logs only whether the
+  id changed, never the id.
+  */
   const reconcileDevice = async (home: PortalResponse): Promise<void> => {
     const stored = storedDeviceId(jar);
     const field = findAntiforgeryField(home.body, [
@@ -748,16 +748,16 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
   };
 
   /**
-   * One of the two visit endpoints, as parsed JSON.
-   *
-   * The order of the three checks is the whole point. `assertSession` first,
-   * because a stale session is the likeliest reason a JSON endpoint answered with
-   * a page and it deserves its own code. Then the "is this JSON at all" guard,
-   * because a **200 carrying HTML** is exactly what a missing or misnamed
-   * antiforgery header gets from these endpoints -- silently, with no 4xx
-   * anywhere -- and reading that as zero visits would ghost the owner's calendar.
-   * Only then `JSON.parse`.
-   */
+  One of the two visit endpoints, as parsed JSON.
+
+  The order of the three checks is the whole point. `assertSession` first,
+  because a stale session is the likeliest reason a JSON endpoint answered with
+  a page and it deserves its own code. Then the "is this JSON at all" guard,
+  because a **200 carrying HTML** is exactly what a missing or misnamed
+  antiforgery header gets from these endpoints -- silently, with no 4xx
+  anywhere -- and reading that as zero visits would ghost the owner's calendar.
+  Only then `JSON.parse`.
+  */
   const visitJson = async (
     path: string,
     label: string,
@@ -844,16 +844,16 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
   };
 
   /**
-   * One Message Center POST: JSON in, JSON out, the antiforgery token in a header.
-   *
-   * JSON is recognised FIRST, unlike `visitJson`: a message body is HTML the
-   * portal wrote, and a letter or a welcome notice can quote exactly the strings
-   * `assertSession` sniffs for (a sign-in link, "verification code"). Read that
-   * way, one such message would make every read an expired session. So a JSON
-   * answer from the URL asked for is parsed as is; only a non-JSON answer is
-   * classified -- a login page is an expired session, and any other page is a
-   * token failure (these endpoints answer a missing token with a 200 and HTML).
-   */
+  One Message Center POST: JSON in, JSON out, the antiforgery token in a header.
+
+  JSON is recognised FIRST, unlike `visitJson`: a message body is HTML the
+  portal wrote, and a letter or a welcome notice can quote exactly the strings
+  `assertSession` sniffs for (a sign-in link, "verification code"). Read that
+  way, one such message would make every read an expired session. So a JSON
+  answer from the URL asked for is parsed as is; only a non-JSON answer is
+  classified -- a login page is an expired session, and any other page is a
+  token failure (these endpoints answer a missing token with a 200 and HTML).
+  */
   const messageCenterJson = async (
     token: string,
     path: string,
@@ -950,29 +950,29 @@ export function createMyChartClient(deps: PortalClientDeps): PortalClient {
   };
 
   /**
-   * Is the session alive -- decided by a page only a signed-in session is served.
-   *
-   * `Home`, and only a chain that *ends* on `Home` under this mount, counts. That
-   * is positive evidence, and nothing weaker is accepted any more:
-   *
-   *  - Not `Home/KeepAlive`. It used to be asked first, and a short 200 from it
-   *    counted as alive -- but a keepalive exists to keep *a* session alive, not
-   *    to say whose, and an anonymous session (the one the OpenID stub itself
-   *    hands out) can be answered just as briefly. That false positive lets a
-   *    `custom_oidc` bridge that never reached the classic session report
-   *    `signed_in`, and the sync after it pass its liveness check only to bounce
-   *    off `VisitsList` with `portal_session_expired`.
-   *  - Not "any page that is not a login page". On a deployment whose login lives
-   *    in a separate shell on the same host, a dead session can be redirected into
-   *    that shell's own pages, which carry no login-form marker at all.
-   *
-   * One `portal.session_check` line per probe, with the landing *kind* -- never a
-   * URL -- because "alive or not" alone cannot say which of those happened.
-   *
-   * Deliberately not `assertSession`: the answer to this question is a boolean,
-   * and a transport failure or a bot block is a different thing again and is
-   * allowed to propagate.
-   */
+  Is the session alive -- decided by a page only a signed-in session is served.
+
+  `Home`, and only a chain that *ends* on `Home` under this mount, counts. That
+  is positive evidence, and nothing weaker is accepted any more:
+
+   - Not `Home/KeepAlive`. It used to be asked first, and a short 200 from it
+     counted as alive -- but a keepalive exists to keep *a* session alive, not
+     to say whose, and an anonymous session (the one the OpenID stub itself
+     hands out) can be answered just as briefly. That false positive lets a
+     `custom_oidc` bridge that never reached the classic session report
+     `signed_in`, and the sync after it pass its liveness check only to bounce
+     off `VisitsList` with `portal_session_expired`.
+   - Not "any page that is not a login page". On a deployment whose login lives
+     in a separate shell on the same host, a dead session can be redirected into
+     that shell's own pages, which carry no login-form marker at all.
+
+  One `portal.session_check` line per probe, with the landing *kind* -- never a
+  URL -- because "alive or not" alone cannot say which of those happened.
+
+  Deliberately not `assertSession`: the answer to this question is a boolean,
+  and a transport failure or a bot block is a different thing again and is
+  allowed to propagate.
+  */
   const isSessionAlive = async (): Promise<boolean> => {
     const { response, landed } = await fetchHome(PATHS.home, "Home", {
       [NO_CACHE_PARAM]: noCache(),

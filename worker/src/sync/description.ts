@@ -1,75 +1,75 @@
 /**
- * The calendar event description, shared between Healthy and the owner.
- *
- * Healthy owns everything from a rule line down, and the owner owns everything
- * above it:
- *
- * ```text
- * <whatever the owner typed -- kept verbatim>
- * -------
- * Synced by Healthy · do not edit below the line
- * <the appointment details>
- * ```
- *
- * `healthyBlock` renders Healthy's half. A new event's description is exactly
- * that block. Every later write goes through `mergeDescription`, which keeps the
- * text above the first line that is exactly `-------` byte for byte and replaces
- * everything from that line down. `carriesBlock` is the matching read side: the
- * plan treats an event as settled only when its description still carries the
- * current block, so an edit *below* the line (or a deleted line) is overwritten on
- * the next run, while an edit *above* it costs no write at all.
- *
- * Three shapes of description turn up that the simple case does not cover.
- *
- * **HTML.** A plain-text edit in Google's web editor stays plain text, but once
- * the owner applies any formatting the editor saves the whole description as
- * HTML -- `<br>` (or `<div>`/`<p>` blocks) where the newlines were, `&` as
- * `&amp;`, Healthy's half included. Lines are therefore
- * split on those as well as on `\n`, the owner's HTML is sliced out of the raw
- * string and never re-serialised, and when the owner's part is HTML the block is
- * written as HTML too (escaped, joined with `<br>`), so the two halves render
- * alike. The comparison in `carriesBlock` is on normalised text -- tags as line
- * breaks, the common entities decoded, blank lines ignored -- so Google
- * re-encoding an `&` in an address does not look like a change and cause a patch
- * every hour for ever.
- *
- * **No rule line.** The owner deleted it, or typed over the whole description.
- * The block is appended after whatever is there, which stays above the new line.
- *
- * **The legacy format.** Before the rule line existed, the description was the
- * appointment details followed by a last line reading "Synced by Healthy · do
- * not edit" (and, on a ghost, a "No longer on the health system's schedule" line
- * after that). All of that was Healthy's, so it is replaced wholesale rather than
- * kept above the new line -- keeping it would show every detail twice. Anything
- * after it (a note the owner appended despite the footer) is not part of the old
- * rendering, and is kept above the line. Text the owner put *before* the old
- * details cannot be told apart from them and goes with them: that region was
- * marked "do not edit", and guessing would be worse.
- *
- * Pure and silent. The owner's text is personal content: nothing here logs it,
- * and nothing that calls this stores it.
- *
- * **One line of the details may be a link.** `mapping.ts` turns the visit-type
- * line into a hyperlink (`linkify`) when the health system has a portal url, and
- * that is the one piece of real markup this module ever writes into the block
- * itself. `htmlBlock` has to know that when it escapes the rest of the block for
- * an HTML owner: it recognises a well-formed `<a>`/`</a>` tag structurally (by
- * tag name, the same way `plainText` already reads the owner's own HTML) and
- * copies it through unescaped, so the link keeps working instead of showing up
- * as literal angle brackets. Anything else that merely looks like a tag --
- * including a stray `<` in upstream data -- is escaped like any other
- * character, exactly as it always was.
- *
- * **A block with a link is always written as HTML.** One `<a>` makes the whole
- * description HTML to any client that renders it as such, and HTML ignores `\n`:
- * Business Calendar showed every synced event's details run together on one line
- * while Google's own UI, which is lenient, did not. So when the block carries
- * markup it is joined with `<br>`, and plain owner text above it is converted
- * the same way (escaped, `\n` as `<br>`) -- the one case where the owner's bytes
- * change, and only into markup that renders exactly as the plain text did. A
- * description written the old way (a linked block joined with `\n`) does not
- * read as settled, so it is rewritten once.
- */
+The calendar event description, shared between Healthy and the owner.
+
+Healthy owns everything from a rule line down, and the owner owns everything
+above it:
+
+```text
+<whatever the owner typed -- kept verbatim>
+-------
+Synced by Healthy · do not edit below the line
+<the appointment details>
+```
+
+`healthyBlock` renders Healthy's half. A new event's description is exactly
+that block. Every later write goes through `mergeDescription`, which keeps the
+text above the first line that is exactly `-------` byte for byte and replaces
+everything from that line down. `carriesBlock` is the matching read side: the
+plan treats an event as settled only when its description still carries the
+current block, so an edit *below* the line (or a deleted line) is overwritten on
+the next run, while an edit *above* it costs no write at all.
+
+Three shapes of description turn up that the simple case does not cover.
+
+**HTML.** A plain-text edit in Google's web editor stays plain text, but once
+the owner applies any formatting the editor saves the whole description as
+HTML -- `<br>` (or `<div>`/`<p>` blocks) where the newlines were, `&` as
+`&amp;`, Healthy's half included. Lines are therefore
+split on those as well as on `\n`, the owner's HTML is sliced out of the raw
+string and never re-serialised, and when the owner's part is HTML the block is
+written as HTML too (escaped, joined with `<br>`), so the two halves render
+alike. The comparison in `carriesBlock` is on normalised text -- tags as line
+breaks, the common entities decoded, blank lines ignored -- so Google
+re-encoding an `&` in an address does not look like a change and cause a patch
+every hour for ever.
+
+**No rule line.** The owner deleted it, or typed over the whole description.
+The block is appended after whatever is there, which stays above the new line.
+
+**The legacy format.** Before the rule line existed, the description was the
+appointment details followed by a last line reading "Synced by Healthy · do
+not edit" (and, on a ghost, a "No longer on the health system's schedule" line
+after that). All of that was Healthy's, so it is replaced wholesale rather than
+kept above the new line -- keeping it would show every detail twice. Anything
+after it (a note the owner appended despite the footer) is not part of the old
+rendering, and is kept above the line. Text the owner put *before* the old
+details cannot be told apart from them and goes with them: that region was
+marked "do not edit", and guessing would be worse.
+
+Pure and silent. The owner's text is personal content: nothing here logs it,
+and nothing that calls this stores it.
+
+**One line of the details may be a link.** `mapping.ts` turns the visit-type
+line into a hyperlink (`linkify`) when the health system has a portal url, and
+that is the one piece of real markup this module ever writes into the block
+itself. `htmlBlock` has to know that when it escapes the rest of the block for
+an HTML owner: it recognises a well-formed `<a>`/`</a>` tag structurally (by
+tag name, the same way `plainText` already reads the owner's own HTML) and
+copies it through unescaped, so the link keeps working instead of showing up
+as literal angle brackets. Anything else that merely looks like a tag --
+including a stray `<` in upstream data -- is escaped like any other
+character, exactly as it always was.
+
+**A block with a link is always written as HTML.** One `<a>` makes the whole
+description HTML to any client that renders it as such, and HTML ignores `\n`:
+Business Calendar showed every synced event's details run together on one line
+while Google's own UI, which is lenient, did not. So when the block carries
+markup it is joined with `<br>`, and plain owner text above it is converted
+the same way (escaped, `\n` as `<br>`) -- the one case where the owner's bytes
+change, and only into markup that renders exactly as the plain text did. A
+description written the old way (a linked block joined with `\n`) does not
+read as settled, so it is rewritten once.
+*/
 
 /** The line that separates the owner's text from Healthy's. Exactly this. */
 const RULE = "-------";
@@ -107,10 +107,10 @@ export function healthyBlock(details: string): string {
 }
 
 /**
- * One line of a description, as offsets into the raw string. `cut` is where the
- * text above this line ends: the line's own start, or the start of the opening
- * `<div>`/`<p>` that wraps it, so a cut there never leaves an unclosed tag.
- */
+One line of a description, as offsets into the raw string. `cut` is where the
+text above this line ends: the line's own start, or the start of the opening
+`<div>`/`<p>` that wraps it, so a cut there never leaves an unclosed tag.
+*/
 interface Line {
   start: number;
   end: number;
@@ -132,9 +132,9 @@ function parseTag(inner: string): { name: string; closing: boolean } | null {
 }
 
 /**
- * Split on `\n` and on line-breaking tags. A hand-rolled scan rather than a
- * regex: linear however the owner's text is shaped.
- */
+Split on `\n` and on line-breaking tags. A hand-rolled scan rather than a
+regex: linear however the owner's text is shaped.
+*/
 function scanLines(text: string): Line[] {
   const lines: Line[] = [];
   let start = 0;
@@ -221,11 +221,11 @@ function escapeAttr(url: string): string {
 }
 
 /**
- * A line of the details as a hyperlink -- the one piece of real markup this
- * module ever writes into a block. Both the visible text and the url are
- * escaped, so a stray `&` or `<` in either (upstream data, or a portal url
- * copied out of a health system's config) cannot break out of the tag.
- */
+A line of the details as a hyperlink -- the one piece of real markup this
+module ever writes into a block. Both the visible text and the url are
+escaped, so a stray `&` or `<` in either (upstream data, or a portal url
+copied out of a health system's config) cannot break out of the tag.
+*/
 export function linkify(text: string, url: string): string {
   return `<a href="${escapeAttr(url)}">${escapeHtml(text)}</a>`;
 }
@@ -234,14 +234,14 @@ export function linkify(text: string, url: string): string {
 const SAFE_TAGS: ReadonlySet<string> = new Set(["a"]);
 
 /**
- * The block as HTML, to sit below an owner's text that Google has made HTML.
- *
- * Escapes every character except a well-formed `<a>` or `</a>` tag, which is
- * copied through verbatim -- attributes included -- so a link `linkify` wrote
- * stays a link instead of turning into visible markup. `parseTag` (below) is
- * the same recogniser `plainText` uses to read the owner's own HTML, so this
- * treats a tag as structural on exactly the same terms reading already does.
- */
+The block as HTML, to sit below an owner's text that Google has made HTML.
+
+Escapes every character except a well-formed `<a>` or `</a>` tag, which is
+copied through verbatim -- attributes included -- so a link `linkify` wrote
+stays a link instead of turning into visible markup. `parseTag` (below) is
+the same recogniser `plainText` uses to read the owner's own HTML, so this
+treats a tag as structural on exactly the same terms reading already does.
+*/
 function htmlBlock(block: string): string {
   let out = "";
   let at = 0;
@@ -280,11 +280,11 @@ function endsHtmlLine(text: string): boolean {
 }
 
 /**
- * The owner's text and the block, joined in one flavour: HTML when either half
- * already is -- the owner's because Google made it so, the block's because it
- * carries a link -- and plain text only when both are. `blankLine` puts an
- * empty line between them unless the owner's text already ends one.
- */
+The owner's text and the block, joined in one flavour: HTML when either half
+already is -- the owner's because Google made it so, the block's because it
+carries a link -- and plain text only when both are. `blankLine` puts an
+empty line between them unless the owner's text already ends one.
+*/
 function joinHalves(owner: string, block: string, blankLine: boolean): string {
   if (!looksLikeHtml(owner) && !looksLikeHtml(block)) {
     const gap = !blankLine || owner.endsWith("\n") ? "" : "\n\n";
@@ -296,11 +296,11 @@ function joinHalves(owner: string, block: string, blankLine: boolean): string {
 }
 
 /**
- * What follows a legacy Healthy rendering, or null when the text is not one.
- *
- * The legacy rendering runs to the old footer line, then (on a ghost) a blank
- * line and the vanished line. Everything after that is the owner's.
- */
+What follows a legacy Healthy rendering, or null when the text is not one.
+
+The legacy rendering runs to the old footer line, then (on a ghost) a blank
+line and the vanished line. Everything after that is the owner's.
+*/
 function legacyRemainder(text: string): string | null {
   const lines = scanLines(text);
   const footer = lines.findIndex((line) => lineText(text, line) === LEGACY_FOOTER);
@@ -324,10 +324,10 @@ function legacyRemainder(text: string): string | null {
 }
 
 /**
- * The description to write over `current`: the owner's text above the rule kept
- * verbatim, Healthy's block from the rule down. See the module comment for the
- * no-rule and legacy cases.
- */
+The description to write over `current`: the owner's text above the rule kept
+verbatim, Healthy's block from the rule down. See the module comment for the
+no-rule and legacy cases.
+*/
 export function mergeDescription(current: string | null, block: string): string {
   const text = current ?? "";
   if (text.trim() === "") return joinHalves("", block, false);
@@ -340,9 +340,9 @@ export function mergeDescription(current: string | null, block: string): string 
 }
 
 /**
- * True when `current` already carries `block` below its first rule line, give
- * or take HTML and blank lines. The owner's text above the line does not matter.
- */
+True when `current` already carries `block` below its first rule line, give
+or take HTML and blank lines. The owner's text above the line does not matter.
+*/
 export function carriesBlock(current: string | null, block: string): boolean {
   if (current === null) return false;
   const rule = findRule(current);

@@ -1,14 +1,14 @@
 /**
- * Paired phones: the `devices` table (worker/migrations/0016_health_connect.sql).
- *
- * A device is a source of Health Connect records, not a health system. Its row
- * holds what the ingest route needs to authenticate it -- the digest of its
- * bearer token, never the token -- and what the Phone page shows about it.
- *
- * The name the owner gave the phone is sealed and padded like every other
- * short, human-chosen value. Everything else in the clear is bookkeeping: this
- * app's own id, instants, the companion app's version string.
- */
+Paired phones: the `devices` table (worker/migrations/0016_health_connect.sql).
+
+A device is a source of Health Connect records, not a health system. Its row
+holds what the ingest route needs to authenticate it -- the digest of its
+bearer token, never the token -- and what the Phone page shows about it.
+
+The name the owner gave the phone is sealed and padded like every other
+short, human-chosen value. Everything else in the clear is bookkeeping: this
+app's own id, instants, the companion app's version string.
+*/
 
 import { hashDeviceToken, mintDeviceToken } from "../../hc/device-token.ts";
 import { newId } from "../../lib/ids.ts";
@@ -72,9 +72,9 @@ export function makeDevicesRepo(ctx: Ctx) {
     },
 
     /**
-     * Replace a device's token. The old one stops working with this statement;
-     * a revoked device stays revoked (pairing again is `mint`).
-     */
+    Replace a device's token. The old one stops working with this statement;
+    a revoked device stays revoked (pairing again is `mint`).
+    */
     async rotate(id: string): Promise<MintedDevice | null> {
       const token = mintDeviceToken(id);
       const { changes } = await run(
@@ -128,10 +128,10 @@ export function makeDevicesRepo(ctx: Ctx) {
     },
 
     /**
-     * Count one authenticated request against the device's fixed window and
-     * return the count inside it. One statement, so two concurrent uploads
-     * cannot both read a stale count. Also stamps `last_seen_at`.
-     */
+    Count one authenticated request against the device's fixed window and
+    return the count inside it. One statement, so two concurrent uploads
+    cannot both read a stale count. Also stamps `last_seen_at`.
+    */
     async bumpRate(id: string, windowSeconds: number): Promise<number> {
       const at = ctx.now();
       const row = await one<{ rate_window_count: number }>(
@@ -182,11 +182,11 @@ export function makeDevicesRepo(ctx: Ctx) {
     },
 
     /**
-     * Remove the device row. Every Health Connect table hangs off it with
-     * `ON DELETE CASCADE`, but a phone's history is millions of rows, so the
-     * caller (the wipe in `worker/src/hc/`) empties those tables in slices
-     * first and calls this last.
-     */
+    Remove the device row. Every Health Connect table hangs off it with
+    `ON DELETE CASCADE`, but a phone's history is millions of rows, so the
+    caller (the wipe in `worker/src/hc/`) empties those tables in slices
+    first and calls this last.
+    */
     async delete(id: string): Promise<boolean> {
       const { changes } = await run(ctx.db.prepare("DELETE FROM devices WHERE id = ?").bind(id));
       return changes > 0;

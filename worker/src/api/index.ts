@@ -40,13 +40,13 @@ export const apiRouter = new Hono<AppHonoEnv>();
 apiRouter.onError(apiErrorHandler);
 
 /**
- * The SPA's "is my session still good?" probe, and the smoke test for the whole
- * gate chain.
- *
- * It answers `{ ok: true }` and nothing else -- no identity, no email, no
- * configuration. A caller that reaches this route has already proved it is the
- * owner, so there is nothing to tell it that it does not know.
- */
+The SPA's "is my session still good?" probe, and the smoke test for the whole
+gate chain.
+
+It answers `{ ok: true }` and nothing else -- no identity, no email, no
+configuration. A caller that reaches this route has already proved it is the
+owner, so there is nothing to tell it that it does not know.
+*/
 apiRouter.get("/whoami", (c) => c.json({ ok: true }, 200, NO_STORE));
 
 apiRouter.route("/overview", overviewRouter);
@@ -67,8 +67,8 @@ apiRouter.route("/mail", mailRouter);
 apiRouter.route("/phone", phoneRouter);
 
 /**
- * An unknown /api path must be a JSON 404, never the SPA's index.html: the SPA
- * fallback would answer a mistyped fetch with an HTML document and turn a clear
- * 404 into a parse error at the other end.
- */
+An unknown /api path must be a JSON 404, never the SPA's index.html: the SPA
+fallback would answer a mistyped fetch with an HTML document and turn a clear
+404 into a parse error at the other end.
+*/
 apiRouter.all("*", (c) => c.json<ApiError>({ error: "not_found" }, 404, NO_STORE));

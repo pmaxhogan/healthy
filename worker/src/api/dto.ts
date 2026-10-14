@@ -1,24 +1,24 @@
 /**
- * Row -> DTO projections for the admin API.
- *
- * This module is the *only* place a D1 row turns into something the SPA sees, and
- * it is a pure function of its argument: no D1, no Env, no fetch. That is what
- * makes the guarantee testable, and the guarantee is the reason the file exists --
- * **no projection here ever reads a `*_enc` column.** The sealed columns are not
- * merely omitted from the output; the functions below do not take a row's sealed
- * fields as an input at all, so a future field cannot be added by copying a
- * spread. Where the UI needs to know that a secret exists, the caller passes a
- * boolean (`hasClientSecret`, `hasRefreshToken`) that it derived from the row.
- *
- * Two representation mismatches are bridged here rather than in the handlers:
- *
- *  - **camelCase vs snake_case.** `worker/shared/types.ts` is the SPA's vocabulary and is
- *    camelCase; `health_systems.config_json` and the `settings` table are snake_case
- *    because that is what the columns are called. Both directions live here.
- *  - **seconds vs ISO.** Every D1 timestamp is an integer unix second; every DTO
- *    field is an ISO-8601 instant, because that is what `Date` parses and what
- *    `Intl` formats.
- */
+Row -> DTO projections for the admin API.
+
+This module is the *only* place a D1 row turns into something the SPA sees, and
+it is a pure function of its argument: no D1, no Env, no fetch. That is what
+makes the guarantee testable, and the guarantee is the reason the file exists --
+**no projection here ever reads a `*_enc` column.** The sealed columns are not
+merely omitted from the output; the functions below do not take a row's sealed
+fields as an input at all, so a future field cannot be added by copying a
+spread. Where the UI needs to know that a secret exists, the caller passes a
+boolean (`hasClientSecret`, `hasRefreshToken`) that it derived from the row.
+
+Two representation mismatches are bridged here rather than in the handlers:
+
+ - **camelCase vs snake_case.** `worker/shared/types.ts` is the SPA's vocabulary and is
+   camelCase; `health_systems.config_json` and the `settings` table are snake_case
+   because that is what the columns are called. Both directions live here.
+ - **seconds vs ISO.** Every D1 timestamp is an integer unix second; every DTO
+   field is an ISO-8601 instant, because that is what `Date` parses and what
+   `Intl` formats.
+*/
 
 import { deviceStatus } from "../hc/coverage.ts";
 import { toIso } from "../lib/time.ts";
@@ -65,25 +65,25 @@ import type {
 } from "@shared/types.ts";
 
 /**
- * The same properties, but every optional one may also be explicitly `undefined`.
- *
- * `exactOptionalPropertyTypes` is on, which makes `{ titleTemplate?: string }` and
- * `{ titleTemplate?: string | undefined }` genuinely different types -- and a zod
- * `.optional()` produces the second. Rather than loosen the DTOs in `worker/shared/`
- * (where the stricter shape is right: the SPA should not send an explicit
- * `undefined`), the two functions that *accept* a DTO accept this widening of it.
- */
+The same properties, but every optional one may also be explicitly `undefined`.
+
+`exactOptionalPropertyTypes` is on, which makes `{ titleTemplate?: string }` and
+`{ titleTemplate?: string | undefined }` genuinely different types -- and a zod
+`.optional()` produces the second. Rather than loosen the DTOs in `worker/shared/`
+(where the stricter shape is right: the SPA should not send an explicit
+`undefined`), the two functions that *accept* a DTO accept this widening of it.
+*/
 type Loose<T> = { [K in keyof T]?: T[K] | undefined };
 
 /**
- * The decoded `run_log` and `mcp_audit` rows, mirrored rather than imported.
- *
- * `db/repos/*.ts` reach the Worker runtime types (`D1Database`), and this module is
- * deliberately importable from the plain-Node unit tests -- the same reason
- * `db/schemas.ts` is written the way it is. These two shapes are structural, so the
- * repos' own return types satisfy them and a divergence is a compile error at the
- * call site in `worker/src/api/routes/`.
- */
+The decoded `run_log` and `mcp_audit` rows, mirrored rather than imported.
+
+`db/repos/*.ts` reach the Worker runtime types (`D1Database`), and this module is
+deliberately importable from the plain-Node unit tests -- the same reason
+`db/schemas.ts` is written the way it is. These two shapes are structural, so the
+repos' own return types satisfy them and a divergence is a compile error at the
+call site in `worker/src/api/routes/`.
+*/
 export interface RunEntryLike {
   id: string;
   kind: RunKind;
@@ -113,11 +113,11 @@ function isoOrNull(seconds: number | null): string | null {
 }
 
 /**
- * `health_systems.vendor` is only ever written by `/api/health-systems`, which
- * takes it from a schema enumerating the adapter registry's vendors. The
- * assertion carries that fact across the db boundary without a runtime branch
- * that could never be taken.
- */
+`health_systems.vendor` is only ever written by `/api/health-systems`, which
+takes it from a schema enumerating the adapter registry's vendors. The
+assertion carries that fact across the db boundary without a runtime branch
+that could never be taken.
+*/
 function toVendor(value: string): Vendor {
   return value as Vendor;
 }
@@ -163,12 +163,12 @@ export function reconnectPathFor(connectionId: string): string {
 }
 
 /**
- * A connection row -> `ConnectionDto`.
- *
- * `hasRefreshToken` is the only thing said about the sealed columns, and it is
- * derived from the column being non-null -- the ciphertext itself never leaves
- * the db layer, and this function never sees the plaintext either.
- */
+A connection row -> `ConnectionDto`.
+
+`hasRefreshToken` is the only thing said about the sealed columns, and it is
+derived from the column being non-null -- the ciphertext itself never leaves
+the db layer, and this function never sees the plaintext either.
+*/
 export function toConnectionDto(row: ConnectionRow): ConnectionDto {
   return {
     id: row.id,
@@ -220,14 +220,14 @@ export function toHealthSystemDto(input: HealthSystemProjection): HealthSystemDt
 // ---------------------------------------------------------------------------
 
 /**
- * Mask an account label for display: `p…n@gmail.com`.
- *
- * The owner needs to recognise *which* Google account is connected; nothing else
- * about the address is useful in the UI, and the label is read back out of an
- * encrypted column, so the less of it that travels the better. A label with no
- * `@` (Google returns the calendar id, which is normally the address but need not
- * be) is masked the same way, minus a domain.
- */
+Mask an account label for display: `p…n@gmail.com`.
+
+The owner needs to recognise *which* Google account is connected; nothing else
+about the address is useful in the UI, and the label is read back out of an
+encrypted column, so the less of it that travels the better. A label with no
+`@` (Google returns the calendar id, which is normally the address but need not
+be) is masked the same way, minus a domain.
+*/
 export function maskAccountLabel(label: string | null): string | null {
   if (label === null || label === "") return null;
   const at = label.lastIndexOf("@");
@@ -283,16 +283,16 @@ export function toSettingsDto(settings: Settings): SettingsDto {
 }
 
 /**
- * A `SettingsPatch` -> the `settings` keys to write.
- *
- * Only keys actually present in the patch are returned, so `setSettings` writes
- * exactly what the owner sent and leaves everything else alone.
- *
- * `syncBackoffUntil` is accepted but deliberately NOT written: the backoff is set
- * by the sync engine when an organisation answers 429 and cleared when the owner
- * presses "sync now". Letting the settings form move it would let a stale form
- * re-impose a backoff that had already expired.
- */
+A `SettingsPatch` -> the `settings` keys to write.
+
+Only keys actually present in the patch are returned, so `setSettings` writes
+exactly what the owner sent and leaves everything else alone.
+
+`syncBackoffUntil` is accepted but deliberately NOT written: the backoff is set
+by the sync engine when an organisation answers 429 and cleared when the owner
+presses "sync now". Letting the settings form move it would let a stale form
+re-impose a backoff that had already expired.
+*/
 export function fromSettingsPatch(patch: Loose<SettingsPatch>): Partial<Settings> {
   const values: Partial<Settings> = {};
   if (patch.timezone !== undefined) values.timezone = patch.timezone;
@@ -318,29 +318,29 @@ export function fromSettingsPatch(patch: Loose<SettingsPatch>): Partial<Settings
 // ---------------------------------------------------------------------------
 
 /**
- * The stored summary -> the DTO the overview renders.
- *
- * The two vocabularies do not line up exactly, and the difference is worth
- * stating: the column holds what the sync engine counts, the DTO holds what the
- * UI shows.
- *
- *  - `encountersSeen` is the number of appointments the run actually saw
- *    upstream, which is everything it inserted, patched, restored or left
- *    unchanged. Ghosts are excluded on purpose: a ghost is an appointment that
- *    was *not* there.
- *  - `warnings` is how many warnings there were, not how many distinct codes.
- *    `warningCodes` is those distinct codes -- e.g. an Epic OperationOutcome code,
- *    which, not how many. A row written before `warningCount` existed has it at
- *    zero, so the number of distinct codes is the floor for `warnings` -- which is
- *    why that is a `max` and not a read.
- *  - `errors` is passed straight through: `run_log.summary_json.errors` is
- *    already bare, stable codes with no health system prefix, by design (see
- *    `worker/src/sync/run.ts`), so there is nothing here to parse.
- *  - `filteredView` and `backedOff` come straight off the stored summary. A run
- *    that saw a filtered schedule is the run that refused to ghost anything, and a
- *    backed-off one did almost nothing at all: both are the first thing to look at
- *    when a run reports no changes.
- */
+The stored summary -> the DTO the overview renders.
+
+The two vocabularies do not line up exactly, and the difference is worth
+stating: the column holds what the sync engine counts, the DTO holds what the
+UI shows.
+
+ - `encountersSeen` is the number of appointments the run actually saw
+   upstream, which is everything it inserted, patched, restored or left
+   unchanged. Ghosts are excluded on purpose: a ghost is an appointment that
+   was *not* there.
+ - `warnings` is how many warnings there were, not how many distinct codes.
+   `warningCodes` is those distinct codes -- e.g. an Epic OperationOutcome code,
+   which, not how many. A row written before `warningCount` existed has it at
+   zero, so the number of distinct codes is the floor for `warnings` -- which is
+   why that is a `max` and not a read.
+ - `errors` is passed straight through: `run_log.summary_json.errors` is
+   already bare, stable codes with no health system prefix, by design (see
+   `worker/src/sync/run.ts`), so there is nothing here to parse.
+ - `filteredView` and `backedOff` come straight off the stored summary. A run
+   that saw a filtered schedule is the run that refused to ghost anything, and a
+   backed-off one did almost nothing at all: both are the first thing to look at
+   when a run reports no changes.
+*/
 export function toRunSummaryDto(summary: DbRunSummary): RunSummaryDto {
   return {
     healthSystems: summary.healthSystems,
@@ -378,13 +378,13 @@ export function toRunDto(entry: RunEntryLike): RunDto {
 // ---------------------------------------------------------------------------
 
 /**
- * `alerts.subject` is `health_system:<id>`, `portal:<id>` or the literal `google`.
- *
- * Both prefixes yield the same `healthSystemId`, because the UI groups alerts by the
- * health system they concern -- a dead FHIR grant and a dead portal session are
- * two alerts about one health system, and the subject string is still there for
- * anything that needs to tell them apart.
- */
+`alerts.subject` is `health_system:<id>`, `portal:<id>` or the literal `google`.
+
+Both prefixes yield the same `healthSystemId`, because the UI groups alerts by the
+health system they concern -- a dead FHIR grant and a dead portal session are
+two alerts about one health system, and the subject string is still there for
+anything that needs to tell them apart.
+*/
 const SUBJECT_PREFIXES = ["health_system:", "portal:"] as const;
 
 /** The health system id a subject names, or null when it names none. */
@@ -409,14 +409,14 @@ export function toAlertDto(row: AlertRow): AlertDto {
 }
 
 /**
- * Project one policy rule, saying whether the engine could parse it.
- *
- * `unparsed` is answered by the engine itself, on this one row, rather than by a
- * second copy of the target grammar here. A rule the engine makes nothing of
- * enforces nothing, and the owner has no way to tell from the row: it looks
- * stored, because it is. That is the one lie this surface can tell, so the UI
- * gets told. See `PolicyRules.unparsed`.
- */
+Project one policy rule, saying whether the engine could parse it.
+
+`unparsed` is answered by the engine itself, on this one row, rather than by a
+second copy of the target grammar here. A rule the engine makes nothing of
+enforces nothing, and the owner has no way to tell from the row: it looks
+stored, because it is. That is the one lie this surface can tell, so the UI
+gets told. See `PolicyRules.unparsed`.
+*/
 export function toPolicyRuleDto(row: McpPolicyRow): PolicyRuleDto {
   return {
     id: row.id,
@@ -437,15 +437,15 @@ export function toPolicyRuleDto(row: McpPolicyRow): PolicyRuleDto {
 // ---------------------------------------------------------------------------
 
 /**
- * The decoded `mail_inbox` entry `worker/src/db/repos/mail-inbox.ts` returns.
- *
- * Mirrored rather than imported, for the same reason as `RunEntryLike` above.
- * `senderDomain` is already only the domain: the repo opens `from_addr_enc`
- * and drops the local part, so the full address never reaches this layer.
- * `subject` is likewise already null for every kind but `forward_verify`, and
- * `pendingCode`/`pendingUrl` are the repo's own "never an otp row's code"
- * answer -- this function re-decides none of that.
- */
+The decoded `mail_inbox` entry `worker/src/db/repos/mail-inbox.ts` returns.
+
+Mirrored rather than imported, for the same reason as `RunEntryLike` above.
+`senderDomain` is already only the domain: the repo opens `from_addr_enc`
+and drops the local part, so the full address never reaches this layer.
+`subject` is likewise already null for every kind but `forward_verify`, and
+`pendingCode`/`pendingUrl` are the repo's own "never an otp row's code"
+answer -- this function re-decides none of that.
+*/
 export interface MailInboxEntryLike {
   id: string;
   receivedAt: number;
@@ -497,10 +497,10 @@ export function toAuditDto(entry: AuditEntryLike): McpAuditDto {
 }
 
 /**
- * A paired phone. `queue`, `report` and `totals` are read elsewhere (the queue
- * and status repos, the sealed sync report) and passed in already projected, so
- * this stays a pure function of its argument.
- */
+A paired phone. `queue`, `report` and `totals` are read elsewhere (the queue
+and status repos, the sealed sync report) and passed in already projected, so
+this stays a pure function of its argument.
+*/
 export function toDeviceDto(input: {
   device: Device;
   now: number;
@@ -530,11 +530,11 @@ export function toDeviceDto(input: {
 }
 
 /**
- * Epoch milliseconds as an ISO instant, or null for anything that is not one: a
- * non-finite number or one outside the range a `Date` holds. Total on purpose:
- * this page is how the owner revokes a misbehaving phone, so a bad stored value
- * must render as "unknown", never throw.
- */
+Epoch milliseconds as an ISO instant, or null for anything that is not one: a
+non-finite number or one outside the range a `Date` holds. Total on purpose:
+this page is how the owner revokes a misbehaving phone, so a bad stored value
+must render as "unknown", never throw.
+*/
 export function isoFromMs(ms: number | null): string | null {
   if (ms === null || !Number.isFinite(ms)) return null;
   const date = new Date(ms);

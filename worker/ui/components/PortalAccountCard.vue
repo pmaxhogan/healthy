@@ -101,10 +101,10 @@ const PHASE_TEXT: Partial<Record<PortalSignInPhase, string>> = {
 };
 
 /**
- * The runner's own phase and the account row's own state can describe two
- * different sign-in attempts -- see `effectiveSignIn`'s own comment -- so this
- * is the freshest of the two, not simply `signIn` off the wire.
- */
+The runner's own phase and the account row's own state can describe two
+different sign-in attempts -- see `effectiveSignIn`'s own comment -- so this
+is the freshest of the two, not simply `signIn` off the wire.
+*/
 const outcome = computed(() =>
   portal.account.data.value === null ? null : effectiveSignIn(portal.account.data.value),
 );
@@ -119,10 +119,10 @@ const phaseLine = computed<string | null>(() => {
 });
 
 /**
- * Whether a portal address is already stored. Until it is, the server needs one
- * to find the portal (`PUT .../portal` refuses a first save without `baseUrl`),
- * so the field is required; afterwards a blank field keeps the stored one.
- */
+Whether a portal address is already stored. Until it is, the server needs one
+to find the portal (`PUT .../portal` refuses a first save without `baseUrl`),
+so the field is required; afterwards a blank field keeps the stored one.
+*/
 const hasStoredPortal = computed(() => (portal.account.data.value?.baseUrl ?? null) !== null);
 
 const canSave = computed(
@@ -133,13 +133,13 @@ const canSave = computed(
 );
 
 /**
- * What `POST .../portal/discover` last reported, waiting for the owner's Confirm.
- *
- * Null means there is nothing to confirm -- either nothing has been probed yet,
- * or the save went through. Cleared whenever the base URL is edited, because the
- * origin on screen would then no longer be the one the owner is about to agree
- * to.
- */
+What `POST .../portal/discover` last reported, waiting for the owner's Confirm.
+
+Null means there is nothing to confirm -- either nothing has been probed yet,
+or the save went through. Cleared whenever the base URL is edited, because the
+origin on screen would then no longer be the one the owner is about to agree
+to.
+*/
 const discovered = ref<PortalDiscoveryDto | null>(null);
 watch(
   () => draft.baseUrl,
@@ -158,14 +158,14 @@ function originOf(url: string): string | null {
 }
 
 /**
- * Save, in the two steps the Worker requires.
- *
- * A password change against the portal already stored needs no probe: that
- * origin was confirmed when it was stored, so it is passed straight back as
- * `confirmedOrigin`. Anything else -- a first save, or a different host -- runs
- * discovery first and shows the owner where it landed, because the origin the
- * chain settles on is where their portal password will be POSTed.
- */
+Save, in the two steps the Worker requires.
+
+A password change against the portal already stored needs no probe: that
+origin was confirmed when it was stored, so it is passed straight back as
+`confirmedOrigin`. Anything else -- a first save, or a different host -- runs
+discovery first and shows the owner where it landed, because the origin the
+chain settles on is where their portal password will be POSTed.
+*/
 async function onSave(): Promise<void> {
   const typed = draft.baseUrl.trim();
   const known = portal.account.data.value?.baseUrl ?? null;
@@ -228,10 +228,10 @@ async function submit(confirmedOrigin: string, confirmedSignInOrigin?: string): 
 }
 
 /**
- * Whether the last `POST .../portal/sign-in` actually queued a job -- a `ref`
- * (not a bare `let`) for the same reason `seeded` above is one: it is written
- * from inside the callback `onSignIn` hands to `signIn.run`.
- */
+Whether the last `POST .../portal/sign-in` actually queued a job -- a `ref`
+(not a bare `let`) for the same reason `seeded` above is one: it is written
+from inside the callback `onSignIn` hands to `signIn.run`.
+*/
 const signInStarted = ref(false);
 
 async function onSignIn(): Promise<void> {

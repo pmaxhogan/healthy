@@ -1,15 +1,15 @@
 /**
- * The per-resource read tools: one per thing a medical record contains.
- *
- * Deliberately many small tools rather than one `query_fhir`. A model picks a
- * tool by name, and "get_allergies" is a better prompt than a resource type plus
- * a category parameter it has to get right. It also means the owner's deny-list
- * can switch off a whole subject area by naming one tool.
- *
- * Every one of them is a `collectionTool`: a description, the resource types to
- * read, the date to order by, and any predicate. No tool in this file touches the
- * network, the policy rules or the serialiser -- `collectionTool` owns all three.
- */
+The per-resource read tools: one per thing a medical record contains.
+
+Deliberately many small tools rather than one `query_fhir`. A model picks a
+tool by name, and "get_allergies" is a better prompt than a resource type plus
+a category parameter it has to get right. It also means the owner's deny-list
+can switch off a whole subject area by naming one tool.
+
+Every one of them is a `collectionTool`: a description, the resource types to
+read, the date to order by, and any predicate. No tool in this file touches the
+network, the policy rules or the serialiser -- `collectionTool` owns all three.
+*/
 
 import { z } from "zod";
 

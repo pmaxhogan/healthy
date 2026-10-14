@@ -20,11 +20,11 @@ import type { HealthResponse } from "@shared/types.ts";
 const REPO = "https://github.com/pmaxhogan/healthy";
 
 /**
- * `private`, not `public`: the pages carry nothing personal and would be safe in a
- * shared cache, but each response also carries a per-response CSP nonce, and a
- * shared cache handing the same nonce to many readers is a nonce in name only.
- * A browser-local cache still spares a reviewer's repeat visits.
- */
+`private`, not `public`: the pages carry nothing personal and would be safe in a
+shared cache, but each response also carries a per-response CSP nonce, and a
+shared cache handing the same nonce to many readers is a nonce in name only.
+A browser-local cache still spares a reviewer's repeat visits.
+*/
 const PUBLIC_CACHE = "private, max-age=3600";
 
 function footer(): string {
@@ -158,16 +158,16 @@ account.</p>
 </main>`;
 
 /**
- * Mounted before the gates in app.ts, so a stranger reaches exactly these four
- * routes and nothing else.
- */
+Mounted before the gates in app.ts, so a stranger reaches exactly these four
+routes and nothing else.
+*/
 export const publicRouter = new Hono<AppHonoEnv>();
 
 /**
- * Liveness probe. Deliberately says nothing but `ok`: no version, no build, no
- * connection count. It is the one endpoint reachable by anyone on the internet,
- * so anything it reports is information disclosure.
- */
+Liveness probe. Deliberately says nothing but `ok`: no version, no build, no
+connection count. It is the one endpoint reachable by anyone on the internet,
+so anything it reports is information disclosure.
+*/
 publicRouter.get("/health", (c) =>
   c.json<HealthResponse>({ ok: true }, 200, { "cache-control": "no-store" }),
 );

@@ -30,11 +30,11 @@ import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 const rules = (...input: PolicyRuleInput[]) => buildRules(input);
 
 /**
- * The world each test starts from, in a holder rather than two `let`s.
- *
- * `beforeEach` assigns into it, and a test mutates `world.state` to change what
- * the tools see mid-session.
- */
+The world each test starts from, in a holder rather than two `let`s.
+
+`beforeEach` assigns into it, and a test mutates `world.state` to change what
+the tools see mid-session.
+*/
 const world: { state: FakeState; client: Client } = {
   state: fakeState(),
   client: undefined as unknown as Client,

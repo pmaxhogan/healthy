@@ -1,32 +1,32 @@
 /**
- * One connection per health system: the tokens, the status machine, and the lease.
- *
- * Two things here are load-bearing for correctness.
- *
- * **Sealing order.** The AAD binds a token to `connections.<column>.<id>`, so the
- * row id has to exist before anything can be sealed for it. `ensure()` therefore
- * creates a bare disconnected row first and every write seals against that id --
- * an `INSERT ... ON CONFLICT` that generated an id inline would seal against an
- * id the conflict then threw away.
- *
- * **The lease.** Epic rejects a refresh token the moment it has been redeemed, so
- * two concurrent refreshes lose the connection. `acquireLease` is a single
- * conditional UPDATE, and D1 reports how many rows it changed; exactly one caller
- * can see `changes === 1`. Expiry is in the predicate rather than a sweeper, so a
- * Worker that died holding a lease blocks nothing beyond the TTL.
- *
- * **Every token write carries the lease in its own predicate.** Holding the lease
- * when the refresh starts is not enough: a slow token endpoint can outlast the TTL,
- * a second refresher can take the lease and store its own rotated refresh token,
- * and the first one's write would then land on top -- leaving D1 holding a token
- * Epic has already invalidated, which is `invalid_grant` on the next run and a
- * re-auth for the owner. So `upsertTokensLeased` writes `WHERE lease_owner = ? AND
- * lease_expires_at > now` and answers `null` when that no longer holds, while
- * `upsertTokens` (the authorization callback, which holds no lease) writes only
- * while no *live* lease exists. An expired lease does not block the callback: a
- * Worker that died holding one leaves `lease_owner` set, and the owner reconnecting
- * must not be hostage to it.
- */
+One connection per health system: the tokens, the status machine, and the lease.
+
+Two things here are load-bearing for correctness.
+
+**Sealing order.** The AAD binds a token to `connections.<column>.<id>`, so the
+row id has to exist before anything can be sealed for it. `ensure()` therefore
+creates a bare disconnected row first and every write seals against that id --
+an `INSERT ... ON CONFLICT` that generated an id inline would seal against an
+id the conflict then threw away.
+
+**The lease.** Epic rejects a refresh token the moment it has been redeemed, so
+two concurrent refreshes lose the connection. `acquireLease` is a single
+conditional UPDATE, and D1 reports how many rows it changed; exactly one caller
+can see `changes === 1`. Expiry is in the predicate rather than a sweeper, so a
+Worker that died holding a lease blocks nothing beyond the TTL.
+
+**Every token write carries the lease in its own predicate.** Holding the lease
+when the refresh starts is not enough: a slow token endpoint can outlast the TTL,
+a second refresher can take the lease and store its own rotated refresh token,
+and the first one's write would then land on top -- leaving D1 holding a token
+Epic has already invalidated, which is `invalid_grant` on the next run and a
+re-auth for the owner. So `upsertTokensLeased` writes `WHERE lease_owner = ? AND
+lease_expires_at > now` and answers `null` when that no longer holds, while
+`upsertTokens` (the authorization callback, which holds no lease) writes only
+while no *live* lease exists. An expired lease does not block the callback: a
+Worker that died holding one leaves `lease_owner` set, and the owner reconnecting
+must not be hostage to it.
+*/
 
 import { AppError } from "../../lib/errors.ts";
 import { newId } from "../../lib/ids.ts";
@@ -166,9 +166,9 @@ export function makeConnectionsRepo(ctx: Ctx) {
     },
 
     /**
-     * Connections the scheduled sync should touch: connected, and belonging to a
-     * health system that has not been soft-deleted.
-     */
+    Connections the scheduled sync should touch: connected, and belonging to a
+    health system that has not been soft-deleted.
+    */
     async listActive(): Promise<ConnectionRow[]> {
       return all<ConnectionRow>(
         ctx.db.prepare(
@@ -181,18 +181,18 @@ export function makeConnectionsRepo(ctx: Ctx) {
     },
 
     /**
-     * Store whichever token fields the caller has, sealed, while no refresh is in
-     * flight.
-     *
-     * For the authorization callback, which holds no lease. Throws `conflict` when a
-     * live lease says a refresh is mid-flight: the alternative is overwriting a
-     * refresh token that has just been rotated, and a 409 the owner can retry is
-     * cheaper than a connection that needs re-authorising.
-     *
-     * Callers must persist a new refresh token *before* using the access token it
-     * came with: if the write fails after a successful refresh, the old refresh
-     * token is already dead and the connection is unrecoverable without a re-auth.
-     */
+    Store whichever token fields the caller has, sealed, while no refresh is in
+    flight.
+
+    For the authorization callback, which holds no lease. Throws `conflict` when a
+    live lease says a refresh is mid-flight: the alternative is overwriting a
+    refresh token that has just been rotated, and a 409 the owner can retry is
+    cheaper than a connection that needs re-authorising.
+
+    Callers must persist a new refresh token *before* using the access token it
+    came with: if the write fails after a successful refresh, the old refresh
+    token is already dead and the connection is unrecoverable without a re-auth.
+    */
     async upsertTokens(healthSystemId: string, patch: TokenPatch): Promise<ConnectionRow> {
       const row = await writeTokens(healthSystemId, patch, {
         clause: "AND (lease_expires_at IS NULL OR lease_expires_at <= ?)",
@@ -208,13 +208,13 @@ export function makeConnectionsRepo(ctx: Ctx) {
     },
 
     /**
-     * Store tokens under the lease this caller holds.
-     *
-     * `null` means the write was rejected -- the lease expired, or somebody else
-     * took it -- and the caller must discard the tokens it just obtained rather
-     * than write them anyway: the winner's rotated refresh token is the one the
-     * organisation will accept next time.
-     */
+    Store tokens under the lease this caller holds.
+
+    `null` means the write was rejected -- the lease expired, or somebody else
+    took it -- and the caller must discard the tokens it just obtained rather
+    than write them anyway: the winner's rotated refresh token is the one the
+    organisation will accept next time.
+    */
     async upsertTokensLeased(
       healthSystemId: string,
       owner: string,
@@ -264,9 +264,9 @@ export function makeConnectionsRepo(ctx: Ctx) {
     },
 
     /**
-     * The refresh token was rejected. Records the code, stamps the clock the
-     * Trello card is opened from, and counts the failure.
-     */
+    The refresh token was rejected. Records the code, stamps the clock the
+    Trello card is opened from, and counts the failure.
+    */
     async markNeedsReauth(id: string, errorCode: string): Promise<boolean> {
       const existing = await byId(id);
       const since = existing?.needs_reauth_since ?? ctx.now();
@@ -290,13 +290,13 @@ export function makeConnectionsRepo(ctx: Ctx) {
     },
 
     /**
-     * Forget everything the grant gave us, keeping the row so its history survives.
-     *
-     * The patient identifier goes with the tokens, and the scope and the lease with
-     * it. The privacy page says disconnecting revokes what is stored, and a sealed
-     * identifier left behind would make that only mostly true -- it is the one
-     * column here that names a person.
-     */
+    Forget everything the grant gave us, keeping the row so its history survives.
+
+    The patient identifier goes with the tokens, and the scope and the lease with
+    it. The privacy page says disconnecting revokes what is stored, and a sealed
+    identifier left behind would make that only mostly true -- it is the one
+    column here that names a person.
+    */
     async disconnect(id: string): Promise<boolean> {
       const { changes } = await run(
         ctx.db
@@ -325,12 +325,12 @@ export function makeConnectionsRepo(ctx: Ctx) {
     },
 
     /**
-     * Try to become the single writer for this connection for `ttlMs`.
-     *
-     * Atomic: the predicate and the write are one statement, so the winner is
-     * whichever UPDATE the database applied first. Returns false to a caller that
-     * should wait and re-read rather than refresh.
-     */
+    Try to become the single writer for this connection for `ttlMs`.
+
+    Atomic: the predicate and the write are one statement, so the winner is
+    whichever UPDATE the database applied first. Returns false to a caller that
+    should wait and re-read rather than refresh.
+    */
     async acquireLease(connectionId: string, owner: string, ttlMs: number): Promise<boolean> {
       const now = ctx.now();
       const { changes } = await run(

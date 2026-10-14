@@ -14,9 +14,9 @@ import { resolveDeps } from "../../../src/sync/deps.ts";
 import { portalDeps } from "../../../src/sync/portal-signin.ts";
 
 /**
- * Stands in for workerd's native `fetch`. Throws unless called with no
- * receiver at all, exactly the check the real one performs internally.
- */
+Stands in for workerd's native `fetch`. Throws unless called with no
+receiver at all, exactly the check the real one performs internally.
+*/
 function strictFetch(this: unknown): Promise<Response> {
   if (this !== undefined && this !== globalThis) {
     throw new TypeError("Illegal invocation");

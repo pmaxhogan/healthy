@@ -1,34 +1,34 @@
 /**
- * References: the one place a resource names another one in passing.
- *
- * A FHIR `Reference` carries a `display` -- the referenced resource's name,
- * copied in by the health system -- wherever it appears: `subject`,
- * `performer[]`, `resultsInterpreter[]`, `participant[].individual`, inside an
- * extension, inside a contained resource. A `field` rule names paths, and no
- * owner can be expected to list every path a Practitioner's name could sit
- * under in every resource type. So the choke point treats the display as what
- * it is -- a copy of the referenced resource -- and judges it by the policy
- * that resource's type is under:
- *
- *  (a) a type a `resource` rule denies: its displays go everywhere;
- *  (b) Patient / RelatedPerson, when a hide rule reaches the patient's `name`
- *      or the `sensitive` default withholds it;
- *  (c) Practitioner / PractitionerRole / Person, when that type is denied, a
- *      hide rule reaches its `name`, or a hide rule reaches one of the fields a
- *      clinician's name is rendered into (an Encounter's `practitioners`, a
- *      request's `requester`, ...).
- *
- * A reference whose target type cannot be read -- a `urn:uuid:`, a `#id` with
- * no matching contained resource, a bare `{ display }` -- is removed whenever
- * any person type is restricted: failing closed is the only safe reading of
- * "we do not know whose name this is".
- *
- * The normalized items carry the same names, rendered to strings by
- * `refs.display` (`worker/src/fhir/normalize/refs.ts`). {@link REFERENCE_FIELDS}
- * lists every normalized field that is a reference rendered to text, with the
- * raw element it came from and the types FHIR R4 allows that element to point
- * at; the normalized field goes when the reference it was read from would.
- */
+References: the one place a resource names another one in passing.
+
+A FHIR `Reference` carries a `display` -- the referenced resource's name,
+copied in by the health system -- wherever it appears: `subject`,
+`performer[]`, `resultsInterpreter[]`, `participant[].individual`, inside an
+extension, inside a contained resource. A `field` rule names paths, and no
+owner can be expected to list every path a Practitioner's name could sit
+under in every resource type. So the choke point treats the display as what
+it is -- a copy of the referenced resource -- and judges it by the policy
+that resource's type is under:
+
+ (a) a type a `resource` rule denies: its displays go everywhere;
+ (b) Patient / RelatedPerson, when a hide rule reaches the patient's `name`
+     or the `sensitive` default withholds it;
+ (c) Practitioner / PractitionerRole / Person, when that type is denied, a
+     hide rule reaches its `name`, or a hide rule reaches one of the fields a
+     clinician's name is rendered into (an Encounter's `practitioners`, a
+     request's `requester`, ...).
+
+A reference whose target type cannot be read -- a `urn:uuid:`, a `#id` with
+no matching contained resource, a bare `{ display }` -- is removed whenever
+any person type is restricted: failing closed is the only safe reading of
+"we do not know whose name this is".
+
+The normalized items carry the same names, rendered to strings by
+`refs.display` (`worker/src/fhir/normalize/refs.ts`). {@link REFERENCE_FIELDS}
+lists every normalized field that is a reference rendered to text, with the
+raw element it came from and the types FHIR R4 allows that element to point
+at; the normalized field goes when the reference it was read from would.
+*/
 
 import { ARRAY_SEGMENT } from "@shared/policy-path.ts";
 
@@ -60,10 +60,10 @@ interface ReferenceField {
   /** Every type FHIR R4 lets that element point at: the fallback when the raw is not in hand. */
   targets: readonly string[];
   /**
-   * True when the field is the referenced party's name. A hide rule on one of
-   * those restricts clinicians' names everywhere; a rule on the others (a
-   * specialty, an address) is only itself.
-   */
+  True when the field is the referenced party's name. A hide rule on one of
+  those restricts clinicians' names everywhere; a rule on the others (a
+  specialty, an address) is only itself.
+  */
   name?: true;
 }
 
@@ -79,17 +79,17 @@ const ACTOR_TARGETS = [
 const PARTICIPANT_TARGETS = ["Practitioner", "PractitionerRole", "RelatedPerson"] as const;
 
 /**
- * The appointment view's clinician. With no Encounter behind it -- a patient
- * portal's visit -- the value came from the portal's own listing, which only
- * ever names the clinician the visit is with.
- */
+The appointment view's clinician. With no Encounter behind it -- a patient
+portal's visit -- the value came from the portal's own listing, which only
+ever names the clinician the visit is with.
+*/
 const VIEW_CLINICIAN_TARGETS = ["Practitioner", "PractitionerRole"] as const;
 
 /**
- * Every normalized field rendered from a Reference, by resource type. A test
- * pins it against the normalizers, so a new `refs.display` call without an
- * entry here fails rather than leaking.
- */
+Every normalized field rendered from a Reference, by resource type. A test
+pins it against the normalizers, so a new `refs.display` call without an
+entry here fails rather than leaking.
+*/
 export const REFERENCE_FIELDS: ReadonlyMap<string, readonly ReferenceField[]> = new Map<
   string,
   readonly ReferenceField[]
@@ -244,16 +244,16 @@ function overlaps(a: readonly string[], b: readonly string[]): boolean {
 }
 
 /**
- * True when a hide rule reaching `resourceType` in this scope touches `path`.
- *
- * `anyTool` drops the rule's tool scope from the test. It is how a rule on a
- * person resource's OWN `name` is read: a `Patient.name` rule scoped to
- * `get_patient_profile` (the only tool a Patient item appears in) is the
- * owner saying the name is not to be shown, and it must reach the copy of it
- * in every other tool's resources, or the scope would be a way around it. A
- * rule on a field a name is rendered into (`participants[].name` in one tool)
- * is about that tool's answer, and keeps its tool scope.
- */
+True when a hide rule reaching `resourceType` in this scope touches `path`.
+
+`anyTool` drops the rule's tool scope from the test. It is how a rule on a
+person resource's OWN `name` is read: a `Patient.name` rule scoped to
+`get_patient_profile` (the only tool a Patient item appears in) is the
+owner saying the name is not to be shown, and it must reach the copy of it
+in every other tool's resources, or the scope would be a way around it. A
+rule on a field a name is rendered into (`participants[].name` in one tool)
+is about that tool's answer, and keeps its tool scope.
+*/
 function hidesIn(
   rules: PolicyRules,
   scope: ItemScope,
@@ -306,11 +306,11 @@ function practitionerNameHidden(rules: PolicyRules, scope: ItemScope): boolean {
 }
 
 /**
- * The reference targets withheld in one scope: the item's tool and health
- * system. The item's own resource type is not part of it -- a name is a name
- * wherever it is referenced from -- and a rule on a person's own `name`
- * reaches every tool (see `hidesIn`).
- */
+The reference targets withheld in one scope: the item's tool and health
+system. The item's own resource type is not part of it -- a name is a name
+wherever it is referenced from -- and a rule on a person's own `name`
+reaches every tool (see `hidesIn`).
+*/
 export function restrictionFor(rules: PolicyRules, scope: ItemScope): Restriction {
   const types = new Set<string>(rules.resources);
   if (patientNameHidden(rules, scope)) for (const type of PATIENT_TYPES) types.add(type);
@@ -369,9 +369,9 @@ function targetTypes(
 }
 
 /**
- * The type to name in the warning when a reference with these targets is
- * withheld, or null when it is not withheld.
- */
+The type to name in the warning when a reference with these targets is
+withheld, or null when it is not withheld.
+*/
 function withheldAs(targets: readonly string[], restriction: Restriction): string | null {
   if (targets.length === 0) return restriction.person ? "unknown" : null;
   return targets.find((type) => restriction.types.has(type)) ?? null;
@@ -393,12 +393,12 @@ const REFERENCE_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * True for an object that is (or has to be treated as) a FHIR Reference:
- * a literal `reference`, a logical reference (an `identifier` with nothing but
- * Reference keys beside it -- an NPI with no type is still someone's), or a
- * `display` that is not a Coding's. A bare `{ display }` counts -- Epic sends
- * performers that way.
- */
+True for an object that is (or has to be treated as) a FHIR Reference:
+a literal `reference`, a logical reference (an `identifier` with nothing but
+Reference keys beside it -- an NPI with no type is still someone's), or a
+`display` that is not a Coding's. A bare `{ display }` counts -- Epic sends
+performers that way.
+*/
 function isReference(value: Record<string, unknown>): boolean {
   if (typeof own(value, "resourceType") === "string") return false;
   if (typeof own(value, "reference") === "string") return true;
@@ -446,9 +446,9 @@ function judgeReference(value: Record<string, unknown>, context: WalkContext): W
 }
 
 /**
- * An Annotation's `authorString` is a person's name with no reference to type
- * it by: removed whenever any person type is restricted.
- */
+An Annotation's `authorString` is a person's name with no reference to type
+it by: removed whenever any person type is restricted.
+*/
 function judgeAnnotation(value: Record<string, unknown>, context: WalkContext): Walked {
   if (!context.restriction.person || typeof own(value, "authorString") !== "string") {
     return { changed: false, value };
@@ -458,11 +458,11 @@ function judgeAnnotation(value: Record<string, unknown>, context: WalkContext): 
 }
 
 /**
- * Rebuild `value` with every withheld reference's `display` (and `identifier`)
- * gone, at any depth. `skip` names keys of the top-level record not to walk
- * (a resource's `contained`, which is filtered as resources of their own).
- * Nothing under a `coding` key is ever a reference.
- */
+Rebuild `value` with every withheld reference's `display` (and `identifier`)
+gone, at any depth. `skip` names keys of the top-level record not to walk
+(a resource's `contained`, which is filtered as resources of their own).
+Nothing under a `coding` key is ever a reference.
+*/
 export function walkReferences(
   value: unknown,
   context: WalkContext,
@@ -515,12 +515,12 @@ function referencesAt(value: unknown, path: readonly string[]): Record<string, u
 }
 
 /**
- * The type a normalized reference field is withheld as, or null when it is
- * not. With the raw resource it was read from in hand, the references
- * actually there decide; without it (or when none is there -- the value came
- * from somewhere else, like a patient portal), every type the element may
- * point at does, which fails closed.
- */
+The type a normalized reference field is withheld as, or null when it is
+not. With the raw resource it was read from in hand, the references
+actually there decide; without it (or when none is there -- the value came
+from somewhere else, like a patient portal), every type the element may
+point at does, which fails closed.
+*/
 function fieldWithheldAs(
   field: ReferenceField,
   source: unknown,
@@ -554,10 +554,10 @@ export function containedTypes(resource: unknown): Map<string, string> {
 }
 
 /**
- * The normalized paths to remove from one item of `resourceType`, each with
- * the type it is withheld as. `source` is the raw resource the item was
- * normalized from, when the caller has it.
- */
+The normalized paths to remove from one item of `resourceType`, each with
+the type it is withheld as. `source` is the raw resource the item was
+normalized from, when the caller has it.
+*/
 export function withheldNormalizedPaths(
   resourceType: string,
   source: unknown,

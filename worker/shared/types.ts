@@ -1,9 +1,9 @@
 /**
- * DTOs shared by the Worker's admin API (worker/src/api/**) and the Vue SPA (worker/ui/**).
- *
- * Rules: nothing here carries ciphertext, tokens or clinical content. Rows are projected
- * into these shapes on the Worker side; the SPA never sees a raw D1 row.
- */
+DTOs shared by the Worker's admin API (worker/src/api/**) and the Vue SPA (worker/ui/**).
+
+Rules: nothing here carries ciphertext, tokens or clinical content. Rows are projected
+into these shapes on the Worker side; the SPA never sees a raw D1 row.
+*/
 
 export type Vendor = "epic" | "modmed";
 export type HealthSystemEnvironment = "prod" | "sandbox";
@@ -103,33 +103,33 @@ export interface SettingsDto {
   syncBackoffUntil: string | null;
   mcpEnabled: boolean;
   /**
-   * Sign-in attempts one patient-portal account may make per UTC day.
-   *
-   * Editable so that live QA against a real portal can raise it for an afternoon;
-   * the default of three is chosen against the portal's own lockout, not against
-   * our convenience.
-   */
+  Sign-in attempts one patient-portal account may make per UTC day.
+
+  Editable so that live QA against a real portal can raise it for an afternoon;
+  the default of three is chosen against the portal's own lockout, not against
+  our convenience.
+  */
   portalLoginAttemptLimit: number;
   /**
-   * The patient-portal login shell's API path prefix, when the deployment needs
-   * one and discovery could not learn it on its own.
-   *
-   * Null for almost every deployment: the value normally comes out of discovery
-   * and is stored on the account's own endpoint instead. This is the fallback of
-   * last resort, and there is no admin UI for it today -- it is set directly in
-   * D1 for the rare account that needs it.
-   */
+  The patient-portal login shell's API path prefix, when the deployment needs
+  one and discovery could not learn it on its own.
+
+  Null for almost every deployment: the value normally comes out of discovery
+  and is stored on the account's own endpoint instead. This is the fallback of
+  last resort, and there is no admin UI for it today -- it is set directly in
+  D1 for the rare account that needs it.
+  */
   portalApiBasePath: string | null;
 }
 
 export type SettingsPatch = Partial<SettingsDto>;
 
 /**
- * The sync engine's own working shape for a run in progress -- see
- * `worker/src/sync/run.ts` for why `errors` still names a health system here. None of that
- * survives being written to `run_log`, so it is `RunSummaryDto`, not this, that
- * `RunDto` actually carries.
- */
+The sync engine's own working shape for a run in progress -- see
+`worker/src/sync/run.ts` for why `errors` still names a health system here. None of that
+survives being written to `run_log`, so it is `RunSummaryDto`, not this, that
+`RunDto` actually carries.
+*/
 export interface RunSummary {
   healthSystems: number;
   encountersSeen: number;
@@ -149,24 +149,24 @@ export interface RunSummary {
   /** Secure messages the patient-portal pass read, across every portal account. */
   portalMessages: number;
   /**
-   * Stable codes from portal accounts that failed, and only codes.
-   *
-   * Deliberately *not* folded into `errors`: a portal session that needs the
-   * owner's attention is an expected state that can persist for days, and putting
-   * it in `errors` would mark every hourly run `ok = 0` and drown the failures
-   * that really are failures. The portal's own state machine
-   * (`portal_accounts.session_state`, plus the Trello card) is what escalates it.
-   */
+  Stable codes from portal accounts that failed, and only codes.
+
+  Deliberately *not* folded into `errors`: a portal session that needs the
+  owner's attention is an expected state that can persist for days, and putting
+  it in `errors` would mark every hourly run `ok = 0` and drown the failures
+  that really are failures. The portal's own state machine
+  (`portal_accounts.session_state`, plus the Trello card) is what escalates it.
+  */
   portalErrors: string[];
 }
 
 /**
- * What `RunDto.summary` actually contains: the same counts as `RunSummary`, but
- * `errors` and `warningCodes` are the bare, stable codes `run_log.summary_json`
- * stores -- never a health system id, which is one join away from naming a health
- * system. `warnings` stays a count; `warningCodes` is the distinct codes behind
- * it, e.g. an Epic OperationOutcome code -- which, not how many.
- */
+What `RunDto.summary` actually contains: the same counts as `RunSummary`, but
+`errors` and `warningCodes` are the bare, stable codes `run_log.summary_json`
+stores -- never a health system id, which is one join away from naming a health
+system. `warnings` stays a count; `warningCodes` is the distinct codes behind
+it, e.g. an Epic OperationOutcome code -- which, not how many.
+*/
 export interface RunSummaryDto extends Omit<RunSummary, "errors"> {
   errors: string[];
   warningCodes: string[];
@@ -184,10 +184,10 @@ export interface RunDto {
 export interface AlertDto {
   id: string;
   /**
-   * `reconnect`: something to sign in to again. `hc_parked`: a phone's uploads
-   * set aside. `sync_failing`: a sync that keeps failing though nothing needs
-   * signing in to.
-   */
+  `reconnect`: something to sign in to again. `hc_parked`: a phone's uploads
+  set aside. `sync_failing`: a sync that keeps failing though nothing needs
+  signing in to.
+  */
   kind: "reconnect" | "hc_parked" | "sync_failing";
   subject: string;
   healthSystemId: string | null;
@@ -203,9 +203,9 @@ export interface AlertDto {
 // ---------------------------------------------------------------------------
 
 /**
- * What a `field` rule applies to, and what it does. Every scope column is
- * optional: all three absent is "every item of every tool".
- */
+What a `field` rule applies to, and what it does. Every scope column is
+optional: all three absent is "every item of every tool".
+*/
 export interface FieldRuleSpec {
   /** `hide` removes the paths; `allow` puts back a field withheld by default. */
   effect: "hide" | "allow";
@@ -223,9 +223,9 @@ export interface PolicyRuleDto {
   id: string;
   ruleType: PolicyRuleType;
   /**
-   * The tool name, resource type or health system id. For a `field` rule, a
-   * signature of `field` below (or a pre-0012 `ResourceType.path` string).
-   */
+  The tool name, resource type or health system id. For a `field` rule, a
+  signature of `field` below (or a pre-0012 `ResourceType.path` string).
+  */
   target: string;
   /** The structured `field` rule; null for the other kinds. */
   field: FieldRuleSpec | null;
@@ -234,33 +234,33 @@ export interface PolicyRuleDto {
   note: string | null;
   createdAt: string;
   /**
-   * True when the policy engine could make nothing of this rule.
-   *
-   * A stored rule that parses to nothing is the worst kind of wrong: the owner
-   * believes an exposure is denied and it is not. Only a malformed `field` rule
-   * (or a blank target) can land here -- a `tool`, `resource` or `health_system`
-   * target is taken literally. The admin UI shows a warning next to the row.
-   */
+  True when the policy engine could make nothing of this rule.
+
+  A stored rule that parses to nothing is the worst kind of wrong: the owner
+  believes an exposure is denied and it is not. Only a malformed `field` rule
+  (or a blank target) can land here -- a `tool`, `resource` or `health_system`
+  target is taken literally. The admin UI shows a warning next to the row.
+  */
   unparsed: boolean;
 }
 
 /**
- * The payload of `POST /api/mcp/policy`: a rule without its server-assigned parts.
- *
- * Mirrors `policyRuleSchema` on the Worker side, which is strict -- an extra key is
- * a 400, and `note` must be absent rather than empty. A `field` rule carries
- * `field`; the other kinds carry `target`. (A `field` rule may still be sent as a
- * legacy `ResourceType.path` `target`, which is converted.)
- */
+The payload of `POST /api/mcp/policy`: a rule without its server-assigned parts.
+
+Mirrors `policyRuleSchema` on the Worker side, which is strict -- an extra key is
+a 400, and `note` must be absent rather than empty. A `field` rule carries
+`field`; the other kinds carry `target`. (A `field` rule may still be sent as a
+legacy `ResourceType.path` `target`, which is converted.)
+*/
 export interface CreatePolicyRuleRequest {
   ruleType: PolicyRuleType;
   target?: string | undefined;
   field?: FieldRuleSpec | undefined;
   /**
-   * `| undefined` explicitly, under `exactOptionalPropertyTypes`: this is the type
-   * the Worker's own parser produces for an absent optional field, and the route
-   * is typed against this interface so the two cannot drift.
-   */
+  `| undefined` explicitly, under `exactOptionalPropertyTypes`: this is the type
+  the Worker's own parser produces for an absent optional field, and the route
+  is typed against this interface so the two cannot drift.
+  */
   note?: string | undefined;
   enabled?: boolean | undefined;
 }
@@ -304,12 +304,12 @@ export interface PolicyShapeDto {
   /** The resource type it belongs to, or null for a tool-specific row. */
   resourceType: string | null;
   /**
-   * Every resource type a rule can be scoped to and still meet a row of this
-   * shape. A FHIR shape: its own type. A Health Connect shape: the `hc:<Type>`
-   * tags its rows can carry, plus the types whose joined or derived values
-   * appear in it (heart rate, on a night's row). Empty for a row no type reaches.
-   * The server always sends it; optional so an older cached schema still types.
-   */
+  Every resource type a rule can be scoped to and still meet a row of this
+  shape. A FHIR shape: its own type. A Health Connect shape: the `hc:<Type>`
+  tags its rows can carry, plus the types whose joined or derived values
+  appear in it (heart rate, on a night's row). Empty for a row no type reaches.
+  The server always sends it; optional so an older cached schema still types.
+  */
   resourceTypes?: string[];
   vocabulary: "normalized" | "raw";
   fields: PolicyFieldNode[];
@@ -355,9 +355,9 @@ export interface PolicyStructureDto {
 }
 
 /**
- * `POST /api/mcp/policy/preview`: a draft rule, run over every tool its scope
- * can reach (or only `tool`, when given) in one request.
- */
+`POST /api/mcp/policy/preview`: a draft rule, run over every tool its scope
+can reach (or only `tool`, when given) in one request.
+*/
 export interface PolicyPreviewRequest {
   field: FieldRuleSpec;
   /** Only this tool. Omitted: every tool the draft's scope can reach. */
@@ -391,9 +391,9 @@ export interface PolicyToolPreviewDto {
   /** The warnings the rule would add to the answer. */
   warnings: string[];
   /**
-   * True when the sample is a made-up example rather than the owner's data:
-   * `get_document_text` cannot be sampled without spending a metered request.
-   */
+  True when the sample is a made-up example rather than the owner's data:
+  `get_document_text` cannot be sampled without spending a metered request.
+  */
   synthetic: boolean;
 }
 
@@ -417,9 +417,9 @@ export interface McpAuditDto {
   errorCode: string | null;
   durationMs: number;
   /**
-   * The call's `jq` program, when it had one: a SHA-256 and a length, never the
-   * text, and how many items went into and came out of it (null when it failed).
-   */
+  The call's `jq` program, when it had one: a SHA-256 and a length, never the
+  text, and how many items went into and came out of it (null when it failed).
+  */
   jq: McpAuditJqDto | null;
 }
 
@@ -437,12 +437,12 @@ export interface McpToolInfoDto {
 }
 
 /**
- * One tool's real, live input schema -- draft-07 JSON Schema, generated from the
- * same zod schema the MCP server validates arguments against. Backs the admin
- * console's "Try a tool" panel: the tool picker's descriptions and the argument
- * editor's skeleton and live validation all come from this, not from the
- * hand-maintained {@link McpToolInfoDto} list (which has no schema to give).
- */
+One tool's real, live input schema -- draft-07 JSON Schema, generated from the
+same zod schema the MCP server validates arguments against. Backs the admin
+console's "Try a tool" panel: the tool picker's descriptions and the argument
+editor's skeleton and live validation all come from this, not from the
+hand-maintained {@link McpToolInfoDto} list (which has no schema to give).
+*/
 export interface McpToolSchemaDto {
   name: string;
   description: string;
@@ -450,17 +450,17 @@ export interface McpToolSchemaDto {
 }
 
 /**
- * `POST /api/mcp/tools/:name/call`.
- *
- * The whole point is transparency: the exact arguments sent and the exact answer
- * the tool gave, so the owner can see what an MCP client would see. `result.data`
- * is the tool's JSON envelope (`{ items, warnings, truncated, ... }` on success, or
- * `{ error, message }` on a tool-level failure such as `policy_denied`) -- both
- * shapes are valid outcomes of a call that reached the tool, which is why they
- * share one 200 response rather than one being an HTTP error. A request that never
- * reached the tool at all (an unknown name, arguments that fail the input schema)
- * is a 4xx `ApiError` instead; see `worker/src/api/routes/mcp.ts`.
- */
+`POST /api/mcp/tools/:name/call`.
+
+The whole point is transparency: the exact arguments sent and the exact answer
+the tool gave, so the owner can see what an MCP client would see. `result.data`
+is the tool's JSON envelope (`{ items, warnings, truncated, ... }` on success, or
+`{ error, message }` on a tool-level failure such as `policy_denied`) -- both
+shapes are valid outcomes of a call that reached the tool, which is why they
+share one 200 response rather than one being an HTTP error. A request that never
+reached the tool at all (an unknown name, arguments that fail the input schema)
+is a 4xx `ApiError` instead; see `worker/src/api/routes/mcp.ts`.
+*/
 export interface McpToolCallResponse {
   request: {
     name: string;
@@ -510,9 +510,9 @@ export interface CreateHealthSystemRequest {
 
 export interface UpdateHealthSystemRequest {
   /**
-   * Where the health system points. Accepted only while it has no live
-   * connection: a connected one's cache and tokens belong to the old endpoint.
-   */
+  Where the health system points. Accepted only while it has no live
+  connection: a connected one's cache and tokens belong to the old endpoint.
+  */
   vendor?: Vendor;
   fhirBaseUrl?: string;
   displayName?: string;
@@ -525,35 +525,35 @@ export interface SetHealthSystemSecretRequest {
 }
 
 /**
- * The 201 body of `POST /api/alerts/test`.
- *
- * A Trello card id, not an alert id: the endpoint deliberately writes no `alerts`
- * row, because a test is not an alert and one there would make the dashboard's
- * open-alert count lie.
- */
+The 201 body of `POST /api/alerts/test`.
+
+A Trello card id, not an alert id: the endpoint deliberately writes no `alerts`
+row, because a test is not an alert and one there would make the dashboard's
+open-alert count lie.
+*/
 export interface AlertTestResponse {
   cardId: string;
 }
 
 /**
- * `GET /health`, the one route an unauthenticated stranger can read.
- *
- * Deliberately says nothing else: no version, no build, no connection count. Every
- * extra field would be information disclosure on a public endpoint.
- */
+`GET /health`, the one route an unauthenticated stranger can read.
+
+Deliberately says nothing else: no version, no build, no connection count. Every
+extra field would be information disclosure on a public endpoint.
+*/
 export interface HealthResponse {
   ok: true;
 }
 
 /**
- * One `mail_inbox` row, as the Mail admin page shows it.
- *
- * `fromDomain` only -- never the full sender address, matching the page's own
- * design ("table of recent entries ... sender domain"). `pendingCode` and
- * `pendingUrl` are only ever non-null for `kind === "forward_verify"`: the
- * Worker never returns an 'otp' row's code over this API, even though the
- * value exists sealed in D1 -- see `worker/src/db/repos/mail-inbox.ts`.
- */
+One `mail_inbox` row, as the Mail admin page shows it.
+
+`fromDomain` only -- never the full sender address, matching the page's own
+design ("table of recent entries ... sender domain"). `pendingCode` and
+`pendingUrl` are only ever non-null for `kind === "forward_verify"`: the
+Worker never returns an 'otp' row's code over this API, even though the
+value exists sealed in D1 -- see `worker/src/db/repos/mail-inbox.ts`.
+*/
 export interface MailInboxEntryDto {
   id: string;
   receivedAt: string;
@@ -577,21 +577,21 @@ export interface MailSettingsDto {
 export type PortalSessionState = "none" | "active" | "needs_reauth";
 
 /**
- * How far a sign-in attempt got.
- *
- * Two values, because the portal's own flow has two outcomes: the password was
- * enough, or it now wants a code that will arrive by email. The admin UI polls
- * for this and shows "waiting for the emailed code" on the second one.
- */
+How far a sign-in attempt got.
+
+Two values, because the portal's own flow has two outcomes: the password was
+enough, or it now wants a code that will arrive by email. The admin UI polls
+for this and shows "waiting for the emailed code" on the second one.
+*/
 export type PortalSignInStatus = "signed_in" | "awaiting_code";
 
 /**
- * One health system's portal account.
- *
- * Write-only credentials: `hasCredentials` is the whole of what the UI learns
- * about the username and password, and nothing here reflects the cookie jar's
- * contents either -- a session cookie is as good as the password.
- */
+One health system's portal account.
+
+Write-only credentials: `hasCredentials` is the whole of what the UI learns
+about the username and password, and nothing here reflects the cookie jar's
+contents either -- a session cookie is as good as the password.
+*/
 export interface PortalAccountDto {
   healthSystemId: string;
   /** Origin only, as discovery settled on it. Null until it has been probed. */
@@ -605,12 +605,12 @@ export interface PortalAccountDto {
   /** True when an address to email a verification code to is stored. */
   hasMfaContact: boolean;
   /**
-   * True when the domain this account's verification codes come from is known.
-   *
-   * The domain itself is never reported -- it names the health system. What the
-   * card shows is that the binding exists: until it does, a code from any
-   * allowlisted sender is eligible for this account's sign-in.
-   */
+  True when the domain this account's verification codes come from is known.
+
+  The domain itself is never reported -- it names the health system. What the
+  card shows is that the binding exists: until it does, a code from any
+  allowlisted sender is eligible for this account's sign-in.
+  */
   hasOtpSender: boolean;
   state: PortalSessionState;
   lastLoginAt: string | null;
@@ -623,88 +623,88 @@ export interface PortalAccountDto {
 }
 
 /**
- * What the repo's `setCredentials` takes, and what the CLI script writes.
- *
- * `baseUrl` and `mountPath` are optional: the owner can save credentials against
- * an already-discovered endpoint, or supply the URL at the same time. The admin
- * API's own body is `PutPortalAccountRequest` below, which carries a mount
- * *hint* rather than a mount path -- the path is whatever discovery settles on.
- */
+What the repo's `setCredentials` takes, and what the CLI script writes.
+
+`baseUrl` and `mountPath` are optional: the owner can save credentials against
+an already-discovered endpoint, or supply the URL at the same time. The admin
+API's own body is `PutPortalAccountRequest` below, which carries a mount
+*hint* rather than a mount path -- the path is whatever discovery settles on.
+*/
 export interface SetPortalCredentialsRequest {
   username: string;
   password: string;
   baseUrl?: string | undefined;
   mountPath?: string | undefined;
   /**
-   * Where the portal should email a verification code, when its own login
-   * response does not say. Omitted leaves whatever is already stored alone;
-   * there is no way to clear it once set except storing a new value.
-   */
+  Where the portal should email a verification code, when its own login
+  response does not say. Omitted leaves whatever is already stored alone;
+  there is no way to clear it once set except storing a new value.
+  */
   mfaContact?: string | undefined;
   /**
-   * The domain the portal's verification-code emails come from.
-   *
-   * Narrows which `mail_inbox` row may be claimed as this account's code.
-   * Omitted leaves whatever is already stored (or learned) alone.
-   */
+  The domain the portal's verification-code emails come from.
+
+  Narrows which `mail_inbox` row may be claimed as this account's code.
+  Omitted leaves whatever is already stored (or learned) alone.
+  */
   otpSenderDomain?: string | undefined;
 }
 
 /**
- * The body of `PUT /api/health-systems/:id/portal`.
- *
- * `baseUrl` is any URL on the portal's host; the handler keeps only its origin
- * and runs discovery from there. `mountHint` is a prefix the owner already knows
- * (`/MyChart/`), probed first. Both are optional once an endpoint is stored:
- * saving a new password against a known portal is the common case.
- */
+The body of `PUT /api/health-systems/:id/portal`.
+
+`baseUrl` is any URL on the portal's host; the handler keeps only its origin
+and runs discovery from there. `mountHint` is a prefix the owner already knows
+(`/MyChart/`), probed first. Both are optional once an endpoint is stored:
+saving a new password against a known portal is the common case.
+*/
 export interface PutPortalAccountRequest {
   username: string;
   password: string;
   baseUrl?: string | undefined;
   mountHint?: string | undefined;
   /**
-   * Where the portal should email a verification code, when its own login
-   * response does not say. Optional, and left alone when omitted -- most
-   * deployments never need it.
-   */
+  Where the portal should email a verification code, when its own login
+  response does not say. Optional, and left alone when omitted -- most
+  deployments never need it.
+  */
   mfaContact?: string | undefined;
   /**
-   * The domain the portal's verification-code emails come from, e.g. the part
-   * after the `@` of the sender.
-   *
-   * Optional: left alone when omitted, and learned from the first code the
-   * portal accepts when it has never been set. Setting it is what stops any
-   * other allowlisted sender's code from being claimed for this account.
-   */
+  The domain the portal's verification-code emails come from, e.g. the part
+  after the `@` of the sender.
+
+  Optional: left alone when omitted, and learned from the first code the
+  portal accepts when it has never been set. Setting it is what stops any
+  other allowlisted sender's code from being claimed for this account.
+  */
   otpSenderDomain?: string | undefined;
   /**
-   * The origin `POST .../portal/discover` reported, echoed back by the owner.
-   *
-   * Required. A discovery chain can follow a vanity alias to a different origin,
-   * and that origin is where the portal password is POSTed on every later
-   * sign-in -- so it is not something one unattended call may decide. The Worker
-   * refuses with `portal_origin_unconfirmed` when the origin it lands on is not
-   * this one.
-   */
+  The origin `POST .../portal/discover` reported, echoed back by the owner.
+
+  Required. A discovery chain can follow a vanity alias to a different origin,
+  and that origin is where the portal password is POSTed on every later
+  sign-in -- so it is not something one unattended call may decide. The Worker
+  refuses with `portal_origin_unconfirmed` when the origin it lands on is not
+  this one.
+  */
   confirmedOrigin: string;
   /**
-   * The `signInOrigin` discovery reported, echoed back by the owner, for a
-   * portal that signs in on a separate identity provider. When omitted, the
-   * provider already stored for this account is what the fresh probe has to
-   * match; a mismatch is `portal_origin_unconfirmed`, and the owner confirms the
-   * new one through discovery.
-   */
+  The `signInOrigin` discovery reported, echoed back by the owner, for a
+  portal that signs in on a separate identity provider. When omitted, the
+  provider already stored for this account is what the fresh probe has to
+  match; a mismatch is `portal_origin_unconfirmed`, and the owner confirms the
+  new one through discovery.
+  */
   confirmedSignInOrigin?: string | undefined;
 }
 
 /**
- * The body of `POST /api/health-systems/:id/portal/discover`.
- *
- * Deliberately carries no credential: this probes for a login page and stores
- * nothing at all, so the owner can be shown where the portal actually is before
- * anything is sealed against it.
- */
+The body of `POST /api/health-systems/:id/portal/discover`.
+
+Deliberately carries no credential: this probes for a login page and stores
+nothing at all, so the owner can be shown where the portal actually is before
+anything is sealed against it.
+*/
 export interface PortalDiscoverRequest {
   /** Any URL on the portal's host. Only its origin is probed. */
   baseUrl: string;
@@ -713,49 +713,49 @@ export interface PortalDiscoverRequest {
 }
 
 /**
- * What discovery found, and nothing more.
- *
- * `origin` is the value the owner has to echo back as `confirmedOrigin` before
- * credentials are stored. `flavor` is which login application drives the
- * deployment, shown so "the portal moved" and "the portal changed how it signs
- * you in" do not look like the same thing.
- */
+What discovery found, and nothing more.
+
+`origin` is the value the owner has to echo back as `confirmedOrigin` before
+credentials are stored. `flavor` is which login application drives the
+deployment, shown so "the portal moved" and "the portal changed how it signs
+you in" do not look like the same thing.
+*/
 export interface PortalDiscoveryDto {
   origin: string;
   mountPath: string;
   flavor: string;
   /**
-   * Where the password is actually POSTed, when that is not `origin` itself:
-   * a ModMed practice signs in on a separate identity provider. Shown to the
-   * owner beside `origin` and echoed back as `confirmedSignInOrigin`.
-   */
+  Where the password is actually POSTed, when that is not `origin` itself:
+  a ModMed practice signs in on a separate identity provider. Shown to the
+  owner beside `origin` and echoed back as `confirmedSignInOrigin`.
+  */
   signInOrigin?: string | undefined;
 }
 
 /**
- * How far the current (or last) sign-in attempt got.
- *
- * Reported by `GET /api/health-systems/:id/portal` for the admin UI to poll while a
- * sign-in is in flight. It lives in the sign-in runner's own Durable Object
- * storage, not in D1: it is progress, and the durable answer is
- * `PortalAccountDto.state` plus `lastErrorCode`.
- *
- * The phases are the portal's own flow. `awaiting_code` is the one that lasts --
- * the Worker has asked the portal to email a code and is waiting for it to
- * arrive in the inbox, which takes seconds to a couple of minutes.
- */
+How far the current (or last) sign-in attempt got.
+
+Reported by `GET /api/health-systems/:id/portal` for the admin UI to poll while a
+sign-in is in flight. It lives in the sign-in runner's own Durable Object
+storage, not in D1: it is progress, and the durable answer is
+`PortalAccountDto.state` plus `lastErrorCode`.
+
+The phases are the portal's own flow. `awaiting_code` is the one that lasts --
+the Worker has asked the portal to email a code and is waiting for it to
+arrive in the inbox, which takes seconds to a couple of minutes.
+*/
 export type PortalSignInPhase =
   "idle" | "logging_in" | "awaiting_code" | "validating" | "signed_in" | "failed";
 
 export interface PortalSignInState {
   phase: PortalSignInPhase;
   /**
-   * The stable failure code when `phase` is "failed", e.g. `portal_login_failed`.
-   *
-   * **Never the emailed verification code.** A one-time code is read from the
-   * inbox, handed straight to the portal and never leaves the Worker -- it is not
-   * in any DTO, any log line or any error body.
-   */
+  The stable failure code when `phase` is "failed", e.g. `portal_login_failed`.
+
+  **Never the emailed verification code.** A one-time code is read from the
+  inbox, handed straight to the portal and never leaves the Worker -- it is not
+  in any DTO, any log line or any error body.
+  */
   code: string | null;
   /** Unix seconds -- not an ISO instant, unlike the rest of this DTO. */
   startedAt: number | null;
@@ -764,28 +764,28 @@ export interface PortalSignInState {
 }
 
 /**
- * `GET /api/health-systems/:id/portal`: the stored account plus live sign-in progress.
- *
- * Always answered, even for a health system that has never had a portal account: the
- * admin UI's portal card renders from this, so a missing row is a synthesized
- * default (`state: "none"`, everything else null) rather than a 404.
- */
+`GET /api/health-systems/:id/portal`: the stored account plus live sign-in progress.
+
+Always answered, even for a health system that has never had a portal account: the
+admin UI's portal card renders from this, so a missing row is a synthesized
+default (`state: "none"`, everything else null) rather than a 404.
+*/
 export interface PortalAccountStatusDto extends PortalAccountDto {
   signIn: PortalSignInState;
   /**
-   * Upcoming visits currently tracked from this portal, as of the last time it
-   * answered. Null when it never has.
-   */
+  Upcoming visits currently tracked from this portal, as of the last time it
+  answered. Null when it never has.
+  */
   lastVisitCount: number | null;
 }
 
 /**
- * A paired phone, as `/api/phone/devices` shows it.
- *
- * `active` (uploaded within the last 6 hours), `stale` (not for longer than
- * that), `revoked` (its token no longer works) or `never` (paired, nothing
- * uploaded yet). Instants are ISO; a device id is this app's own row id.
- */
+A paired phone, as `/api/phone/devices` shows it.
+
+`active` (uploaded within the last 6 hours), `stale` (not for longer than
+that), `revoked` (its token no longer works) or `never` (paired, nothing
+uploaded yet). Instants are ISO; a device id is this app's own row id.
+*/
 export type DeviceStatus = "active" | "stale" | "revoked" | "never";
 
 /** The phone's own sync report, as it last sent it. Every field is the phone's claim. */
@@ -813,20 +813,20 @@ export interface DeviceDto {
   /** Batches accepted and not yet applied. */
   queue: { batches: number; bytes: number };
   /**
-   * Uploads that could not be applied and are being kept (the phone has moved
-   * past them, so the stored body is the only copy), with the distinct failing
-   * error codes from the ingest log.
-   */
+  Uploads that could not be applied and are being kept (the phone has moved
+  past them, so the stored body is the only copy), with the distinct failing
+  error codes from the ingest log.
+  */
   parked: { batches: number; bytes: number; errorCodes: string[] };
   /** Rollup and summary rebuilds set aside because their source would not open. */
   parkedMarks: number;
   /** Null until the phone has sent a sync report. */
   report: DeviceReportDto | null;
   /**
-   * `typesDenied` are types the owner has not granted, which is a choice and not
-   * a fault. `typesBackfilled` counts granted types whose backfill has finished,
-   * so it is out of `typesGranted`.
-   */
+  `typesDenied` are types the owner has not granted, which is a choice and not
+  a fault. `typesBackfilled` counts granted types whose backfill has finished,
+  so it is out of `typesGranted`.
+  */
   totals: {
     recordCount: number;
     typesGranted: number;
@@ -836,12 +836,12 @@ export interface DeviceDto {
 }
 
 /**
- * The answer to minting or rotating a device's token.
- *
- * `token` and `pairing` appear in this response and nowhere else, ever: only the
- * token's digest is stored. `pairing` is exactly the text the QR code encodes,
- * a JSON object `{"v":1,"url":"https://…","deviceId":"…","token":"…"}`.
- */
+The answer to minting or rotating a device's token.
+
+`token` and `pairing` appear in this response and nowhere else, ever: only the
+token's digest is stored. `pairing` is exactly the text the QR code encodes,
+a JSON object `{"v":1,"url":"https://…","deviceId":"…","token":"…"}`.
+*/
 export interface PairedDeviceDto {
   device: DeviceDto;
   pairing: string;
@@ -905,10 +905,10 @@ export interface DeviceIngestLogDto {
   rawBytes: number;
   applyMs: number | null;
   /**
-   * What started the sync run the batch was uploaded in: a stable code
-   * (`periodic`, `alarm`, `manual`, `app_open`, `backfill`, ...). Null from a
-   * build of the app that does not say.
-   */
+  What started the sync run the batch was uploaded in: a stable code
+  (`periodic`, `alarm`, `manual`, `app_open`, `backfill`, ...). Null from a
+  build of the app that does not say.
+  */
   runTrigger: string | null;
   /** When that run began, by the phone's clock: the same for every batch of one run. */
   runStartedAt: string | null;
@@ -918,10 +918,10 @@ export interface DeviceIngestLogDto {
 export type DeviceIngestLogState = "finished" | "waiting";
 
 /**
- * What became of one phone's uploads, as counts: `GET
- * /api/phone/devices/:id/ingest-summary`. `total` is every batch in the log,
- * which is what a listing of the newest few is "of".
- */
+What became of one phone's uploads, as counts: `GET
+/api/phone/devices/:id/ingest-summary`. `total` is every batch in the log,
+which is what a listing of the newest few is "of".
+*/
 export interface DeviceIngestSummaryDto {
   total: number;
   queued: number;

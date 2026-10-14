@@ -27,11 +27,11 @@ export interface PortalCall {
   method: string;
   headers: Record<string, string>;
   /**
-   * `init.body` exactly as it was passed. Never normalised: `undefined` (no body
-   * at all) and `""` (an empty string body, which makes the runtime add
-   * `Content-Type: text/plain`) are different requests and the WAF rule this
-   * client works around is the reason.
-   */
+  `init.body` exactly as it was passed. Never normalised: `undefined` (no body
+  at all) and `""` (an empty string body, which makes the runtime add
+  `Content-Type: text/plain`) are different requests and the WAF rule this
+  client works around is the reason.
+  */
   body: string | undefined;
   redirect: string | undefined;
 }
@@ -122,14 +122,14 @@ export function loginPageOld(token = TOKEN): string {
 }
 
 /**
- * A third login form shape: the username field is the plain `Login`, and the
- * page also carries the `jsenabled` hidden field a JS-enabled browser's own
- * script is presumed to flip before submit.
- *
- * `jsenabled` starts at `"0"`, the shape a script-toggled hidden field would
- * have before the toggle runs, so a test can tell "echoed as found" apart from
- * "the client set it".
- */
+A third login form shape: the username field is the plain `Login`, and the
+page also carries the `jsenabled` hidden field a JS-enabled browser's own
+script is presumed to flip before submit.
+
+`jsenabled` starts at `"0"`, the shape a script-toggled hidden field would
+have before the toggle runs, so a test can tell "echoed as found" apart from
+"the client set it".
+*/
 export function loginPageWithLoginField(token = TOKEN): string {
   return `<!doctype html><html><body>
     <form action="/MyChart/Authentication/Login/DoLogin" method="post">
@@ -143,9 +143,9 @@ export function loginPageWithLoginField(token = TOKEN): string {
 }
 
 /**
- * The same page re-rendered with a captcha challenge: the container id and the
- * flag `MARKERS.captchaRequired` looks for, both synthetic.
- */
+The same page re-rendered with a captcha challenge: the container id and the
+flag `MARKERS.captchaRequired` looks for, both synthetic.
+*/
 export const LOGIN_PAGE_CAPTCHA_REQUIRED = `<!doctype html><html><body>
   <div id="CaptchaContainer">"captchaRequired":true</div>
   <form action="/MyChart/Authentication/Login/DoLogin" method="post">
@@ -157,11 +157,11 @@ export const LOGIN_PAGE_CAPTCHA_REQUIRED = `<!doctype html><html><body>
 </body></html>`;
 
 /**
- * A login form whose token is entity-encoded, as a template engine emits one.
- *
- * `&#x2B;` is a `+`: base64 tokens contain them, and a token echoed back still
- * escaped is rejected in a way that looks exactly like a wrong password.
- */
+A login form whose token is entity-encoded, as a template engine emits one.
+
+`&#x2B;` is a `+`: base64 tokens contain them, and a token echoed back still
+escaped is rejected in a way that looks exactly like a wrong password.
+*/
 export const LOGIN_PAGE_ENCODED_TOKEN = `<!doctype html><html><body>
   <form action="/MyChart/Authentication/Login/DoLogin" method="post">
     <input type="hidden" name="__RequestVerificationToken" value="aa&#x2B;bb&amp;cc" />
@@ -171,12 +171,12 @@ export const LOGIN_PAGE_ENCODED_TOKEN = `<!doctype html><html><body>
 </body></html>`;
 
 /**
- * A login page that carries the two things that most look like trouble and are
- * not: a reCAPTCHA script tag (present on plenty of login pages that never show
- * a challenge) and a `disabled` attribute (present on nearly every form). A
- * marker list that matched either as a substring would abandon discovery, or
- * report a locked account, on a page that is simply a login form.
- */
+A login page that carries the two things that most look like trouble and are
+not: a reCAPTCHA script tag (present on plenty of login pages that never show
+a challenge) and a `disabled` attribute (present on nearly every form). A
+marker list that matched either as a substring would abandon discovery, or
+report a locked account, on a page that is simply a login form.
+*/
 export const LOGIN_PAGE_WITH_INNOCENT_MARKERS = `<!doctype html><html><head>
   <script src="https://www.example-captcha.test/recaptcha/api.js"></script>
 </head><body>
@@ -196,9 +196,9 @@ export const LOGIN_REJECTED_WITH_INNOCENT_MARKERS = LOGIN_PAGE_WITH_INNOCENT_MAR
 );
 
 /**
- * A signed-in page that mentions the two-step settings and carries a
- * change-password form -- neither of which means the session is gone.
- */
+A signed-in page that mentions the two-step settings and carries a
+change-password form -- neither of which means the session is gone.
+*/
 export const HOME_PAGE_WITH_INNOCENT_MARKERS = `<!doctype html><html><body>
   <h1>Your chart</h1>
   <nav><a href="/MyChart/Profile/SecondaryValidation">Two-step verification</a></nav>
@@ -209,12 +209,12 @@ export const HOME_PAGE_WITH_INNOCENT_MARKERS = `<!doctype html><html><body>
 </body></html>`;
 
 /**
- * A page that redirects with a script rather than a header.
- *
- * Parameterised on the target because the origin is what decides whether it is
- * followed at all: a body-level redirect is content the page chose, so
- * `portalFetch` follows it only within the same origin.
- */
+A page that redirects with a script rather than a header.
+
+Parameterised on the target because the origin is what decides whether it is
+followed at all: a body-level redirect is content the page chose, so
+`portalFetch` follows it only within the same origin.
+*/
 export function scriptRedirectPage(target: string): string {
   return `<!doctype html><html><head><script>
   window.location.href = "${target}";
@@ -250,13 +250,13 @@ export function twoFactorPage(token = TOKEN_2): string {
 }
 
 /**
- * The challenge page as a classic deployment really serves it: no form at all.
- *
- * Mirrors the captured structure only -- a lone antiforgery input, the page
- * context's `Workflow` value and the controller script that builds the UI. No
- * `TwoFactorCode` input and no `Validate` action anywhere: the page is recognised
- * by its path, and its XHRs carry the token in a header.
- */
+The challenge page as a classic deployment really serves it: no form at all.
+
+Mirrors the captured structure only -- a lone antiforgery input, the page
+context's `Workflow` value and the controller script that builds the UI. No
+`TwoFactorCode` input and no `Validate` action anywhere: the page is recognised
+by its path, and its XHRs carry the token in a header.
+*/
 export function codeEntryPage(token = TOKEN_2): string {
   return `<!doctype html><html><body>
     <input type="hidden" name="__RequestVerificationToken" value="${token}" />
@@ -287,12 +287,12 @@ export const LOGIN_LOCKED_PAGE = `<!doctype html><html><body>
 </body></html>`;
 
 /**
- * The classic login page's real, two-form shape: `#loginForm` (action `"#"`,
- * never submitted) holds the fields a browser's script reads, and `#actualLogin`
- * (the form actually posted) carries nothing but the antiforgery token -- the
- * script builds `LoginInfo` and appends it, `DeviceId`, `forMobile` and
- * `postLoginUrl` at submit time. See `LOGIN_INFO` in `wire.ts`.
- */
+The classic login page's real, two-form shape: `#loginForm` (action `"#"`,
+never submitted) holds the fields a browser's script reads, and `#actualLogin`
+(the form actually posted) carries nothing but the antiforgery token -- the
+script builds `LoginInfo` and appends it, `DeviceId`, `forMobile` and
+`postLoginUrl` at submit time. See `LOGIN_INFO` in `wire.ts`.
+*/
 export function loginPageEnvelope(token = TOKEN): string {
   return `<!doctype html><html><body>
     <form id="loginForm" action="#">
@@ -308,11 +308,11 @@ export function loginPageEnvelope(token = TOKEN): string {
 }
 
 /**
- * A login page carrying an unrelated second form -- a site-search box, say --
- * next to the one that is actually posted. Proves the login POST's echo is
- * scoped to the posted form's own fields: `q` belongs to the search form and
- * must never reach `DoLogin`.
- */
+A login page carrying an unrelated second form -- a site-search box, say --
+next to the one that is actually posted. Proves the login POST's echo is
+scoped to the posted form's own fields: `q` belongs to the search form and
+must never reach `DoLogin`.
+*/
 export function loginPageWithUnrelatedForm(token = TOKEN): string {
   return `<!doctype html><html><body>
     <form id="siteSearch" action="/MyChart/Search" method="get">
@@ -328,11 +328,11 @@ export function loginPageWithUnrelatedForm(token = TOKEN): string {
 }
 
 /**
- * A page asking the owner to choose a delivery channel before any code has
- * been sent -- not the code-entry page, and (on purpose) not served under a
- * path containing `secondaryvalidation`, so a client that only checked the URL
- * would misread it as "signed in".
- */
+A page asking the owner to choose a delivery channel before any code has
+been sent -- not the code-entry page, and (on purpose) not served under a
+path containing `secondaryvalidation`, so a client that only checked the URL
+would misread it as "signed in".
+*/
 export const METHOD_CHOICE_PAGE = `<!doctype html><html><body>
   <form action="/MyChart/Authentication/VerificationMethod/SendCode" method="post">
     <input type="hidden" name="__RequestVerificationToken" value="${TOKEN_2}" />
@@ -345,13 +345,13 @@ export const METHOD_CHOICE_PAGE = `<!doctype html><html><body>
 </body></html>`;
 
 /**
- * A signed-in page.
- *
- * Carefully free of every marker the client looks for: no password input, no
- * mention of the challenge, and none of the words that mean "locked" or
- * "blocked" -- a fixture that tripped one of those would make a passing test
- * meaningless.
- */
+A signed-in page.
+
+Carefully free of every marker the client looks for: no password input, no
+mention of the challenge, and none of the words that mean "locked" or
+"blocked" -- a fixture that tripped one of those would make a passing test
+meaningless.
+*/
 export const HOME_PAGE = `<!doctype html><html><body>
   <h1>Your chart</h1><nav><a href="/MyChart/Visits/VisitsList">Visits</a></nav>
 </body></html>`;
@@ -368,12 +368,12 @@ export function visitsListPage(token = TOKEN_2): string {
 export const VISIT_INSTANT_MS = 1_790_000_000_000;
 
 /**
- * A `LoadUpcoming` body with all three buckets populated.
- *
- * The status booleans are set in combinations that contradict each other on
- * purpose: that is what the real payload does, and pinning the priority order is
- * the only way a cancelled visit reliably stops being on the calendar.
- */
+A `LoadUpcoming` body with all three buckets populated.
+
+The status booleans are set in combinations that contradict each other on
+purpose: that is what the real payload does, and pinning the priority order is
+the only way a cancelled visit reliably stops being on the calendar.
+*/
 export function upcomingPayload(): Record<string, unknown> {
   return {
     InProgressVisits: [
@@ -431,17 +431,17 @@ export function upcomingPayload(): Record<string, unknown> {
 }
 
 /**
- * A `LoadUpcoming` body in the shape a live capture found, rather than the shape
- * the key guesses assumed.
- *
- * Every difference from `upcomingPayload()` is a correction the capture forced:
- * `Csn` not `CSN`, `VisitTypeName` not `VisitType`, `PrimaryProviderName` not
- * `ProviderName`, the whole of the place nested under `PrimaryDepartment` with a
- * structured `Address` object, no `IsVideoVisit`-shaped flag anywhere, and the
- * two status keys whose guessed names were simply wrong.
- *
- * Invented values throughout. No part of this came from a real payload.
- */
+A `LoadUpcoming` body in the shape a live capture found, rather than the shape
+the key guesses assumed.
+
+Every difference from `upcomingPayload()` is a correction the capture forced:
+`Csn` not `CSN`, `VisitTypeName` not `VisitType`, `PrimaryProviderName` not
+`ProviderName`, the whole of the place nested under `PrimaryDepartment` with a
+structured `Address` object, no `IsVideoVisit`-shaped flag anywhere, and the
+two status keys whose guessed names were simply wrong.
+
+Invented values throughout. No part of this came from a real payload.
+*/
 export function confirmedShapePayload(): Record<string, unknown> {
   return {
     HasPVG: false,
@@ -524,12 +524,12 @@ export const ORG_TOKEN = "org-token-aaa";
 const ORG_TOKEN_2 = "org-token-bbb";
 
 /**
- * A `LoadPast` body: the same rows, grouped one level deeper.
- *
- * `LoadPast` buckets by an opaque organisation token because a chart account can
- * be linked to several organisations, which is the one structural difference from
- * `LoadUpcoming`.
- */
+A `LoadPast` body: the same rows, grouped one level deeper.
+
+`LoadPast` buckets by an opaque organisation token because a chart account can
+be linked to several organisations, which is the one structural difference from
+`LoadUpcoming`.
+*/
 export function pastPayload(): Record<string, unknown> {
   return {
     CanSearch: true,
@@ -567,13 +567,13 @@ export function pastPayload(): Record<string, unknown> {
 }
 
 /**
- * The OpenID handoff stub a `custom_oidc` deployment serves at the login path.
- *
- * No form the classic client could drive, no username field, no password field:
- * one hidden antiforgery input and the controller script that hands off to the
- * OpenID flow. Written by hand; the marker strings are the only part that has to
- * match a real deployment.
- */
+The OpenID handoff stub a `custom_oidc` deployment serves at the login path.
+
+No form the classic client could drive, no username field, no password field:
+one hidden antiforgery input and the controller script that hands off to the
+OpenID flow. Written by hand; the marker strings are the only part that has to
+match a real deployment.
+*/
 export const OPENID_STUB_PAGE = `<!doctype html><html><head>
   <script src="/areas/authentication/scripts/controllers/openidrequestcontroller.min.js"></script>
 </head><body>
@@ -584,16 +584,16 @@ export const OPENID_STUB_PAGE = `<!doctype html><html><head>
 export const RESULT_TOKEN = "synthetic-antiforgery-token-0003";
 
 /**
- * The hand-off stub as a `custom_oidc` deployment serves it.
- *
- * Mirrors the *structure* of the owner's capture of a successful sign-in and
- * nothing else: one hidden antiforgery input, and the request controller
- * instantiated inside the UI framework's load callback with six literal
- * arguments -- encrypted nonce, encrypted state, encrypted code verifier, the
- * authorization URL (every `&` written as `\u0026`, as a JS string literal in
- * the real page carries it), a workflow label, and the submit-a-form flag.
- * Every value is invented. The class name is generic MyChart framework code.
- */
+The hand-off stub as a `custom_oidc` deployment serves it.
+
+Mirrors the *structure* of the owner's capture of a successful sign-in and
+nothing else: one hidden antiforgery input, and the request controller
+instantiated inside the UI framework's load callback with six literal
+arguments -- encrypted nonce, encrypted state, encrypted code verifier, the
+authorization URL (every `&` written as `\u0026`, as a JS string literal in
+the real page carries it), a workflow label, and the submit-a-form flag.
+Every value is invented. The class name is generic MyChart framework code.
+*/
 export function openIdRequestPage(authorizeUrl: string, submitForm = false): string {
   const literal = authorizeUrl.replaceAll("&", String.raw`\u0026`);
   return `<!doctype html><html><body>
@@ -607,10 +607,10 @@ export function openIdRequestPage(authorizeUrl: string, submitForm = false): str
 }
 
 /**
- * The `AuthorizeResult` page, same rules: its own antiforgery input and the
- * response controller with `(code, state, error, responseMode, issuer)`, where
- * the capture had `error` and `issuer` empty.
- */
+The `AuthorizeResult` page, same rules: its own antiforgery input and the
+response controller with `(code, state, error, responseMode, issuer)`, where
+the capture had `error` and `issuer` empty.
+*/
 export function openIdResponsePage(code: string, state: string, responseMode = "query"): string {
   return `<!doctype html><html><body>
   <input name="__RequestVerificationToken" type="hidden" value="${RESULT_TOKEN}" />
@@ -623,15 +623,15 @@ export function openIdResponsePage(code: string, state: string, responseMode = "
 }
 
 /**
- * The OpenID handoff stub, plus the `<noscript>` fallback a real deployment
- * ships alongside it for a browser that will not run its scripts.
- *
- * `nojsTarget` is the no-JS landing page. A browser with JavaScript enabled --
- * which this client impersonates -- never renders a `<noscript>` element's
- * content, let alone follows a refresh inside it, so a scraper that does is one
- * hop behind a real browser and lands somewhere with none of this stub's
- * markers.
- */
+The OpenID handoff stub, plus the `<noscript>` fallback a real deployment
+ships alongside it for a browser that will not run its scripts.
+
+`nojsTarget` is the no-JS landing page. A browser with JavaScript enabled --
+which this client impersonates -- never renders a `<noscript>` element's
+content, let alone follows a refresh inside it, so a scraper that does is one
+hop behind a real browser and lands somewhere with none of this stub's
+markers.
+*/
 export function openIdStubWithNoscriptFallback(nojsTarget: string): string {
   return `<!doctype html><html><head>
   <script src="/areas/authentication/scripts/controllers/openidrequestcontroller.min.js"></script>
@@ -642,14 +642,14 @@ export function openIdStubWithNoscriptFallback(nojsTarget: string): string {
 }
 
 /**
- * The stub again, this time with an unrelated same-origin body redirect that
- * sits *outside* any `<noscript>` element.
- *
- * Proves the stub is recognised on its own markers before a body redirect is
- * even considered, not merely because `<noscript>` stripping happened to
- * remove the only one present: this redirect is real, and blindly following it
- * would still walk past the stub if nothing recognised the stub first.
- */
+The stub again, this time with an unrelated same-origin body redirect that
+sits *outside* any `<noscript>` element.
+
+Proves the stub is recognised on its own markers before a body redirect is
+even considered, not merely because `<noscript>` stripping happened to
+remove the only one present: this redirect is real, and blindly following it
+would still walk past the stub if nothing recognised the stub first.
+*/
 export function openIdStubWithBodyRedirect(target: string): string {
   return `<!doctype html><html><head>
   <script src="/areas/authentication/scripts/controllers/openidrequestcontroller.min.js"></script>
@@ -660,10 +660,10 @@ export function openIdStubWithBodyRedirect(target: string): string {
 }
 
 /**
- * A `<meta refresh>` outside `<noscript>`, plus a decoy inside one that points
- * somewhere else. The real target must still be the one used: `<noscript>`
- * stripping must remove only the decoy, not the redirect a real browser acts on.
- */
+A `<meta refresh>` outside `<noscript>`, plus a decoy inside one that points
+somewhere else. The real target must still be the one used: `<noscript>`
+stripping must remove only the decoy, not the redirect a real browser acts on.
+*/
 export function metaRedirectPageWithNoscriptDecoy(target: string, decoyTarget: string): string {
   return `<!doctype html><html><head>
   <meta http-equiv="refresh" content="0;url=${target}" />
@@ -672,10 +672,10 @@ export function metaRedirectPageWithNoscriptDecoy(target: string, decoyTarget: s
 }
 
 /**
- * A page whose only redirect is a `window.location` assignment inside
- * `<noscript>`. A browser with JavaScript enabled never executes it, so the
- * page is not a redirect at all as far as this client is concerned.
- */
+A page whose only redirect is a `window.location` assignment inside
+`<noscript>`. A browser with JavaScript enabled never executes it, so the
+page is not a redirect at all as far as this client is concerned.
+*/
 export function noscriptOnlyScriptRedirectPage(target: string): string {
   return `<!doctype html><html><head>
   <noscript><script>window.location.href = "${target}";</script></noscript>

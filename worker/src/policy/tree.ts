@@ -1,30 +1,30 @@
 /**
- * The field tree: what a `field` rule can name, for every shape a tool answers in.
- *
- * Two jobs, one source:
- *
- *  - The admin UI's rule builder draws it as an expandable tree the owner picks
- *    fields from (served by `GET /api/mcp/policy/schema`).
- *  - `POST /api/mcp/policy` walks it to refuse a path that cannot match anything
- *    for the rule's scope (`resolvePath` below).
- *
- * A "shape" is one kind of object a tool puts in its answer: the normalized item
- * of a resource type (`normalized:Observation`), the raw FHIR resource behind it
- * (`raw:Observation`, returned with `raw: true`), or one of the tool-specific
- * shapes -- the appointment view `get_appointments` and the summary serve, the
- * summary's count rows, a document's decoded text, a health system row. Each
- * tool lists the shapes it can emit (`TOOL_SHAPES`).
- *
- * The normalized shapes are complete: every key a `normalizeX` function can
- * emit, each list compile-checked against the `NormalizedX` interface. The raw
- * FHIR shapes cover every top-level element of each R4 resource (compile-checked
- * against `fhir/r4`), and the datatypes and backbone elements below them that
- * carry anything a person would want to hide; a node marked `open` stops the
- * model there, and any path below it is accepted rather than refused, because
- * this module cannot prove such a path wrong. The UI overlays the owner's real
- * cached key structure on top (`POST /api/mcp/policy/structure`), so a key the
- * model does not know is still pickable.
- */
+The field tree: what a `field` rule can name, for every shape a tool answers in.
+
+Two jobs, one source:
+
+ - The admin UI's rule builder draws it as an expandable tree the owner picks
+   fields from (served by `GET /api/mcp/policy/schema`).
+ - `POST /api/mcp/policy` walks it to refuse a path that cannot match anything
+   for the rule's scope (`resolvePath` below).
+
+A "shape" is one kind of object a tool puts in its answer: the normalized item
+of a resource type (`normalized:Observation`), the raw FHIR resource behind it
+(`raw:Observation`, returned with `raw: true`), or one of the tool-specific
+shapes -- the appointment view `get_appointments` and the summary serve, the
+summary's count rows, a document's decoded text, a health system row. Each
+tool lists the shapes it can emit (`TOOL_SHAPES`).
+
+The normalized shapes are complete: every key a `normalizeX` function can
+emit, each list compile-checked against the `NormalizedX` interface. The raw
+FHIR shapes cover every top-level element of each R4 resource (compile-checked
+against `fhir/r4`), and the datatypes and backbone elements below them that
+carry anything a person would want to hide; a node marked `open` stops the
+model there, and any path below it is accepted rather than refused, because
+this module cannot prove such a path wrong. The UI overlays the owner's real
+cached key structure on top (`POST /api/mcp/policy/structure`), so a key the
+model does not know is still pickable.
+*/
 
 import { ARRAY_SEGMENT } from "@shared/policy-path.ts";
 
@@ -1179,10 +1179,10 @@ const RAW_ORGANIZATION = {
 type NormalizedSpecs<T> = { readonly [K in keyof T]-?: Spec };
 
 /**
- * Keys `collect` adds to every normalized item: the health system tags. Not part
- * of any `NormalizedX` interface (the normalizer does not know the id), but on
- * every item a tool answers with.
- */
+Keys `collect` adds to every normalized item: the health system tags. Not part
+of any `NormalizedX` interface (the normalizer does not know the id), but on
+every item a tool answers with.
+*/
 const TAGS = {
   healthSystem: ["string", "The health system's display name"],
   healthSystemId: ["string", "The health system's id"],
@@ -1436,9 +1436,9 @@ const N_ORGANIZATION = {
 } as const satisfies NormalizedSpecs<NormalizedOrganization>;
 
 /**
- * Fields a normalized shape names in its own `sensitive` array: withheld unless
- * an `allow` rule puts them back. Mirrors the normalizers; a test pins the two.
- */
+Fields a normalized shape names in its own `sensitive` array: withheld unless
+an `allow` rule puts them back. Mirrors the normalizers; a test pins the two.
+*/
 export const SENSITIVE_FIELDS: ReadonlyMap<string, readonly string[]> = new Map([
   ["Patient", ["birthDate"]],
   ["Coverage", ["subscriberId"]],
@@ -1460,10 +1460,10 @@ const SUMMARY_RECENT = {
 } as const;
 
 /**
- * One condition, collapsed from every row that names it (`get_conditions` with
- * `collapse: true`, the summary's conditions). Built from rows the policy has
- * already filtered, so a rule on a Condition field reaches it through those.
- */
+One condition, collapsed from every row that names it (`get_conditions` with
+`collapse: true`, the summary's conditions). Built from rows the policy has
+already filtered, so a rule on a Condition field reaches it through those.
+*/
 const CONDITION_GROUP = {
   resourceType: ["string", "Always Condition"],
   kind: ["string", "condition_group (recent, in the summary)"],
@@ -1495,11 +1495,11 @@ const DOCUMENT_TEXT = {
 } as const;
 
 /**
- * One secure message, as both message tools hand it to the policy before
- * grouping messages into conversations. There is no FHIR resource behind it --
- * it is read from the patient portal -- so this view is the whole of its shape,
- * under FHIR's own name for a message.
- */
+One secure message, as both message tools hand it to the policy before
+grouping messages into conversations. There is no FHIR resource behind it --
+it is read from the patient portal -- so this view is the whole of its shape,
+under FHIR's own name for a message.
+*/
 const MESSAGE = {
   resourceType: ["string", "Always Communication"],
   id: ["string", "The message's id"],
@@ -1524,12 +1524,12 @@ const MESSAGE = {
 const MESSAGE_SHAPE = "view:Message";
 
 /**
- * What both message tools' conversation items share. Built by grouping message
- * items the policy has already filtered (`worker/src/mcp/message-threads.ts`), so a
- * rule on a message field reaches them through those; the policy also runs over
- * the conversation items themselves, so a rule on one of these fields reaches
- * them directly.
- */
+What both message tools' conversation items share. Built by grouping message
+items the policy has already filtered (`worker/src/mcp/message-threads.ts`), so a
+rule on a message field reaches them through those; the policy also runs over
+the conversation items themselves, so a rule on one of these fields reaches
+them directly.
+*/
 const THREAD_BASE = {
   resourceType: ["string", "Always Communication"],
   kind: ["string", "message_thread, or message_thread_detail from get_message_thread"],
@@ -1944,13 +1944,13 @@ const HC_SUMMARY_ROW = {
 } as const;
 
 /**
- * Every Health Connect shape, by id, with the record types its rows can be
- * tagged as: `"any"` for a shape whose rows are about whichever type the
- * caller named, a list for one that is always about the same types, and an
- * empty list for a row that carries no `resourceType` at all. A rule scoped to
- * a type reaches a shape only through a row that can carry that type -- or
- * through a joined field, which `./hc-aliases.ts` knows about.
- */
+Every Health Connect shape, by id, with the record types its rows can be
+tagged as: `"any"` for a shape whose rows are about whichever type the
+caller named, a list for one that is always about the same types, and an
+empty list for a row that carries no `resourceType` at all. A rule scoped to
+a type reaches a shape only through a row that can carry that type -- or
+through a joined field, which `./hc-aliases.ts` knows about.
+*/
 const HC_SHAPES: readonly {
   id: string;
   label: string;
@@ -2012,11 +2012,11 @@ const HC_SHAPES: readonly {
 const HC_DAILY_SUMMARY_TYPE = "DailySummary";
 
 /**
- * The `hc:<Type>` resource types the rule builder offers: every record type
- * the companion app maps (`worker/src/hc/record-types.ts`) -- the ones with
- * nothing numeric to summarise included, which are the ones most worth hiding
- * -- plus the daily summary's own.
- */
+The `hc:<Type>` resource types the rule builder offers: every record type
+the companion app maps (`worker/src/hc/record-types.ts`) -- the ones with
+nothing numeric to summarise included, which are the ones most worth hiding
+-- plus the daily summary's own.
+*/
 const HC_RESOURCE_TYPES: readonly string[] = [
   ...HC_RECORD_TYPES.map((type) => `${HC_TYPE_PREFIX}${type}`),
   `${HC_TYPE_PREFIX}${HC_DAILY_SUMMARY_TYPE}`,
@@ -2195,10 +2195,10 @@ function collectionShapes(resourceType: string): string[] {
 type ToolName = (typeof TOOL_NAMES)[number];
 
 /**
- * Every shape each tool can put in its answer. `satisfies Record<ToolName, ...>`
- * makes a new tool without an entry here a compile error, so the builder can
- * never offer a tool it has no tree for.
- */
+Every shape each tool can put in its answer. `satisfies Record<ToolName, ...>`
+makes a new tool without an entry here a compile error, so the builder can
+never offer a tool it has no tree for.
+*/
 const TOOL_SHAPES = {
   get_health_summary: [
     "summary:count",
@@ -2259,10 +2259,10 @@ export function toolShapes(tool: string): readonly string[] | undefined {
 }
 
 /**
- * Resource types a tool answers with that have a view of their own but no FHIR
- * normalizer or raw model behind them: a secure message is read from the patient
- * portal, not a FHIR server.
- */
+Resource types a tool answers with that have a view of their own but no FHIR
+normalizer or raw model behind them: a secure message is read from the patient
+portal, not a FHIR server.
+*/
 const VIEW_ONLY_RESOURCE_TYPES: readonly string[] = ["Communication"];
 
 /** Every resource type the tree models, in a stable order. */
@@ -2322,11 +2322,11 @@ function toNode(name: string, spec: Spec, sensitive: ReadonlySet<string>): Polic
 }
 
 /**
- * The choice-type stems among a shape's keys: `value` when it has
- * `valueQuantity` and `valueString`, `medication` for `medicationReference`
- * and `medicationCodeableConcept`. Two variants at least, each the stem plus a
- * capitalised type name -- which is how FHIR spells `[x]` once serialised.
- */
+The choice-type stems among a shape's keys: `value` when it has
+`valueQuantity` and `valueString`, `medication` for `medicationReference`
+and `medicationCodeableConcept`. Two variants at least, each the stem plus a
+capitalised type name -- which is how FHIR spells `[x]` once serialised.
+*/
 const CHOICE_TYPES = new Set([
   "Quantity",
   "CodeableConcept",
@@ -2485,12 +2485,12 @@ function shapeNodes(shapeId: string): PolicyFieldNode[] {
 }
 
 /**
- * Walk `path` through one shape.
- *
- * `[]` must meet an array; a named segment that meets an array steps into its
- * elements implicitly, exactly as the filter does. A `stem[x]` segment resolves
- * against the choice node of that stem. An `open` node accepts anything below it.
- */
+Walk `path` through one shape.
+
+`[]` must meet an array; a named segment that meets an array steps into its
+elements implicitly, exactly as the filter does. A `stem[x]` segment resolves
+against the choice node of that stem. An `open` node accepts anything below it.
+*/
 export function resolveInShape(shapeId: string, path: readonly string[]): Resolution {
   const walk: Walk = {
     nodes: shapeNodes(shapeId),
@@ -2565,11 +2565,11 @@ export function isPhoneShape(shapeId: string): boolean {
 }
 
 /**
- * The `resourceType`s a row of one Health Connect shape can carry when `tool`
- * answers with it, as far as a rule on `ruleType` is concerned: the shape's
- * own fixed types, or -- for a shape about whichever type the caller named --
- * the rule's own type and every type whose rows the tool joins it onto.
- */
+The `resourceType`s a row of one Health Connect shape can carry when `tool`
+answers with it, as far as a rule on `ruleType` is concerned: the shape's
+own fixed types, or -- for a shape about whichever type the caller named --
+the rule's own type and every type whose rows the tool joins it onto.
+*/
 export function phoneRowTypes(shapeId: string, tool: string, ruleType: string): string[] {
   const rows = HC_SHAPES_BY_ID.get(shapeId)?.rows ?? [];
   const candidates =
@@ -2596,18 +2596,18 @@ function phoneShapeReached(shapeId: string, tool: string | null, ruleType: strin
 }
 
 /**
- * The shape ids a rule with this scope can reach. No tool: every shape. A
- * resource type narrows to that type's shapes, plus the tool-specific rows
- * that carry a `resourceType` of whatever they describe (summary counts, sync
- * rows), which the filter matches by that field.
- *
- * A phone's rows are typed `hc:<Type>`, so the two families never reach each
- * other's shapes, and within the phone's a type reaches only the shapes whose
- * rows can carry it or its data: `hc:HeartRate` reaches a heart-rate point
- * and, through the joined overnight heart rate, a night -- but not a
- * blood-pressure-only shape's own fields, and not the phone's sync row, which
- * has no type at all.
- */
+The shape ids a rule with this scope can reach. No tool: every shape. A
+resource type narrows to that type's shapes, plus the tool-specific rows
+that carry a `resourceType` of whatever they describe (summary counts, sync
+rows), which the filter matches by that field.
+
+A phone's rows are typed `hc:<Type>`, so the two families never reach each
+other's shapes, and within the phone's a type reaches only the shapes whose
+rows can carry it or its data: `hc:HeartRate` reaches a heart-rate point
+and, through the joined overnight heart rate, a night -- but not a
+blood-pressure-only shape's own fields, and not the phone's sync row, which
+has no type at all.
+*/
 export function shapesForScope(scope: {
   tool: string | null;
   resourceType: string | null;
@@ -2653,14 +2653,14 @@ function renderedSources(name: string, rawType: string): string[][] | null {
 }
 
 /**
- * The renames that are not renames: a normalized string field with the same
- * name as a raw CodeableConcept or Reference -- `category`, `clinicalStatus`,
- * Observation's `code`, `requester`, `payor` -- is that element rendered to
- * text (`codeText`, `refs.display`). So a rule against the raw `display` of a
- * coding has to take the normalized text with it. Derived here from the two
- * trees rather than written out per module, because every such field follows
- * the same two rules.
- */
+The renames that are not renames: a normalized string field with the same
+name as a raw CodeableConcept or Reference -- `category`, `clinicalStatus`,
+Observation's `code`, `requester`, `payor` -- is that element rendered to
+text (`codeText`, `refs.display`). So a rule against the raw `display` of a
+coding has to take the normalized text with it. Derived here from the two
+trees rather than written out per module, because every such field follows
+the same two rules.
+*/
 export function sameNameRenderings(resourceType: string): FieldAlias[] {
   const resource = RESOURCES.find((entry) => entry.type === resourceType);
   if (resource === undefined) return [];

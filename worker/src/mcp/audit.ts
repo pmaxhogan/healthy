@@ -1,28 +1,28 @@
 /**
- * The wrapper every tool is registered through.
- *
- * It does four things, in this order, so that no tool has to remember any of
- * them:
- *
- *  1. Refuses everything when `settings.mcp_enabled` is false. One switch, and it
- *     is checked before a single row is read.
- *  2. Loads the exposure rules once per call and refuses a denied tool before it
- *     reads anything -- a denied tool costs one settings read and one policy read,
- *     not a cache scan. (`applyPolicy` enforces the same rule again on the way
- *     out; this is the cheap path, not the trusted one.)
- *  3. Turns any thrown error into an `isError` answer with a stable code. A
- *     health system's error body can quote the record that caused it, so no
- *     upstream message and no stack ever reaches the client.
- *  4. Writes exactly one `mcp_audit` row per call: which tool, which health systems by
- *     id, how many items, whether it worked, how long it took -- and, when the
- *     caller passed a `jq` program, its SHA-256 and length (never its text, see
- *     `AuditJq`) with the item counts that went into and came out of it. The row
- *     has nowhere to put content and this function never offers it any.
- *
- * Retention is handled here too, sampled rather than scheduled: roughly one call
- * in eighty also prunes rows past a year. That keeps the daily cron free of a
- * dependency on this module and means an unused deployment never accumulates.
- */
+The wrapper every tool is registered through.
+
+It does four things, in this order, so that no tool has to remember any of
+them:
+
+ 1. Refuses everything when `settings.mcp_enabled` is false. One switch, and it
+    is checked before a single row is read.
+ 2. Loads the exposure rules once per call and refuses a denied tool before it
+    reads anything -- a denied tool costs one settings read and one policy read,
+    not a cache scan. (`applyPolicy` enforces the same rule again on the way
+    out; this is the cheap path, not the trusted one.)
+ 3. Turns any thrown error into an `isError` answer with a stable code. A
+    health system's error body can quote the record that caused it, so no
+    upstream message and no stack ever reaches the client.
+ 4. Writes exactly one `mcp_audit` row per call: which tool, which health systems by
+    id, how many items, whether it worked, how long it took -- and, when the
+    caller passed a `jq` program, its SHA-256 and length (never its text, see
+    `AuditJq`) with the item counts that went into and came out of it. The row
+    has nowhere to put content and this function never offers it any.
+
+Retention is handled here too, sampled rather than scheduled: roughly one call
+in eighty also prunes rows past a year. That keeps the daily cron free of a
+dependency on this module and means an unused deployment never accumulates.
+*/
 
 import { isAppError } from "../lib/errors.ts";
 import { isToolDenied } from "../policy/rules.ts";
@@ -63,24 +63,24 @@ function classify(error: unknown): ToolErrorCode {
 }
 
 /**
- * One call in ~85, using the CSPRNG.
- *
- * `Math.random()` would do, but `sonarjs/pseudo-random` is right that reaching
- * for it in a Worker is a habit worth not having, and `crypto` is already here.
- */
+One call in ~85, using the CSPRNG.
+
+`Math.random()` would do, but `sonarjs/pseudo-random` is right that reaching
+for it in a Worker is a habit worth not having, and `crypto` is already here.
+*/
 function shouldPrune(): boolean {
   const [byte = 255] = crypto.getRandomValues(new Uint8Array(1));
   return byte < 3;
 }
 
 /**
- * Wrap one tool body into the callback `McpServer.registerTool` takes.
- *
- * The audit write is awaited inside the same request: a Durable Object can be
- * evicted the moment the response is written, so a fire-and-forget row is a row
- * that sometimes does not exist -- and an audit trail with gaps is worse than
- * none, because it looks complete.
- */
+Wrap one tool body into the callback `McpServer.registerTool` takes.
+
+The audit write is awaited inside the same request: a Durable Object can be
+evicted the moment the response is written, so a fire-and-forget row is a row
+that sometimes does not exist -- and an audit trail with gaps is worse than
+none, because it looks complete.
+*/
 export function withAudit<Args>(
   deps: ToolDeps,
   tool: string,

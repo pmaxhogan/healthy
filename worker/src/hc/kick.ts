@@ -1,14 +1,14 @@
 /**
- * Waking the ingest runner.
- *
- * The seam between the ingest route, which only queues, and the Durable Object
- * that applies what is queued. Kept as its own tiny module so the route does
- * not import the runner class (and everything the apply pipeline pulls in).
- *
- * A failure to wake the runner is never the phone's problem: the batch is
- * already durable, and the scheduled tick wakes the runner again anyway. So
- * this never throws.
- */
+Waking the ingest runner.
+
+The seam between the ingest route, which only queues, and the Durable Object
+that applies what is queued. Kept as its own tiny module so the route does
+not import the runner class (and everything the apply pipeline pulls in).
+
+A failure to wake the runner is never the phone's problem: the batch is
+already durable, and the scheduled tick wakes the runner again anyway. So
+this never throws.
+*/
 
 import { errorFields, logLine } from "../lib/log.ts";
 

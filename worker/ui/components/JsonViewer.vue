@@ -30,15 +30,15 @@ const copied = ref(false);
 const editor = shallowRef<EditorView | null>(null);
 
 /**
- * Pretty-printed JSON text for the current `value`.
- *
- * `JSON.stringify` can throw (a BigInt, a circular structure) even though
- * `value` is whatever a tool call answered with -- always JSON off the wire, but
- * typed `unknown` here because this component has no reason to trust that. The
- * fallback is a fixed sentence rather than `String(value)`: an arbitrary
- * `unknown` stringifies to `"[object Object]"` far more often than to anything
- * useful.
- */
+Pretty-printed JSON text for the current `value`.
+
+`JSON.stringify` can throw (a BigInt, a circular structure) even though
+`value` is whatever a tool call answered with -- always JSON off the wire, but
+typed `unknown` here because this component has no reason to trust that. The
+fallback is a fixed sentence rather than `String(value)`: an arbitrary
+`unknown` stringifies to `"[object Object]"` far more often than to anything
+useful.
+*/
 function textOf(value: unknown): string {
   if (value === undefined) return "undefined";
   try {

@@ -1,16 +1,16 @@
 /**
- * Units, declared once per answer.
- *
- * The companion app normalises every value before it uploads (pressure mmHg,
- * heart rate bpm, lengths metres, energy kcal, mass kg, temperature celsius,
- * volume litres, speed m/s, power watts, percentages 0-100, glucose mmol/L),
- * so a unit belongs to a field, not to a row. A tool puts the map for the
- * fields it returns in the envelope's `units` and leaves it off every item.
- *
- * A field not listed here has no unit to declare (a name, an enum, a count of
- * nothing in particular) or belongs to a record type this Worker has no table
- * for; either way it is absent from the map rather than guessed at.
- */
+Units, declared once per answer.
+
+The companion app normalises every value before it uploads (pressure mmHg,
+heart rate bpm, lengths metres, energy kcal, mass kg, temperature celsius,
+volume litres, speed m/s, power watts, percentages 0-100, glucose mmol/L),
+so a unit belongs to a field, not to a row. A tool puts the map for the
+fields it returns in the envelope's `units` and leaves it off every item.
+
+A field not listed here has no unit to declare (a name, an enum, a count of
+nothing in particular) or belongs to a record type this Worker has no table
+for; either way it is absent from the map rather than guessed at.
+*/
 
 /** Units of `data` fields, by record type. Nested sample fields by their own key. */
 const DATA_UNITS: Readonly<Record<string, Readonly<Record<string, string>>>> = {

@@ -93,21 +93,21 @@ function getCallCount(api: FakeFetch): number {
 }
 
 /**
- * A `signIn.updatedAt` well after the account fixture's own `updatedAt`
- * ("2026-09-21T11:07:00.000Z"), the way a real `setPhase` call would stamp it
- * on every step. The card prefers whichever of the two is fresher (see
- * `effectiveSignIn` in `worker/ui/lib/use-portal-account.ts`), so a poll sequence
- * has to look like the runner is still the one that ran most recently.
- */
+A `signIn.updatedAt` well after the account fixture's own `updatedAt`
+("2026-09-21T11:07:00.000Z"), the way a real `setPhase` call would stamp it
+on every step. The card prefers whichever of the two is fresher (see
+`effectiveSignIn` in `worker/ui/lib/use-portal-account.ts`), so a poll sequence
+has to look like the runner is still the one that ran most recently.
+*/
 const RUNNER_UPDATED_AT = 1_800_000_000;
 
 /**
- * GET #n's response, by 1-based call order: #1 is the initial load.
- *
- * `signInCode` is `PortalSignInState.code` -- the stable failure code the
- * sign-in runner attaches once `phase` reaches `"failed"` -- not the emailed
- * 2FA code, which never leaves the Worker.
- */
+GET #n's response, by 1-based call order: #1 is the initial load.
+
+`signInCode` is `PortalSignInState.code` -- the stable failure code the
+sign-in runner attaches once `phase` reaches `"failed"` -- not the emailed
+2FA code, which never leaves the Worker.
+*/
 function phaseSequence(phases: PortalSignInPhase[], signInCode: string | null = null) {
   return (n: number): PortalAccountStatusDto =>
     portalAccount({

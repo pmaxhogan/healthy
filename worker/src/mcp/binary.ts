@@ -1,23 +1,23 @@
 /**
- * Fetching a clinical document body.
- *
- * The only request-time path in the MCP that talks to a health system, and the
- * only module that imports the sync engine. Both facts are deliberate: the
- * dependency is isolated here so no tool can reach an organisation by accident,
- * and so a change to the sync engine's contract fails to compile in exactly one
- * place.
- *
- * Why documents are special. Epic meters `DocumentReference` content: an
- * organisation answers error 4135 once the day's quota is spent, and that quota is
- * shared with everything else this app does. So metadata is refreshed on the daily
- * schedule like every other resource type, the body is fetched only when a caller
- * asks for that specific document, and the decoded text is cached for thirty days
- * under the synthetic resource type `_binary_text`. A second read of the same note
- * costs nothing, and the cap is reported as its own code so a caller knows to try
- * tomorrow rather than to retry now.
- *
- * The text conversion itself is in `document-text.ts`, which is pure.
- */
+Fetching a clinical document body.
+
+The only request-time path in the MCP that talks to a health system, and the
+only module that imports the sync engine. Both facts are deliberate: the
+dependency is isolated here so no tool can reach an organisation by accident,
+and so a change to the sync engine's contract fails to compile in exactly one
+place.
+
+Why documents are special. Epic meters `DocumentReference` content: an
+organisation answers error 4135 once the day's quota is spent, and that quota is
+shared with everything else this app does. So metadata is refreshed on the daily
+schedule like every other resource type, the body is fetched only when a caller
+asks for that specific document, and the decoded text is cached for thirty days
+under the synthetic resource type `_binary_text`. A second read of the same note
+costs nothing, and the cap is reported as its own code so a caller knows to try
+tomorrow rather than to retry now.
+
+The text conversion itself is in `document-text.ts`, which is pure.
+*/
 
 import { isAppError } from "../lib/errors.ts";
 import { getFhirClientFor } from "../sync/index.ts";
@@ -45,12 +45,12 @@ import type * as fhir4 from "fhir/r4";
 const DOCUMENT_CAP_CODE = "4135";
 
 /**
- * The sync engine's contract, named as a type.
- *
- * The assignment below is the whole coupling between the MCP and the sync engine.
- * If that contract changes, this one line is the compile error -- not a diagnostic
- * buried inside a tool.
- */
+The sync engine's contract, named as a type.
+
+The assignment below is the whole coupling between the MCP and the sync engine.
+If that contract changes, this one line is the compile error -- not a diagnostic
+buried inside a tool.
+*/
 type FhirClientResolver = (ctx: Ctx, healthSystemId: string) => Promise<{ client: FhirClient }>;
 
 const resolveFhirClient: FhirClientResolver = getFhirClientFor;
@@ -67,15 +67,15 @@ interface FoundDocument {
 }
 
 /**
- * The cached `DocumentReference`(s) of one health system whose attachment points
- * at `binaryId`.
- *
- * A single indexed read -- `fhir_cache_type` covers `(resource_type,
- * health_system_id)`, so this is one lookup, not a table walk -- followed by an
- * in-memory match on each attachment's `url`. When more than one document names
- * the same Binary (unusual, but not forbidden by FHIR), the first match wins;
- * nothing here can tell them apart any better than that.
- */
+The cached `DocumentReference`(s) of one health system whose attachment points
+at `binaryId`.
+
+A single indexed read -- `fhir_cache_type` covers `(resource_type,
+health_system_id)`, so this is one lookup, not a table walk -- followed by an
+in-memory match on each attachment's `url`. When more than one document names
+the same Binary (unusual, but not forbidden by FHIR), the first match wins;
+nothing here can tell them apart any better than that.
+*/
 async function findByBinaryId(
   deps: BinaryTextDeps,
   healthSystemId: string,
@@ -100,19 +100,19 @@ type ResolvedDocument =
   | { ok: false; reason: "not_found"; detail: string };
 
 /**
- * Turn a `get_document_text` id argument into a cached `DocumentReference` and
- * the specific attachment it names.
- *
- *  - A Binary reference (`Binary/<id>`, or a URL ending in one) is looked up by
- *    scanning that health system's cached DocumentReferences for one whose
- *    attachment names it, and `attachmentForBinary` picks that exact attachment
- *    -- never a different one `pickAttachment` might otherwise prefer.
- *  - A `DocumentReference/<id>`-prefixed id is looked up as that DocumentReference,
- *    with no fallback: an explicit prefix says what the caller meant.
- *  - A bare id is tried as a DocumentReference id first, so every existing caller
- *    (which only ever passed one) is unaffected, and only falls back to the
- *    Binary search when that lookup misses.
- */
+Turn a `get_document_text` id argument into a cached `DocumentReference` and
+the specific attachment it names.
+
+ - A Binary reference (`Binary/<id>`, or a URL ending in one) is looked up by
+   scanning that health system's cached DocumentReferences for one whose
+   attachment names it, and `attachmentForBinary` picks that exact attachment
+   -- never a different one `pickAttachment` might otherwise prefer.
+ - A `DocumentReference/<id>`-prefixed id is looked up as that DocumentReference,
+   with no fallback: an explicit prefix says what the caller meant.
+ - A bare id is tried as a DocumentReference id first, so every existing caller
+   (which only ever passed one) is unaffected, and only falls back to the
+   Binary search when that lookup misses.
+*/
 async function resolveDocument(
   deps: BinaryTextDeps,
   healthSystemId: string,
@@ -209,19 +209,19 @@ async function fetchBinary(
 }
 
 /**
- * Fetch (or recall) the text of one document.
- *
- * `rawId` is what `get_document_text`'s `id` argument was called with -- a
- * DocumentReference id (optionally `DocumentReference/`-prefixed) or a Binary
- * reference (`Binary/<id>`, a bare Binary id, or a URL ending in one); see
- * `parseDocumentTextId`. Whichever form resolves the same document answers with
- * the same `documentId` and hits the same thirty-day cache entry, because both
- * paths end up naming the same attachment's Binary id.
- *
- * Never throws: every failure is one of the four `DocumentTextResult` reasons, so
- * the tool layer maps a stable code and the audit row records it without anyone
- * having to interpret an upstream message.
- */
+Fetch (or recall) the text of one document.
+
+`rawId` is what `get_document_text`'s `id` argument was called with -- a
+DocumentReference id (optionally `DocumentReference/`-prefixed) or a Binary
+reference (`Binary/<id>`, a bare Binary id, or a URL ending in one); see
+`parseDocumentTextId`. Whichever form resolves the same document answers with
+the same `documentId` and hits the same thirty-day cache entry, because both
+paths end up naming the same attachment's Binary id.
+
+Never throws: every failure is one of the four `DocumentTextResult` reasons, so
+the tool layer maps a stable code and the audit row records it without anyone
+having to interpret an upstream message.
+*/
 export async function documentText(
   deps: BinaryTextDeps,
   healthSystemId: string,

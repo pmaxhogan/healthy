@@ -1,43 +1,43 @@
 /**
- * The choke point.
- *
- * Every MCP tool builds its answer, hands it to {@link applyPolicy}, and
- * serialises whatever comes back. Nothing else may serialise, and no tool
- * inspects the rules itself -- that is the whole design. One function, called in
- * one place (`worker/src/mcp/respond.ts`), is the only thing standing between the
- * FHIR cache and a third-party LLM, so it has to be small enough to read in one
- * sitting and impossible to route around.
- *
- * Two properties it is built to have, and that the tests assert on the final
- * serialised STRING rather than on the returned object:
- *
- *  1. Removal is total. A hidden field is deep-deleted from the normalized item
- *     AND from the raw resource behind it, including inside arrays at any depth.
- *     A denied resource type or health system takes every item with it.
- *  2. Removal is immutable. Nothing here mutates its input: each item is rebuilt
- *     without the denied parts, so a cached object cannot be left damaged for
- *     the next caller and a half-applied filter cannot leave a field behind.
- *
- * Redaction REMOVES the key. It never substitutes a marker: a placeholder value
- * is something a model can mistake for data, and a `jq` program run after the
- * filter could select it. What the model is told instead is a stable warning,
- * `policy_field_removed:<ResourceType|*>.<path>`, naming the path and never a
- * value or a health system. A path that ends in `[]` removes every element of
- * the array and leaves it empty (`"components": []`).
- *
- * Sensitive-by-default: an item that names fields in its own `sensitive` array
- * (see `worker/src/fhir/normalize/types.ts`) loses them unless an `allow` rule puts
- * them back. The `sensitive` key is then replaced by `withheld`, so the model is
- * told a field exists and was held back rather than being left to assume the
- * record is empty.
- *
- * References: a name a resource copies from another (`Reference.display`) is
- * judged by the referenced type, anywhere in the raw resource and in the
- * normalized strings rendered from it -- see `worker/src/policy/references.ts`.
- * Contained resources are filtered as resources of their own type, and a raw
- * resource's narrative (`text`) is dropped whenever the policy withholds
- * anything from it, since no path can reach inside rendered HTML.
- */
+The choke point.
+
+Every MCP tool builds its answer, hands it to {@link applyPolicy}, and
+serialises whatever comes back. Nothing else may serialise, and no tool
+inspects the rules itself -- that is the whole design. One function, called in
+one place (`worker/src/mcp/respond.ts`), is the only thing standing between the
+FHIR cache and a third-party LLM, so it has to be small enough to read in one
+sitting and impossible to route around.
+
+Two properties it is built to have, and that the tests assert on the final
+serialised STRING rather than on the returned object:
+
+ 1. Removal is total. A hidden field is deep-deleted from the normalized item
+    AND from the raw resource behind it, including inside arrays at any depth.
+    A denied resource type or health system takes every item with it.
+ 2. Removal is immutable. Nothing here mutates its input: each item is rebuilt
+    without the denied parts, so a cached object cannot be left damaged for
+    the next caller and a half-applied filter cannot leave a field behind.
+
+Redaction REMOVES the key. It never substitutes a marker: a placeholder value
+is something a model can mistake for data, and a `jq` program run after the
+filter could select it. What the model is told instead is a stable warning,
+`policy_field_removed:<ResourceType|*>.<path>`, naming the path and never a
+value or a health system. A path that ends in `[]` removes every element of
+the array and leaves it empty (`"components": []`).
+
+Sensitive-by-default: an item that names fields in its own `sensitive` array
+(see `worker/src/fhir/normalize/types.ts`) loses them unless an `allow` rule puts
+them back. The `sensitive` key is then replaced by `withheld`, so the model is
+told a field exists and was held back rather than being left to assume the
+record is empty.
+
+References: a name a resource copies from another (`Reference.display`) is
+judged by the referenced type, anywhere in the raw resource and in the
+normalized strings rendered from it -- see `worker/src/policy/references.ts`.
+Contained resources are filtered as resources of their own type, and a raw
+resource's narrative (`text`) is dropped whenever the policy withholds
+anything from it, since no path can reach inside rendered HTML.
+*/
 
 import { ARRAY_SEGMENT, isChoiceSegment, matchesChoice } from "@shared/policy-path.ts";
 
@@ -79,12 +79,12 @@ export interface ApplyPolicyInput {
   /** Optional raw projection, filtered by exactly the same rules. */
   rawItems?: readonly RawEntry[] | undefined;
   /**
-   * The raw resource each item was normalized from, index-aligned with `items`,
-   * for judging only: never returned. It tells the reference rule which type a
-   * rendered name (`requester`, `payor`) actually points at. Defaults to
-   * `rawItems`; an item with no source is judged by every type its field may
-   * point at, which fails closed.
-   */
+  The raw resource each item was normalized from, index-aligned with `items`,
+  for judging only: never returned. It tells the reference rule which type a
+  rendered name (`requester`, `payor`) actually points at. Defaults to
+  `rawItems`; an item with no source is judged by every type its field may
+  point at, which fails closed.
+  */
   sources?: readonly (RawEntry | undefined)[] | undefined;
   rules: PolicyRules;
 }
@@ -95,23 +95,23 @@ export interface ApplyPolicyResult {
   items: unknown[];
   rawItems: RawEntry[];
   /**
-   * Stable, non-identifying notes about what the policy removed: rule kinds,
-   * resource type names and field paths only, never a value.
-   */
+  Stable, non-identifying notes about what the policy removed: rule kinds,
+  resource type names and field paths only, never a value.
+  */
   warnings: string[];
 }
 
 /**
- * The path walk's answer.
- *
- * `remove` means the caller one level up should drop this key, or this array
- * element, entirely -- it is how the end of a path is reported.
- *
- * `changed` exists because the rebuild is unconditional: `Object.fromEntries`
- * always produces a new object, so reference inequality says nothing about whether
- * anything was actually removed, and a warning keyed off it would fire for every
- * rule that matched no data.
- */
+The path walk's answer.
+
+`remove` means the caller one level up should drop this key, or this array
+element, entirely -- it is how the end of a path is reported.
+
+`changed` exists because the rebuild is unconditional: `Object.fromEntries`
+always produces a new object, so reference inequality says nothing about whether
+anything was actually removed, and a warning keyed off it would fire for every
+rule that matched no data.
+*/
 interface PruneResult {
   remove: boolean;
   changed: boolean;
@@ -128,19 +128,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Rebuild `value` with the field at `path` gone.
- *
- * Returns {@link REMOVE} when `path` is exhausted, which is how the caller one
- * level up knows to drop the key (or the array element) entirely. A path that
- * does not exist in `value` leaves it untouched and reports `changed: false`, so
- * an over-broad rule is inert rather than destructive.
- *
- * Arrays are stepped into wherever they are met, not only where the path says
- * `[]`: `participants.name` and `participants[].name` remove the same thing,
- * because a rule that silently did nothing for want of two brackets would be a
- * leak the owner cannot see. An explicit `[]` is still how a path says "every
- * element itself" -- `components[]` empties the array.
- */
+Rebuild `value` with the field at `path` gone.
+
+Returns {@link REMOVE} when `path` is exhausted, which is how the caller one
+level up knows to drop the key (or the array element) entirely. A path that
+does not exist in `value` leaves it untouched and reports `changed: false`, so
+an over-broad rule is inert rather than destructive.
+
+Arrays are stepped into wherever they are met, not only where the path says
+`[]`: `participants.name` and `participants[].name` remove the same thing,
+because a rule that silently did nothing for want of two brackets would be a
+leak the owner cannot see. An explicit `[]` is still how a path says "every
+element itself" -- `components[]` empties the array.
+*/
 function prune(value: unknown, path: readonly string[]): PruneResult {
   if (path.length === 0) return REMOVE;
   const head = path[0] ?? "";
@@ -172,13 +172,13 @@ function pruneArray(value: readonly unknown[], rest: readonly string[]): PruneRe
 }
 
 /**
- * Rebuild one record with the keys `matches` picks replaced or gone.
- *
- * Built from entries rather than by assigning `out[key]`: a computed write with a
- * variable key is exactly the prototype-pollution shape
- * `security/detect-object-injection` exists to flag, and `Object.fromEntries`
- * sidesteps it without a suppression.
- */
+Rebuild one record with the keys `matches` picks replaced or gone.
+
+Built from entries rather than by assigning `out[key]`: a computed write with a
+variable key is exactly the prototype-pollution shape
+`security/detect-object-injection` exists to flag, and `Object.fromEntries`
+sidesteps it without a suppression.
+*/
 function pruneRecord(
   value: Record<string, unknown>,
   matches: (key: string) => boolean,
@@ -203,17 +203,17 @@ function pruneRecord(
 }
 
 /**
- * Apply every hide rule that reaches `scope` to one value.
- *
- * `shape` says which of the two projections `value` is: a rule's `path` is
- * whatever vocabulary the owner wrote it in, which is not necessarily this
- * one, so it is expanded through `worker/src/policy/aliases.ts` into every path
- * worth trying against `shape` before pruning -- the path exactly as written,
- * plus its translation when a known rename applies. That is what makes one
- * rule -- in either vocabulary -- strip the normalized item AND the raw
- * resource behind it, which `SECURITY.md` requires of the one exposure choke
- * point.
- */
+Apply every hide rule that reaches `scope` to one value.
+
+`shape` says which of the two projections `value` is: a rule's `path` is
+whatever vocabulary the owner wrote it in, which is not necessarily this
+one, so it is expanded through `worker/src/policy/aliases.ts` into every path
+worth trying against `shape` before pruning -- the path exactly as written,
+plus its translation when a known rename applies. That is what makes one
+rule -- in either vocabulary -- strip the normalized item AND the raw
+resource behind it, which `SECURITY.md` requires of the one exposure choke
+point.
+*/
 function applyFieldRules(
   rules: PolicyRules,
   scope: ItemScope,
@@ -267,17 +267,17 @@ function fhirCandidates(
 }
 
 /**
- * Every normalized-shape path a rule should be tried as.
- *
- * The rule's own translation into the normalized vocabulary, plus a round trip
- * through the raw one: a rule written as `Encounter.practitioners` goes to raw
- * `participant`, and back to every normalized name that field has --
- * `practitioners` on the Encounter shape and `practitioner` on the appointment
- * view `get_appointments` serves under the same resource type. Without the round
- * trip a rule written against one normalized shape would silently miss the
- * other, which is a leak rather than an inconvenience. It can only add paths
- * that name the same raw field, so it strips more, never less.
- */
+Every normalized-shape path a rule should be tried as.
+
+The rule's own translation into the normalized vocabulary, plus a round trip
+through the raw one: a rule written as `Encounter.practitioners` goes to raw
+`participant`, and back to every normalized name that field has --
+`practitioners` on the Encounter shape and `practitioner` on the appointment
+view `get_appointments` serves under the same resource type. Without the round
+trip a rule written against one normalized shape would silently miss the
+other, which is a leak rather than an inconvenience. It can only add paths
+that name the same raw field, so it strips more, never less.
+*/
 function normalizedCandidates(
   resourceType: string,
   path: readonly string[],
@@ -300,12 +300,12 @@ function sensitiveKey(resourceType: string, healthSystemId: string): string {
 }
 
 /**
- * Strip the fields `fields` names from one raw resource.
- *
- * The raw FHIR carries no `sensitive` marker of its own, so without this
- * carry-over from the normalized items `raw: true` would be a way around the
- * default.
- */
+Strip the fields `fields` names from one raw resource.
+
+The raw FHIR carries no `sensitive` marker of its own, so without this
+carry-over from the normalized items `raw: true` would be a way around the
+default.
+*/
 function stripSensitiveRaw(
   resourceType: string,
   fields: ReadonlySet<string>,
@@ -329,13 +329,13 @@ function stringArray(value: unknown): string[] {
 }
 
 /**
- * One own string property, or "".
- *
- * Read through `Reflect.get` after an own-property check rather than with
- * `value[key]`: the bracket form is the prototype-pollution shape
- * `security/detect-object-injection` flags, and an inherited `resourceType` is not
- * something this filter should ever act on.
- */
+One own string property, or "".
+
+Read through `Reflect.get` after an own-property check rather than with
+`value[key]`: the bracket form is the prototype-pollution shape
+`security/detect-object-injection` flags, and an inherited `resourceType` is not
+something this filter should ever act on.
+*/
 function stringField(value: unknown, key: string): string {
   if (!isRecord(value) || !Object.hasOwn(value, key)) return "";
   const found: unknown = Reflect.get(value, key);
@@ -343,13 +343,13 @@ function stringField(value: unknown, key: string): string {
 }
 
 /**
- * Strip the fields an item declares sensitive, unless the owner allowed them.
- *
- * `sensitive` is replaced by `withheld` on the way out: the key never survives
- * into the serialised answer, because "here are the names of the fields you are
- * not being shown" is useful and "here is a list you might mistake for data" is
- * not.
- */
+Strip the fields an item declares sensitive, unless the owner allowed them.
+
+`sensitive` is replaced by `withheld` on the way out: the key never survives
+into the serialised answer, because "here are the names of the fields you are
+not being shown" is useful and "here is a list you might mistake for data" is
+not.
+*/
 function stripSensitive(
   rules: PolicyRules,
   scope: ItemScope,
@@ -419,16 +419,16 @@ function itemDenied(rules: PolicyRules, scope: ItemScope, warnings: Set<string>)
 }
 
 /**
- * Filter one tool's output.
- *
- * Order matters and is fixed: tool deny short-circuits everything; then health system
- * and resource-type denies drop whole items (no point filtering fields off
- * something that is leaving); then field rules; then the sensitive default. The
- * sensitive field names are collected from the normalized items BEFORE they are
- * stripped, and reused on the raw resources of the same type and health system --
- * the raw FHIR carries no `sensitive` marker of its own, so without that carry-over
- * `raw: true` would be a way around the default.
- */
+Filter one tool's output.
+
+Order matters and is fixed: tool deny short-circuits everything; then health system
+and resource-type denies drop whole items (no point filtering fields off
+something that is leaving); then field rules; then the sensitive default. The
+sensitive field names are collected from the normalized items BEFORE they are
+stripped, and reused on the raw resources of the same type and health system --
+the raw FHIR carries no `sensitive` marker of its own, so without that carry-over
+`raw: true` would be a way around the default.
+*/
 export function applyPolicy(input: ApplyPolicyInput): ApplyPolicyResult {
   const { rules, tool } = input;
   if (isToolDenied(rules, tool)) {
@@ -455,10 +455,10 @@ export function applyPolicy(input: ApplyPolicyInput): ApplyPolicyResult {
 }
 
 /**
- * The reference restriction per health system, computed once per call: it
- * depends on the tool and health system a rule is scoped to, never on the
- * item's own resource type (see `restrictionFor`).
- */
+The reference restriction per health system, computed once per call: it
+depends on the tool and health system a rule is scoped to, never on the
+item's own resource type (see `restrictionFor`).
+*/
 class Restrictions {
   private readonly byHealthSystem = new Map<string, Restriction>();
 
@@ -481,9 +481,9 @@ class Restrictions {
 }
 
 /**
- * Remove every normalized field rendered from a withheld reference: a
- * clinician's name in `practitioners[].name`, a requester, an author.
- */
+Remove every normalized field rendered from a withheld reference: a
+clinician's name in `practitioners[].name`, a requester, an author.
+*/
 function stripNormalizedReferences(
   item: unknown,
   resourceType: string,
@@ -577,20 +577,20 @@ interface RawContext {
 }
 
 /**
- * The sensitive fields a raw resource of this type loses when no normalized
- * item declared them -- a contained resource has none -- read from the static
- * default and the owner's `allow` rules.
- */
+The sensitive fields a raw resource of this type loses when no normalized
+item declared them -- a contained resource has none -- read from the static
+default and the owner's `allow` rules.
+*/
 function staticSensitive(rules: PolicyRules, scope: ItemScope): ReadonlySet<string> {
   const declared = SENSITIVE_FIELDS.get(scope.resourceType) ?? [];
   return new Set(declared.filter((field) => !isSensitiveAllowed(rules, scope, field)));
 }
 
 /**
- * One raw resource through the whole policy: field rules, sensitive fields,
- * its contained resources (each judged as a resource of its own type), every
- * withheld reference's display, and the narrative.
- */
+One raw resource through the whole policy: field rules, sensitive fields,
+its contained resources (each judged as a resource of its own type), every
+withheld reference's display, and the narrative.
+*/
 function filterRawResource(
   rules: PolicyRules,
   scope: ItemScope,
@@ -625,11 +625,11 @@ function filterRawResource(
 const CONTAINED_KEY: ReadonlySet<string> = new Set(["contained"]);
 
 /**
- * Filter a resource's `contained[]` as resources of their own types: a denied
- * type is dropped, and every other one goes through {@link filterRawResource}
- * in its own resource-type scope (same tool and health system). Anything in
- * the array that is not a resource cannot be judged, so it is dropped.
- */
+Filter a resource's `contained[]` as resources of their own types: a denied
+type is dropped, and every other one goes through {@link filterRawResource}
+in its own resource-type scope (same tool and health system). Anything in
+the array that is not a resource cannot be judged, so it is dropped.
+*/
 function filterContained(
   rules: PolicyRules,
   scope: ItemScope,
@@ -656,13 +656,13 @@ function filterContained(
 }
 
 /**
- * Drop a resource's narrative (`text`, a `{ status, div }` Narrative).
- *
- * The narrative is the health system's own rendering of the whole resource to
- * HTML -- names, dates, results -- and no path rule can reach inside it. So
- * whenever the policy removes anything from a resource, or withholds names at
- * all, the narrative goes with it rather than restating what was removed.
- */
+Drop a resource's narrative (`text`, a `{ status, div }` Narrative).
+
+The narrative is the health system's own rendering of the whole resource to
+HTML -- names, dates, results -- and no path rule can reach inside it. So
+whenever the policy removes anything from a resource, or withholds names at
+all, the narrative goes with it rather than restating what was removed.
+*/
 function stripNarrative(resourceType: string, resource: unknown, warnings: Set<string>): unknown {
   if (!isRecord(resource) || !Object.hasOwn(resource, "text")) return resource;
   const text: unknown = Reflect.get(resource, "text");
@@ -674,11 +674,11 @@ function stripNarrative(resourceType: string, resource: unknown, warnings: Set<s
 }
 
 /**
- * Warnings as a sorted, de-duplicated list.
- *
- * Shared with `worker/src/mcp/respond.ts`, which merges a tool's own notes into the
- * policy's, so the two orderings cannot drift.
- */
+Warnings as a sorted, de-duplicated list.
+
+Shared with `worker/src/mcp/respond.ts`, which merges a tool's own notes into the
+policy's, so the two orderings cannot drift.
+*/
 export function sortedWarnings(values: Iterable<string>): string[] {
   // eslint-disable-next-line unicorn/no-array-sort -- Array#toSorted is ES2023 and the Worker compiles against the ES2022 lib; the array is created on the line above, so sorting in place mutates nothing shared.
   return [...new Set(values)].sort((a, b) => a.localeCompare(b));

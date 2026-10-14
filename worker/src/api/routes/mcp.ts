@@ -1,22 +1,22 @@
 /**
- * `/api/mcp` -- the exposure deny-list, the granted clients, and the audit trail.
- *
- * ### The policy routes are the sharp end
- *
- * `mcp_policy` is allow-all with a deny-list, enforced at one server-side choke
- * point before serialisation. These routes are the only way rules get in and out,
- * so a rule that is accepted here and never read there is a rule the owner
- * believes is protecting them. `ruleType` is therefore a closed enum matching the
- * column's CHECK, and adding the same rule twice is a no-op that returns the
- * existing row -- the UI can be fire and forget.
- *
- * ### Grants come from somebody else's store
- *
- * MCP grants live in `@cloudflare/workers-oauth-provider`'s KV namespace, not in
- * D1, so they are reached through a port (`worker/src/api/ports.ts`). Listing them can
- * fail independently of everything else, which is why `GET /api/overview` reports
- * a grant count of zero rather than failing outright when the store is unreachable.
- */
+`/api/mcp` -- the exposure deny-list, the granted clients, and the audit trail.
+
+### The policy routes are the sharp end
+
+`mcp_policy` is allow-all with a deny-list, enforced at one server-side choke
+point before serialisation. These routes are the only way rules get in and out,
+so a rule that is accepted here and never read there is a rule the owner
+believes is protecting them. `ruleType` is therefore a closed enum matching the
+column's CHECK, and adding the same rule twice is a no-op that returns the
+existing row -- the UI can be fire and forget.
+
+### Grants come from somebody else's store
+
+MCP grants live in `@cloudflare/workers-oauth-provider`'s KV namespace, not in
+D1, so they are reached through a port (`worker/src/api/ports.ts`). Listing them can
+fail independently of everything else, which is why `GET /api/overview` reports
+a grant count of zero rather than failing outright when the store is unreachable.
+*/
 
 import { Hono } from "hono";
 
@@ -52,12 +52,12 @@ mcpRouter.route("/policy", mcpPolicyRouter);
 const UNKNOWN_CREATED_AT = new Date(0).toISOString();
 
 /**
- * Project one grant record.
- *
- * Defensive because the shape ultimately belongs to a dependency that has changed
- * it between releases: a missing `createdAt` becomes the epoch rather than
- * `Invalid Date`, and a missing client id is named `unknown` rather than left blank.
- */
+Project one grant record.
+
+Defensive because the shape ultimately belongs to a dependency that has changed
+it between releases: a missing `createdAt` becomes the epoch rather than
+`Invalid Date`, and a missing client id is named `unknown` rather than left blank.
+*/
 function toGrantDto(raw: GrantLike): McpGrantDto {
   return {
     id: raw.id,
@@ -111,11 +111,11 @@ mcpRouter.get("/tools", (c) => c.json([...TOOL_CATALOG], 200, NO_STORE));
 // header for why that is the point.
 
 /**
- * Every tool's real, live JSON input schema -- for the "Try a tool" panel's
- * picker and its argument editor's skeleton and validation. Distinct from
- * `GET /api/mcp/tools`: that one is the hand-maintained FHIR-resource-type index
- * policy targets are written against, and has no schema to give.
- */
+Every tool's real, live JSON input schema -- for the "Try a tool" panel's
+picker and its argument editor's skeleton and validation. Distinct from
+`GET /api/mcp/tools`: that one is the hand-maintained FHIR-resource-type index
+policy targets are written against, and has no schema to give.
+*/
 mcpRouter.get("/tools/schema", async (c) => {
   const deps = makeToolDeps({ env: c.env, caller: adminCaller() });
   const tools = await listMcpTools(deps);
@@ -131,20 +131,20 @@ mcpRouter.get("/tools/schema", async (c) => {
 });
 
 /**
- * Call one tool as the admin console, not an OAuth client -- `adminCaller()` is
- * what `mcp_audit.client_id` reads for a call made from here.
- *
- * A `CallToolResult` that is real tool output is always the JSON envelope
- * `respond()`/`toolError()` serialise (`worker/src/mcp/respond.ts`): `{ items, ... }`
- * on success, `{ error, message, ... }` on a tool-level failure such as
- * `policy_denied` or `jq_error` (whose `detail` is jq's own message). Both are audited, because the tool ran either way, and both
- * are reported here as one 200 -- the caller's fault ends where the tool starts.
- *
- * A `CallToolResult` whose text does NOT parse as JSON never reached the tool at
- * all: it is the MCP SDK's own plain-English rejection of `args` against the
- * real input schema, thrown before `withAudit` runs (so there is no audit row for
- * it either). That is the caller's fault, and is answered as a 400 instead.
- */
+Call one tool as the admin console, not an OAuth client -- `adminCaller()` is
+what `mcp_audit.client_id` reads for a call made from here.
+
+A `CallToolResult` that is real tool output is always the JSON envelope
+`respond()`/`toolError()` serialise (`worker/src/mcp/respond.ts`): `{ items, ... }`
+on success, `{ error, message, ... }` on a tool-level failure such as
+`policy_denied` or `jq_error` (whose `detail` is jq's own message). Both are audited, because the tool ran either way, and both
+are reported here as one 200 -- the caller's fault ends where the tool starts.
+
+A `CallToolResult` whose text does NOT parse as JSON never reached the tool at
+all: it is the MCP SDK's own plain-English rejection of `args` against the
+real input schema, thrown before `withAudit` runs (so there is no audit row for
+it either). That is the caller's fault, and is answered as a 400 instead.
+*/
 mcpRouter.post("/tools/:name/call", async (c) => {
   const name = c.req.param("name");
   const args = await readOptionalJson(c, mcpToolCallArgsSchema);

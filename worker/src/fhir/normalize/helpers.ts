@@ -6,13 +6,13 @@ import { cleanPhone } from "../../lib/text.ts";
 import type * as fhir4 from "fhir/r4";
 
 /** `CodeableConcept` -> the best available human text: `.text`, else the
- * first coding's `.display`, else its `.code`. */
+first coding's `.display`, else its `.code`. */
 /**
- * Where {@link codeText} can have read its answer from, below the element
- * `field`: for a `FIELD_ALIASES` entry whose normalized side is a code
- * rendered as text, so a policy rule written against the raw `display` (or
- * `text`, or `code`) of a coding also removes the normalized text made from it.
- */
+Where {@link codeText} can have read its answer from, below the element
+`field`: for a `FIELD_ALIASES` entry whose normalized side is a code
+rendered as text, so a policy rule written against the raw `display` (or
+`text`, or `code`) of a coding also removes the normalized text made from it.
+*/
 export function codeTextSources(field: string): string[][] {
   return [
     [field, "text"],
@@ -33,7 +33,7 @@ export function codeText(cc?: fhir4.CodeableConcept): string | undefined {
 }
 
 /** Renders one or more `HumanName`s to a single display string, preferring an
- * "official" or "usual" use over whatever happens to be first. */
+"official" or "usual" use over whatever happens to be first. */
 export function humanName(name?: fhir4.HumanName[] | fhir4.HumanName): string | undefined {
   if (!name) {
     return undefined;

@@ -55,9 +55,9 @@ const queueText = computed(() => {
 });
 
 /**
- * How far the backfill has got, over the types the phone may read. A type the
- * owner has not granted has no backfill to finish, so it is in neither number.
- */
+How far the backfill has got, over the types the phone may read. A type the
+owner has not granted has no backfill to finish, so it is in neither number.
+*/
 const backfillText = computed(() => {
   const { typesBackfilled, typesGranted } = props.device.totals;
   return typesGranted === 0

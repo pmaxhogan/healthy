@@ -47,9 +47,9 @@ export function placeholderFor(propertySchema: JsonSchemaLike): unknown {
 }
 
 /**
- * `{}` when a tool needs nothing but its shared, optional arguments; otherwise
- * one key per required property, each set to a placeholder of the right JS type.
- */
+`{}` when a tool needs nothing but its shared, optional arguments; otherwise
+one key per required property, each set to a placeholder of the right JS type.
+*/
 export function buildArgsSkeleton(
   schema: JsonSchemaLike,
   now: number = Date.now(),
@@ -68,12 +68,12 @@ export function buildArgsSkeleton(
 const DAY_MS = 86_400_000;
 
 /**
- * A usable first value for the two arguments every phone (Health Connect) tool
- * asks for that a blank string can never satisfy: a `start` that is a calendar
- * date (the last week) and a record `type` (steps, the commonest). Found by
- * the argument's name and the sentence that describes it; anything else is left
- * to `placeholderFor`.
- */
+A usable first value for the two arguments every phone (Health Connect) tool
+asks for that a blank string can never satisfy: a `start` that is a calendar
+date (the last week) and a record `type` (steps, the commonest). Found by
+the argument's name and the sentence that describes it; anything else is left
+to `placeholderFor`.
+*/
 function startingValue(key: string, propertySchema: JsonSchemaLike, now: number): string | null {
   if (propertySchema.type !== "string" || propertySchema.enum !== undefined) return null;
   const description =

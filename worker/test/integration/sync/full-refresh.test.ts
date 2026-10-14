@@ -109,9 +109,9 @@ function immunization(id: string): fhir4.Immunization {
 }
 
 /**
- * A Bundle whose only entry is an OperationOutcome, as Epic sends for a search
- * that produced a warning instead of results.
- */
+A Bundle whose only entry is an OperationOutcome, as Epic sends for a search
+that produced a warning instead of results.
+*/
 function outcomeBundle(issue: fhir4.OperationOutcomeIssue): fhir4.Bundle {
   const outcome: fhir4.OperationOutcome = { resourceType: "OperationOutcome", issue: [issue] };
   return {
@@ -457,11 +457,11 @@ function subject(h: Harness): string {
 }
 
 /**
- * Refuse the appointment search and every clinical search this suite's
- * organisation supports. What still answers is the handful of reference types
- * (the patient, organisations, practitioners, locations), so more of the
- * refresh fails than works.
- */
+Refuse the appointment search and every clinical search this suite's
+organisation supports. What still answers is the handful of reference types
+(the patient, organisations, practitioners, locations), so more of the
+refresh fails than works.
+*/
 function refuseMost(h: Harness): void {
   h.server.encounterStatus = 403;
   for (const resource of searchable()) h.server.searchStatus.set(resource.type, 403);
@@ -589,12 +589,12 @@ describe("a refresh that keeps failing", () => {
 });
 
 /**
- * A wall clock that jumps by a fixed step every time it is read.
- *
- * The budget is measured in milliseconds and `Ctx.now()` is whole seconds, so the
- * chunk clock is its own injected dep. Stepping it by more than the budget makes
- * "one resource type per chunk" exact instead of a race against the machine.
- */
+A wall clock that jumps by a fixed step every time it is read.
+
+The budget is measured in milliseconds and `Ctx.now()` is whole seconds, so the
+chunk clock is its own injected dep. Stepping it by more than the budget makes
+"one resource type per chunk" exact instead of a race against the machine.
+*/
 function steppedMs(step: number): () => number {
   const state = { at: 0 };
   return () => {
@@ -647,12 +647,11 @@ describe("runFullRefreshChunk", () => {
 
   it("closes the open row when a backoff lands between two chunks", async () => {
     const h = await setup();
-    const first = await runFullRefreshChunk(h.ctx, {
+    const { job } = await runFullRefreshChunk(h.ctx, {
       deps: oneTypePerChunk(h.upstreams),
       budgetMs: ONE_TYPE_BUDGET_MS,
       job: { pending: [h.healthSystemId], cycleStartedAt: T0, runId: null, state: null },
     });
-    const { job } = first;
     if (job === null) throw new Error("the budgeted first chunk should have deferred");
 
     // Something else -- the hourly sync meeting a 429 -- set a backoff while this

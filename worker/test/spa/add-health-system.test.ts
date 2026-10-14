@@ -241,7 +241,6 @@ describe("AddHealthSystemForm", () => {
       await toManualMode(wrapper);
       const { displayName, fhirBaseUrl } = manualInputs(wrapper);
       await displayName.setValue("Example Health");
-      // eslint-disable-next-line unicorn/prefer-https -- the assertion IS that http is refused.
       await fhirBaseUrl.setValue("http://fhir.example.test/api/FHIR/R4");
       await fhirBaseUrl.trigger("blur");
 

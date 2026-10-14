@@ -1,12 +1,12 @@
 /**
- * The ModMed patient-portal adapter: discovery plus a client, behind the same
- * `PortalAdapter` boundary the MyChart scrape uses (`../mychart/index.ts`), so
- * the sync, the sign-in runner and the admin API drive it without knowing which
- * vendor answered.
- *
- * Pure like the other adapters: a `fetchImpl`, a `Logger` and a clock in; the
- * jar handed in by the caller and handed back for the caller to seal.
- */
+The ModMed patient-portal adapter: discovery plus a client, behind the same
+`PortalAdapter` boundary the MyChart scrape uses (`../mychart/index.ts`), so
+the sync, the sign-in runner and the admin API drive it without knowing which
+vendor answered.
+
+Pure like the other adapters: a `fetchImpl`, a `Logger` and a clock in; the
+jar handed in by the caller and handed back for the caller to seal.
+*/
 
 import { AppError } from "../../lib/errors.ts";
 

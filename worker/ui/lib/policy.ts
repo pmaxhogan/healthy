@@ -43,10 +43,10 @@ export function isPhoneType(type: string): boolean {
 }
 
 /**
- * Names a source id for a sentence: a health system by its name, a phone as
- * `Name (phone)`. A phone nobody lists any more says so; a health system the
- * caller has no wording for falls back to `unknownHealthSystem`, else its id.
- */
+Names a source id for a sentence: a health system by its name, a phone as
+`Name (phone)`. A phone nobody lists any more says so; a health system the
+caller has no wording for falls back to `unknownHealthSystem`, else its id.
+*/
 export function sourceNamer(
   healthSystems: readonly HealthSystemDto[],
   devices: readonly DeviceDto[],
@@ -264,10 +264,10 @@ function overlayNodes(
 }
 
 /**
- * The owner's real key structure laid over the tree: normalized-vocabulary
- * groups get the answer's item keys, raw groups the raw resource's keys.
- * Returns new groups; names only ever came from the server, never values.
- */
+The owner's real key structure laid over the tree: normalized-vocabulary
+groups get the answer's item keys, raw groups the raw resource's keys.
+Returns new groups; names only ever came from the server, never values.
+*/
 export function overlayStructure(
   groups: readonly TreeGroup[],
   structure: { item: readonly PolicyKeyNode[]; raw: readonly PolicyKeyNode[] },
@@ -319,9 +319,9 @@ function matchingPaths(nodes: readonly TreeNode[], needle: string, into: Set<str
 }
 
 /**
- * The rows to draw. With no search, children show under an expanded node; with
- * a search, every match and the ancestors leading to it show, opened.
- */
+The rows to draw. With no search, children show under an expanded node; with
+a search, every match and the ancestors leading to it show, opened.
+*/
 export function visibleRows(
   group: TreeGroup,
   expanded: ReadonlySet<string>,
@@ -562,11 +562,11 @@ function emit(lines: DiffLine[], value: unknown, other: unknown, place: Place): 
 }
 
 /**
- * `value` drawn as JSON lines, with every key (or array element) that is not
- * in `other` marked. With `value` the item before a hide rule and `other` the
- * item after it, the marked lines are exactly what the rule removes; the other
- * way round, what an allow rule puts back.
- */
+`value` drawn as JSON lines, with every key (or array element) that is not
+in `other` marked. With `value` the item before a hide rule and `other` the
+item after it, the marked lines are exactly what the rule removes; the other
+way round, what an allow rule puts back.
+*/
 export function diffLines(value: unknown, other: unknown): DiffLine[] {
   const lines: DiffLine[] = [];
   emit(lines, value, other, { indent: 0, prefix: "", comma: "", removed: false });
@@ -581,10 +581,10 @@ export function changedTools(preview: PolicyPreviewDto | null): PolicyToolPrevie
 }
 
 /**
- * The selection after the options change: kept while its tool is still an
- * option, else the first option, else "" (the empty state). Never a tool that
- * is no longer listed.
- */
+The selection after the options change: kept while its tool is still an
+option, else the first option, else "" (the empty state). Never a tool that
+is no longer listed.
+*/
 export function keptSelection(current: string, options: readonly PolicyToolPreviewDto[]): string {
   return options.some((entry) => entry.tool === current) ? current : (options[0]?.tool ?? "");
 }

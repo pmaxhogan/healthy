@@ -1,31 +1,31 @@
 /**
- * `get_appointments`.
- *
- * Separate from the other clinical tools for two reasons. It projects rather than
- * returns the normalized shape -- `appointmentViewFromEncounter` is the flat
- * "when, where, who, what" view that a calendar or a reminder actually needs, and
- * it is the same projection the Google Calendar sync maps from, so the MCP and the
- * calendar cannot drift. And its default window is not "everything": an
- * appointments question is almost always about what is coming up, so the lower
- * bound defaults to now unless the caller asks for history.
- *
- * The projected item is tagged `resourceType: "Encounter"` even though the
- * projection has no resourceType of its own. Without it a `resource` deny rule on
- * Encounter would hide `get_encounters` and leave this tool serving the same
- * visits under another name.
- *
- * Upcoming visits come from the patient portal, not from FHIR: Epic's patient
- * view never returns an Encounter before it happens. `collectAppointments`
- * merges the portal pass's stored visits in, one item per visit, each marked
- * `source: "fhir" | "portal"` -- see `worker/src/mcp/appointment-items.ts`, which
- * also explains why a portal item's `raw` is only a placeholder.
- *
- * Ordering: the default (upcoming-only) window is soonest first, because "what
- * is next" is the question and a far-future visit must not push next week's off
- * the page. A window that reaches into the past -- `includePast` or an explicit
- * `from` -- is newest first, like every other tool. There is no default upper
- * bound: every upcoming visit the portal lists is returned, however far out.
- */
+`get_appointments`.
+
+Separate from the other clinical tools for two reasons. It projects rather than
+returns the normalized shape -- `appointmentViewFromEncounter` is the flat
+"when, where, who, what" view that a calendar or a reminder actually needs, and
+it is the same projection the Google Calendar sync maps from, so the MCP and the
+calendar cannot drift. And its default window is not "everything": an
+appointments question is almost always about what is coming up, so the lower
+bound defaults to now unless the caller asks for history.
+
+The projected item is tagged `resourceType: "Encounter"` even though the
+projection has no resourceType of its own. Without it a `resource` deny rule on
+Encounter would hide `get_encounters` and leave this tool serving the same
+visits under another name.
+
+Upcoming visits come from the patient portal, not from FHIR: Epic's patient
+view never returns an Encounter before it happens. `collectAppointments`
+merges the portal pass's stored visits in, one item per visit, each marked
+`source: "fhir" | "portal"` -- see `worker/src/mcp/appointment-items.ts`, which
+also explains why a portal item's `raw` is only a placeholder.
+
+Ordering: the default (upcoming-only) window is soonest first, because "what
+is next" is the question and a far-future visit must not push next week's off
+the page. A window that reaches into the past -- `includePast` or an explicit
+`from` -- is newest first, like every other tool. There is no default upper
+bound: every upcoming visit the portal lists is returned, however far out.
+*/
 
 import { z } from "zod";
 
@@ -42,19 +42,19 @@ import type { HealthSystemInfo, PortalAccountInfo, ToolDeps } from "../deps.ts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 /** How long since the portal last answered a signed-in read before its visits are
- * called `stale` rather than `ok`. The sync runs hourly and the keepalive every
- * ten minutes; six hours gives several missed runs of slack before flagging. */
+called `stale` rather than `ok`. The sync runs hourly and the keepalive every
+ten minutes; six hours gives several missed runs of slack before flagging. */
 const PORTAL_STALE_AFTER_SECONDS = 6 * 60 * 60;
 
 /**
- * A synthetic coverage entry per health system for the portal half of
- * `get_appointments`: upcoming visits come only from the patient portal (see
- * `worker/src/mcp/appointment-items.ts`), so the portal account's own state
- * (`HealthSystemInfo.portal`: signed in or not, when it last answered, its last
- * error) is what says whether they are current. A health system with no portal
- * account reports `unsupported`. It is reported under a resource type of its
- * own, `PortalVisit`, rather than folded into `Encounter`.
- */
+A synthetic coverage entry per health system for the portal half of
+`get_appointments`: upcoming visits come only from the patient portal (see
+`worker/src/mcp/appointment-items.ts`), so the portal account's own state
+(`HealthSystemInfo.portal`: signed in or not, when it last answered, its last
+error) is what says whether they are current. A health system with no portal
+account reports `unsupported`. It is reported under a resource type of its
+own, `PortalVisit`, rather than folded into `Encounter`.
+*/
 function portalCoverage(healthSystems: readonly HealthSystemInfo[], now: number): CoverageEntry[] {
   return healthSystems.map((healthSystem) => ({
     healthSystemId: healthSystem.id,
@@ -65,11 +65,11 @@ function portalCoverage(healthSystems: readonly HealthSystemInfo[], now: number)
 }
 
 /**
- * One health system's portal coverage, from the portal account's own state.
- *
- * Never from the FHIR connection: a portal-only health system has none, and a
- * FHIR grant that needs re-authorising says nothing about the portal session.
- */
+One health system's portal coverage, from the portal account's own state.
+
+Never from the FHIR connection: a portal-only health system has none, and a
+FHIR grant that needs re-authorising says nothing about the portal session.
+*/
 function portalCoverageOf(
   portal: PortalAccountInfo | null,
   now: number,

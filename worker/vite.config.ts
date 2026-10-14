@@ -14,10 +14,10 @@ import { defineConfig } from "vite";
 // see that file's comment for why a shared multi-entry build cannot do this.
 // `npm run build` runs both configs in sequence.
 /**
- * Where `npm run dev:worker` listens. Overridable for a second checkout running
- * its own Worker on another port; set `DEV_ORIGIN` in that checkout's `.dev.vars`
- * to the same origin (see `worker/src/lib/dev-origin.ts`).
- */
+Where `npm run dev:worker` listens. Overridable for a second checkout running
+its own Worker on another port; set `DEV_ORIGIN` in that checkout's `.dev.vars`
+to the same origin (see `worker/src/lib/dev-origin.ts`).
+*/
 const WORKER_ORIGIN = process.env.HEALTHY_DEV_WORKER ?? "http://localhost:8787";
 
 export default defineConfig({

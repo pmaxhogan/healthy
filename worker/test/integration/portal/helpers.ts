@@ -35,14 +35,14 @@ export const PORTAL_USERNAME = "portal-user";
 export const PORTAL_PASSWORD = "portal-password";
 
 /**
- * The domain the invented portal's verification codes arrive from.
- *
- * `seedPortalAccount` stores it as the account's expected OTP sender and
- * `seedOtp` sends from it, because a claim is bound to a sender now: a code from
- * anywhere else is not eligible for this health system. A test that wants the
- * *unbound* path (a first-ever sign-in, where the allowlist stands in and the
- * sender is then learned) passes `otpSenderDomain: null`.
- */
+The domain the invented portal's verification codes arrive from.
+
+`seedPortalAccount` stores it as the account's expected OTP sender and
+`seedOtp` sends from it, because a claim is bound to a sender now: a code from
+anywhere else is not eligible for this health system. A test that wants the
+*unbound* path (a first-ever sign-in, where the allowlist stands in and the
+sender is then learned) passes `otpSenderDomain: null`.
+*/
 export const OTP_SENDER_DOMAIN = "mail.example.test";
 const OTP_SENDER = `no-reply@${OTP_SENDER_DOMAIN}`;
 
@@ -66,15 +66,15 @@ export interface FakePortal {
   /** Thrown by `loadMessages` instead of resolving. */
   messagesError: AppError | null;
   /**
-   * Files `loadMessageAttachment` answers with, by `dcsId`; an `AppError` is
-   * thrown instead. A handle with neither is a parse failure.
-   */
+  Files `loadMessageAttachment` answers with, by `dcsId`; an `AppError` is
+  thrown instead. A handle with neither is a parse failure.
+  */
   files: Map<string, AppError | { contentType: string; bytes: Uint8Array }>;
   /**
-   * What `loadVisitDetails` answers with, by the visit's `csn`; an `AppError` is
-   * thrown instead. A visit with neither has an empty page: no wait list, no
-   * directions, no instructions.
-   */
+  What `loadVisitDetails` answers with, by the visit's `csn`; an `AppError` is
+  thrown instead. A visit with neither has an empty page: no wait list, no
+  directions, no instructions.
+  */
   details: Map<string, AppError | VisitDetails>;
   calls: {
     /** `csn`s whose details page was asked for, in order. */
@@ -91,22 +91,22 @@ export interface FakePortal {
   /** Codes handed to `validate`, so a test can prove which one was submitted. */
   submitted: string[];
   /**
-   * The deps every `adapter.client(...)` call received, oldest first.
-   *
-   * What proves `openPortalSession` builds and passes `custom` -- the sign-in
-   * path opens a fresh client on more than one occasion in a single run, so this
-   * is a log, not a single slot.
-   */
+  The deps every `adapter.client(...)` call received, oldest first.
+
+  What proves `openPortalSession` builds and passes `custom` -- the sign-in
+  path opens a fresh client on more than one occasion in a single run, so this
+  is a log, not a single slot.
+  */
   clientDeps: PortalAdapterDeps[];
 }
 
 /**
- * A `PortalAdapter` whose client answers from a mutable script.
- *
- * `discover` throws: discovery is exercised against the real adapter and synthetic
- * HTML in `worker/test/integration/api/portal.test.ts`, and a fake that silently answered
- * it would make a broken discovery path look tested.
- */
+A `PortalAdapter` whose client answers from a mutable script.
+
+`discover` throws: discovery is exercised against the real adapter and synthetic
+HTML in `worker/test/integration/api/portal.test.ts`, and a fake that silently answered
+it would make a broken discovery path look tested.
+*/
 export function fakePortal(overrides: Partial<FakePortal> = {}): FakePortal {
   const state: FakePortal = {
     adapter: {
@@ -225,12 +225,12 @@ export function portalVisit(overrides: Partial<PortalVisit> & { csn: string }): 
 }
 
 /**
- * A portal account in state `active`, with a stored endpoint, credentials and an
- * (empty but present) cookie jar.
- *
- * The jar matters: `hasSession` and the sign-in path both key off it, and an
- * account with credentials but no jar is a different state.
- */
+A portal account in state `active`, with a stored endpoint, credentials and an
+(empty but present) cookie jar.
+
+The jar matters: `hasSession` and the sign-in path both key off it, and an
+account with credentials but no jar is a different state.
+*/
 export async function seedPortalAccount(
   ctx: Ctx,
   healthSystemId: string,
@@ -267,19 +267,19 @@ export async function seedPortalAccount(
 }
 
 /**
- * An unconsumed verification code in the inbox.
- *
- * `receivedAt` defaults to a minute ahead of the clock, because `takeFreshOtp`
- * only claims a code that arrived strictly after the `SendCode` call -- a code from
- * before it belongs to an earlier attempt, and submitting it would fail and burn
- * this one too. A minute rather than a second so a suite running against the real
- * wall clock (rather than a frozen one) cannot spend that second on the requests
- * between seeding the code and asking for one.
- *
- * `fromAddr` defaults to `OTP_SENDER`, which is what `seedPortalAccount` stores
- * as the account's expected sender: a code from anywhere else is deliberately
- * not eligible for that health system.
- */
+An unconsumed verification code in the inbox.
+
+`receivedAt` defaults to a minute ahead of the clock, because `takeFreshOtp`
+only claims a code that arrived strictly after the `SendCode` call -- a code from
+before it belongs to an earlier attempt, and submitting it would fail and burn
+this one too. A minute rather than a second so a suite running against the real
+wall clock (rather than a frozen one) cannot spend that second on the requests
+between seeding the code and asking for one.
+
+`fromAddr` defaults to `OTP_SENDER`, which is what `seedPortalAccount` stores
+as the account's expected sender: a code from anywhere else is deliberately
+not eligible for that health system.
+*/
 export async function seedOtp(
   ctx: Ctx,
   code: string,

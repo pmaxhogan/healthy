@@ -37,9 +37,9 @@ beforeEach(resetSyncDb);
 const REFRESHED = "SyntheticRefreshed";
 
 /**
- * The fake portal, but every client it opens has just been handed a refreshed
- * cookie -- which is what shows whether the keepalive saved the jar afterwards.
- */
+The fake portal, but every client it opens has just been handed a refreshed
+cookie -- which is what shows whether the keepalive saved the jar afterwards.
+*/
 function refreshingAdapter(portal: FakePortal): PortalAdapter {
   return {
     ...portal.adapter,

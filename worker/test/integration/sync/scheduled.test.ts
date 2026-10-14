@@ -34,12 +34,12 @@ beforeEach(resetSyncDb);
 const HOST = "fhir.a.example.test";
 
 /**
- * A stand-in ExecutionContext that records what was deferred.
- *
- * The scheduled handler only uses `waitUntil`, and only for the daily retention
- * pruning, so collecting the promises is both the whole implementation and the
- * assertion that the pruning was scheduled at all.
- */
+A stand-in ExecutionContext that records what was deferred.
+
+The scheduled handler only uses `waitUntil`, and only for the daily retention
+pruning, so collecting the promises is both the whole implementation and the
+assertion that the pruning was scheduled at all.
+*/
 function executionContext(): { ectx: ExecutionContext; deferred: Promise<unknown>[] } {
   const deferred: Promise<unknown>[] = [];
   const ectx = {

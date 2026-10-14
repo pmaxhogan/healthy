@@ -65,9 +65,9 @@ export function heartRate(
 }
 
 /**
- * One heart-rate sample per step from `fromMs`, `count` of them. `bpm` is a
- * constant or a function of the sample's index.
- */
+One heart-rate sample per step from `fromMs`, `count` of them. `bpm` is a
+constant or a function of the sample's index.
+*/
 export function steady(
   fromMs: number,
   count: number,

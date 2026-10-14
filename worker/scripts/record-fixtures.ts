@@ -1,30 +1,30 @@
 /**
- * Records real Epic sandbox FHIR responses as test fixtures for a synthetic
- * test patient.
- *
- *   npm run record-fixtures -- --client-id <nonprod client id>
- *   npm run record-fixtures -- --client-id <id> --client-secret <secret>
- *   npm run record-fixtures -- --client-id <id> --out test/fixtures/epic-sandbox --patient camila
- *
- * What it does: stands up a one-shot HTTP server on
- * `http://localhost:8787/oauth/callback` (the redirect URI already registered
- * with Epic for local development), builds and prints the sandbox authorize
- * URL, opens it in the OS default browser, exchanges the code that comes back
- * for tokens, then runs every search in `SEARCH_REGISTRY` for the returned
- * patient, a `Patient` read, and reads of up to twenty referenced
- * Practitioner/Location/Organization resources. Every response is scrubbed
- * (`scripts/lib/scrub-fixture.ts`) and written under `--out` as pretty JSON,
- * alongside a `manifest.json` describing what was recorded.
- *
- * It exercises the real `EhrAdapter` and `FhirClient` implementations
- * under `worker/src/ehr/epic/` -- not a reimplementation of them -- so a
- * recording run is also a smoke test of that code against a live server.
- *
- * Sign in with one of Epic's published sandbox test patients (e.g.
- * `fhircamila` / `epicepic1`); see Epic's "Sandbox Patients" documentation.
- * Never point `--client-id` at a production app registration: this script
- * makes no attempt to be gentle with the API it is talking to.
- */
+Records real Epic sandbox FHIR responses as test fixtures for a synthetic
+test patient.
+
+  npm run record-fixtures -- --client-id <nonprod client id>
+  npm run record-fixtures -- --client-id <id> --client-secret <secret>
+  npm run record-fixtures -- --client-id <id> --out test/fixtures/epic-sandbox --patient camila
+
+What it does: stands up a one-shot HTTP server on
+`http://localhost:8787/oauth/callback` (the redirect URI already registered
+with Epic for local development), builds and prints the sandbox authorize
+URL, opens it in the OS default browser, exchanges the code that comes back
+for tokens, then runs every search in `SEARCH_REGISTRY` for the returned
+patient, a `Patient` read, and reads of up to twenty referenced
+Practitioner/Location/Organization resources. Every response is scrubbed
+(`scripts/lib/scrub-fixture.ts`) and written under `--out` as pretty JSON,
+alongside a `manifest.json` describing what was recorded.
+
+It exercises the real `EhrAdapter` and `FhirClient` implementations
+under `worker/src/ehr/epic/` -- not a reimplementation of them -- so a
+recording run is also a smoke test of that code against a live server.
+
+Sign in with one of Epic's published sandbox test patients (e.g.
+`fhircamila` / `epicepic1`); see Epic's "Sandbox Patients" documentation.
+Never point `--client-id` at a production app registration: this script
+makes no attempt to be gentle with the API it is talking to.
+*/
 
 import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -171,15 +171,15 @@ interface RecordingFetch {
 }
 
 /**
- * A `fetch` wrapper that lets the rest of this script observe every response
- * body the real adapter/client code sees, without changing what they receive.
- *
- * Only one sink is active at a time: this script is a strictly sequential
- * recording session, never a concurrent one, so a single closed-over "current
- * sink" is simpler than threading a sink through every adapter and client
- * call. It lives in this closure rather than at module scope so that mutating
- * it is ordinary closure state, not a shared global.
- */
+A `fetch` wrapper that lets the rest of this script observe every response
+body the real adapter/client code sees, without changing what they receive.
+
+Only one sink is active at a time: this script is a strictly sequential
+recording session, never a concurrent one, so a single closed-over "current
+sink" is simpler than threading a sink through every adapter and client
+call. It lives in this closure rather than at module scope so that mutating
+it is ordinary closure state, not a shared global.
+*/
 function createRecordingFetch(inner: typeof fetch): RecordingFetch {
   let active: FetchSink | null = null;
 
@@ -338,18 +338,18 @@ interface ExchangeArgs {
 }
 
 /**
- * Exchange the authorization code for tokens, recording the raw (redacted)
- * response either way, and writes `token-response.scrubbed.json` itself.
- *
- * With a client secret this simply calls the real adapter, which tries HTTP
- * Basic first per the module comment on `worker/src/ehr/epic/index.ts`.
- * Without one, `EhrAdapter.exchangeCode` has no "send no credentials at
- * all" mode to call into -- every path it has sends *something* -- so this
- * does the public-client token POST by hand: no Authorization header, no
- * `client_secret` field, relying on the PKCE verifier alone (RFC 7636). The
- * sandbox may accept either shape for a given app registration; this is an
- * assumption this script cannot verify without a live client id.
- */
+Exchange the authorization code for tokens, recording the raw (redacted)
+response either way, and writes `token-response.scrubbed.json` itself.
+
+With a client secret this simply calls the real adapter, which tries HTTP
+Basic first per the module comment on `worker/src/ehr/epic/index.ts`.
+Without one, `EhrAdapter.exchangeCode` has no "send no credentials at
+all" mode to call into -- every path it has sends *something* -- so this
+does the public-client token POST by hand: no Authorization header, no
+`client_secret` field, relying on the PKCE verifier alone (RFC 7636). The
+sandbox may accept either shape for a given app registration; this is an
+assumption this script cannot verify without a live client id.
+*/
 async function exchangeCodeAndRecord(
   adapter: EhrAdapter,
   config: SmartConfig,

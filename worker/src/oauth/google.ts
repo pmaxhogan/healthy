@@ -1,21 +1,21 @@
 /**
- * Google Calendar authorisation: `/oauth/google/start` and `/oauth/google/callback`.
- *
- * Simpler than the Epic flow in two ways and subtler in one.
- *
- * Simpler: there is one Google account and one client, so there is no health system to
- * look up and no per-organisation secret; and Google's client does not use PKCE
- * here, so the `oauth_states` row carries a throwaway verifier purely to satisfy
- * the NOT NULL column. (The row's real job is the `state` nonce, which is checked
- * exactly as Epic's is: ten minutes, single use, `kind` must match.)
- *
- * Subtler: **the account label.** This app never asks for `openid email`, because
- * it has no business holding the owner's address for its own sake. But the UI does
- * need to show which Google account is connected, or a re-consent into the wrong
- * account is invisible. So the primary calendar's id is read from the calendar
- * scopes the grant already includes, sealed into `google_account.email_enc`, and
- * masked (`p…n@gmail.com`) on the way to the UI. It is never logged.
- */
+Google Calendar authorisation: `/oauth/google/start` and `/oauth/google/callback`.
+
+Simpler than the Epic flow in two ways and subtler in one.
+
+Simpler: there is one Google account and one client, so there is no health system to
+look up and no per-organisation secret; and Google's client does not use PKCE
+here, so the `oauth_states` row carries a throwaway verifier purely to satisfy
+the NOT NULL column. (The row's real job is the `state` nonce, which is checked
+exactly as Epic's is: ten minutes, single use, `kind` must match.)
+
+Subtler: **the account label.** This app never asks for `openid email`, because
+it has no business holding the owner's address for its own sake. But the UI does
+need to show which Google account is connected, or a re-consent into the wrong
+account is invisible. So the primary calendar's id is read from the calendar
+scopes the grant already includes, sealed into `google_account.email_enc`, and
+masked (`p…n@gmail.com`) on the way to the UI. It is never logged.
+*/
 
 import { Hono } from "hono";
 

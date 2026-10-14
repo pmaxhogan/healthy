@@ -1,15 +1,15 @@
 /**
- * The db layer's front door.
- *
- * `makeRepos(ctx)` is the one thing the rest of the Worker constructs. Repos are
- * plain objects of closures over a `Ctx`, so a request handler builds them once
- * per request and a scheduled run builds them once per invocation -- there is no
- * shared mutable state to get wrong, and a test can hand them a different clock.
- *
- * Nothing outside `worker/src/db/**` should import `crypto.ts` or touch a `*_enc`
- * column: the repos are what guarantee a sealed value is only ever opened with
- * the AAD it was sealed under.
- */
+The db layer's front door.
+
+`makeRepos(ctx)` is the one thing the rest of the Worker constructs. Repos are
+plain objects of closures over a `Ctx`, so a request handler builds them once
+per request and a scheduled run builds them once per invocation -- there is no
+shared mutable state to get wrong, and a test can hand them a different clock.
+
+Nothing outside `worker/src/db/**` should import `crypto.ts` or touch a `*_enc`
+column: the repos are what guarantee a sealed value is only ever opened with
+the AAD it was sealed under.
+*/
 
 import { makeCtx } from "./client.ts";
 import { makeAlertsRepo } from "./repos/alerts.ts";

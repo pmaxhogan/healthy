@@ -73,12 +73,12 @@ function propertySchema(schema: JsonSchema, key: string): JsonSchema | undefined
 }
 
 /**
- * Walks a JSON Pointer-shaped path (each segment either an object key or,
- * inside an array, the index as a string) to the subschema it names. Every
- * path this module builds comes from either the tokenizer's own walk of the
- * document or a validator's `instanceLocation`, so segments are always plain
- * strings even when they represent an array index.
- */
+Walks a JSON Pointer-shaped path (each segment either an object key or,
+inside an array, the index as a string) to the subschema it names. Every
+path this module builds comes from either the tokenizer's own walk of the
+document or a validator's `instanceLocation`, so segments are always plain
+strings even when they represent an array index.
+*/
 export function resolveSchema(root: JsonSchema, path: readonly string[]): JsonSchema | undefined {
   let current: JsonSchema | undefined = root;
   for (const segment of path) {
@@ -569,12 +569,12 @@ function valueCompletions(
 }
 
 /**
- * A `@codemirror/autocomplete` completion source driven entirely by the
- * tool's JSON Schema: property names (required ones first) at key positions,
- * and enum/const/boolean literals at value positions. `getSchema` is read on
- * every call, not captured once, so a caller can swap the schema (a new tool
- * selected) without recreating the editor.
- */
+A `@codemirror/autocomplete` completion source driven entirely by the
+tool's JSON Schema: property names (required ones first) at key positions,
+and enum/const/boolean literals at value positions. `getSchema` is read on
+every call, not captured once, so a caller can swap the schema (a new tool
+selected) without recreating the editor.
+*/
 export function jsonSchemaCompletionSource(getSchema: () => JsonSchema | null): CompletionSource {
   return (context: CompletionContext): CompletionResult | null => {
     const schema = getSchema();
@@ -611,9 +611,9 @@ function buildHoverDom(name: string, schema: JsonSchema): HTMLElement {
 }
 
 /**
- * A `hoverTooltip` source (see `@codemirror/view`) that shows a property's
- * description and type when the pointer rests on its key.
- */
+A `hoverTooltip` source (see `@codemirror/view`) that shows a property's
+description and type when the pointer rests on its key.
+*/
 export function jsonSchemaHoverSource(getSchema: () => JsonSchema | null) {
   return (view: EditorView, pos: number): Tooltip | null => {
     const schema = getSchema();
@@ -653,15 +653,15 @@ function parseErrorDiagnostic(doc: string, error: unknown): Diagnostic {
 }
 
 /**
- * Validates `doc` against `schema` and returns one lint diagnostic per
- * schema-validation error that names a specific key or value (skipping the
- * container-level errors the validator also reports for the same problem,
- * which have nothing of their own to underline). A JSON syntax error short-
- * circuits to a single diagnostic near the parse failure.
- *
- * A pure function -- `linter()`'s own delay and refresh timing wrap it; tests
- * call it directly.
- */
+Validates `doc` against `schema` and returns one lint diagnostic per
+schema-validation error that names a specific key or value (skipping the
+container-level errors the validator also reports for the same problem,
+which have nothing of their own to underline). A JSON syntax error short-
+circuits to a single diagnostic near the parse failure.
+
+A pure function -- `linter()`'s own delay and refresh timing wrap it; tests
+call it directly.
+*/
 export function schemaDiagnostics(schema: JsonSchema | null, doc: string): Diagnostic[] {
   if (schema === null) return [];
   let parsed: unknown;
@@ -717,19 +717,19 @@ export function schemaDiagnostics(schema: JsonSchema | null, doc: string): Diagn
 const MONOSPACE_FONT = "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace";
 
 /**
- * Styling for the completion popup, the hover tooltip and the lint markers,
- * layered on top of `jsonBaseExtensions()`'s theme (worker/ui/lib/codemirror-json.ts)
- * the same way that theme layers on top of CodeMirror's own: every colour is
- * one of this app's CSS custom properties, so both light and dark mode track
- * `prefers-color-scheme` with no JavaScript here to keep them in sync.
- *
- * `@codemirror/lint`'s base theme underlines an error with a `background-image`
- * data URI, which this editor's sandboxed CSP (`img-src 'none'`,
- * `worker/src/auth/security-headers.ts`'s `sandboxContentSecurityPolicy`) refuses to
- * load -- Chrome logs a CSP violation and shows no underline at all. Every
- * `.cm-lintRange*` rule below replaces that image with a plain
- * `text-decoration`, which needs no image.
- */
+Styling for the completion popup, the hover tooltip and the lint markers,
+layered on top of `jsonBaseExtensions()`'s theme (worker/ui/lib/codemirror-json.ts)
+the same way that theme layers on top of CodeMirror's own: every colour is
+one of this app's CSS custom properties, so both light and dark mode track
+`prefers-color-scheme` with no JavaScript here to keep them in sync.
+
+`@codemirror/lint`'s base theme underlines an error with a `background-image`
+data URI, which this editor's sandboxed CSP (`img-src 'none'`,
+`worker/src/auth/security-headers.ts`'s `sandboxContentSecurityPolicy`) refuses to
+load -- Chrome logs a CSP violation and shows no underline at all. Every
+`.cm-lintRange*` rule below replaces that image with a plain
+`text-decoration`, which needs no image.
+*/
 export const jsonSchemaCompletionTheme = EditorView.theme({
   ".cm-tooltip.cm-tooltip-autocomplete": {
     border: "1px solid var(--border)",

@@ -1,28 +1,28 @@
 /**
- * A minimal FHIR R4 client for Epic's patient-facing API.
- *
- * What it exists to get right (each of these is a documented Epic sharp edge):
- *
- *  - `Accept: application/fhir+json` on every request. Epic's server has
- *    historically answered with XML when the header is absent.
- *  - Paging by `Bundle.link[relation=next]`, followed immediately and only when
- *    the link's origin matches the FHIR base -- the bearer token rides on that
- *    request, so a bundle that points somewhere else is dropped, not followed.
- *  - `search.mode === "outcome"` entries are warnings, not results. They are
- *    skipped and their issues collected.
- *  - 4101 (no results) is an empty result. 4119 (patient view filtered) is a
- *    warning. 4113 (paging session expired) restarts the search exactly once.
- *    4118 (not authorized for this data) is `upstream_auth`.
- *  - A 401 means the access token died mid-run: the `onUnauthorized` hook is
- *    given one chance to produce a fresh one, then the request is retried once.
- *  - A 403 is a registration mismatch, not a bad token, and is never retried.
- *  - 429 and 5xx go through `retriedFetch`, whose `Retry-After` is carried out
- *    on the `AppError` so a whole sync run can back off rather than one call.
- *
- * Nothing here logs a URL, a search parameter or a resource body: the base URL
- * identifies the organisation and the parameters carry the patient id. Counts,
- * resource type names, HTTP statuses and Epic numeric codes only.
- */
+A minimal FHIR R4 client for Epic's patient-facing API.
+
+What it exists to get right (each of these is a documented Epic sharp edge):
+
+ - `Accept: application/fhir+json` on every request. Epic's server has
+   historically answered with XML when the header is absent.
+ - Paging by `Bundle.link[relation=next]`, followed immediately and only when
+   the link's origin matches the FHIR base -- the bearer token rides on that
+   request, so a bundle that points somewhere else is dropped, not followed.
+ - `search.mode === "outcome"` entries are warnings, not results. They are
+   skipped and their issues collected.
+ - 4101 (no results) is an empty result. 4119 (patient view filtered) is a
+   warning. 4113 (paging session expired) restarts the search exactly once.
+   4118 (not authorized for this data) is `upstream_auth`.
+ - A 401 means the access token died mid-run: the `onUnauthorized` hook is
+   given one chance to produce a fresh one, then the request is retried once.
+ - A 403 is a registration mismatch, not a bad token, and is never retried.
+ - 429 and 5xx go through `retriedFetch`, whose `Retry-After` is carried out
+   on the `AppError` so a whole sync run can back off rather than one call.
+
+Nothing here logs a URL, a search parameter or a resource body: the base URL
+identifies the organisation and the parameters carry the patient id. Counts,
+resource type names, HTTP statuses and Epic numeric codes only.
+*/
 
 import { isBundle, isRecord, nextLink, resourceKey, splitEntries } from "../../fhir/bundle.ts";
 import {
@@ -47,10 +47,10 @@ export interface FhirClientDeps {
   /** Resolves a valid access token. Called once per request, not per attempt. */
   getAccessToken: () => Promise<string>;
   /**
-   * Called when a request comes back 401, and expected to force a token refresh
-   * and return the new access token. The request is then retried exactly once.
-   * Without this hook a 401 is `upstream_auth` immediately.
-   */
+  Called when a request comes back 401, and expected to force a token refresh
+  and return the new access token. The request is then retried exactly once.
+  Without this hook a 401 is `upstream_auth` immediately.
+  */
   onUnauthorized?: (() => Promise<string>) | undefined;
   fetchImpl: typeof fetch;
   logger: Logger;
@@ -71,10 +71,10 @@ export interface FhirClient {
   /** A single resource by id, or null when the organisation has no such row. */
   read<T extends Resource = Resource>(resourceType: string, id: string): Promise<T | null>;
   /**
-   * Follows `Bundle.link[relation=next]` to the very end -- there is no page
-   * ceiling. The owner's record is whatever size it is; see `paginate` for the
-   * one thing that does stop a search early: the same `next` link twice.
-   */
+  Follows `Bundle.link[relation=next]` to the very end -- there is no page
+  ceiling. The owner's record is whatever size it is; see `paginate` for the
+  one thing that does stop a search early: the same `next` link twice.
+  */
   search<T extends Resource = Resource>(
     resourceType: string,
     params: Record<string, string>,
@@ -99,11 +99,11 @@ export function searchUrl(
 }
 
 /**
- * Whether a bundle's `next` link may be followed.
- *
- * A same-origin check rather than a prefix check: Epic's continuation URLs are
- * not always under the R4 base path, but they are always on the same host.
- */
+Whether a bundle's `next` link may be followed.
+
+A same-origin check rather than a prefix check: Epic's continuation URLs are
+not always under the R4 base path, but they are always on the same host.
+*/
 export function sameOrigin(candidate: string, baseUrl: string): boolean {
   try {
     return new URL(candidate).origin === new URL(baseUrl).origin;
@@ -127,13 +127,13 @@ type PageOutcome = ResolvedOutcome | { kind: "unauthorized" };
 type ResolvedOutcome = { kind: "ok"; body: unknown } | { kind: "not-found" };
 
 /**
- * A `fetch` wrapper that hides non-auth 4xx responses from `retriedFetch`.
- *
- * `retriedFetch` throws `PermanentError` for those and discards the body, but
- * every semantic this client needs -- 4113, 4118, an OperationOutcome explaining
- * a 400 -- lives in exactly that body. The response is stashed and a bodyless
- * 204 returned in its place so the retry loop stops without retrying.
- */
+A `fetch` wrapper that hides non-auth 4xx responses from `retriedFetch`.
+
+`retriedFetch` throws `PermanentError` for those and discards the body, but
+every semantic this client needs -- 4113, 4118, an OperationOutcome explaining
+a 400 -- lives in exactly that body. The response is stashed and a bodyless
+204 returned in its place so the retry loop stops without retrying.
+*/
 function passthrough4xx(inner: typeof fetch): {
   fetchImpl: typeof fetch;
   taken: () => Response | null;
@@ -167,12 +167,12 @@ async function parseJsonBody(response: Response): Promise<unknown> {
 }
 
 /**
- * Turn the issues of an OperationOutcome into either a classification the caller
- * can act on, or the right `AppError`.
- *
- * Order matters: 4113 and 4118 both also set `fatal`, and both have a specific
- * recovery, so they are checked first.
- */
+Turn the issues of an OperationOutcome into either a classification the caller
+can act on, or the right `AppError`.
+
+Order matters: 4113 and 4118 both also set `fatal`, and both have a specific
+recovery, so they are checked first.
+*/
 function assertIssuesUsable(resourceType: string, issues: readonly ParsedIssue[]): OutcomeClass {
   const outcome = classifyOutcome(issues);
   if (outcome.pagingExpired) throw new PagingExpiredError();
@@ -319,26 +319,26 @@ export function createFhirClient(deps: FhirClientDeps): FhirClient {
   }
 
   /**
-   * Follow `next` to the end. There is no page ceiling: the owner's record is
-   * whatever size it is, and a health system with an unusually long history is
-   * exactly the case a cap would silently truncate.
-   *
-   * The one thing that does stop this early is `next` repeating a URL already
-   * visited in this walk -- an upstream bug (or an off-by-one in a paging
-   * cursor) serving the same page forever is a real failure mode, and looping
-   * on it forever would be worse than any page cap. That is reported loudly,
-   * as a thrown error, not folded into a warning: `refreshResourceType` catches
-   * it, records the failure in `fhir_sync_state`, and does not cache a partial
-   * result under a resource type that looked like it succeeded.
-   *
-   * A server that serves a *fresh* `next` link forever is not caught here, and
-   * that is a decision, not an oversight: security review L2 (2026-09) proposed a
-   * fail-loud bound on pages or bytes, and the owner's standing rule (CLAUDE.md,
-   * "Never cap what is fetched or stored") forbids one. The backstop is the
-   * Worker's CPU limit (`limits.cpu_ms` in `wrangler.jsonc`), which ends such a
-   * walk and fails the run rather than letting it spin. Do not add a page or byte
-   * ceiling here without the owner changing that rule.
-   */
+  Follow `next` to the end. There is no page ceiling: the owner's record is
+  whatever size it is, and a health system with an unusually long history is
+  exactly the case a cap would silently truncate.
+
+  The one thing that does stop this early is `next` repeating a URL already
+  visited in this walk -- an upstream bug (or an off-by-one in a paging
+  cursor) serving the same page forever is a real failure mode, and looping
+  on it forever would be worse than any page cap. That is reported loudly,
+  as a thrown error, not folded into a warning: `refreshResourceType` catches
+  it, records the failure in `fhir_sync_state`, and does not cache a partial
+  result under a resource type that looked like it succeeded.
+
+  A server that serves a *fresh* `next` link forever is not caught here, and
+  that is a decision, not an oversight: security review L2 (2026-09) proposed a
+  fail-loud bound on pages or bytes, and the owner's standing rule (CLAUDE.md,
+  "Never cap what is fetched or stored") forbids one. The backstop is the
+  Worker's CPU limit (`limits.cpu_ms` in `wrangler.jsonc`), which ends such a
+  walk and fails the run rather than letting it spin. Do not add a page or byte
+  ceiling here without the owner changing that rule.
+  */
   async function paginate(resourceType: string, firstUrl: string): Promise<SearchResult<Resource>> {
     const sink = {
       resources: [] as Resource[],

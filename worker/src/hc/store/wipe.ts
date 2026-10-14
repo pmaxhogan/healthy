@@ -1,26 +1,26 @@
 /**
- * Wiping a device: every Health Connect row it has, then the device row.
- *
- * Every table hangs off `devices` with `ON DELETE CASCADE`, so deleting the
- * device row alone would be correct -- and, for a phone with a year of
- * history, one statement deleting millions of rows, which D1 will not finish.
- * So the tables are emptied in bounded slices first and the device row goes
- * last, when there is nothing left for the cascade to do.
- *
- * `wipeDevice` does one bounded pass and says whether it finished; the caller
- * calls it again until it has. It is safe to call at any point and any number
- * of times, including for a device that is already gone.
- *
- * The device is revoked first, so no upload can refill the queue between
- * passes, and the queue is emptied first, so the ingest runner finds nothing
- * to apply. A runner slice that was already under way can still write a few
- * rows after their table was emptied; the cascade takes those, and once the
- * device row is gone its foreign key refuses any more. The runner's own stored
- * job and alarm are cleared last of all.
- *
- * The tables are WITHOUT ROWID, and SQLite has no `DELETE ... LIMIT` here, so
- * a slice is "the rows whose primary key is among the first N".
- */
+Wiping a device: every Health Connect row it has, then the device row.
+
+Every table hangs off `devices` with `ON DELETE CASCADE`, so deleting the
+device row alone would be correct -- and, for a phone with a year of
+history, one statement deleting millions of rows, which D1 will not finish.
+So the tables are emptied in bounded slices first and the device row goes
+last, when there is nothing left for the cascade to do.
+
+`wipeDevice` does one bounded pass and says whether it finished; the caller
+calls it again until it has. It is safe to call at any point and any number
+of times, including for a device that is already gone.
+
+The device is revoked first, so no upload can refill the queue between
+passes, and the queue is emptied first, so the ingest runner finds nothing
+to apply. A runner slice that was already under way can still write a few
+rows after their table was emptied; the cascade takes those, and once the
+device row is gone its foreign key refuses any more. The runner's own stored
+job and alarm are cleared last of all.
+
+The tables are WITHOUT ROWID, and SQLite has no `DELETE ... LIMIT` here, so
+a slice is "the rows whose primary key is among the first N".
+*/
 
 import { run } from "../../db/client.ts";
 import { makeDevicesRepo } from "../../db/repos/devices.ts";
@@ -102,9 +102,9 @@ async function emptyTable(
 }
 
 /**
- * One bounded pass of a device wipe. `done: false` means rows remain and the
- * caller should call again.
- */
+One bounded pass of a device wipe. `done: false` means rows remain and the
+caller should call again.
+*/
 export async function wipeDevice(
   ctx: Ctx,
   deviceId: string,

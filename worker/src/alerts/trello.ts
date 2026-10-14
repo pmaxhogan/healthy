@@ -1,27 +1,27 @@
 /**
- * Trello REST client for the reconnect-alert flow.
- *
- * Pure module: no D1, no Env. Every dependency (credentials, list ids, fetch,
- * logger, clock) is injected via `createTrelloAlerts(cfg)`, so this file is
- * unit-testable without a Worker runtime and callers own where the config
- * comes from (Worker secrets, in production).
- *
- * Auth is Trello's REST convention: `key` and `token` as query params on
- * every request (see ../../trello-mcp/src/trello-client.ts). Those two values
- * -- and every other query param, since card creation puts the (user-data)
- * health system display name and description there too -- must never reach a log
- * line or an error message. `stripCredentials` is exported and tested for
- * callers that need to log a full URL, but this module's own logging never
- * does: it logs only the method and path, never the query string, and every
- * thrown message below is a fixed string that never interpolates the request
- * URL or its params.
- *
- * Transport goes through `retriedFetch` (worker/src/lib/retry.ts), which already
- * classifies 429/5xx as transient (backoff honoring Retry-After) and returns
- * 401/403 to the caller instead of retrying. This module turns that outcome
- * into the shared `AppError` taxonomy: 401/403 -> "upstream_auth", other 4xx
- * -> "upstream_error", retry exhaustion -> "upstream_unavailable".
- */
+Trello REST client for the reconnect-alert flow.
+
+Pure module: no D1, no Env. Every dependency (credentials, list ids, fetch,
+logger, clock) is injected via `createTrelloAlerts(cfg)`, so this file is
+unit-testable without a Worker runtime and callers own where the config
+comes from (Worker secrets, in production).
+
+Auth is Trello's REST convention: `key` and `token` as query params on
+every request (see ../../trello-mcp/src/trello-client.ts). Those two values
+-- and every other query param, since card creation puts the (user-data)
+health system display name and description there too -- must never reach a log
+line or an error message. `stripCredentials` is exported and tested for
+callers that need to log a full URL, but this module's own logging never
+does: it logs only the method and path, never the query string, and every
+thrown message below is a fixed string that never interpolates the request
+URL or its params.
+
+Transport goes through `retriedFetch` (worker/src/lib/retry.ts), which already
+classifies 429/5xx as transient (backoff honoring Retry-After) and returns
+401/403 to the caller instead of retrying. This module turns that outcome
+into the shared `AppError` taxonomy: 401/403 -> "upstream_auth", other 4xx
+-> "upstream_error", retry exhaustion -> "upstream_unavailable".
+*/
 
 import { AppError, isAppError } from "../lib/errors.ts";
 import { noopLogger } from "../lib/log.ts";

@@ -1,32 +1,32 @@
 /**
- * ModMed appointment rows -> the portal visit model the calendar sync already reads.
- *
- * One appointment row, as the upcoming list returns it:
- *
- *   { id, appointmentDate, timeZone, reason,
- *     physician: { id, fullNameComplete, ... },
- *     facility: { id, name, timeZone, address: { street1, city, state, zipcode, ... },
- *                 mainPhone: { formattedPhoneNumber, ... }, ... },
- *     visit?: { id, visitType, ... } }
- *
- * What the fields mean, as confirmed against a signed-in session:
- *
- *  - `appointmentDate` is the true instant, written with a `+0000` offset (no
- *    colon). It is UTC; nothing about the clinic's zone is in it.
- *  - `facility.timeZone` is the zone the portal renders the time in, and the
- *    clinic's own. The row's top-level `timeZone` is the *practice's* zone,
- *    which can differ from the clinic's -- the portal's own page prefers the
- *    facility's, and so does this.
- *  - `id` is the appointment's id: stable, and the dedupe key (`csn` in the
- *    shared model, which predates there being a second vendor).
- *  - There is no status, no duration and no cancellation flag. A row is on the
- *    list because it is booked; a cancelled one drops off, which the sync's
- *    vanished-visit rule already handles. A row that carries a `visit` object
- *    has been checked in.
- *
- * A row without a usable id or instant is skipped and counted, never guessed.
- * Logs carry counts only.
- */
+ModMed appointment rows -> the portal visit model the calendar sync already reads.
+
+One appointment row, as the upcoming list returns it:
+
+  { id, appointmentDate, timeZone, reason,
+    physician: { id, fullNameComplete, ... },
+    facility: { id, name, timeZone, address: { street1, city, state, zipcode, ... },
+                mainPhone: { formattedPhoneNumber, ... }, ... },
+    visit?: { id, visitType, ... } }
+
+What the fields mean, as confirmed against a signed-in session:
+
+ - `appointmentDate` is the true instant, written with a `+0000` offset (no
+   colon). It is UTC; nothing about the clinic's zone is in it.
+ - `facility.timeZone` is the zone the portal renders the time in, and the
+   clinic's own. The row's top-level `timeZone` is the *practice's* zone,
+   which can differ from the clinic's -- the portal's own page prefers the
+   facility's, and so does this.
+ - `id` is the appointment's id: stable, and the dedupe key (`csn` in the
+   shared model, which predates there being a second vendor).
+ - There is no status, no duration and no cancellation flag. A row is on the
+   list because it is booked; a cancelled one drops off, which the sync's
+   vanished-visit rule already handles. A row that carries a `visit` object
+   has been checked in.
+
+A row without a usable id or instant is skipped and counted, never guessed.
+Logs carry counts only.
+*/
 
 import { toIsoInZone } from "../../lib/time.ts";
 
@@ -64,10 +64,10 @@ function child(record: Json, key: string): Json | undefined {
 }
 
 /**
- * `2026-10-14T15:30:00.000+0000` (or with `+00:00`, or `Z`) -> unix seconds.
- * Null for anything that is not an ISO instant with an explicit offset: a bare
- * local time would be a guess about the zone.
- */
+`2026-10-14T15:30:00.000+0000` (or with `+00:00`, or `Z`) -> unix seconds.
+Null for anything that is not an ISO instant with an explicit offset: a bare
+local time would be a guess about the zone.
+*/
 export function parseAppointmentDate(value: unknown): number | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -81,14 +81,14 @@ export function parseAppointmentDate(value: unknown): number | null {
 }
 
 /**
- * The canonical IANA name for the legacy `US/*` links ModMed reports.
- *
- * `US/Central` and friends are backward-compatibility links in the tz database:
- * every runtime here resolves them, but they are deprecated, and a zone stored
- * on a visit (and served over MCP) should be the name everything else uses.
- * The whole `US/*` family, so nothing about which one a practice uses is
- * special-cased.
- */
+The canonical IANA name for the legacy `US/*` links ModMed reports.
+
+`US/Central` and friends are backward-compatibility links in the tz database:
+every runtime here resolves them, but they are deprecated, and a zone stored
+on a visit (and served over MCP) should be the name everything else uses.
+The whole `US/*` family, so nothing about which one a practice uses is
+special-cased.
+*/
 const US_LINKS: ReadonlyMap<string, string> = new Map([
   ["US/Alaska", "America/Anchorage"],
   ["US/Aleutian", "America/Adak"],
@@ -142,16 +142,16 @@ function phoneOf(facility: Json | undefined): string | undefined {
 }
 
 /**
- * Whether an appointment's reason says it is a video visit.
- *
- * The only signal there is. The patient API's appointment projection is fixed
- * (`id`, `appointmentDate`, `timeZone`, `reason`, `physician`, `facility`,
- * `visit`); a selector naming any telehealth-ish field is silently ignored, and
- * the app's own video page is a separate screen that lists a meeting only once
- * the practice has opened it (`/ema/ws/v3/meeting/available`), not a property
- * of a booked appointment. So a booking is a video visit when the practice
- * booked it under a reason that says so.
- */
+Whether an appointment's reason says it is a video visit.
+
+The only signal there is. The patient API's appointment projection is fixed
+(`id`, `appointmentDate`, `timeZone`, `reason`, `physician`, `facility`,
+`visit`); a selector naming any telehealth-ish field is silently ignored, and
+the app's own video page is a separate screen that lists a meeting only once
+the practice has opened it (`/ema/ws/v3/meeting/available`), not a property
+of a booked appointment. So a booking is a video visit when the practice
+booked it under a reason that says so.
+*/
 const VIDEO_REASON = /\b(?:video|virtual|tele-?health|tele-?medicine|telemed|e-?visit)\b/iu;
 
 export function isVideoReason(reason: string | undefined): boolean {
@@ -217,11 +217,11 @@ export function parseAppointments(
 const PAST_VISIT_PREFIX = "visit:";
 
 /**
- * One row of the *past* list, which is a different record: a visit, not an
- * appointment. `visitId`, `visitDate` (same `+0000` form), `primaryProvider` (a
- * display name) and the same `facility`. It also carries clinical text
- * (`impressions`) and a note link; neither is read.
- */
+One row of the *past* list, which is a different record: a visit, not an
+appointment. `visitId`, `visitDate` (same `+0000` form), `primaryProvider` (a
+display name) and the same `facility`. It also carries clinical text
+(`impressions`) and a note link; neither is read.
+*/
 function parsePastVisit(row: unknown, fallbackTimeZone: string): PortalVisit | null {
   if (!isRecord(row)) return null;
   const visitId = idOf(row, "visitId");

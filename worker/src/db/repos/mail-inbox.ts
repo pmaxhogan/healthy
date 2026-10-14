@@ -1,42 +1,42 @@
 /**
- * `mail_inbox`: the sign-in flow's only view of what has landed in the
- * portal's 2FA mailbox.
- *
- * Bodies are never stored -- see `worker/src/mail/handler.ts` -- and everything
- * this table does keep about a message is sealed the same way every other
- * secret in this repository is, AAD bound to `mail_inbox.<column>.<id>`: the
- * code, and since 0005 the sender address and the subject too. Both of those
- * name the health system for a forwarded portal message, and both are chosen
- * by whoever sent it. The old plaintext `from_addr` / `subject` columns are
- * still in the schema and new rows write an empty string into them; a row
- * written before 0005 is read through them as a fallback.
- *
- * `takeFreshOtp` is the security-relevant operation, and it has two jobs.
- *
- *   - **Only the right sender's code may be claimed.** An eligible row is one
- *     from the health system's own expected sender where it has one, and otherwise
- *     one that is both on the sender allowlist and on the same site
- *     (registrable domain) as this portal's own base URL. Without either half,
- *     a stranger who can reach the inbound address -- or, before any sender is
- *     learned, a second configured portal's own allowlisted sender arriving in
- *     the same window -- could have a code of their own choosing submitted to
- *     the owner's real portal.
- *   - **A code can never be claimed twice.** The claim is an
- *     `UPDATE ... WHERE consumed_at IS NULL RETURNING`, one row at a time, so
- *     two concurrent sign-in attempts (or a retry racing the original) cannot
- *     both take the same code -- the second finds nothing to update and moves
- *     on, exactly like `oauth_states.consume`.
- *
- * Oldest eligible first, not newest: the portal's own code is the one that
- * arrived closest behind the `SendCode` call, and preferring the newest handed
- * every poll to whoever was sending fastest.
- *
- * `listRecent` never opens an 'otp' row's code, even though it is free to:
- * a one-time login code has no reason to ever appear on a screen, and the
- * one thing the admin UI needs to show the owner is the *other* kind of code
- * this table holds -- Gmail's own forwarding-confirmation code -- which is
- * not a secret and exists specifically so a human can read and use it.
- */
+`mail_inbox`: the sign-in flow's only view of what has landed in the
+portal's 2FA mailbox.
+
+Bodies are never stored -- see `worker/src/mail/handler.ts` -- and everything
+this table does keep about a message is sealed the same way every other
+secret in this repository is, AAD bound to `mail_inbox.<column>.<id>`: the
+code, and since 0005 the sender address and the subject too. Both of those
+name the health system for a forwarded portal message, and both are chosen
+by whoever sent it. The old plaintext `from_addr` / `subject` columns are
+still in the schema and new rows write an empty string into them; a row
+written before 0005 is read through them as a fallback.
+
+`takeFreshOtp` is the security-relevant operation, and it has two jobs.
+
+  - **Only the right sender's code may be claimed.** An eligible row is one
+    from the health system's own expected sender where it has one, and otherwise
+    one that is both on the sender allowlist and on the same site
+    (registrable domain) as this portal's own base URL. Without either half,
+    a stranger who can reach the inbound address -- or, before any sender is
+    learned, a second configured portal's own allowlisted sender arriving in
+    the same window -- could have a code of their own choosing submitted to
+    the owner's real portal.
+  - **A code can never be claimed twice.** The claim is an
+    `UPDATE ... WHERE consumed_at IS NULL RETURNING`, one row at a time, so
+    two concurrent sign-in attempts (or a retry racing the original) cannot
+    both take the same code -- the second finds nothing to update and moves
+    on, exactly like `oauth_states.consume`.
+
+Oldest eligible first, not newest: the portal's own code is the one that
+arrived closest behind the `SendCode` call, and preferring the newest handed
+every poll to whoever was sending fastest.
+
+`listRecent` never opens an 'otp' row's code, even though it is free to:
+a one-time login code has no reason to ever appear on a screen, and the
+one thing the admin UI needs to show the owner is the *other* kind of code
+this table holds -- Gmail's own forwarding-confirmation code -- which is
+not a secret and exists specifically so a human can read and use it.
+*/
 
 import { registrableDomain } from "../../ehr/mychart/site.ts";
 import { newId } from "../../lib/ids.ts";
@@ -57,15 +57,15 @@ const fromAad = (id: string): string => aadFor("mail_inbox", "from_addr_enc", id
 const subjectAad = (id: string): string => aadFor("mail_inbox", "subject_enc", id);
 
 /**
- * How many pending rows one claim will consider.
- *
- * The sender filter cannot be pushed into SQL -- a sealed column has a random
- * IV per row, so two seals of the same address are different ciphertext and
- * `WHERE from_addr_enc = ?` can never match. So the candidates are read
- * oldest-first and opened one at a time until one is eligible, and this is the
- * bound on that work. Far above any real inbox (a portal sends one code per
- * attempt); a flood beyond it is exactly the case the TTL and the purge cover.
- */
+How many pending rows one claim will consider.
+
+The sender filter cannot be pushed into SQL -- a sealed column has a random
+IV per row, so two seals of the same address are different ciphertext and
+`WHERE from_addr_enc = ?` can never match. So the candidates are read
+oldest-first and opened one at a time until one is eligible, and this is the
+bound on that work. Far above any real inbox (a portal sends one code per
+attempt); a flood beyond it is exactly the case the TTL and the purge cover.
+*/
 const CLAIM_CANDIDATES = 25;
 
 /** Rows older than this are dropped whatever their `expires_at` says. */
@@ -89,12 +89,12 @@ export interface MailInboxEntry {
   id: string;
   receivedAt: number;
   /**
-   * The sender's domain, and only the domain.
-   *
-   * Reduced here rather than in `worker/src/api/dto.ts` so the full address never
-   * leaves this module: it is opened from `from_addr_enc`, the local part is
-   * dropped, and what travels is the one part the admin UI shows.
-   */
+  The sender's domain, and only the domain.
+
+  Reduced here rather than in `worker/src/api/dto.ts` so the full address never
+  leaves this module: it is opened from `from_addr_enc`, the local part is
+  dropped, and what travels is the one part the admin UI shows.
+  */
   senderDomain: string;
   /** Opened only for a 'forward_verify' row -- the one kind the UI needs it for. */
   subject: string | null;
@@ -121,39 +121,39 @@ export interface OtpClaimFilter {
   since: number;
   now: number;
   /**
-   * The domain this health system's codes come from, when it is known.
-   *
-   * Non-null narrows eligibility to that domain (or a subdomain of it) and
-   * nothing else. Null falls back to the sender allowlist -- narrowed by
-   * `portalHost`, below -- which is what makes the very first sign-in -- the
-   * one that *learns* the sender -- possible.
-   */
+  The domain this health system's codes come from, when it is known.
+
+  Non-null narrows eligibility to that domain (or a subdomain of it) and
+  nothing else. Null falls back to the sender allowlist -- narrowed by
+  `portalHost`, below -- which is what makes the very first sign-in -- the
+  one that *learns* the sender -- possible.
+  */
   expectedSender: string | null;
   /** The `mail_sender_allowlist` setting, parsed. Used only when there is no expected sender. */
   allowlist: readonly string[];
   /**
-   * This account's own portal, as a hostname (from `portal_accounts.base_url`).
-   *
-   * Used only when there is no expected sender yet: a candidate then also has to
-   * share a registrable domain with this host, not merely be on the (global,
-   * shared-across-every-configured-portal) allowlist. Without this, a second
-   * configured portal's own allowlisted sender is eligible for this one too,
-   * which is exactly the cross-portal claim this field exists to rule out. Null
-   * fails closed -- nothing is eligible via the allowlist path at all -- which
-   * in production never happens: `openPortalSession` refuses to run without a
-   * `base_url`, so a call this far into a sign-in always has one.
-   */
+  This account's own portal, as a hostname (from `portal_accounts.base_url`).
+
+  Used only when there is no expected sender yet: a candidate then also has to
+  share a registrable domain with this host, not merely be on the (global,
+  shared-across-every-configured-portal) allowlist. Without this, a second
+  configured portal's own allowlisted sender is eligible for this one too,
+  which is exactly the cross-portal claim this field exists to rule out. Null
+  fails closed -- nothing is eligible via the allowlist path at all -- which
+  in production never happens: `openPortalSession` refuses to run without a
+  `base_url`, so a call this far into a sign-in always has one.
+  */
   portalHost: string | null;
 }
 
 /**
- * What actually goes into `code_enc`.
- *
- * One column has to carry two different shapes: a bare OTP string, or a
- * `forward_verify` message's `{ code, url }` pair. Encoding that difference
- * lives here, entirely inside the repo, so nothing upstream has to know the
- * column moonlights as small JSON for one kind and plain text for another.
- */
+What actually goes into `code_enc`.
+
+One column has to carry two different shapes: a bare OTP string, or a
+`forward_verify` message's `{ code, url }` pair. Encoding that difference
+lives here, entirely inside the repo, so nothing upstream has to know the
+column moonlights as small JSON for one kind and plain text for another.
+*/
 function payloadFor(input: Pick<MailInboxInsert, "kind" | "code" | "url">): string | null {
   if (input.kind === "other") return null;
   if (input.kind === "forward_verify") {
@@ -183,11 +183,11 @@ function readForwardVerifyPayload(payload: string): { code: string | null; url: 
 
 export function makeMailInboxRepo(ctx: Ctx) {
   /**
-   * The row's sender domain.
-   *
-   * An absent or unreadable ciphertext reads as "no sender", which makes the
-   * row ineligible for any claim rather than eligible for all of them.
-   */
+  The row's sender domain.
+
+  An absent or unreadable ciphertext reads as "no sender", which makes the
+  row ineligible for any claim rather than eligible for all of them.
+  */
   const senderDomainOf = async (row: MailInboxRow): Promise<string> => {
     const opened = await openOrNull(ctx.env, row.from_addr_enc, fromAad(row.id));
     return opened === null ? "" : domainOf(opened);
@@ -263,16 +263,16 @@ export function makeMailInboxRepo(ctx: Ctx) {
     },
 
     /**
-     * Atomically claim the oldest unconsumed, unexpired, *eligible* OTP
-     * received after `filter.since` (a login attempt's `SendCode` time),
-     * marking it consumed in the same statement.
-     *
-     * Null when there is nothing to claim -- an expired code, an
-     * already-consumed one, one from a sender this health system has never had a
-     * code from, or nothing having arrived yet all look the same to the caller,
-     * which is the point: there is nothing it could do differently for any of
-     * them.
-     */
+    Atomically claim the oldest unconsumed, unexpired, *eligible* OTP
+    received after `filter.since` (a login attempt's `SendCode` time),
+    marking it consumed in the same statement.
+
+    Null when there is nothing to claim -- an expired code, an
+    already-consumed one, one from a sender this health system has never had a
+    code from, or nothing having arrived yet all look the same to the caller,
+    which is the point: there is nothing it could do differently for any of
+    them.
+    */
     async takeFreshOtp(filter: OtpClaimFilter): Promise<ClaimedOtp | null> {
       const candidates = await all<MailInboxRow>(
         ctx.db
@@ -318,15 +318,15 @@ export function makeMailInboxRepo(ctx: Ctx) {
     },
 
     /**
-     * Drop rows past their TTL, and rows past the hard age ceiling whatever
-     * their TTL says.
-     *
-     * The second half is the backstop: every kind gets an `expires_at` now, but
-     * a row written before that was true (or by some future caller that forgets)
-     * would otherwise be kept for ever. Called from the email handler after each
-     * insert *and* from the daily cron, so collection does not depend on inbound
-     * mail arriving.
-     */
+    Drop rows past their TTL, and rows past the hard age ceiling whatever
+    their TTL says.
+
+    The second half is the backstop: every kind gets an `expires_at` now, but
+    a row written before that was true (or by some future caller that forgets)
+    would otherwise be kept for ever. Called from the email handler after each
+    insert *and* from the daily cron, so collection does not depend on inbound
+    mail arriving.
+    */
     async purgeExpired(now: number): Promise<number> {
       const { changes } = await run(
         ctx.db
@@ -343,18 +343,18 @@ export function makeMailInboxRepo(ctx: Ctx) {
 }
 
 /**
- * Whether a row from `senderDomain` may be claimed under `filter`.
- *
- * An expected sender narrows eligibility to that domain (or a subdomain of it)
- * and nothing else -- the strongest rule, and once a health system has one it wins
- * outright, even for a sender on a different site than the portal itself (a
- * vendor-hosted deployment can legitimately email from a different domain than
- * it serves the portal from). Without one, two things both have to hold: the
- * sender is on the general allowlist, same as before, and it shares a
- * registrable domain with this portal's own host -- which is what makes the
- * very first sign-in -- the one that learns the sender -- possible without also
- * admitting a second configured portal's own allowlisted sender.
- */
+Whether a row from `senderDomain` may be claimed under `filter`.
+
+An expected sender narrows eligibility to that domain (or a subdomain of it)
+and nothing else -- the strongest rule, and once a health system has one it wins
+outright, even for a sender on a different site than the portal itself (a
+vendor-hosted deployment can legitimately email from a different domain than
+it serves the portal from). Without one, two things both have to hold: the
+sender is on the general allowlist, same as before, and it shares a
+registrable domain with this portal's own host -- which is what makes the
+very first sign-in -- the one that learns the sender -- possible without also
+admitting a second configured portal's own allowlisted sender.
+*/
 function eligible(senderDomain: string, filter: OtpClaimFilter): boolean {
   return filter.expectedSender === null
     ? domainAllowed(senderDomain, filter.allowlist) &&

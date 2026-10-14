@@ -1,38 +1,38 @@
 /**
- * The authenticated ModMed client: sign in, keep the token fresh, read the visits.
- *
- * ### Sign-in
- *
- * Keycloak's authorization-code flow, driven by plain HTTP the way the portal's
- * own app drives it in a browser:
- *
- *  1. Re-read the practice's `auth/data/patient` and refuse unless it still
- *     names the identity provider the owner confirmed (`discovery.ts`).
- *  2. GET the authorize URL. A live Keycloak SSO cookie in the jar answers with
- *     the code straight away; otherwise it renders the login page.
- *  3. The default page asks for name and date of birth; one POST of its
- *     "Login with Username" button swaps it for the username/password form.
- *  4. POST the username and password. Success is a redirect off the identity
- *     provider to the portal, with `#code=...` in the fragment. That redirect is
- *     read, never followed.
- *  5. Exchange the code at the token endpoint (public client, PKCE S256).
- *
- * Anything else the credential POST lands on is classified, never guessed at:
- * a one-time-code field is `portal_code_challenge` (this client does not answer
- * one -- the owner's login does not ask for it, so seeing one means the owner
- * has to look), a lockout is `portal_locked`, the form again is
- * `portal_login_failed`.
- *
- * ### The session
- *
- * The API is stateless: every call carries `Authorization: Bearer`. The token
- * pair and both expiries live in the jar's extras, which the caller seals into
- * D1 with the cookies. `ensureAccessToken` refreshes ahead of expiry; a refresh
- * the identity provider refuses is `portal_session_expired`, which the sync
- * answers by signing in again (no code is involved, so that is cheap).
- *
- * Nothing from the portal is logged: no URL, host, token, body or name.
- */
+The authenticated ModMed client: sign in, keep the token fresh, read the visits.
+
+### Sign-in
+
+Keycloak's authorization-code flow, driven by plain HTTP the way the portal's
+own app drives it in a browser:
+
+ 1. Re-read the practice's `auth/data/patient` and refuse unless it still
+    names the identity provider the owner confirmed (`discovery.ts`).
+ 2. GET the authorize URL. A live Keycloak SSO cookie in the jar answers with
+    the code straight away; otherwise it renders the login page.
+ 3. The default page asks for name and date of birth; one POST of its
+    "Login with Username" button swaps it for the username/password form.
+ 4. POST the username and password. Success is a redirect off the identity
+    provider to the portal, with `#code=...` in the fragment. That redirect is
+    read, never followed.
+ 5. Exchange the code at the token endpoint (public client, PKCE S256).
+
+Anything else the credential POST lands on is classified, never guessed at:
+a one-time-code field is `portal_code_challenge` (this client does not answer
+one -- the owner's login does not ask for it, so seeing one means the owner
+has to look), a lockout is `portal_locked`, the form again is
+`portal_login_failed`.
+
+### The session
+
+The API is stateless: every call carries `Authorization: Bearer`. The token
+pair and both expiries live in the jar's extras, which the caller seals into
+D1 with the cookies. `ensureAccessToken` refreshes ahead of expiry; a refresh
+the identity provider refuses is `portal_session_expired`, which the sync
+answers by signing in again (no code is involved, so that is cheap).
+
+Nothing from the portal is logged: no URL, host, token, body or name.
+*/
 
 import { AppError } from "../../lib/errors.ts";
 import { dateInZone, startOfDayInZone, toIso } from "../../lib/time.ts";
@@ -253,13 +253,13 @@ export function createModMedClient(deps: ModMedClientDeps): PortalClient {
   }
 
   /**
-   * Run an authenticated call, once more on a refreshed token if the first try
-   * is refused. The API never answers a rejected token with a 401: one it cannot
-   * parse is a 500 and one whose signature fails is a 403, both as an HTML error
-   * page. A refresh the identity provider refuses becomes
-   * `portal_session_expired` (sign in again); the same answer on a good token
-   * keeps its own code.
-   */
+  Run an authenticated call, once more on a refreshed token if the first try
+  is refused. The API never answers a rejected token with a 401: one it cannot
+  parse is a 500 and one whose signature fails is a 403, both as an HTML error
+  page. A refresh the identity provider refuses becomes
+  `portal_session_expired` (sign in again); the same answer on a good token
+  keeps its own code.
+  */
   async function withFreshToken<T>(call: (accessToken: string) => Promise<T>): Promise<T> {
     try {
       return await call(await ensureAccessToken());
@@ -338,17 +338,17 @@ export function createModMedClient(deps: ModMedClientDeps): PortalClient {
   }
 
   /**
-   * The `from` bound for the upcoming list: the start of today in `timeZone`.
-   *
-   * The app writes the local date with a `Z` (`2026-10-03T00:00:00.000Z`),
-   * which is only the instant of local midnight in UTC itself. How the server
-   * reads it is not known, so this sends whichever is *earlier* of that string
-   * and the true instant of local midnight: east of UTC the true instant is the
-   * earlier one, and the app's form would drop this morning's visits; west of
-   * UTC the app's form is earlier and costs at most a few hours of yesterday,
-   * which the calendar already holds. Never later than local midnight, so no
-   * visit today is ever cut off.
-   */
+  The `from` bound for the upcoming list: the start of today in `timeZone`.
+
+  The app writes the local date with a `Z` (`2026-10-03T00:00:00.000Z`),
+  which is only the instant of local midnight in UTC itself. How the server
+  reads it is not known, so this sends whichever is *earlier* of that string
+  and the true instant of local midnight: east of UTC the true instant is the
+  earlier one, and the app's form would drop this morning's visits; west of
+  UTC the app's form is earlier and costs at most a few hours of yesterday,
+  which the calendar already holds. Never later than local midnight, so no
+  visit today is ever cut off.
+  */
   function startOfToday(timeZone: string): string {
     const nowIso = toIso(deps.now());
     const appForm = `${dateInZone(nowIso, timeZone)}T00:00:00.000Z`;
@@ -359,10 +359,10 @@ export function createModMedClient(deps: ModMedClientDeps): PortalClient {
   }
 
   /**
-   * From the authorize URL to Keycloak's hand-back: the URL it redirected to.
-   * Presses "Login with Username" when the default identity form comes up, then
-   * posts the credentials. Throws a classified code for any page it stops on.
-   */
+  From the authorize URL to Keycloak's hand-back: the URL it redirected to.
+  Presses "Login with Username" when the default identity form comes up, then
+  posts the credentials. Throws a classified code for any page it stops on.
+  */
   async function submitCredentials(
     authorizeUrl: string,
     credentials: PortalCredentials,

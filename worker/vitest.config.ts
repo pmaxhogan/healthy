@@ -23,30 +23,30 @@ mkdirSync("dist", { recursive: true });
 const migrations = await readD1Migrations(fileURLToPath(new URL("migrations", import.meta.url)));
 
 /**
- * Dummy values for every secret in `worker/src/env.ts`, bound into the integration
- * runtime.
- *
- * This is a safety fix, not a convenience. The pool loads `wrangler.jsonc` the way
- * `wrangler dev` does, which includes reading the developer's real `.dev.vars` into
- * `env` -- so a test helper that spreads `...env` (several do, to get the real D1
- * and Durable Object bindings) silently picks up the operator's real Trello token,
- * Google client secret and `DATA_KEY`. Nothing in the suite needs them, and a test
- * that asserted on one, logged one, or sent one to a stubbed upstream would put a
- * live credential somewhere it does not belong.
- *
- * `miniflare.bindings` is applied after the config is read, so these win. Every name
- * in `Env` is listed even where no test reads it: the point is that the real value
- * cannot be present, and a secret added to `Env` without a line here is a gap.
- * `worker/test/integration/env.test.ts` asserts that this is in force.
- *
- * `DEV_MODE` is "false", matching wrangler.jsonc and production: a test that needs
- * the Access gate relaxed builds its own env and passes it to `app.fetch`, which is
- * what every suite here already does.
- *
- * `DATA_KEY` is generated per run rather than written down. A committed AES key is
- * indistinguishable from a leaked one to every scanner that will read this
- * repository, and the tests only need the key to be valid, not to be stable.
- */
+Dummy values for every secret in `worker/src/env.ts`, bound into the integration
+runtime.
+
+This is a safety fix, not a convenience. The pool loads `wrangler.jsonc` the way
+`wrangler dev` does, which includes reading the developer's real `.dev.vars` into
+`env` -- so a test helper that spreads `...env` (several do, to get the real D1
+and Durable Object bindings) silently picks up the operator's real Trello token,
+Google client secret and `DATA_KEY`. Nothing in the suite needs them, and a test
+that asserted on one, logged one, or sent one to a stubbed upstream would put a
+live credential somewhere it does not belong.
+
+`miniflare.bindings` is applied after the config is read, so these win. Every name
+in `Env` is listed even where no test reads it: the point is that the real value
+cannot be present, and a secret added to `Env` without a line here is a gap.
+`worker/test/integration/env.test.ts` asserts that this is in force.
+
+`DEV_MODE` is "false", matching wrangler.jsonc and production: a test that needs
+the Access gate relaxed builds its own env and passes it to `app.fetch`, which is
+what every suite here already does.
+
+`DATA_KEY` is generated per run rather than written down. A committed AES key is
+indistinguishable from a leaked one to every scanner that will read this
+repository, and the tests only need the key to be valid, not to be stable.
+*/
 const TEST_SECRETS: Record<string, string> = {
   DEV_MODE: "false",
   CF_ACCESS_TEAM_DOMAIN: "test-team.cloudflareaccess.test",
@@ -71,11 +71,11 @@ const TEST_SECRETS: Record<string, string> = {
 };
 
 /**
- * `import module from "./x.wasm"` in plain Node, the way wrangler bundles it for
- * workerd: a compiled, not-yet-instantiated `WebAssembly.Module`. Vite has no
- * such rule of its own, and the MCP tools reach the jq engine
- * (worker/src/mcp/jq/engine.ts) through `respond()`, so the unit suite needs it.
- */
+`import module from "./x.wasm"` in plain Node, the way wrangler bundles it for
+workerd: a compiled, not-yet-instantiated `WebAssembly.Module`. Vite has no
+such rule of its own, and the MCP tools reach the jq engine
+(worker/src/mcp/jq/engine.ts) through `respond()`, so the unit suite needs it.
+*/
 function wasmModule(): Plugin {
   return {
     name: "healthy:wasm-module",

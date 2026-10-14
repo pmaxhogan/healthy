@@ -52,7 +52,6 @@ describe("isHttpsUrl", () => {
   });
 
   it("refuses http, a relative path, and anything unparseable", () => {
-    // eslint-disable-next-line unicorn/prefer-https -- the assertion IS that http is refused.
     expect(isHttpsUrl("http://fhir.example.test/R4")).toBe(false);
     expect(isHttpsUrl("/R4")).toBe(false);
     expect(isHttpsUrl("not a url")).toBe(false);
@@ -118,7 +117,6 @@ describe("healthSystemCreateSchema", () => {
   it("refuses a non-https FHIR base at the schema, before any request is made", () => {
     const result = healthSystemCreateSchema.safeParse({
       ...base,
-      // eslint-disable-next-line unicorn/prefer-https -- the assertion IS that http is refused.
       fhirBaseUrl: "http://fhir.example.test/R4",
     });
 

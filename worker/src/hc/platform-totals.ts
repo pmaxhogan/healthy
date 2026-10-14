@@ -1,23 +1,23 @@
 /**
- * The platform's own hourly totals (`Agg.<Metric>`), and how to tell one that
- * no longer agrees with the records it is a total of. Pure: no D1, no `Env`,
- * so the store (worker/src/hc/store/platform-stale.ts) and the `data_quality`
- * tool (worker/src/mcp/hc/quality.ts) share one rule.
- *
- * The phone uploads, beside the records of a type, Health Connect's own
- * priority-merged total of every UTC hour of it, as one synthetic record a
- * hour: type `Agg.<Metric>`, id `agg:<Metric>:<hour start, epoch ms>`, and in
- * `data` the value and the `origins` -- the package names of the apps whose
- * records went into it. It works a total out again for every hour it knows
- * changed. An upsert carries its record's times, so those hours are known; a
- * deletion does not (Health Connect's change feed gives a deleted record's id
- * and nothing else), so for one the phone can only guess, and an old hour
- * whose records were deleted keeps a total that still counts them.
- *
- * Which record type a metric is the total of comes from `PLATFORM_PAIRS`
- * (worker/src/policy/hc-fields.ts), the one list the policy reads too, and
- * which must agree with the companion app's `AggMetric`.
- */
+The platform's own hourly totals (`Agg.<Metric>`), and how to tell one that
+no longer agrees with the records it is a total of. Pure: no D1, no `Env`,
+so the store (worker/src/hc/store/platform-stale.ts) and the `data_quality`
+tool (worker/src/mcp/hc/quality.ts) share one rule.
+
+The phone uploads, beside the records of a type, Health Connect's own
+priority-merged total of every UTC hour of it, as one synthetic record a
+hour: type `Agg.<Metric>`, id `agg:<Metric>:<hour start, epoch ms>`, and in
+`data` the value and the `origins` -- the package names of the apps whose
+records went into it. It works a total out again for every hour it knows
+changed. An upsert carries its record's times, so those hours are known; a
+deletion does not (Health Connect's change feed gives a deleted record's id
+and nothing else), so for one the phone can only guess, and an old hour
+whose records were deleted keeps a total that still counts them.
+
+Which record type a metric is the total of comes from `PLATFORM_PAIRS`
+(worker/src/policy/hc-fields.ts), the one list the policy reads too, and
+which must agree with the companion app's `AggMetric`.
+*/
 
 import { PLATFORM_PAIRS } from "../policy/hc-fields.ts";
 
@@ -74,11 +74,11 @@ export function platformHourKey(hour: PlatformHour): string {
 }
 
 /**
- * The hour a platform-total record id names, or null for an id that is not
- * one. Deletes are ids alone, and this is how one is recognised as the
- * deletion of an hour's total: the phone deletes the record of an hour that
- * has no total any more.
- */
+The hour a platform-total record id names, or null for an id that is not
+one. Deletes are ids alone, and this is how one is recognised as the
+deletion of an hour's total: the phone deletes the record of an hour that
+has no total any more.
+*/
 export function parseAggId(id: string): PlatformHour | null {
   if (!id.startsWith(AGG_ID_PREFIX)) return null;
   const parts = id.slice(AGG_ID_PREFIX.length).split(AGG_ID_SEPARATOR);
@@ -99,12 +99,12 @@ export function aggRecordHour(record: HcRecord): PlatformHour | null {
 }
 
 /**
- * Every hour whose platform total a batch carries, upserted or deleted, by
- * `platformHourKey`. A batch that carries an hour's total has it as Health
- * Connect worked it out when the phone built the batch -- after it had read
- * every record change the batch also carries -- so nothing in that batch makes
- * that hour's total stale.
- */
+Every hour whose platform total a batch carries, upserted or deleted, by
+`platformHourKey`. A batch that carries an hour's total has it as Health
+Connect worked it out when the phone built the batch -- after it had read
+every record change the batch also carries -- so nothing in that batch makes
+that hour's total stale.
+*/
 export function carriedPlatformHours(batch: {
   upserts: readonly HcRecord[];
   deletes: readonly string[];
@@ -122,23 +122,23 @@ export function carriedPlatformHours(batch: {
 }
 
 /**
- * The longest stretch of one record whose hours are marked stale when it goes.
- * Health Connect divides an interval record among every hour it spans, so a
- * record's deletion changes the total of each of them -- but a record claiming
- * to run for years would name tens of thousands of hours, all held in memory
- * and written in one transaction, for a share of each that rounds to nothing.
- * A month: longer than any record a device writes (a day's total written as one
- * record is a day), and the most hours the phone asks Health Connect for in one
- * call. What lies beyond it of such a record is not marked; the `data_quality`
- * finding below still names any such hour left with no record at all.
- */
+The longest stretch of one record whose hours are marked stale when it goes.
+Health Connect divides an interval record among every hour it spans, so a
+record's deletion changes the total of each of them -- but a record claiming
+to run for years would name tens of thousands of hours, all held in memory
+and written in one transaction, for a share of each that rounds to nothing.
+A month: longer than any record a device writes (a day's total written as one
+record is a day), and the most hours the phone asks Health Connect for in one
+call. What lies beyond it of such a record is not marked; the `data_quality`
+finding below still names any such hour left with no record at all.
+*/
 export const MAX_MARKED_SPAN_MS = 31 * 24 * HOUR_MS;
 
 /**
- * The UTC hours a record overlaps, `[start, end)`: the hours whose platform
- * total it is part of. An instant, or a record whose end is not after its
- * start, is in the hour it starts in. Bounded by `MAX_MARKED_SPAN_MS`.
- */
+The UTC hours a record overlaps, `[start, end)`: the hours whose platform
+total it is part of. An instant, or a record whose end is not after its
+start, is in the hour it starts in. Bounded by `MAX_MARKED_SPAN_MS`.
+*/
 export function hoursOfRecord(record: HcRecord): number[] {
   const startMs = recordStartMs(record);
   const endMs = Math.min(recordEndMs(record), startMs + MAX_MARKED_SPAN_MS);
@@ -154,11 +154,11 @@ export function hoursOfRecord(record: HcRecord): number[] {
 // ---------------------------------------------------------------------------
 
 /**
- * Which apps have records of a type in which hours: by hour, the set of their
- * keys. A key is whatever both sides of the comparison agree on -- a package
- * name for the `data_quality` tool, which reads opened rows, and the blinded
- * `origin_hash` for the store's scan, which reads clear columns only.
- */
+Which apps have records of a type in which hours: by hour, the set of their
+keys. A key is whatever both sides of the comparison agree on -- a package
+name for the `data_quality` tool, which reads opened rows, and the blinded
+`origin_hash` for the store's scan, which reads clear columns only.
+*/
 export type Presence = Map<number, Set<string>>;
 
 /** Note that `origin` has a record over `[startMs, endMs)`, clipped to `[fromHour, toHour)`. */
@@ -203,27 +203,27 @@ export interface StaleTotal {
 }
 
 /**
- * The stored totals that have a figure in an hour where the type has no
- * record at all.
- *
- * That is what a total looks like once every record it counted was deleted:
- * the store took the deletion, and the total from before it is still there.
- * It can also be a total over records that never arrived (refused by the
- * server, say); either way the hour's total and its records disagree, and
- * working the total out again is what settles it.
- *
- * Only that, and not "the total names an app with no record in the hour",
- * although a total does carry the apps it counted (`data.origins`). Health
- * Connect's list is not the hour's: a total it has just worked out, for an
- * hour with records of one app only, names every app with records anywhere in
- * the span the phone asked about (seen on the owner's phone, 2026-10-14, for
- * hours re-fetched minutes before). Held to the hour, the list made a fresh
- * total look stale, and the phone would have been sent to fetch it again
- * every time the scan ran. So a total that still counts a deleted app in an
- * hour another app also recorded in cannot be told from the stored rows; the
- * marks the apply writes as it takes the deletion are what find those
- * (worker/src/hc/store/platform-stale.ts).
- */
+The stored totals that have a figure in an hour where the type has no
+record at all.
+
+That is what a total looks like once every record it counted was deleted:
+the store took the deletion, and the total from before it is still there.
+It can also be a total over records that never arrived (refused by the
+server, say); either way the hour's total and its records disagree, and
+working the total out again is what settles it.
+
+Only that, and not "the total names an app with no record in the hour",
+although a total does carry the apps it counted (`data.origins`). Health
+Connect's list is not the hour's: a total it has just worked out, for an
+hour with records of one app only, names every app with records anywhere in
+the span the phone asked about (seen on the owner's phone, 2026-10-14, for
+hours re-fetched minutes before). Held to the hour, the list made a fresh
+total look stale, and the phone would have been sent to fetch it again
+every time the scan ran. So a total that still counts a deleted app in an
+hour another app also recorded in cannot be told from the stored rows; the
+marks the apply writes as it takes the deletion are what find those
+(worker/src/hc/store/platform-stale.ts).
+*/
 export function staleTotals(totals: readonly StoredTotal[], presence: Presence): StaleTotal[] {
   const stale: StaleTotal[] = [];
   for (const total of totals) {

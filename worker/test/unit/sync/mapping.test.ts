@@ -82,12 +82,12 @@ function input(
 }
 
 /**
- * A view override may be an explicit `undefined`, which means "drop this field".
- *
- * `Partial<NormalizedAppointmentView>` will not do: under
- * `exactOptionalPropertyTypes` an optional property does not accept `undefined`,
- * and half these tests are about what happens when a field is missing.
- */
+A view override may be an explicit `undefined`, which means "drop this field".
+
+`Partial<NormalizedAppointmentView>` will not do: under
+`exactOptionalPropertyTypes` an optional property does not accept `undefined`,
+and half these tests are about what happens when a field is missing.
+*/
 type ViewOverrides = {
   [K in keyof NormalizedAppointmentView]?: NormalizedAppointmentView[K] | undefined;
 };

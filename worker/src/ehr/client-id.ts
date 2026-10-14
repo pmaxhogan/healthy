@@ -1,11 +1,11 @@
 /**
- * Which Worker secret holds the client id a health system's vendor issued.
- *
- * A client id is per app registration, not per organisation, so it is a Worker
- * secret rather than a column: Epic issues one for its sandbox and another for
- * production, ModMed issues one. The per-organisation half of the credential,
- * the client secret, lives on the health system row.
- */
+Which Worker secret holds the client id a health system's vendor issued.
+
+A client id is per app registration, not per organisation, so it is a Worker
+secret rather than a column: Epic issues one for its sandbox and another for
+production, ModMed issues one. The per-organisation half of the credential,
+the client secret, lives on the health system row.
+*/
 
 import { AppError } from "../lib/errors.ts";
 
@@ -24,11 +24,11 @@ export function clientIdSecretFor(
 }
 
 /**
- * The client id for one health system. Throws when the secret is unset.
- *
- * Missing is a deployment fault, not a user error: there is nothing the owner
- * can do in the UI about an unset Worker secret.
- */
+The client id for one health system. Throws when the secret is unset.
+
+Missing is a deployment fault, not a user error: there is nothing the owner
+can do in the UI about an unset Worker secret.
+*/
 export function clientIdFor(
   env: Env,
   healthSystem: Pick<HealthSystemRow, "vendor" | "environment">,

@@ -1,42 +1,42 @@
 /**
- * One portal account per health system: the credentials, the cookie jar, the state
- * machine and the daily attempt budget.
- *
- * Four things here are load-bearing.
- *
- * **The AAD needs no insert dance.** Unlike `connections`, the row id *is* the
- * health system id, so a value can be sealed against
- * `portal_accounts.<column>.<healthSystemId>` before the row exists. What still has
- * to happen first is the row itself -- an `INSERT ... ON CONFLICT DO NOTHING`
- * -- because every write here is an UPDATE.
- *
- * **`markActive` checks the endpoint before the database does.** The migration's
- * CHECK refuses an active session with no `base_url`/`mount_path`, and a raw
- * constraint violation from D1 is an opaque 500. So the repo refuses it first,
- * with a code, and the CHECK stays as the backstop it is meant to be.
- *
- * **The attempt counter resets by comparing days, not by sweeping.** The plan
- * caps sign-in attempts per day, and a cron that clears counters at midnight is
- * one more thing that can fail silently. Storing the UTC day alongside the count
- * means a stale counter reads as zero on its own, with no scheduled work.
- *
- * **The cookie jar is as sensitive as the password.** It carries the session
- * cookie and the trust-this-device cookie, either of which is a sign-in. It is
- * sealed, it is never returned except through `getSecrets`, and `hasSession` on
- * the DTO is the whole of what the admin UI learns about it.
- *
- * **Where the portal is, is sealed too (0007).** `base_url`, `mount_path` and
- * `endpoint_json` name the organisation -- its portal host, its app's mount
- * point, its login application -- so they are sealed in place, padded, against
- * `portal_accounts.<column>.<healthSystemId>`. They are read once per sign-in or
- * portal run (the row is opened when it is read, and the hops of a sign-in reuse
- * the opened values), so this is a decrypt per run, not per request. The columns
- * carry `_enc` names since 0009; the AAD keeps the name each value was first
- * sealed under (`portal_accounts.base_url.<id>`), because it is part of the tag.
- * Every short
- * credential column is sealed padded (`sealShort`), so a ciphertext no longer
- * gives away a username's or a password's exact length.
- */
+One portal account per health system: the credentials, the cookie jar, the state
+machine and the daily attempt budget.
+
+Four things here are load-bearing.
+
+**The AAD needs no insert dance.** Unlike `connections`, the row id *is* the
+health system id, so a value can be sealed against
+`portal_accounts.<column>.<healthSystemId>` before the row exists. What still has
+to happen first is the row itself -- an `INSERT ... ON CONFLICT DO NOTHING`
+-- because every write here is an UPDATE.
+
+**`markActive` checks the endpoint before the database does.** The migration's
+CHECK refuses an active session with no `base_url`/`mount_path`, and a raw
+constraint violation from D1 is an opaque 500. So the repo refuses it first,
+with a code, and the CHECK stays as the backstop it is meant to be.
+
+**The attempt counter resets by comparing days, not by sweeping.** The plan
+caps sign-in attempts per day, and a cron that clears counters at midnight is
+one more thing that can fail silently. Storing the UTC day alongside the count
+means a stale counter reads as zero on its own, with no scheduled work.
+
+**The cookie jar is as sensitive as the password.** It carries the session
+cookie and the trust-this-device cookie, either of which is a sign-in. It is
+sealed, it is never returned except through `getSecrets`, and `hasSession` on
+the DTO is the whole of what the admin UI learns about it.
+
+**Where the portal is, is sealed too (0007).** `base_url`, `mount_path` and
+`endpoint_json` name the organisation -- its portal host, its app's mount
+point, its login application -- so they are sealed in place, padded, against
+`portal_accounts.<column>.<healthSystemId>`. They are read once per sign-in or
+portal run (the row is opened when it is read, and the hops of a sign-in reuse
+the opened values), so this is a decrypt per run, not per request. The columns
+carry `_enc` names since 0009; the AAD keeps the name each value was first
+sealed under (`portal_accounts.base_url.<id>`), because it is part of the tag.
+Every short
+credential column is sealed padded (`sealShort`), so a ciphertext no longer
+gives away a username's or a password's exact length.
+*/
 
 import { AppError, isAppError } from "../../lib/errors.ts";
 import { DAY_SECONDS, toIso } from "../../lib/time.ts";
@@ -68,15 +68,15 @@ export interface PortalEndpointPatch {
   baseUrl: string;
   mountPath: string;
   /**
-   * The adapter's whole discovery result, stored verbatim as JSON.
-   *
-   * Opaque here on purpose: `worker/src/ehr/mychart/**` owns the shape and it
-   * grows as deployments turn out to differ -- which login application to drive,
-   * for one -- so a column (or a strict schema) per field would mean a migration
-   * every time and a stored endpoint that quietly disagrees with the adapter that
-   * produced it. Omitted by a caller that only knows the two fields above, which
-   * is what `npm run set-portal-credentials` does.
-   */
+  The adapter's whole discovery result, stored verbatim as JSON.
+
+  Opaque here on purpose: `worker/src/ehr/mychart/**` owns the shape and it
+  grows as deployments turn out to differ -- which login application to drive,
+  for one -- so a column (or a strict schema) per field would mean a migration
+  every time and a stored endpoint that quietly disagrees with the adapter that
+  produced it. Omitted by a caller that only knows the two fields above, which
+  is what `npm run set-portal-credentials` does.
+  */
   endpoint?: Record<string, unknown>;
 }
 
@@ -99,12 +99,12 @@ export function utcDay(unixSeconds: number): number {
 }
 
 /**
- * A row as the admin UI sees it: no ciphertext, no cookie values, no username.
- *
- * Lives here rather than in `worker/src/api/dto.ts` on purpose -- the projection's
- * whole job is to drop the sealed columns, and this is the module that knows
- * which ones those are.
- */
+A row as the admin UI sees it: no ciphertext, no cookie values, no username.
+
+Lives here rather than in `worker/src/api/dto.ts` on purpose -- the projection's
+whole job is to drop the sealed columns, and this is the module that knows
+which ones those are.
+*/
 function toPortalAccountDto(row: PortalAccountRow, now: number): PortalAccountDto {
   return {
     healthSystemId: row.health_system_id,
@@ -242,17 +242,17 @@ export function makePortalAccountsRepo(ctx: Ctx) {
     },
 
     /**
-     * The stored discovery result, or null when the column is NULL.
-     *
-     * **Deliberately not tolerant.** It used to swallow a validation failure and
-     * answer null, which sent the sign-in to `fallbackEndpoint` -- so a stored
-     * endpoint whose `baseUrl` was not an https origin was quietly replaced by
-     * one built from the `base_url` column and used anyway. The schema now
-     * checks both origins as https URLs, and a row that fails it has to stop the
-     * sign-in rather than be worked around: the value decides where a password
-     * is POSTed. Null still means "nothing was ever stored", which is the
-     * pre-0003 row the fallback exists for.
-     */
+    The stored discovery result, or null when the column is NULL.
+
+    **Deliberately not tolerant.** It used to swallow a validation failure and
+    answer null, which sent the sign-in to `fallbackEndpoint` -- so a stored
+    endpoint whose `baseUrl` was not an https origin was quietly replaced by
+    one built from the `base_url` column and used anyway. The schema now
+    checks both origins as https URLs, and a row that fails it has to stop the
+    sign-in rather than be worked around: the value decides where a password
+    is POSTed. Null still means "nothing was ever stored", which is the
+    pre-0003 row the fallback exists for.
+    */
     async getEndpoint(healthSystemId: string): Promise<StoredPortalEndpoint | null> {
       const row = await byHealthSystem(healthSystemId);
       const json = row?.endpoint_json ?? null;
@@ -274,12 +274,12 @@ export function makePortalAccountsRepo(ctx: Ctx) {
     },
 
     /**
-     * Store the owner's portal login, sealed.
-     *
-     * Storing credentials resets the session state to 'none' and drops the
-     * cookie jar: a new password invalidates whatever the old jar held, and a
-     * jar kept across a credential change is a session nobody can account for.
-     */
+    Store the owner's portal login, sealed.
+
+    Storing credentials resets the session state to 'none' and drops the
+    cookie jar: a new password invalidates whatever the old jar held, and a
+    jar kept across a credential change is a session nobody can account for.
+    */
     async setCredentials(
       healthSystemId: string,
       input: SetPortalCredentialsRequest,
@@ -345,12 +345,12 @@ export function makePortalAccountsRepo(ctx: Ctx) {
     },
 
     /**
-     * The domain this account's verification codes are expected to come from.
-     *
-     * Null when nothing has set or learned one yet, which is what lets a first
-     * sign-in fall back to the sender allowlist. Read on every code poll, so it
-     * opens one column rather than going through `getSecrets`.
-     */
+    The domain this account's verification codes are expected to come from.
+
+    Null when nothing has set or learned one yet, which is what lets a first
+    sign-in fall back to the sender allowlist. Read on every code poll, so it
+    opens one column rather than going through `getSecrets`.
+    */
     async getOtpSender(healthSystemId: string): Promise<string | null> {
       const row = await byHealthSystem(healthSystemId);
       return row === null
@@ -359,13 +359,13 @@ export function makePortalAccountsRepo(ctx: Ctx) {
     },
 
     /**
-     * Record the sender of a code the portal actually accepted.
-     *
-     * Only when there is nothing stored: an owner-set value is theirs, and a
-     * learned one must not drift to whatever sent the most recent accepted code
-     * -- that would undo the binding one successful sign-in at a time. Returns
-     * whether it wrote.
-     */
+    Record the sender of a code the portal actually accepted.
+
+    Only when there is nothing stored: an owner-set value is theirs, and a
+    learned one must not drift to whatever sent the most recent accepted code
+    -- that would undo the binding one successful sign-in at a time. Returns
+    whether it wrote.
+    */
     async learnOtpSender(healthSystemId: string, senderDomain: string): Promise<boolean> {
       const domain = normaliseDomain(senderDomain);
       if (domain === "") return false;
@@ -380,11 +380,11 @@ export function makePortalAccountsRepo(ctx: Ctx) {
     },
 
     /**
-     * Persist the cookie jar after any call, successful or not.
-     *
-     * `null` forgets the session -- what the admin UI's "Forget session" button
-     * does, and what a credential change does implicitly.
-     */
+    Persist the cookie jar after any call, successful or not.
+
+    `null` forgets the session -- what the admin UI's "Forget session" button
+    does, and what a credential change does implicitly.
+    */
     async saveCookieJar(healthSystemId: string, serialised: string | null): Promise<void> {
       await ensure(healthSystemId);
       const sealed =
@@ -395,11 +395,11 @@ export function makePortalAccountsRepo(ctx: Ctx) {
     },
 
     /**
-     * A sign-in worked, or an authenticated call did: the session is live.
-     *
-     * Refuses when the endpoint is unknown, which the migration's CHECK would
-     * otherwise turn into an opaque constraint violation.
-     */
+    A sign-in worked, or an authenticated call did: the session is live.
+
+    Refuses when the endpoint is unknown, which the migration's CHECK would
+    otherwise turn into an opaque constraint violation.
+    */
     async markActive(healthSystemId: string): Promise<void> {
       const row = await require_(healthSystemId);
       if (row.base_url === null || row.mount_path === null) {
@@ -415,18 +415,18 @@ export function makePortalAccountsRepo(ctx: Ctx) {
     },
 
     /**
-     * The portal will not let us in without the owner. Records the stable code
-     * and stamps the clock the reconnect card is opened from.
-     *
-     * `needs_reauth_since` is only set on the *first* failure, so the card's age
-     * reflects how long the owner has been ignoring it rather than resetting on
-     * every hourly retry.
-     *
-     * Resolves with the code the row carried *before* this failure, or null when
-     * it was not already failing, so a caller can tell a repeat of the same
-     * failure from a first one without a counter column: `markActive` is what
-     * clears it.
-     */
+    The portal will not let us in without the owner. Records the stable code
+    and stamps the clock the reconnect card is opened from.
+
+    `needs_reauth_since` is only set on the *first* failure, so the card's age
+    reflects how long the owner has been ignoring it rather than resetting on
+    every hourly retry.
+
+    Resolves with the code the row carried *before* this failure, or null when
+    it was not already failing, so a caller can tell a repeat of the same
+    failure from a first one without a counter column: `markActive` is what
+    clears it.
+    */
     async markNeedsReauth(healthSystemId: string, errorCode: string): Promise<string | null> {
       const row = await require_(healthSystemId);
       await patch(healthSystemId, {
@@ -439,11 +439,11 @@ export function makePortalAccountsRepo(ctx: Ctx) {
     },
 
     /**
-     * Sign-in attempts used today.
-     *
-     * Zero once the stored day is not today's: see the module comment on why the
-     * reset is a comparison rather than a sweep.
-     */
+    Sign-in attempts used today.
+
+    Zero once the stored day is not today's: see the module comment on why the
+    reset is a comparison rather than a sweep.
+    */
     async countLoginAttemptsToday(healthSystemId: string): Promise<number> {
       const row = await byHealthSystem(healthSystemId);
       if (row === null) return 0;
@@ -451,12 +451,12 @@ export function makePortalAccountsRepo(ctx: Ctx) {
     },
 
     /**
-     * Count one attempt and return the new total for today.
-     *
-     * The increment and the day comparison are one statement, so two runs that
-     * overlap cannot both read 2 and both write 3. `last_login_at` moves with it
-     * because the hourly limit is read off that column.
-     */
+    Count one attempt and return the new total for today.
+
+    The increment and the day comparison are one statement, so two runs that
+    overlap cannot both read 2 and both write 3. `last_login_at` moves with it
+    because the hourly limit is read off that column.
+    */
     async recordLoginAttempt(healthSystemId: string): Promise<number> {
       await ensure(healthSystemId);
       const today = utcDay(ctx.now());
@@ -476,12 +476,12 @@ export function makePortalAccountsRepo(ctx: Ctx) {
     },
 
     /**
-     * Codes an unattended sign-in has had emailed today, and when the last was.
-     *
-     * The count is zero once its stored day is not today's, like
-     * `countLoginAttemptsToday`; `lastAt` is kept across days, because spacing
-     * codes out has nothing to do with where midnight falls.
-     */
+    Codes an unattended sign-in has had emailed today, and when the last was.
+
+    The count is zero once its stored day is not today's, like
+    `countLoginAttemptsToday`; `lastAt` is kept across days, because spacing
+    codes out has nothing to do with where midnight falls.
+    */
     async unattendedCodes(
       healthSystemId: string,
     ): Promise<{ today: number; lastAt: number | null }> {
@@ -494,12 +494,12 @@ export function makePortalAccountsRepo(ctx: Ctx) {
     },
 
     /**
-     * Count one code an unattended sign-in is about to have emailed.
-     *
-     * Before the request, for the same reason `recordLoginAttempt` is: an
-     * invocation that dies mid-send has still cost the owner an email. One
-     * statement, so two overlapping runs cannot both read the same count.
-     */
+    Count one code an unattended sign-in is about to have emailed.
+
+    Before the request, for the same reason `recordLoginAttempt` is: an
+    invocation that dies mid-send has still cost the owner an email. One
+    statement, so two overlapping runs cannot both read the same count.
+    */
     async recordUnattendedCode(healthSystemId: string): Promise<void> {
       await ensure(healthSystemId);
       const today = utcDay(ctx.now());
@@ -517,14 +517,14 @@ export function makePortalAccountsRepo(ctx: Ctx) {
     },
 
     /**
-     * Forget the stored session, keeping the credentials and the endpoint.
-     *
-     * What the admin UI's "Forget session" button does, and the honest way to
-     * recover from a session the portal has decided it does not recognise: the
-     * next run signs in from scratch rather than replaying a jar that no longer
-     * works. The error and the reauth stamp go with it, because the state they
-     * described is no longer the state.
-     */
+    Forget the stored session, keeping the credentials and the endpoint.
+
+    What the admin UI's "Forget session" button does, and the honest way to
+    recover from a session the portal has decided it does not recognise: the
+    next run signs in from scratch rather than replaying a jar that no longer
+    works. The error and the reauth stamp go with it, because the state they
+    described is no longer the state.
+    */
     async forgetSession(healthSystemId: string): Promise<void> {
       await require_(healthSystemId);
       await patch(healthSystemId, {
@@ -537,14 +537,14 @@ export function makePortalAccountsRepo(ctx: Ctx) {
     },
 
     /**
-     * Forget the portal account entirely: credentials, jar, endpoint, counters.
-     *
-     * The row is deleted rather than blanked. A blanked row would keep
-     * `login_attempts_today` -- so removing an account and adding it back would
-     * inherit a spent budget -- and would leave `listActive` and the admin UI
-     * reasoning about a row that describes nothing. The endpoint goes too: the
-     * owner may be re-adding the account precisely because that was wrong.
-     */
+    Forget the portal account entirely: credentials, jar, endpoint, counters.
+
+    The row is deleted rather than blanked. A blanked row would keep
+    `login_attempts_today` -- so removing an account and adding it back would
+    inherit a spent budget -- and would leave `listActive` and the admin UI
+    reasoning about a row that describes nothing. The endpoint goes too: the
+    owner may be re-adding the account precisely because that was wrong.
+    */
     async clear(healthSystemId: string): Promise<boolean> {
       const { changes } = await run(
         ctx.db

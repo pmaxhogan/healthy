@@ -1,34 +1,34 @@
 /**
- * `portal_messages` and `portal_message_sync`: the portal pass's copy of every
- * secure message it read, and how the last read went.
- *
- * The MCP (`worker/src/mcp/message-items.ts`) reads both back: the messages to
- * answer from, the sync row to say whether they are current.
- *
- * ### Keys come from content
- *
- * The portal's own ids are per-session tokens, with no evidence they survive a new
- * sign-in, so nothing is keyed on them. A message is identified by a digest of
- * what it *is* -- its delivery instant, its author's role and its text -- and a
- * thread by its subject and first message. Those digests are plain SHA-256, and
- * live only inside the sealed payload; what is stored in the clear is a keyed
- * blind of them with the health system id (`message_key`, `thread_key`), so a
- * snapshot can neither read nor confirm them. The message digest is also what lets
- * the MCP recognise one message listed by two organisations' portals: see
- * `worker/src/sync/message-dedupe.ts`.
- *
- * The ids the MCP hands out (`threadId`, `messageId`) are keyed blinds too, of
- * the same digests *without* the health system: stable across runs and across
- * portals, so one conversation has one id however it was read.
- *
- * ### Never deleted, only flagged
- *
- * A message is part of the record, so rows are kept until the health system is
- * deleted. A message the portal's own organisation stops listing in a complete
- * read is marked `missing`. One from another organisation linked to the chart
- * never is: a capture showed such an organisation drop out of the Message Center
- * for a while, with no error anywhere, and its messages come back with it.
- */
+`portal_messages` and `portal_message_sync`: the portal pass's copy of every
+secure message it read, and how the last read went.
+
+The MCP (`worker/src/mcp/message-items.ts`) reads both back: the messages to
+answer from, the sync row to say whether they are current.
+
+### Keys come from content
+
+The portal's own ids are per-session tokens, with no evidence they survive a new
+sign-in, so nothing is keyed on them. A message is identified by a digest of
+what it *is* -- its delivery instant, its author's role and its text -- and a
+thread by its subject and first message. Those digests are plain SHA-256, and
+live only inside the sealed payload; what is stored in the clear is a keyed
+blind of them with the health system id (`message_key`, `thread_key`), so a
+snapshot can neither read nor confirm them. The message digest is also what lets
+the MCP recognise one message listed by two organisations' portals: see
+`worker/src/sync/message-dedupe.ts`.
+
+The ids the MCP hands out (`threadId`, `messageId`) are keyed blinds too, of
+the same digests *without* the health system: stable across runs and across
+portals, so one conversation has one id however it was read.
+
+### Never deleted, only flagged
+
+A message is part of the record, so rows are kept until the health system is
+deleted. A message the portal's own organisation stops listing in a complete
+read is marked `missing`. One from another organisation linked to the chart
+never is: a capture showed such an organisation drop out of the Message Center
+for a while, with no error anywhere, and its messages come back with it.
+*/
 
 import { blinderFor } from "../blind.ts";
 import { BATCH_CHUNK, all, batch, chunk, run, sha256Hex } from "../client.ts";
@@ -102,10 +102,10 @@ export interface RecordMessagesReport {
 
 export interface RecordMessagesOptions {
   /**
-   * False when the read could not prove it saw everything (an organisation sent
-   * no summary, a message would not parse): then absence proves nothing, and no
-   * row is marked missing.
-   */
+  False when the read could not prove it saw everything (an organisation sent
+  no summary, a message would not parse): then absence proves nothing, and no
+  row is marked missing.
+  */
   complete: boolean;
 }
 
@@ -163,10 +163,10 @@ function publicIds(
 }
 
 /**
- * The keys of one message's attachments, by position. Derived from the same
- * digests as the message's own keys, so a later run -- another session, other
- * portal ids -- arrives at the same ones.
- */
+The keys of one message's attachments, by position. Derived from the same
+digests as the message's own keys, so a later run -- another session, other
+portal ids -- arrives at the same ones.
+*/
 async function attachmentIds(
   blinder: Blinder,
   healthSystemId: string,
@@ -299,10 +299,10 @@ export function makePortalMessagesRepo(ctx: Ctx) {
   };
 
   /**
-   * The statement one prepared message needs: none when it is unchanged and
-   * active, a state flip when it is unchanged but was missing, and a sealed
-   * upsert (`sealed`) otherwise.
-   */
+  The statement one prepared message needs: none when it is unchanged and
+  active, a state flip when it is unchanged but was missing, and a sealed
+  upsert (`sealed`) otherwise.
+  */
   const upsertFor = async (
     healthSystemId: string,
     entry: Prepared,
@@ -350,10 +350,10 @@ export function makePortalMessagesRepo(ctx: Ctx) {
   };
 
   /**
-   * The stored keys of the active first-party messages a complete read did not
-   * return. Only those rows are opened, and only the portal's own messages are
-   * ever flagged: see the module comment.
-   */
+  The stored keys of the active first-party messages a complete read did not
+  return. Only those rows are opened, and only the portal's own messages are
+  ever flagged: see the module comment.
+  */
   const noLongerListed = async (
     known: readonly KnownRow[],
     prepared: ReadonlyMap<string, Prepared>,
@@ -404,12 +404,12 @@ export function makePortalMessagesRepo(ctx: Ctx) {
 
   return {
     /**
-     * Store every message one Message Center read returned.
-     *
-     * A new or changed message is sealed and written; an unchanged one is left
-     * alone (a missing one that is back becomes active again). With `complete`,
-     * a first-party message this read did not return is marked missing.
-     */
+    Store every message one Message Center read returned.
+
+    A new or changed message is sealed and written; an unchanged one is left
+    alone (a missing one that is back becomes active again). With `complete`,
+    a first-party message this read did not return is marked missing.
+    */
     async record(
       healthSystemId: string,
       threads: readonly PortalThread[],

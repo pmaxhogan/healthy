@@ -47,9 +47,9 @@ function stopPolling(): void {
 }
 
 /**
- * One poll tick: fetch and swap in the fresh list without touching `loading`, so
- * the table does not flash a spinner every three seconds.
- */
+One poll tick: fetch and swap in the fresh list without touching `loading`, so
+the table does not flash a spinner every three seconds.
+*/
 async function pollOnce(): Promise<void> {
   if (Date.now() >= poll.deadline) {
     stopPolling();

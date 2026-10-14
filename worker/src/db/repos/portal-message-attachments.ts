@@ -1,31 +1,31 @@
 /**
- * `portal_message_attachments` and `portal_message_attachment_chunks`: the files
- * attached to secure messages, fetched by the portal pass and sealed.
- *
- * The portal names an attachment only by a per-session token, so the same run
- * that listed it has to fetch it (`worker/src/sync/portal-sync.ts`). What is stored
- * is keyed on content instead -- `attachment_key` is the key
- * `worker/src/db/repos/portal-messages.ts` derives from the message's own digest and
- * the attachment's position in it -- so the next run, with a new session, knows
- * the file is already here and does not fetch it again.
- *
- * ### Every byte, in pieces
- *
- * A file is kept whole, however large. D1 holds at most 2,000,000 bytes in one
- * value, so the file is base64-encoded and cut into {@link CHUNK_BASE64_CHARS}-
- * character pieces, each sealed and padded on its own: a full piece pads to a
- * 1 MiB bucket and seals to about 1.4 MB. The pieces and the row that says the
- * file is stored are written in one batch, so a reader never sees a file with a
- * piece missing.
- *
- * ### A failure is a row too
- *
- * A download that does not work (another organisation's attachment the portal
- * will not serve, an expired session, a page where the file should be) is
- * recorded as `failed` with a stable code, so the MCP can say so instead of
- * pretending the file does not exist. It is tried again on a later run once
- * {@link RETRY_FAILED_AFTER_SECONDS} have passed.
- */
+`portal_message_attachments` and `portal_message_attachment_chunks`: the files
+attached to secure messages, fetched by the portal pass and sealed.
+
+The portal names an attachment only by a per-session token, so the same run
+that listed it has to fetch it (`worker/src/sync/portal-sync.ts`). What is stored
+is keyed on content instead -- `attachment_key` is the key
+`worker/src/db/repos/portal-messages.ts` derives from the message's own digest and
+the attachment's position in it -- so the next run, with a new session, knows
+the file is already here and does not fetch it again.
+
+### Every byte, in pieces
+
+A file is kept whole, however large. D1 holds at most 2,000,000 bytes in one
+value, so the file is base64-encoded and cut into {@link CHUNK_BASE64_CHARS}-
+character pieces, each sealed and padded on its own: a full piece pads to a
+1 MiB bucket and seals to about 1.4 MB. The pieces and the row that says the
+file is stored are written in one batch, so a reader never sees a file with a
+piece missing.
+
+### A failure is a row too
+
+A download that does not work (another organisation's attachment the portal
+will not serve, an expired session, a page where the file should be) is
+recorded as `failed` with a stable code, so the MCP can say so instead of
+pretending the file does not exist. It is tried again on a later run once
+{@link RETRY_FAILED_AFTER_SECONDS} have passed.
+*/
 
 import { base64ToBytes, bytesToBase64 } from "../../lib/base64.ts";
 import { all, batch, one, run } from "../client.ts";
@@ -34,11 +34,11 @@ import { aadFor, open, seal } from "../crypto.ts";
 import type { Ctx } from "../client.ts";
 
 /**
- * Base64 characters per stored piece: 576 KiB of the file. With the padding's
- * length prefix that fills a 1 MiB bucket exactly, which seals to ~1.4 MB --
- * under D1's 2,000,000-byte value limit with room to spare. A multiple of four,
- * so every piece decodes on its own.
- */
+Base64 characters per stored piece: 576 KiB of the file. With the padding's
+length prefix that fills a 1 MiB bucket exactly, which seals to ~1.4 MB --
+under D1's 2,000,000-byte value limit with room to spare. A multiple of four,
+so every piece decodes on its own.
+*/
 export const CHUNK_BASE64_CHARS = 786_432;
 
 /** How long a failed download waits before the portal pass tries it again. */
@@ -110,9 +110,9 @@ export function makePortalMessageAttachmentsRepo(ctx: Ctx) {
 
   return {
     /**
-     * Of these keys, the ones the portal pass should fetch now: never tried, or
-     * failed long enough ago to try again. A stored file is never fetched twice.
-     */
+    Of these keys, the ones the portal pass should fetch now: never tried, or
+    failed long enough ago to try again. A stored file is never fetched twice.
+    */
     async needingFetch(healthSystemId: string, keys: readonly string[]): Promise<Set<string>> {
       const rows = await all<Pick<AttachmentRow, "attachment_key" | "state" | "attempted_at">>(
         ctx.db

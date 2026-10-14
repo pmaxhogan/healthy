@@ -1,46 +1,46 @@
 /**
- * The diff. Pure, exhaustive, and the only place that decides what happens to an
- * appointment.
- *
- * Three sources disagree on every run and the plan reconciles them:
- *
- *   - the **candidates**, built from what the organisation returned this run (plus
- *     whatever the cache still remembers about an appointment that has vanished)
- *   - the **rows** of `calendar_events`, which say what this app last wrote
- *   - the **Google events** carrying `extendedProperties.private.healthy = "1"`,
- *     which say what is actually on the calendar now
- *
- * Deliberate asymmetries, each of which is a bug if inverted:
- *
- *   - An appointment that has vanished and never had a row is **skipped**, not
- *     ghosted. A ghost for something that was never on the calendar would invent
- *     history.
- *   - A row whose Google event is gone was deleted by the owner by hand. It is
- *     re-created only if the appointment is still ahead and the row is not
- *     already a ghost; otherwise the row is ghosted with no Google write, because
- *     re-creating an event the owner deleted is the one thing they clearly did
- *     not want.
- *   - A Google event whose key has no row *and* no candidate is an **orphan**. It
- *     is reported and left alone: it carries this app's marker, so something
- *     wrote it, and guessing at its content would be worse than counting it.
- *   - An event is settled only when its fingerprint matches **and** its
- *     description still carries Healthy's current block below the rule
- *     (`carriesBlock`). The owner's text above the rule never costs a write; an
- *     edit below it, or a deleted rule, is rewritten on the next run
- *     (`description_drift`). Both halves read what `events.list` already
- *     returned, so an unchanged event costs no Google call either way.
- *   - **The owner's title wins** (`titles.ts`). An event whose title differs
- *     from what Healthy last wrote is the owner's: every write to it carries
- *     `keepTitle` and leaves `summary` out, and the settled check never compares
- *     the owner's title to the model's -- the fingerprint still covers the model's
- *     title, so a model change patches once (without the title) and settles. A
- *     title Healthy still owns but that is not the one it would write now (the
- *     owner changed it back to an older Healthy title) is `title_drift`.
- *   - `suppressGhosting` exists for Epic 4119 -- the organisation admitted it
- *     filtered the patient-facing view. Partial results must never ghost real
- *     appointments, so absent candidates are skipped for that run while inserts
- *     and patches carry on.
- */
+The diff. Pure, exhaustive, and the only place that decides what happens to an
+appointment.
+
+Three sources disagree on every run and the plan reconciles them:
+
+  - the **candidates**, built from what the organisation returned this run (plus
+    whatever the cache still remembers about an appointment that has vanished)
+  - the **rows** of `calendar_events`, which say what this app last wrote
+  - the **Google events** carrying `extendedProperties.private.healthy = "1"`,
+    which say what is actually on the calendar now
+
+Deliberate asymmetries, each of which is a bug if inverted:
+
+  - An appointment that has vanished and never had a row is **skipped**, not
+    ghosted. A ghost for something that was never on the calendar would invent
+    history.
+  - A row whose Google event is gone was deleted by the owner by hand. It is
+    re-created only if the appointment is still ahead and the row is not
+    already a ghost; otherwise the row is ghosted with no Google write, because
+    re-creating an event the owner deleted is the one thing they clearly did
+    not want.
+  - A Google event whose key has no row *and* no candidate is an **orphan**. It
+    is reported and left alone: it carries this app's marker, so something
+    wrote it, and guessing at its content would be worse than counting it.
+  - An event is settled only when its fingerprint matches **and** its
+    description still carries Healthy's current block below the rule
+    (`carriesBlock`). The owner's text above the rule never costs a write; an
+    edit below it, or a deleted rule, is rewritten on the next run
+    (`description_drift`). Both halves read what `events.list` already
+    returned, so an unchanged event costs no Google call either way.
+  - **The owner's title wins** (`titles.ts`). An event whose title differs
+    from what Healthy last wrote is the owner's: every write to it carries
+    `keepTitle` and leaves `summary` out, and the settled check never compares
+    the owner's title to the model's -- the fingerprint still covers the model's
+    title, so a model change patches once (without the title) and settles. A
+    title Healthy still owns but that is not the one it would write now (the
+    owner changed it back to an older Healthy title) is `title_drift`.
+  - `suppressGhosting` exists for Epic 4119 -- the organisation admitted it
+    filtered the patient-facing view. Partial results must never ghost real
+    appointments, so absent candidates are skipped for that run while inserts
+    and patches carry on.
+*/
 
 import { carriesBlock } from "./description.ts";
 import { titleOwnership } from "./titles.ts";
@@ -50,11 +50,11 @@ import type { CalendarEventRow } from "../db/rows.ts";
 import type { EventRecord } from "../google/types.ts";
 
 /**
- * What the plan does with one key.
- *
- * `ghost-row-only` is the case with no Google write: the event is not there to
- * patch, so only `calendar_events` moves.
- */
+What the plan does with one key.
+
+`ghost-row-only` is the case with no Google write: the event is not there to
+patch, so only `calendar_events` moves.
+*/
 type PlanAction =
   "insert" | "patch" | "ghost" | "ghost-row-only" | "restore" | "unchanged" | "skip";
 
@@ -79,9 +79,9 @@ export interface PlanCandidate {
   /** The appointment starts after the run's clock. */
   upcoming: boolean;
   /**
-   * False when no model could be built -- the appointment is gone from the
-   * organisation and gone from the cache too, so there is nothing to write.
-   */
+  False when no model could be built -- the appointment is gone from the
+  organisation and gone from the cache too, so there is nothing to write.
+  */
   hasModel: boolean;
 }
 
@@ -97,10 +97,10 @@ export interface PlanEntry {
   /** The owner edited the event's title: a write must leave `summary` out. */
   keepTitle: boolean;
   /**
-   * What the row should record as the title Healthy last wrote, when the write
-   * does not itself write the title (`keepTitle`, or an `unchanged` legacy row
-   * being seeded). Null when there is nothing to record.
-   */
+  What the row should record as the title Healthy last wrote, when the write
+  does not itself write the title (`keepTitle`, or an `unchanged` legacy row
+  being seeded). Null when there is nothing to record.
+  */
   titleDigest: string | null;
 }
 
@@ -127,9 +127,9 @@ export interface PlanOptions {
   /** Epic 4119: the view was filtered, so absence proves nothing this run. */
   suppressGhosting?: boolean;
   /**
-   * Title digests by event key (`titles.ts`). Absent: every title is treated as
-   * Healthy's and never drifts -- what the plan did before titles were tracked.
-   */
+  Title digests by event key (`titles.ts`). Absent: every title is treated as
+  Healthy's and never drifts -- what the plan did before titles were tracked.
+  */
   titles?: ReadonlyMap<string, TitleDigests>;
 }
 
@@ -151,9 +151,9 @@ function eventFingerprintOf(event: EventRecord): string | null {
 }
 
 /**
- * True when the event's description carries this block below its rule, or when
- * there is no block to compare (no model, so nothing could be written anyway).
- */
+True when the event's description carries this block below its rule, or when
+there is no block to compare (no model, so nothing could be written anyway).
+*/
 function described(event: EventRecord, block: string | null): boolean {
   return block === null || carriesBlock(event.description, block);
 }
@@ -183,11 +183,11 @@ function entry(
 const HEALTHY_TITLE: TitleOwnership = { ownerEdited: false, lastWritten: null };
 
 /**
- * Who owns this event's title, for the variant about to be considered.
- *
- * `drifted` is true when Healthy owns the title but it is not the one Healthy
- * would write now -- only knowable when both digests are.
- */
+Who owns this event's title, for the variant about to be considered.
+
+`drifted` is true when Healthy owns the title but it is not the one Healthy
+would write now -- only knowable when both digests are.
+*/
 function ownershipFor(
   row: CalendarEventRow | undefined,
   titles: TitleDigests | undefined,
@@ -301,12 +301,12 @@ function decideActive(
 }
 
 /**
- * Reconcile the three sources into one plan.
- *
- * `rows` and `googleEvents` must already be narrowed to one health system and to the
- * sync window: a row older than the window is absent from every search by
- * definition, and diffing it would ghost a real appointment for being old.
- */
+Reconcile the three sources into one plan.
+
+`rows` and `googleEvents` must already be narrowed to one health system and to the
+sync window: a row older than the window is absent from every search by
+definition, and diffing it would ghost a real appointment for being old.
+*/
 export function planChanges(
   rows: readonly CalendarEventRow[],
   googleEvents: readonly EventRecord[],

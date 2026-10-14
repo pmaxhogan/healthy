@@ -1,34 +1,34 @@
 /**
- * Builds the title and Markdown body for the Trello card that says a sync
- * keeps failing.
- *
- * Pure formatting, like `reconnect.ts`: no fetch, no D1, no Env.
- * `healthSystemName` is user data -- the display name of a connected health
- * system -- and this module only ever puts it into the returned strings; it
- * never logs anything itself.
- *
- * This is the card for a failure that is *not* a re-auth, and that is the
- * whole reason it is its own formatter: the connection is still authorised, so
- * telling the owner to reconnect would send them through a consent screen that
- * changes nothing. What the card may say is what is failing, the stable code of
- * the failure, since when and how many runs, and where to look. Never a
- * message, a URL from a response or anything read from a record. The
- * occurrence time is UTC and labelled as such, for the reason given in
- * `reconnect.ts`.
- */
+Builds the title and Markdown body for the Trello card that says a sync
+keeps failing.
+
+Pure formatting, like `reconnect.ts`: no fetch, no D1, no Env.
+`healthSystemName` is user data -- the display name of a connected health
+system -- and this module only ever puts it into the returned strings; it
+never logs anything itself.
+
+This is the card for a failure that is *not* a re-auth, and that is the
+whole reason it is its own formatter: the connection is still authorised, so
+telling the owner to reconnect would send them through a consent screen that
+changes nothing. What the card may say is what is failing, the stable code of
+the failure, since when and how many runs, and where to look. Never a
+message, a URL from a response or anything read from a record. The
+occurrence time is UTC and labelled as such, for the reason given in
+`reconnect.ts`.
+*/
 
 /**
- * Whose sync it is, which decides what the card calls it and what can be done.
- * `run` is the sync itself: a run that stops before it reaches any of the others.
- */
+Whose sync it is, which decides what the card calls it and what can be done.
+`run` is the sync itself: a run that stops before it reaches any of the others.
+*/
 type SyncFailingKind = "health_system" | "portal" | "google" | "run";
 
 /**
- * Which pass keeps failing. The same vocabulary as `sync_failures.check_name`:
- * `calendar` is the hourly appointment sync (or, for Google, reading and
- * writing the calendar itself), `refresh` the four-hourly read of the whole
- * record, `visits` a portal's visit list and `messages` its message centre.
- */
+Which pass keeps failing. The same vocabulary as `sync_failures.check_name`:
+`calendar` is the hourly appointment sync (or, for Google, reading and
+writing the calendar itself), `refresh` the four-hourly read of the whole
+record, `visits` a portal's visit list and `messages` its message centre.
+*/
 type SyncFailingCheck = "calendar" | "refresh" | "visits" | "messages";
 
 export interface BuildSyncFailingCardInput {
@@ -95,12 +95,12 @@ function passName(input: BuildSyncFailingCardInput): string {
 }
 
 /**
- * The second step, which is the only one that differs.
- *
- * A portal has one thing the owner can do that the others do not: its
- * scheduled sync holds back from signing in on its own (see `ensureSession` in
- * `portal-sync.ts`), and "Sign in now" is what ends that wait early.
- */
+The second step, which is the only one that differs.
+
+A portal has one thing the owner can do that the others do not: its
+scheduled sync holds back from signing in on its own (see `ensureSession` in
+`portal-sync.ts`), and "Sign in now" is what ends that wait early.
+*/
 function adviceFor(input: BuildSyncFailingCardInput): string {
   if (input.kind === "run") {
     return `2. Nothing needs reconnecting: no connection was reached. The run list there shows each run that stopped. It is retried every hour; if this card is still open tomorrow, the error code above is where to start.`;

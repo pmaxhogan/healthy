@@ -127,10 +127,10 @@ function resolveKey(): string {
 }
 
 /**
- * Runs wrangler through the shell, which Windows needs: wrangler is a .cmd shim
- * that Node refuses to spawn directly. Safe here because every argument is a
- * single fixed token.
- */
+Runs wrangler through the shell, which Windows needs: wrangler is a .cmd shim
+that Node refuses to spawn directly. Safe here because every argument is a
+single fixed token.
+*/
 function wrangler(args: readonly string[], input?: string): string {
   const result = spawnSync("npx", ["wrangler", ...args], {
     ...(input !== undefined && { input }),

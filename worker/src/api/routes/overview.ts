@@ -1,20 +1,20 @@
 /**
- * `GET /api/overview` -- the dashboard, in one request.
- *
- * One round trip rather than nine, because the SPA's first screen needs all of it
- * and nine parallel fetches through Cloudflare Access is nine identity checks.
- *
- * Everything here is counts, statuses and timestamps. The two numeric panels are
- * deliberately *derived* rather than stored: `cacheCounts` is a `GROUP BY` over
- * `fhir_cache` (row counts only -- nothing is decrypted to produce them) and
- * `calendarEvents` is a `GROUP BY` over `calendar_events`, which holds no clinical
- * content at all.
- *
- * The grant count is the one thing allowed to fail quietly. Grants live in the
- * OAuth provider's KV store, not in D1, so an unreachable or unwired store would
- * otherwise take down the whole dashboard -- including the parts that would tell
- * the owner what is wrong.
- */
+`GET /api/overview` -- the dashboard, in one request.
+
+One round trip rather than nine, because the SPA's first screen needs all of it
+and nine parallel fetches through Cloudflare Access is nine identity checks.
+
+Everything here is counts, statuses and timestamps. The two numeric panels are
+deliberately *derived* rather than stored: `cacheCounts` is a `GROUP BY` over
+`fhir_cache` (row counts only -- nothing is decrypted to produce them) and
+`calendarEvents` is a `GROUP BY` over `calendar_events`, which holds no clinical
+content at all.
+
+The grant count is the one thing allowed to fail quietly. Grants live in the
+OAuth provider's KV store, not in D1, so an unreachable or unwired store would
+otherwise take down the whole dashboard -- including the parts that would tell
+the owner what is wrong.
+*/
 
 import { Hono } from "hono";
 
@@ -37,13 +37,13 @@ import type { ApiContext } from "../http.ts";
 import type { OverviewDto } from "@shared/types.ts";
 
 /**
- * Row counts the owner would recognise as "cached records".
- *
- * `fhir_cache` also holds the sync engine's own bookkeeping -- one `_smart` row and
- * one `_capability` row per health system, which are a discovery document and an indexed
- * CapabilityStatement, not clinical resources. Counting those on the dashboard would
- * report two cached "records" for a health system that has never been synced.
- */
+Row counts the owner would recognise as "cached records".
+
+`fhir_cache` also holds the sync engine's own bookkeeping -- one `_smart` row and
+one `_capability` row per health system, which are a discovery document and an indexed
+CapabilityStatement, not clinical resources. Counting those on the dashboard would
+report two cached "records" for a health system that has never been synced.
+*/
 function clinicalCounts(
   counts: readonly { healthSystemId: string; resourceType: string; count: number }[],
 ): { healthSystemId: string; resourceType: string; count: number }[] {

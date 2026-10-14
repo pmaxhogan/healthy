@@ -8,25 +8,25 @@
 const encoder = new TextEncoder();
 
 /**
- * A `Uint8Array` backed by a plain `ArrayBuffer`.
- *
- * TypeScript 5.7 made `Uint8Array` generic in its buffer type, and WebCrypto's
- * `BufferSource` deliberately excludes `SharedArrayBuffer`. Spelling the buffer
- * out is what lets these values be handed straight to `crypto.subtle` with no
- * cast -- under the Worker type configuration and the Node one alike, which is
- * what keeps these modules unit-testable outside workerd.
- */
+A `Uint8Array` backed by a plain `ArrayBuffer`.
+
+TypeScript 5.7 made `Uint8Array` generic in its buffer type, and WebCrypto's
+`BufferSource` deliberately excludes `SharedArrayBuffer`. Spelling the buffer
+out is what lets these values be handed straight to `crypto.subtle` with no
+cast -- under the Worker type configuration and the Node one alike, which is
+what keeps these modules unit-testable outside workerd.
+*/
 export type Bytes = Uint8Array<ArrayBuffer>;
 
 /**
- * UTF-8 bytes of `value`.
- *
- * The copy is not redundant: workerd's own types declare `TextEncoder.encode` as
- * returning `Uint8Array<ArrayBufferLike>`, which `BufferSource` does not accept,
- * so re-homing the bytes in a freshly allocated `ArrayBuffer` is what removes the
- * need for a cast at every `crypto.subtle` call site. The inputs here are
- * passwords and short messages, so the cost is nil.
- */
+UTF-8 bytes of `value`.
+
+The copy is not redundant: workerd's own types declare `TextEncoder.encode` as
+returning `Uint8Array<ArrayBufferLike>`, which `BufferSource` does not accept,
+so re-homing the bytes in a freshly allocated `ArrayBuffer` is what removes the
+need for a cast at every `crypto.subtle` call site. The inputs here are
+passwords and short messages, so the cost is nil.
+*/
 export function utf8(value: string): Bytes {
   const encoded = encoder.encode(value);
   const bytes = new Uint8Array(encoded.length);
@@ -55,11 +55,11 @@ export function b64urlDecode(value: string): Bytes | null {
 }
 
 /**
- * Length-then-content comparison in constant time for equal-length inputs.
- *
- * Leaking the *length* of a MAC or a derived key is harmless -- both are fixed
- * width and public -- so the early return on a length mismatch is deliberate.
- */
+Length-then-content comparison in constant time for equal-length inputs.
+
+Leaking the *length* of a MAC or a derived key is harmless -- both are fixed
+width and public -- so the early return on a length mismatch is deliberate.
+*/
 export function timingSafeEqual(a: Bytes, b: Bytes): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
@@ -82,12 +82,12 @@ export async function hmacSha256(secret: string, message: string): Promise<Bytes
 }
 
 /**
- * One cookie out of a request's `Cookie` header, or null.
- *
- * Splits on the first `=` only: a base64url session value never contains one,
- * but Cloudflare Access's own `CF_Authorization` JWT does not either and this
- * way a future value with padding still round-trips.
- */
+One cookie out of a request's `Cookie` header, or null.
+
+Splits on the first `=` only: a base64url session value never contains one,
+but Cloudflare Access's own `CF_Authorization` JWT does not either and this
+way a future value with padding still round-trips.
+*/
 export function readCookie(request: Request, name: string): string | null {
   const header = request.headers.get("cookie");
   if (!header) return null;

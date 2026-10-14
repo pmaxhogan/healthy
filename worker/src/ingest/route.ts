@@ -1,65 +1,65 @@
 /**
- * `POST /ingest/health-connect`: where a paired phone delivers its records.
- *
- * This is the one machine-facing route in the Hono app, and it sits ABOVE the
- * owner gate (see `worker/src/app.ts`): the phone has no Cloudflare Access
- * identity and no password session, so Access is configured to let this path
- * through and the bearer check below is the whole of its authentication.
- *
- * Access lets through more than this file serves: its bypass entry covers the
- * path and everything beneath it, and matches without regard to case. Only the
- * exact path is registered here, so a sub-path or another casing falls to the
- * owner gate, which checks the Access identity itself and answers 403. That
- * fail-closed fall-through is what keeps the opening one route wide -- so
- * NOTHING may ever be registered beneath this path without its own
- * authentication: it would be on the internet with no Access in front of it.
- * Read it as the security boundary it is.
- *
- * What the route does, in order, and why in that order:
- *
- *   1. Token shape  -- parsed before any database read, so a request without a
- *      well-formed token costs nothing but CPU.
- *   2. Token check  -- one row by primary key, then a constant-time comparison
- *      of digests. Missing, malformed, unknown, wrong and revoked all answer the
- *      same 401, so the route is not an oracle for which device ids exist.
- *   3. Rate limit   -- per device, counted before the body is read; then
- *      backpressure: a device whose queue is already deep is told to wait,
- *      again before its body is read.
- *   4. Size limits  -- on the bytes actually read and actually expanded, never
- *      on a header (`body.ts`).
- *   5. Validation   -- the envelope strictly, each record on its own (`wire.ts`).
- *      The batch's `deviceId` must be the token's, and a batch of more records
- *      than one may carry is refused whole so the phone splits it.
- *   6. Queue        -- the body is sealed into `hc_ingest_queue` in one
- *      transaction, and only then is the batch acknowledged. A batch id seen
- *      before is acknowledged again only if its content is the same. The log
- *      row written with it carries which sync run the batch says it is part
- *      of, so a run can be seen the moment it uploads and not once applied.
- *   7. Stale totals -- with the batch queued, the answer says which hours of
- *      the device's platform totals the store knows to be out of date, when it
- *      can tell (`staleHoursFor`, worker/src/hc/store/platform-stale.ts). The
- *      only way anything reaches the phone from here: it has no route of its
- *      own, and must never get one beneath this path (see above).
- *
- * It does not apply the batch. A month of backfill touches hundreds of stored
- * rows, which does not fit one request's D1 query budget; the alarm-driven
- * runner (`worker/src/hc/runner.ts`) does that, in order, afterwards. So
- * `accepted` in the answer means "validated and durably queued", which is the
- * promise the phone needs before it commits its changes token.
- *
- * It adds, and reads back one thing. Nothing here reads a record back: the
- * one thing the answer carries out of the store is which hours of which record
- * types of THIS device have a platform total that is out of date (step 7), so
- * that the phone can work them out again. That is record type names -- the
- * SDK's class names, the same for every user -- and hours: when the device's
- * owner had activity of a type, to the hour, and no value, no origin, nothing
- * else. So a stolen token can push data to its own device and learn those
- * hours of its own device, and can do nothing else: not read a record or a
- * total, not touch another device, not reach the admin API or the MCP.
- *
- * Logging: this app's own device id, counts, sizes, stable error codes and
- * the code for what started the sync run. Never the token, never a record id, never an origin app's package name.
- */
+`POST /ingest/health-connect`: where a paired phone delivers its records.
+
+This is the one machine-facing route in the Hono app, and it sits ABOVE the
+owner gate (see `worker/src/app.ts`): the phone has no Cloudflare Access
+identity and no password session, so Access is configured to let this path
+through and the bearer check below is the whole of its authentication.
+
+Access lets through more than this file serves: its bypass entry covers the
+path and everything beneath it, and matches without regard to case. Only the
+exact path is registered here, so a sub-path or another casing falls to the
+owner gate, which checks the Access identity itself and answers 403. That
+fail-closed fall-through is what keeps the opening one route wide -- so
+NOTHING may ever be registered beneath this path without its own
+authentication: it would be on the internet with no Access in front of it.
+Read it as the security boundary it is.
+
+What the route does, in order, and why in that order:
+
+  1. Token shape  -- parsed before any database read, so a request without a
+     well-formed token costs nothing but CPU.
+  2. Token check  -- one row by primary key, then a constant-time comparison
+     of digests. Missing, malformed, unknown, wrong and revoked all answer the
+     same 401, so the route is not an oracle for which device ids exist.
+  3. Rate limit   -- per device, counted before the body is read; then
+     backpressure: a device whose queue is already deep is told to wait,
+     again before its body is read.
+  4. Size limits  -- on the bytes actually read and actually expanded, never
+     on a header (`body.ts`).
+  5. Validation   -- the envelope strictly, each record on its own (`wire.ts`).
+     The batch's `deviceId` must be the token's, and a batch of more records
+     than one may carry is refused whole so the phone splits it.
+  6. Queue        -- the body is sealed into `hc_ingest_queue` in one
+     transaction, and only then is the batch acknowledged. A batch id seen
+     before is acknowledged again only if its content is the same. The log
+     row written with it carries which sync run the batch says it is part
+     of, so a run can be seen the moment it uploads and not once applied.
+  7. Stale totals -- with the batch queued, the answer says which hours of
+     the device's platform totals the store knows to be out of date, when it
+     can tell (`staleHoursFor`, worker/src/hc/store/platform-stale.ts). The
+     only way anything reaches the phone from here: it has no route of its
+     own, and must never get one beneath this path (see above).
+
+It does not apply the batch. A month of backfill touches hundreds of stored
+rows, which does not fit one request's D1 query budget; the alarm-driven
+runner (`worker/src/hc/runner.ts`) does that, in order, afterwards. So
+`accepted` in the answer means "validated and durably queued", which is the
+promise the phone needs before it commits its changes token.
+
+It adds, and reads back one thing. Nothing here reads a record back: the
+one thing the answer carries out of the store is which hours of which record
+types of THIS device have a platform total that is out of date (step 7), so
+that the phone can work them out again. That is record type names -- the
+SDK's class names, the same for every user -- and hours: when the device's
+owner had activity of a type, to the hour, and no value, no origin, nothing
+else. So a stolen token can push data to its own device and learn those
+hours of its own device, and can do nothing else: not read a record or a
+total, not touch another device, not reach the admin API or the MCP.
+
+Logging: this app's own device id, counts, sizes, stable error codes and
+the code for what started the sync run. Never the token, never a record id, never an origin app's package name.
+*/
 
 import { Hono } from "hono";
 
@@ -92,9 +92,9 @@ export const MAX_QUEUED_BATCHES = 400;
 const BACKLOG_RETRY_SECONDS = 30;
 
 /**
- * A digest that is no device's, compared against when the device id is
- * unknown, so "no such device" and "wrong token" spend the same work.
- */
+A digest that is no device's, compared against when the device id is
+unknown, so "no such device" and "wrong token" spend the same work.
+*/
 const NO_DEVICE_HASH = "A".repeat(43);
 
 type IngestErrorCode =
@@ -120,14 +120,14 @@ interface IngestResponse {
   /** Epoch milliseconds. */
   serverTime: number;
   /**
-   * Hours whose stored platform total is out of date, for the phone to work
-   * out again: by record type (`Steps`), each hour as the epoch milliseconds
-   * of its start. Present only when the store can say -- nothing else of the
-   * device's is waiting to be applied -- and then the whole of what is stale,
-   * up to `STALE_HOURS_PER_ANSWER` hours of each type, the earliest (the rest
-   * come in later answers; nothing is dropped). An empty object means none.
-   * Absent means "not known now": the phone keeps what it was told before.
-   */
+  Hours whose stored platform total is out of date, for the phone to work
+  out again: by record type (`Steps`), each hour as the epoch milliseconds
+  of its start. Present only when the store can say -- nothing else of the
+  device's is waiting to be applied -- and then the whole of what is stale,
+  up to `STALE_HOURS_PER_ANSWER` hours of each type, the earliest (the rest
+  come in later answers; nothing is dropped). An empty object means none.
+  Absent means "not known now": the phone keeps what it was told before.
+  */
   staleHours?: Record<string, number[]>;
 }
 
@@ -141,20 +141,20 @@ function refuse(
 }
 
 /**
- * Rejections listed in one answer. The count is always exact; the list is for
- * a person reading the phone's log, and a batch with thousands of bad records
- * is a bug the first few already describe.
- */
+Rejections listed in one answer. The count is always exact; the list is for
+a person reading the phone's log, and a batch with thousands of bad records
+is a bug the first few already describe.
+*/
 export const MAX_REPORTED_REJECTIONS = 100;
 
 /** The largest sync report kept. A real one is a few kilobytes. */
 const MAX_SYNC_STATE_CHARS = 128 * 1024;
 
 /**
- * The phone's sync report as the JSON to seal, or null to keep the last one.
- * A report too large to be one is not stored -- and is not a reason to refuse
- * the records that came with it, which are already queued by now.
- */
+The phone's sync report as the JSON to seal, or null to keep the last one.
+A report too large to be one is not stored -- and is not a reason to refuse
+the records that came with it, which are already queued by now.
+*/
 function syncStateJson(syncState: HcSyncState | undefined): string | null {
   if (syncState === undefined) return null;
   const text = JSON.stringify(syncState);
@@ -246,11 +246,11 @@ async function readBatch(
 }
 
 /**
- * Step 7: the device's stale platform-total hours, or null when the answer
- * cannot say. The batch is already queued and acknowledged by now, so a read
- * that fails leaves the field out -- "not known now" -- and does not turn the
- * acknowledgement into an error the phone would answer by sending it again.
- */
+Step 7: the device's stale platform-total hours, or null when the answer
+cannot say. The batch is already queued and acknowledged by now, so a read
+that fails leaves the field out -- "not known now" -- and does not turn the
+acknowledgement into an error the phone would answer by sending it again.
+*/
 async function readStaleHours(
   c: IngestContext,
   deviceId: string,

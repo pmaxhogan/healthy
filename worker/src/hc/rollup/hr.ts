@@ -1,11 +1,11 @@
 /**
- * Heart-rate helpers shared by the rollups and the query tools: flattening
- * HeartRate records into samples, the per-minute series, resampling to a
- * requested resolution, and finding events (sustained rises) in a minute
- * series.
- *
- * Pure: no D1, no `Env`. Times are epoch milliseconds throughout.
- */
+Heart-rate helpers shared by the rollups and the query tools: flattening
+HeartRate records into samples, the per-minute series, resampling to a
+requested resolution, and finding events (sustained rises) in a minute
+series.
+
+Pure: no D1, no `Env`. Times are epoch milliseconds throughout.
+*/
 
 import { AppError } from "../../lib/errors.ts";
 
@@ -18,12 +18,12 @@ const MINUTE_MS = 60_000;
 const HOUR_MS = 3_600_000;
 
 /**
- * One heart-rate reading -- or a minute of them, as the store keeps heart rate
- * for joining to a night or a workout: `bpm` is then the minute's mean, and
- * `min`, `max` and `n` the lowest and highest sample of the minute and how
- * many there were. Without them the point is one sample, and is its own
- * extremes.
- */
+One heart-rate reading -- or a minute of them, as the store keeps heart rate
+for joining to a night or a workout: `bpm` is then the minute's mean, and
+`min`, `max` and `n` the lowest and highest sample of the minute and how
+many there were. Without them the point is one sample, and is its own
+extremes.
+*/
 export interface HrSample {
   t: number;
   bpm: number;
@@ -53,12 +53,12 @@ function byTime(left: { t: number }, right: { t: number }): number {
 }
 
 /**
- * Every sample of the given HeartRate records, in time order.
- *
- * Tolerant: a record with no `samples` list, and a sample without a finite
- * `t` and `bpm`, are skipped. Nothing else is filtered here -- an implausible
- * reading is the artefact rules' business (`../rules.ts`), at query time.
- */
+Every sample of the given HeartRate records, in time order.
+
+Tolerant: a record with no `samples` list, and a sample without a finite
+`t` and `bpm`, are skipped. Nothing else is filtered here -- an implausible
+reading is the artefact rules' business (`../rules.ts`), at query time.
+*/
 export function heartRateSamples(records: readonly HcRecord[]): HrSample[] {
   const samples: HrSample[] = [];
   for (const record of records) {
@@ -75,9 +75,9 @@ export function heartRateSamples(records: readonly HcRecord[]): HrSample[] {
 }
 
 /**
- * Samples grouped by the UTC minute they fall in, in time order. Minutes with
- * no sample are absent. The input need not be sorted.
- */
+Samples grouped by the UTC minute they fall in, in time order. Minutes with
+no sample are absent. The input need not be sorted.
+*/
 export function minuteSeries(samples: readonly HrSample[]): HrMinutePoint[] {
   const minutes = new Map<number, { n: number; sum: number; min: number; max: number }>();
   for (const sample of samples) {
@@ -114,15 +114,15 @@ export function hrHourToPoints(hourUtc: number, hour: HrHour): HrMinutePoint[] {
 }
 
 /**
- * Summary of the samples in `[startMs, endMs]`, or null when there are none.
- *
- * `min` and `max` are the lowest and highest SAMPLE and `n` the number of
- * samples -- also when the input is one point a minute, which carries its
- * minute's extremes and count (`HrSample`). `mean` is the mean of the
- * per-minute means, not of the samples: a wearable samples every second or so
- * while it thinks its wearer is active and far less often otherwise, so a plain
- * mean of samples would weight the busy minutes many times over.
- */
+Summary of the samples in `[startMs, endMs]`, or null when there are none.
+
+`min` and `max` are the lowest and highest SAMPLE and `n` the number of
+samples -- also when the input is one point a minute, which carries its
+minute's extremes and count (`HrSample`). `mean` is the mean of the
+per-minute means, not of the samples: a wearable samples every second or so
+while it thinks its wearer is active and far less often otherwise, so a plain
+mean of samples would weight the busy minutes many times over.
+*/
 export function summariseHeartRate(
   samples: readonly HrSample[],
   startMs: number,
@@ -156,12 +156,12 @@ export const HR_RESOLUTION_MS: Readonly<Record<Exclude<HrResolution, "raw">, num
 };
 
 /**
- * How long one sample is taken to stand for when no other follows it. Ten
- * minutes: a wearable's slowest background rate is a reading every several
- * minutes, so anything longer than this is a gap (the watch was off the
- * wrist), not a steady heart rate, and must not be credited to the last
- * reading before it.
- */
+How long one sample is taken to stand for when no other follows it. Ten
+minutes: a wearable's slowest background rate is a reading every several
+minutes, so anything longer than this is a gap (the watch was off the
+wrist), not a steady heart rate, and must not be credited to the last
+reading before it.
+*/
 export const HR_SAMPLE_HOLD_MAX_MS = 10 * MINUTE_MS;
 
 export interface HrPoint {
@@ -179,18 +179,18 @@ export interface HrResampled {
   /** The resolution asked for. */
   resolution: HrResolution;
   /**
-   * The bucket width actually used, ms: the resolution's own, times
-   * `decimation`. Null for `raw`, whose points are not on a grid.
-   */
+  The bucket width actually used, ms: the resolution's own, times
+  `decimation`. Null for `raw`, whose points are not on a grid.
+  */
   bucketMs: number | null;
   points: HrPoint[];
   /** True when `maxPoints` forced a coarser result than the resolution asked for. */
   decimated: boolean;
   /**
-   * 1 when not decimated. Otherwise the factor: each point covers this many
-   * buckets of the requested resolution (for `raw`, this many consecutive
-   * samples).
-   */
+  1 when not decimated. Otherwise the factor: each point covers this many
+  buckets of the requested resolution (for `raw`, this many consecutive
+  samples).
+  */
   decimation: number;
   /** Points there would have been without `maxPoints`. */
   totalPoints: number;
@@ -268,30 +268,30 @@ function grouped(sorted: readonly HrSample[], factor: number): HrPoint[] {
 const RESAMPLE_GROWTH = 1.25;
 
 /**
- * Heart-rate samples at a requested resolution.
- *
- * `raw` returns the samples as they are, in time order. Every other resolution
- * puts them on a fixed grid aligned to the epoch and gives each non-empty
- * bucket a TIME-WEIGHTED mean: each reading counts for as long as it stood
- * (see {@link HR_SAMPLE_HOLD_MAX_MS}), so ten minutes sampled every second and
- * fifty sampled every five minutes contribute to an hour in proportion to
- * their length, not to their sample counts. `min`, `max` and `n` are over the
- * bucket's samples. Empty buckets are absent, not interpolated.
- *
- * `maxPoints` is the caller's ceiling, never applied unless passed. When the
- * result would exceed it, the series is made coarser rather than cut short:
- * the grid is widened by a whole factor that fits (and recomputed from the
- * samples, so the means stay time-weighted and no reading is dropped); for
- * `raw`, consecutive samples are grouped. The result says so in `decimated`,
- * `decimation`, `bucketMs` and `totalPoints`.
- *
- * The factor is found from the series' span, not by counting up, so it is a
- * good fit rather than provably the smallest. One case cannot be met at all:
- * the grid is aligned to the epoch, so readings either side of a line every
- * width shares stay in two buckets however wide the buckets grow. The search
- * stops once a bucket is wider than the whole timeline to that point and
- * returns what it has -- check `points.length`, not only `maxPoints`.
- */
+Heart-rate samples at a requested resolution.
+
+`raw` returns the samples as they are, in time order. Every other resolution
+puts them on a fixed grid aligned to the epoch and gives each non-empty
+bucket a TIME-WEIGHTED mean: each reading counts for as long as it stood
+(see {@link HR_SAMPLE_HOLD_MAX_MS}), so ten minutes sampled every second and
+fifty sampled every five minutes contribute to an hour in proportion to
+their length, not to their sample counts. `min`, `max` and `n` are over the
+bucket's samples. Empty buckets are absent, not interpolated.
+
+`maxPoints` is the caller's ceiling, never applied unless passed. When the
+result would exceed it, the series is made coarser rather than cut short:
+the grid is widened by a whole factor that fits (and recomputed from the
+samples, so the means stay time-weighted and no reading is dropped); for
+`raw`, consecutive samples are grouped. The result says so in `decimated`,
+`decimation`, `bucketMs` and `totalPoints`.
+
+The factor is found from the series' span, not by counting up, so it is a
+good fit rather than provably the smallest. One case cannot be met at all:
+the grid is aligned to the epoch, so readings either side of a line every
+width shares stay in two buckets however wide the buckets grow. The search
+stops once a bucket is wider than the whole timeline to that point and
+returns what it has -- check `points.length`, not only `maxPoints`.
+*/
 export function resampleHeartRate(
   samples: readonly HrSample[],
   resolution: HrResolution,
@@ -379,32 +379,32 @@ export interface HrEvent {
 }
 
 /**
- * The baseline is this quantile of the quiet minutes in the look-back window.
- * Low, not the median: on the way up a slow climb half the window is already
- * elevated, and a median would follow the climb and never see it as a rise.
- * The tenth percentile is the level the heart rate was resting at without
- * being the single lowest minute.
- */
+The baseline is this quantile of the quiet minutes in the look-back window.
+Low, not the median: on the way up a slow climb half the window is already
+elevated, and a median would follow the climb and never see it as a rise.
+The tenth percentile is the level the heart rate was resting at without
+being the single lowest minute.
+*/
 export const HR_EVENT_BASELINE_QUANTILE = 0.1;
 
 /**
- * A baseline needs this many quiet minutes in its window. Fewer, and one odd
- * minute would set it.
- */
+A baseline needs this many quiet minutes in its window. Fewer, and one odd
+minute would set it.
+*/
 export const HR_EVENT_MIN_BASELINE_MINUTES = 3;
 
 /**
- * Once open, an event lasts while the heart rate stays above this fraction of
- * `minDeltaBpm` over the baseline. Half: a rise that dips for a minute on its
- * way up or down is one event, not two, but one that falls most of the way
- * back is over.
- */
+Once open, an event lasts while the heart rate stays above this fraction of
+`minDeltaBpm` over the baseline. Half: a rise that dips for a minute on its
+way up or down is one event, not two, but one that falls most of the way
+back is over.
+*/
 export const HR_EVENT_HOLD_FRACTION = 0.5;
 
 /**
- * A hole in the minute series longer than this ends an event. Two minutes
- * allows one missing minute; beyond that nothing says the rise continued.
- */
+A hole in the minute series longer than this ends an event. Two minutes
+allows one missing minute; beyond that nothing says the rise continued.
+*/
 export const HR_EVENT_MAX_GAP_MS = 2 * MINUTE_MS;
 
 interface MinuteMean {
@@ -413,10 +413,10 @@ interface MinuteMean {
 }
 
 /**
- * The event that opens at `points[from]`: how far it runs while each minute
- * stays at or above `floor` with no gap too long, its peak, and the index
- * scanning resumes at.
- */
+The event that opens at `points[from]`: how far it runs while each minute
+stays at or above `floor` with no gap too long, its peak, and the index
+scanning resumes at.
+*/
 function elevatedRun(
   points: readonly MinuteMean[],
   from: number,
@@ -435,10 +435,10 @@ function elevatedRun(
 }
 
 /**
- * The quiet minutes of the last `windowMs`, kept in value order as the scan
- * moves on, so the baseline costs a lookup rather than a sort of the window at
- * every minute.
- */
+The quiet minutes of the last `windowMs`, kept in value order as the scan
+moves on, so the baseline costs a lookup rather than a sort of the window at
+every minute.
+*/
 class BaselineWindow {
   private readonly windowMs: number;
   private readonly admitted: MinuteMean[] = [];
@@ -470,31 +470,31 @@ class BaselineWindow {
 }
 
 /**
- * Sustained rises in a per-minute heart-rate series.
- *
- * For each minute in turn, the baseline is the
- * {@link HR_EVENT_BASELINE_QUANTILE} quantile of the QUIET minute means in the
- * `windowS` seconds before it -- quiet meaning not part of an event already
- * opened, whether that event was reported or dropped as too short. (Were the
- * event's own minutes allowed in, the window after a rise would be full of it,
- * and a second rise minutes later would have nothing to rise from.) There
- * must be at least {@link HR_EVENT_MIN_BASELINE_MINUTES} of them, else that
- * minute cannot open an event.
- *
- * A minute whose mean is `minDeltaBpm` or more above its baseline opens an
- * event; the baseline is then frozen, and the event runs on through every
- * following minute that stays above baseline plus
- * {@link HR_EVENT_HOLD_FRACTION} of `minDeltaBpm`, until one does not or the
- * series has a gap longer than {@link HR_EVENT_MAX_GAP_MS}. It is reported
- * when it lasted `sustainS` or longer; a shorter one is dropped, and scanning
- * resumes after it either way.
- *
- * A climb is seen when it gains `minDeltaBpm` within about `windowS`; one
- * slower than that is, by this definition, a drift and not an event.
- *
- * The series is `minuteSeries()` output or stored minute rows through
- * `hrHourToPoints()`; it need not be sorted.
- */
+Sustained rises in a per-minute heart-rate series.
+
+For each minute in turn, the baseline is the
+{@link HR_EVENT_BASELINE_QUANTILE} quantile of the QUIET minute means in the
+`windowS` seconds before it -- quiet meaning not part of an event already
+opened, whether that event was reported or dropped as too short. (Were the
+event's own minutes allowed in, the window after a rise would be full of it,
+and a second rise minutes later would have nothing to rise from.) There
+must be at least {@link HR_EVENT_MIN_BASELINE_MINUTES} of them, else that
+minute cannot open an event.
+
+A minute whose mean is `minDeltaBpm` or more above its baseline opens an
+event; the baseline is then frozen, and the event runs on through every
+following minute that stays above baseline plus
+{@link HR_EVENT_HOLD_FRACTION} of `minDeltaBpm`, until one does not or the
+series has a gap longer than {@link HR_EVENT_MAX_GAP_MS}. It is reported
+when it lasted `sustainS` or longer; a shorter one is dropped, and scanning
+resumes after it either way.
+
+A climb is seen when it gains `minDeltaBpm` within about `windowS`; one
+slower than that is, by this definition, a drift and not an event.
+
+The series is `minuteSeries()` output or stored minute rows through
+`hrHourToPoints()`; it need not be sorted.
+*/
 export function detectHrEvents(
   series: readonly { t: number; mean: number }[],
   options: HrEventOptions,

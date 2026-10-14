@@ -1,18 +1,18 @@
 /**
- * Reading the Health Connect store back: what the MCP tools and the rebuild
- * phase call. Nothing here writes.
- *
- * Every reader takes a half-open window `[startMs, endMs)` in epoch
- * milliseconds and returns everything in it. There is no limit anywhere: a
- * caller that wants fewer rows asks for a narrower window or a coarser table
- * (hour and day rollups exist so that a year is a few hundred rows). Large
- * raw reads are fetched from D1 a page at a time, but all of it is returned.
- *
- * Origins are package names to a caller and blinds in the database. A reader
- * that takes `origins` blinds them on the way in; one that returns rows of a
- * table without a payload naming the app (the rollups) resolves the blind
- * back through `listOrigins`, which opens one chunk per origin.
- */
+Reading the Health Connect store back: what the MCP tools and the rebuild
+phase call. Nothing here writes.
+
+Every reader takes a half-open window `[startMs, endMs)` in epoch
+milliseconds and returns everything in it. There is no limit anywhere: a
+caller that wants fewer rows asks for a narrower window or a coarser table
+(hour and day rollups exist so that a year is a few hundred rows). Large
+raw reads are fetched from D1 a page at a time, but all of it is returned.
+
+Origins are package names to a caller and blinds in the database. A reader
+that takes `origins` blinds them on the way in; one that returns rows of a
+table without a payload naming the app (the rollups) resolves the blind
+back through `listOrigins`, which opens one chunk per origin.
+*/
 
 import { blindHcOrigin, blinderFor } from "../../db/blind.ts";
 import { all, one } from "../../db/client.ts";
@@ -88,29 +88,29 @@ export interface StoredExerciseSession {
 const CHUNK_PAGE = 200;
 
 /**
- * Which making of the rollups this code writes. Raised whenever what a rollup
- * holds changes in a way the rows already stored have to follow:
- *
- *   2  a rollup says which UTC hours its records start in (`hours`), and a
- *      running count's lists the records that run past their hour
- *      (`crossing`): worker/src/hc/rollup/types.ts.
- *
- * It is folded into `tz_digest`, so raising it does to every stored day rollup
- * exactly what a change of the `timezone` setting does, by the same code:
- * rows of an earlier revision are no longer returned by `readDayRollups`,
- * `storeBacklog` reports `rezonePending`, and the runner marks every day of
- * every type, deletes the old rows and rebuilds them, newest first, a budgeted
- * slice at a time (worker/src/hc/store/rebuild.ts, which also writes afresh
- * the hour rollups a day is built from when they are of an earlier making).
- * Nothing has to be run by hand, and the answers are right throughout: while
- * it lasts they are read from hour rollups and say `hc_store_pending`.
- */
+Which making of the rollups this code writes. Raised whenever what a rollup
+holds changes in a way the rows already stored have to follow:
+
+  2  a rollup says which UTC hours its records start in (`hours`), and a
+     running count's lists the records that run past their hour
+     (`crossing`): worker/src/hc/rollup/types.ts.
+
+It is folded into `tz_digest`, so raising it does to every stored day rollup
+exactly what a change of the `timezone` setting does, by the same code:
+rows of an earlier revision are no longer returned by `readDayRollups`,
+`storeBacklog` reports `rezonePending`, and the runner marks every day of
+every type, deletes the old rows and rebuilds them, newest first, a budgeted
+slice at a time (worker/src/hc/store/rebuild.ts, which also writes afresh
+the hour rollups a day is built from when they are of an earlier making).
+Nothing has to be run by hand, and the answers are right throughout: while
+it lasts they are read from hour rollups and say `hc_store_pending`.
+*/
 const ROLLUP_REVISION = 2;
 
 /**
- * The keyed digest that `hc_rollup_day.tz_digest` holds: of the zone a row was
- * built for, and of the revision of the rollups it was built as.
- */
+The keyed digest that `hc_rollup_day.tz_digest` holds: of the zone a row was
+built for, and of the revision of the rollups it was built as.
+*/
 export function tzDigest(ctx: Pick<Ctx, "env">, timeZone: string): Promise<string> {
   return blinderFor(ctx.env).digest(
     "hc_rollup_day.tz_digest",
@@ -142,30 +142,30 @@ function originClause(hashes: readonly string[] | null): { sql: string; values: 
 }
 
 /**
- * Every chunk row one of the two scans matches, in key order, a page at a time.
- */
+Every chunk row one of the two scans matches, in key order, a page at a time.
+*/
 /** The two reads `readRecords` makes: which rows, and through which index. */
 export const WINDOW_SCAN = {
   from: "hc_chunks",
   where: " AND hour_utc >= ? AND hour_utc < ?",
 } as const;
 /**
- * The earlier chunks that reach into a window starting at `startMs`.
- *
- * A record is the half-open interval `[start, end)` and so is a window, so a
- * record of an earlier hour is in the window only if it ends AFTER the window
- * starts: `max_end_ms > startMs`, strictly. One that ends exactly on the
- * window's first instant has nothing in it. (A record with no length is the one
- * instant it sits on, and that instant is in its own hour's chunk, which the
- * window scan reads.) Such a chunk runs past the end of its own hour, and those
- * are exactly what the partial index `hc_chunks_spill` holds; the last
- * comparison repeats the index's predicate so that `INDEXED BY` can name it.
- * Left to choose, the planner walks `hc_chunks_range` through every earlier
- * chunk of the type.
- *
- * `keysFirst`: the rows are found in the index alone and only then looked up
- * in the table (see `chunkScanSql`).
- */
+The earlier chunks that reach into a window starting at `startMs`.
+
+A record is the half-open interval `[start, end)` and so is a window, so a
+record of an earlier hour is in the window only if it ends AFTER the window
+starts: `max_end_ms > startMs`, strictly. One that ends exactly on the
+window's first instant has nothing in it. (A record with no length is the one
+instant it sits on, and that instant is in its own hour's chunk, which the
+window scan reads.) Such a chunk runs past the end of its own hour, and those
+are exactly what the partial index `hc_chunks_spill` holds; the last
+comparison repeats the index's predicate so that `INDEXED BY` can name it.
+Left to choose, the planner walks `hc_chunks_range` through every earlier
+chunk of the type.
+
+`keysFirst`: the rows are found in the index alone and only then looked up
+in the table (see `chunkScanSql`).
+*/
 export const SPILL_SCAN = {
   from: "hc_chunks INDEXED BY hc_chunks_spill",
   where: ` AND hour_utc < ? AND max_end_ms > ? AND max_end_ms > (hour_utc + 1) * ${String(HOUR_MS)}`,
@@ -179,17 +179,17 @@ interface ChunkScan {
 }
 
 /**
- * The statement one page of a chunk scan runs. Exported so its plan can be
- * asserted.
- *
- * A `keysFirst` scan selects the page's primary keys in a subquery, which the
- * index answers by itself (the table is WITHOUT ROWID, so an index entry
- * carries the whole key), and joins the table to them for the payloads. Asked
- * for in one flat SELECT, SQLite fetches the table row of every index entry in
- * range before it tests `hour_utc` -- and the range is every later chunk of the
- * type that runs past its hour, so a read of an old window would open the
- * payload of each of them. Same order, same page, same bound values either way.
- */
+The statement one page of a chunk scan runs. Exported so its plan can be
+asserted.
+
+A `keysFirst` scan selects the page's primary keys in a subquery, which the
+index answers by itself (the table is WITHOUT ROWID, so an index entry
+carries the whole key), and joins the table to them for the payloads. Asked
+for in one flat SELECT, SQLite fetches the table row of every index entry in
+range before it tests `hour_utc` -- and the range is every later chunk of the
+type that runs past its hour, so a read of an old window would open the
+payload of each of them. Same order, same page, same bound values either way.
+*/
 export function chunkScanSql(scan: ChunkScan, extra = ""): string {
   const filter = `WHERE device_id = ? AND record_type = ?${scan.where}${extra}
             ORDER BY hour_utc, origin_hash, part LIMIT ?`;
@@ -235,14 +235,14 @@ async function scanChunks(
 }
 
 /**
- * Every record of one type with anything in the window, by start time.
- *
- * A record lives in the chunk of its start hour however long it runs, so the
- * window is read in two parts: the chunks whose hour is in it, and the earlier
- * chunks whose `max_end_ms` reaches into it (a night of sleep that began the
- * evening before; see `SPILL_SCAN` for exactly where the line is). Only
- * overlapping chunks are opened.
- */
+Every record of one type with anything in the window, by start time.
+
+A record lives in the chunk of its start hour however long it runs, so the
+window is read in two parts: the chunks whose hour is in it, and the earlier
+chunks whose `max_end_ms` reaches into it (a night of sleep that began the
+evening before; see `SPILL_SCAN` for exactly where the line is). Only
+overlapping chunks are opened.
+*/
 export async function readRecords(ctx: Ctx, window: RecordWindow): Promise<HcRecord[]> {
   const { deviceId, type, startMs, endMs } = window;
   if (endMs <= startMs) return [];
@@ -265,10 +265,10 @@ export async function readRecords(ctx: Ctx, window: RecordWindow): Promise<HcRec
 }
 
 /**
- * The origin apps that have written records of one type, with their package
- * names -- which exist only inside sealed payloads, so one chunk per origin is
- * opened to read them.
- */
+The origin apps that have written records of one type, with their package
+names -- which exist only inside sealed payloads, so one chunk per origin is
+opened to read them.
+*/
 export async function listOrigins(ctx: Ctx, deviceId: string, type: string): Promise<OriginRef[]> {
   // Part 0 only: a chunk's continuation rows are not more chunks.
   const firsts = await all<{ origin_hash: string; hour_utc: number }>(
@@ -357,13 +357,13 @@ export interface DayWindow {
 }
 
 /**
- * The day rollups of one type for the days asked for, in the configured zone.
- *
- * Only rows built for the zone now configured are returned. After the
- * `timezone` setting changes, every day is rebuilt; until the runner has got
- * to a day it is absent here rather than answered for the old zone, and
- * `storeBacklog` says there is still work outstanding.
- */
+The day rollups of one type for the days asked for, in the configured zone.
+
+Only rows built for the zone now configured are returned. After the
+`timezone` setting changes, every day is rebuilt; until the runner has got
+to a day it is absent here rather than answered for the old zone, and
+`storeBacklog` says there is still work outstanding.
+*/
 export async function readDayRollups(ctx: Ctx, window: DayWindow): Promise<DayRollupRow[]> {
   const { deviceId, type } = window;
   const origin = originClause(await originHashes(ctx, deviceId, window.origins));
@@ -429,10 +429,10 @@ async function hrHours(
 }
 
 /**
- * Heart rate at one-minute resolution: the rows of every UTC hour the window
- * touches, whole. A caller that wants only the window's own minutes filters
- * on `hourUtc * 3_600_000 + m * 60_000`.
- */
+Heart rate at one-minute resolution: the rows of every UTC hour the window
+touches, whole. A caller that wants only the window's own minutes filters
+on `hourUtc * 3_600_000 + m * 60_000`.
+*/
 export async function readHrMinutes(
   ctx: Ctx,
   window: Omit<RecordWindow, "type">,
@@ -457,15 +457,15 @@ export async function readHrMinutes(
 }
 
 /**
- * One heart-rate point per minute in `[startMs, endMs]`, for joining to a
- * night or a session: the minute means of the session's own origin when it
- * measured heart rate there, and of every origin otherwise. Mixing a watch's
- * minutes with a second device's would count the overlap twice.
- *
- * Each point carries its minute's lowest and highest sample and how many
- * samples there were, so that what a summary calls the session's `min`, `max`
- * and `n` are the samples' and not the minute means'.
- */
+One heart-rate point per minute in `[startMs, endMs]`, for joining to a
+night or a session: the minute means of the session's own origin when it
+measured heart rate there, and of every origin otherwise. Mixing a watch's
+minutes with a second device's would count the overlap twice.
+
+Each point carries its minute's lowest and highest sample and how many
+samples there were, so that what a summary calls the session's `min`, `max`
+and `n` are the samples' and not the minute means'.
+*/
 export async function readHrPoints(
   ctx: Ctx,
   deviceId: string,
@@ -540,30 +540,30 @@ export interface StoreBacklog {
   /** Batches accepted and waiting to be applied. */
   queuedBatches: number;
   /**
-   * Batches that could not be applied and are set aside, body kept. Their
-   * records are not in the store, so a non-zero count means data is missing
-   * until they are queued again.
-   */
+  Batches that could not be applied and are set aside, body kept. Their
+  records are not in the store, so a non-zero count means data is missing
+  until they are queued again.
+  */
   parkedBatches: number;
   /** Rollups and summaries marked for rebuilding and not yet rebuilt. */
   dirty: number;
   /**
-   * Marks set aside because what they have to be rebuilt from will not open.
-   * Their rollup or summary is missing or out of date until that is fixed.
-   */
+  Marks set aside because what they have to be rebuilt from will not open.
+  Their rollup or summary is missing or out of date until that is fixed.
+  */
   parkedMarks: number;
   /**
-   * True when day rollups built for another zone are still there: the
-   * `timezone` setting changed and the runner has not been round yet, so
-   * `readDayRollups` is answering with fewer days than there are.
-   */
+  True when day rollups built for another zone are still there: the
+  `timezone` setting changed and the runner has not been round yet, so
+  `readDayRollups` is answering with fewer days than there are.
+  */
   rezonePending: boolean;
 }
 
 /**
- * What a device still has outstanding. Anything non-zero or true means an
- * answer from the rollups or the summaries may not include everything yet.
- */
+What a device still has outstanding. Anything non-zero or true means an
+answer from the rollups or the summaries may not include everything yet.
+*/
 export async function storeBacklog(ctx: Ctx, deviceId: string): Promise<StoreBacklog> {
   const digest = await tzDigest(ctx, await getTimezone(ctx));
   const row = await one<{

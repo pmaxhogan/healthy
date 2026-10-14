@@ -65,10 +65,10 @@ interface Recorded {
 }
 
 /**
- * The real engine's readers, and starters that only write down what they were
- * asked for. The readers are real on purpose: `busy()` on the runners and the
- * sign-in phase are part of what is under test.
- */
+The real engine's readers, and starters that only write down what they were
+asked for. The readers are real on purpose: `busy()` on the runners and the
+sign-in phase are part of what is under test.
+*/
 function recordingEngine(recorded: Recorded): SyncEngine {
   return {
     calendarSyncBusy,
@@ -519,10 +519,10 @@ describe("the patient portal", () => {
 });
 
 /**
- * One health system with no connection and no portal, and a client over the
- * real engine. Every kind is skipped for it before the engine is asked for
- * anything, which is what makes it safe to run with nothing stood in for.
- */
+One health system with no connection and no portal, and a client over the
+real engine. Every kind is skipped for it before the engine is asked for
+anything, which is what makes it safe to run with nothing stood in for.
+*/
 async function unconnected(): Promise<{ id: string; client: Client }> {
   await resetDb();
   const created = await repos().healthSystems.create({

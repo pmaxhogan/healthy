@@ -1,25 +1,25 @@
 /**
- * The plumbing every /api route shares: a request context, body parsing, and the
- * one error handler.
- *
- * ### What the error handler will and will not say
- *
- * `worker/src/app.ts` answers an `AppError` with its code and nothing else, because
- * an upstream failure's message can quote an upstream response body -- and an
- * upstream response here can carry patient detail. That is the right default for
- * the whole app.
- *
- * The admin API can afford slightly more, and needs it: the caller is the owner,
- * and "bad_request" with no indication of which field is a bad API. So the rule
- * here is drawn by status, not by taste:
- *
- *  - **4xx**: the message and details are the app's own, written in this
- *    repository, describing the request. They are returned.
- *  - **5xx** (`upstream_*`, `internal`, `crypto`): the code only. Those messages
- *    are built from upstream responses.
- *
- * A stack trace is never returned, at any status.
- */
+The plumbing every /api route shares: a request context, body parsing, and the
+one error handler.
+
+### What the error handler will and will not say
+
+`worker/src/app.ts` answers an `AppError` with its code and nothing else, because
+an upstream failure's message can quote an upstream response body -- and an
+upstream response here can carry patient detail. That is the right default for
+the whole app.
+
+The admin API can afford slightly more, and needs it: the caller is the owner,
+and "bad_request" with no indication of which field is a bad API. So the rule
+here is drawn by status, not by taste:
+
+ - **4xx**: the message and details are the app's own, written in this
+   repository, describing the request. They are returned.
+ - **5xx** (`upstream_*`, `internal`, `crypto`): the code only. Those messages
+   are built from upstream responses.
+
+A stack trace is never returned, at any status.
+*/
 
 import { z } from "zod";
 
@@ -54,14 +54,14 @@ export function apiContext(c: Context<AppHonoEnv>): ApiContext {
 }
 
 /**
- * Let a promise finish after the response has been sent.
- *
- * The `catch` is not optional. An unhandled rejection passed to `waitUntil` fails
- * the whole invocation -- and in the integration tests it fails
- * `waitOnExecutionContext`, turning a background sync error into an unrelated test
- * failure. A background job's errors belong in the run log and the alert, which is
- * the sync engine's job; here they are logged by code and dropped.
- */
+Let a promise finish after the response has been sent.
+
+The `catch` is not optional. An unhandled rejection passed to `waitUntil` fails
+the whole invocation -- and in the integration tests it fails
+`waitOnExecutionContext`, turning a background sync error into an unrelated test
+failure. A background job's errors belong in the run log and the alert, which is
+the sync engine's job; here they are logged by code and dropped.
+*/
 export function afterResponse(
   c: Context<AppHonoEnv>,
   event: string,
@@ -85,15 +85,15 @@ export function afterResponse(
 }
 
 /**
- * zod issues, reduced to paths and codes. The offending value never travels.
- *
- * A `custom` issue is the one exception to "code only": its message is a
- * `.refine(..., { error: "..." })` string written in `worker/src/api/schemas.ts`,
- * not anything derived from the request, and "allowlist.1: custom" tells the
- * owner nothing a sentence like "must be a domain with at least two labels"
- * does not. zod's built-in messages stay out, because not every one of them is
- * guaranteed value-free.
- */
+zod issues, reduced to paths and codes. The offending value never travels.
+
+A `custom` issue is the one exception to "code only": its message is a
+`.refine(..., { error: "..." })` string written in `worker/src/api/schemas.ts`,
+not anything derived from the request, and "allowlist.1: custom" tells the
+owner nothing a sentence like "must be a domain with at least two labels"
+does not. zod's built-in messages stay out, because not every one of them is
+guaranteed value-free.
+*/
 function issuesOf(error: z.ZodError): { issues: string[] } {
   return {
     issues: error.issues.map(
@@ -103,11 +103,11 @@ function issuesOf(error: z.ZodError): { issues: string[] } {
 }
 
 /**
- * Parse and validate a JSON request body.
- *
- * A body that is not JSON at all is a 400 like any other bad request -- Hono's
- * `c.req.json()` throws a `SyntaxError`, which would otherwise surface as a 500.
- */
+Parse and validate a JSON request body.
+
+A body that is not JSON at all is a 400 like any other bad request -- Hono's
+`c.req.json()` throws a `SyntaxError`, which would otherwise surface as a 500.
+*/
 export async function readJson<T>(c: Context<AppHonoEnv>, schema: z.ZodType<T>): Promise<T> {
   let body: unknown;
   try {
@@ -123,12 +123,12 @@ export async function readJson<T>(c: Context<AppHonoEnv>, schema: z.ZodType<T>):
 }
 
 /**
- * Like `readJson`, but an empty body validates as `{}`.
- *
- * For the routes whose body is entirely optional -- "sync everything" is a POST
- * with nothing to say -- where requiring `{}` would be a trap for anyone driving
- * the API with curl.
- */
+Like `readJson`, but an empty body validates as `{}`.
+
+For the routes whose body is entirely optional -- "sync everything" is a POST
+with nothing to say -- where requiring `{}` would be a trap for anyone driving
+the API with curl.
+*/
 export async function readOptionalJson<T>(
   c: Context<AppHonoEnv>,
   schema: z.ZodType<T>,
@@ -191,11 +191,11 @@ function errorBody(error: unknown): { body: ApiError; status: ContentfulStatusCo
 }
 
 /**
- * The /api error handler.
- *
- * Registered on the sub-app so that the richer 4xx body above applies to /api and
- * only to /api; `app.ts`'s handler stays the last resort for everything else.
- */
+The /api error handler.
+
+Registered on the sub-app so that the richer 4xx body above applies to /api and
+only to /api; `app.ts`'s handler stays the last resort for everything else.
+*/
 export function apiErrorHandler(error: Error, c: Context<AppHonoEnv>): Response {
   const { body, status } = errorBody(error);
   // The code, never the message: the message is what may quote an upstream body,

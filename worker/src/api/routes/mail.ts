@@ -1,11 +1,11 @@
 /**
- * `/api/mail` -- the admin view of `mail_inbox`: recent entries, the sender
- * allowlist, and a way to prove the path works without waiting for a real
- * email.
- *
- * Everything here reads or writes through the repo and `dto.ts`; no route
- * handler ever touches `code_enc` or opens a sealed column directly.
- */
+`/api/mail` -- the admin view of `mail_inbox`: recent entries, the sender
+allowlist, and a way to prove the path works without waiting for a real
+email.
+
+Everything here reads or writes through the repo and `dto.ts`; no route
+handler ever touches `code_enc` or opens a sealed column directly.
+*/
 
 import { Hono } from "hono";
 
@@ -49,13 +49,13 @@ mailRouter.put("/settings", async (c) => {
 });
 
 /**
- * Insert a synthetic 'other' row to prove the inbox path end to end.
- *
- * No email is sent and nothing is parsed: this exercises the same repo and
- * DTO the real `email()` handler uses, without needing a real message to
- * arrive. The sender is a reserved documentation domain (RFC 2606), never a
- * real address.
- */
+Insert a synthetic 'other' row to prove the inbox path end to end.
+
+No email is sent and nothing is parsed: this exercises the same repo and
+DTO the real `email()` handler uses, without needing a real message to
+arrive. The sender is a reserved documentation domain (RFC 2606), never a
+real address.
+*/
 mailRouter.post("/test", async (c) => {
   const api = apiContext(c);
   const entry = await api.repos.mailInbox.insert({

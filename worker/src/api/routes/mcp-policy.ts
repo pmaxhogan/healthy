@@ -1,26 +1,26 @@
 /**
- * `/api/mcp/policy` -- the exposure rules, the field tree they are built from,
- * and the two windows onto real data the rule builder uses.
- *
- * ### The sharp end
- *
- * `mcp_policy` is allow-all with a deny-list, enforced at one server-side choke
- * point before serialisation. These routes are the only way rules get in and
- * out, so a rule that is accepted here and never read there is a rule the owner
- * believes is protecting them. That is why a `field` rule is checked before it
- * is stored (`checkFieldSpec`): a path that names nothing in the rule's scope,
- * a tool that does not exist, a health system that does not exist -- each is a
- * 400 whose message says what is wrong, never a row that quietly does nothing.
- * Adding the same rule twice is a no-op that returns the existing row.
- *
- * ### Real data, owner's eyes only
- *
- * `POST /structure` and `POST /preview` run a real tool over the owner's cached
- * record (`worker/src/mcp/policy-sample.ts`). They are POSTs so the CSRF guard
- * covers them like every other route that does work; what they answer goes
- * only to the admin UI behind Access and the password session, and nothing of
- * it is logged or audited.
- */
+`/api/mcp/policy` -- the exposure rules, the field tree they are built from,
+and the two windows onto real data the rule builder uses.
+
+### The sharp end
+
+`mcp_policy` is allow-all with a deny-list, enforced at one server-side choke
+point before serialisation. These routes are the only way rules get in and
+out, so a rule that is accepted here and never read there is a rule the owner
+believes is protecting them. That is why a `field` rule is checked before it
+is stored (`checkFieldSpec`): a path that names nothing in the rule's scope,
+a tool that does not exist, a health system that does not exist -- each is a
+400 whose message says what is wrong, never a row that quietly does nothing.
+Adding the same rule twice is a no-op that returns the existing row.
+
+### Real data, owner's eyes only
+
+`POST /structure` and `POST /preview` run a real tool over the owner's cached
+record (`worker/src/mcp/policy-sample.ts`). They are POSTs so the CSRF guard
+covers them like every other route that does work; what they answer goes
+only to the admin UI behind Access and the password session, and nothing of
+it is logged or audited.
+*/
 
 import { Hono } from "hono";
 
@@ -90,10 +90,10 @@ async function reportedPhoneTypes(api: ApiContext): Promise<Set<string>> {
 }
 
 /**
- * Refuse an `hc:` type that no row is tagged as -- a typo, the wrong case, an
- * aggregate -- with a 400 that says what the right spelling is. Anything that
- * is not a Health Connect type passes: FHIR types are not this check's business.
- */
+Refuse an `hc:` type that no row is tagged as -- a typo, the wrong case, an
+aggregate -- with a 400 that says what the right spelling is. Anything that
+is not a Health Connect type passes: FHIR types are not this check's business.
+*/
 async function requireKnownPhoneType(api: ApiContext, target: string | null): Promise<void> {
   if (!target?.toLowerCase().startsWith("hc:")) return;
   const problem = checkPhoneType(target, await reportedPhoneTypes(api));
@@ -215,11 +215,11 @@ mcpPolicyRouter.post("/structure", async (c) => {
 });
 
 /**
- * A draft `field` rule run over the real answer of every tool its scope can
- * reach (or of `tool`, when given), in one request: per-tool counts and the
- * first changed item. Doubles as live validation: a draft that would be
- * refused on save is refused here with the same sentence.
- */
+A draft `field` rule run over the real answer of every tool its scope can
+reach (or of `tool`, when given), in one request: per-tool counts and the
+first changed item. Doubles as live validation: a draft that would be
+refused on save is refused here with the same sentence.
+*/
 mcpPolicyRouter.post("/preview", async (c) => {
   const api = apiContext(c);
   const body = await readJson(c, policyPreviewSchema);

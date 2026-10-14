@@ -37,7 +37,7 @@ export type {
 } from "./types.ts";
 export { mapResolver } from "./refs.ts";
 /** Every resource type this module has a dedicated normalizer for. Anything
- * else falls back to the generic shape in {@link normalizeResource}. */
+else falls back to the generic shape in {@link normalizeResource}. */
 export const NORMALIZED_TYPES = [
   "Encounter",
   "Condition",
@@ -77,11 +77,11 @@ function normalizeGeneric(resource: fhir4.FhirResource, ctx: NormalizeCtx): Norm
 }
 
 /**
- * Dispatches on `resource.resourceType` to the matching `normalizeX`
- * function. A resource type with no dedicated normalizer (or a type not on
- * {@link NORMALIZED_TYPES}) falls back to a generic `{resourceType, id,
- * health system, text?}` shape, `text` being the resource's narrative if present.
- */
+Dispatches on `resource.resourceType` to the matching `normalizeX`
+function. A resource type with no dedicated normalizer (or a type not on
+{@link NORMALIZED_TYPES}) falls back to a generic `{resourceType, id,
+health system, text?}` shape, `text` being the resource's narrative if present.
+*/
 
 export function normalizeResource(
   resource: fhir4.FhirResource,
@@ -158,13 +158,13 @@ export function normalizeResource(
 }
 
 /**
- * The calendar-facing projection of a normalized Encounter. Picks the primary
- * practitioner as the first entry of `encounter.practitioners` -- Epic's
- * primary-performer/attending participant, when present, is already sorted
- * there by {@link normalizeEncounter}. `end` is left `undefined` when the
- * source Encounter had none; the calendar sync's own default-duration rule
- * applies later, not here.
- */
+The calendar-facing projection of a normalized Encounter. Picks the primary
+practitioner as the first entry of `encounter.practitioners` -- Epic's
+primary-performer/attending participant, when present, is already sorted
+there by {@link normalizeEncounter}. `end` is left `undefined` when the
+source Encounter had none; the calendar sync's own default-duration rule
+applies later, not here.
+*/
 export function appointmentViewFromEncounter(
   encounter: NormalizedEncounter,
   ctx: NormalizeCtx,

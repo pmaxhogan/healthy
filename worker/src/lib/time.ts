@@ -1,17 +1,17 @@
 /**
- * Time helpers.
- *
- * Two representations, and only two, so nothing has to guess:
- *   - a **unix second** integer, which is what every D1 timestamp column holds
- *   - an **ISO-8601 instant string** in UTC (`...Z`), which is what FHIR, the
- *     Google Calendar API and the JSON logs speak
- *
- * Milliseconds appear only inside this module and in `ttlMs` arguments.
- *
- * The display timezone is a `settings` row, never a constant here: a default
- * baked into source would leak where the owner lives. Every function that
- * formats for a human therefore takes the zone as an argument.
- */
+Time helpers.
+
+Two representations, and only two, so nothing has to guess:
+  - a **unix second** integer, which is what every D1 timestamp column holds
+  - an **ISO-8601 instant string** in UTC (`...Z`), which is what FHIR, the
+    Google Calendar API and the JSON logs speak
+
+Milliseconds appear only inside this module and in `ttlMs` arguments.
+
+The display timezone is a `settings` row, never a constant here: a default
+baked into source would leak where the owner lives. Every function that
+formats for a human therefore takes the zone as an argument.
+*/
 
 import { AppError } from "./errors.ts";
 
@@ -37,11 +37,11 @@ export function toIso(unixSeconds: number): string {
 }
 
 /**
- * An ISO-8601 instant as an integer unix second, truncated towards the past.
- *
- * Throws rather than returning NaN: an unparseable upstream date must fail the
- * resource it came from, not silently become 1970.
- */
+An ISO-8601 instant as an integer unix second, truncated towards the past.
+
+Throws rather than returning NaN: an unparseable upstream date must fail the
+resource it came from, not silently become 1970.
+*/
 export function fromIso(iso: string): number {
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) throw new AppError("bad_request", "unparseable ISO-8601 instant");
@@ -115,14 +115,14 @@ function zoneOffsetMs(ms: number, timeZone: string): number {
 }
 
 /**
- * The instant at which the local calendar day containing `iso` began in
- * `timeZone`, as an ISO-8601 UTC instant.
- *
- * Two passes: the first converts the local midnight using the offset in force
- * at `iso`, the second re-reads the offset at that candidate. That is what makes
- * the answer right on a day whose offset changed after midnight (a DST
- * transition), where a single-pass conversion is an hour out.
- */
+The instant at which the local calendar day containing `iso` began in
+`timeZone`, as an ISO-8601 UTC instant.
+
+Two passes: the first converts the local midnight using the offset in force
+at `iso`, the second re-reads the offset at that candidate. That is what makes
+the answer right on a day whose offset changed after midnight (a DST
+transition), where a single-pass conversion is an hour out.
+*/
 export function startOfDayInZone(iso: string, timeZone: string): string {
   const ms = fromIso(iso) * 1000;
   const local = zonedParts(ms, timeZone);
@@ -133,12 +133,12 @@ export function startOfDayInZone(iso: string, timeZone: string): string {
 }
 
 /**
- * The local calendar date of `iso` in `timeZone` as `YYYY-MM-DD`.
- *
- * This is the form FHIR search date parameters take (`date=ge2026-01-01`), and
- * it has to be computed in the owner's zone or the window is a day out for
- * anyone east or west of UTC.
- */
+The local calendar date of `iso` in `timeZone` as `YYYY-MM-DD`.
+
+This is the form FHIR search date parameters take (`date=ge2026-01-01`), and
+it has to be computed in the owner's zone or the window is a day out for
+anyone east or west of UTC.
+*/
 export function dateInZone(iso: string, timeZone: string): string {
   const p = zonedParts(fromIso(iso) * 1000, timeZone);
   const pad = (value: number): string => String(value).padStart(2, "0");
@@ -146,18 +146,18 @@ export function dateInZone(iso: string, timeZone: string): string {
 }
 
 /**
- * An instant as an ISO-8601 string carrying `timeZone`'s own UTC offset, e.g.
- * `2026-09-29T14:30:00-05:00`.
- *
- * `toIso` is the right answer almost everywhere in this project, and this is the
- * exception: a patient portal reports a clinic-local wall-clock time plus the
- * clinic's IANA zone, and a calendar event wants to keep that local reading
- * rather than be rewritten into UTC. Offset rather than a bare local time
- * because the string has to stay unambiguous on its own.
- *
- * The offset is read at the given instant, so a booking either side of a DST
- * transition gets the offset actually in force then.
- */
+An instant as an ISO-8601 string carrying `timeZone`'s own UTC offset, e.g.
+`2026-09-29T14:30:00-05:00`.
+
+`toIso` is the right answer almost everywhere in this project, and this is the
+exception: a patient portal reports a clinic-local wall-clock time plus the
+clinic's IANA zone, and a calendar event wants to keep that local reading
+rather than be rewritten into UTC. Offset rather than a bare local time
+because the string has to stay unambiguous on its own.
+
+The offset is read at the given instant, so a booking either side of a DST
+transition gets the offset actually in force then.
+*/
 export function toIsoInZone(unixSeconds: number, timeZone: string): string {
   if (!Number.isFinite(unixSeconds)) {
     throw new AppError("bad_request", "not a finite unix timestamp");
@@ -176,12 +176,12 @@ export function toIsoInZone(unixSeconds: number, timeZone: string): string {
 const DEFAULT_FORMAT: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeStyle: "short" };
 
 /**
- * Format an instant for a human, in an explicit zone.
- *
- * Defaults to a short date-and-time, which is what a ghost event's "no longer on
- * the schedule as of" line and the admin UI both want. The locale is fixed to en-US so the output
- * does not change with whatever locale the Worker isolate happens to report.
- */
+Format an instant for a human, in an explicit zone.
+
+Defaults to a short date-and-time, which is what a ghost event's "no longer on
+the schedule as of" line and the admin UI both want. The locale is fixed to en-US so the output
+does not change with whatever locale the Worker isolate happens to report.
+*/
 export function formatInZone(
   iso: string,
   timeZone: string,

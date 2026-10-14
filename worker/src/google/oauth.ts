@@ -39,14 +39,14 @@ const FORM_CONTENT_TYPE = "application/x-www-form-urlencoded";
 const TOKEN_TIMEOUT_MS = 20_000;
 
 /**
- * The only two scopes the sync needs.
- *
- * `calendar.events.owned` writes events this app created and nothing else -- it
- * cannot read or modify events created by the owner or by another app, which is
- * a far better fit for the "touch only our own events" invariant than the broad
- * `calendar` scope. `calendar.calendarlist.readonly` is needed to offer the
- * calendar picker and to resolve `primary`.
- */
+The only two scopes the sync needs.
+
+`calendar.events.owned` writes events this app created and nothing else -- it
+cannot read or modify events created by the owner or by another app, which is
+a far better fit for the "touch only our own events" invariant than the broad
+`calendar` scope. `calendar.calendarlist.readonly` is needed to offer the
+calendar picker and to resolve `primary`.
+*/
 export const GOOGLE_CALENDAR_SCOPES: readonly string[] = [
   "https://www.googleapis.com/auth/calendar.events.owned",
   "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
@@ -108,20 +108,20 @@ function parseOAuthError(body: string): string | null {
 }
 
 /**
- * Map a failed token-endpoint response onto the app's error taxonomy.
- *
- * `invalid_grant` on a 400 means "the grant you presented is no good", and what
- * that implies depends entirely on which grant it was -- which is why the caller
- * names the code rather than this function guessing:
- *
- *   - on a **refresh**, the refresh token has been revoked or has expired. That
- *     is `needs_reauth`: the caller marks the connection and opens a reconnect
- *     alert instead of retrying forever.
- *   - on a **code exchange**, the authorization code expired or was already
- *     redeemed. That is `bad_request` on a connection that may never have had a
- *     token at all, and mapping it to `needs_reauth` would make a first-time
- *     connect attempt open a spurious reconnect alert.
- */
+Map a failed token-endpoint response onto the app's error taxonomy.
+
+`invalid_grant` on a 400 means "the grant you presented is no good", and what
+that implies depends entirely on which grant it was -- which is why the caller
+names the code rather than this function guessing:
+
+  - on a **refresh**, the refresh token has been revoked or has expired. That
+    is `needs_reauth`: the caller marks the connection and opens a reconnect
+    alert instead of retrying forever.
+  - on a **code exchange**, the authorization code expired or was already
+    redeemed. That is `bad_request` on a connection that may never have had a
+    token at all, and mapping it to `needs_reauth` would make a first-time
+    connect attempt open a spurious reconnect alert.
+*/
 function tokenFailure(
   response: Response,
   body: string,

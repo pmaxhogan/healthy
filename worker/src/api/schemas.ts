@@ -1,14 +1,14 @@
 /**
- * Request-body and query schemas for the admin API.
- *
- * Every schema is strict: an unknown key is a rejected request, not a silently
- * dropped one. The admin UI and the Worker ship together, so a key the Worker does
- * not know is a bug in one of them and saying so is cheaper than debugging a
- * setting that appeared to save and did not.
- *
- * Kept free of Worker runtime types and of the db layer, so the unit tests can
- * import it directly.
- */
+Request-body and query schemas for the admin API.
+
+Every schema is strict: an unknown key is a rejected request, not a silently
+dropped one. The admin UI and the Worker ship together, so a key the Worker does
+not know is a bug in one of them and saying so is cheaper than debugging a
+setting that appeared to save and did not.
+
+Kept free of Worker runtime types and of the db layer, so the unit tests can
+import it directly.
+*/
 
 import { z } from "zod";
 
@@ -34,17 +34,17 @@ export { isHttpsUrl } from "@shared/url.ts";
 const OFFSET_ZONE = /^[+-]/;
 
 /**
- * Whether a string names an IANA time zone.
- *
- * `Intl.supportedValuesOf("timeZone")` is the exact answer where it exists, but it
- * lists canonical names only -- a legitimate alias (`US/Central`) is absent from
- * it -- so a miss falls through to the constructor, which accepts aliases and
- * throws a RangeError on anything it does not know.
- *
- * Fixed offsets are refused outright. `+05:00` would format, but it does not
- * follow daylight saving, and the sync's local-day window would be an hour wrong
- * for half the year.
- */
+Whether a string names an IANA time zone.
+
+`Intl.supportedValuesOf("timeZone")` is the exact answer where it exists, but it
+lists canonical names only -- a legitimate alias (`US/Central`) is absent from
+it -- so a miss falls through to the constructor, which accepts aliases and
+throws a RangeError on anything it does not know.
+
+Fixed offsets are refused outright. `+05:00` would format, but it does not
+follow daylight saving, and the sync's local-day window would be an hour wrong
+for half the year.
+*/
 export function isValidTimezone(zone: string): boolean {
   if (zone === "" || OFFSET_ZONE.test(zone)) return false;
   const supported: ((key: "timeZone") => string[]) | undefined = Intl.supportedValuesOf;
@@ -68,31 +68,31 @@ const timezone = z
   .refine(isValidTimezone, { error: "must be an IANA time zone" });
 
 /**
- * A sender domain: at least two labels, and nothing but a domain.
- *
- * Validated rather than free text because the matching rule is anchored now
- * (`domainAllowed` in `worker/src/mail/classify.ts`), and a stored entry that is not
- * domain-shaped is one nothing will ever match -- a silent "no mail is ever
- * accepted" rather than a rejected save. It also closes the older failure in the
- * other direction: with containment matching, a one-character entry like `"e"`
- * allowlisted most of the internet, silently.
- *
- * Case-insensitive: entries are lower-cased on the way to storage, by
- * `formatAllowlistCsv`.
- */
+A sender domain: at least two labels, and nothing but a domain.
+
+Validated rather than free text because the matching rule is anchored now
+(`domainAllowed` in `worker/src/mail/classify.ts`), and a stored entry that is not
+domain-shaped is one nothing will ever match -- a silent "no mail is ever
+accepted" rather than a rejected save. It also closes the older failure in the
+other direction: with containment matching, a one-character entry like `"e"`
+allowlisted most of the internet, silently.
+
+Case-insensitive: entries are lower-cased on the way to storage, by
+`formatAllowlistCsv`.
+*/
 const DOMAIN_LABEL = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i;
 const MAX_DOMAIN_CHARS = 253;
 const MAX_LABEL_CHARS = 63;
 
 /**
- * Whether `value`, trimmed, is a domain with at least two labels.
- *
- * Split-then-check-each-label rather than one regex for the whole domain: the
- * obvious single pattern nests a quantified label group inside a quantified
- * `(\.label)+`, which is exactly the shape that backtracks super-linearly on a
- * near-miss. `DOMAIN_LABEL` has one unnested `*` between two anchors, so it is
- * linear in the label, and the label count is bounded by the length cap above.
- */
+Whether `value`, trimmed, is a domain with at least two labels.
+
+Split-then-check-each-label rather than one regex for the whole domain: the
+obvious single pattern nests a quantified label group inside a quantified
+`(\.label)+`, which is exactly the shape that backtracks super-linearly on a
+near-miss. `DOMAIN_LABEL` has one unnested `*` between two anchors, so it is
+linear in the label, and the label count is bounded by the length cap above.
+*/
 function isSenderDomain(value: string): boolean {
   const entry = value.trim();
   if (entry.length === 0 || entry.length > MAX_DOMAIN_CHARS) return false;
@@ -133,12 +133,12 @@ const healthSystemConfigSchema = z.strictObject({
 });
 
 /**
- * `POST /api/health-systems`.
- *
- * Either a `brandId` from `/api/brands` or a manual `fhirBaseUrl`; the handler
- * requires exactly one, because "both" would leave it guessing which the owner
- * meant when they disagree.
- */
+`POST /api/health-systems`.
+
+Either a `brandId` from `/api/brands` or a manual `fhirBaseUrl`; the handler
+requires exactly one, because "both" would leave it guessing which the owner
+meant when they disagree.
+*/
 export const healthSystemCreateSchema = z.strictObject({
   vendor: vendorSchema.optional(),
   displayName: shortText,
@@ -151,11 +151,11 @@ export const healthSystemCreateSchema = z.strictObject({
 });
 
 /**
- * `PATCH /api/health-systems/:id`.
- *
- * `vendor` and `fhirBaseUrl` are accepted, but the handler refuses them while the
- * health system has a live connection.
- */
+`PATCH /api/health-systems/:id`.
+
+`vendor` and `fhirBaseUrl` are accepted, but the handler refuses them while the
+health system has a live connection.
+*/
 export const updateHealthSystemSchema = z.strictObject({
   vendor: vendorSchema.optional(),
   fhirBaseUrl: httpsUrl.optional(),
@@ -165,22 +165,22 @@ export const updateHealthSystemSchema = z.strictObject({
 });
 
 /**
- * `POST /api/health-systems/:id/secret`.
- *
- * Annotated with the shared request DTO rather than just inferring: that is what
- * makes a change to `SetHealthSystemSecretRequest` a compile error here instead of a
- * schema that quietly stops matching what the SPA sends.
- */
+`POST /api/health-systems/:id/secret`.
+
+Annotated with the shared request DTO rather than just inferring: that is what
+makes a change to `SetHealthSystemSecretRequest` a compile error here instead of a
+schema that quietly stops matching what the SPA sends.
+*/
 export const healthSystemSecretSchema: z.ZodType<SetHealthSystemSecretRequest> = z.strictObject({
   clientSecret: z.string().min(1).max(1000),
 });
 
 /**
- * `PUT /api/settings`.
- *
- * `syncBackoffUntil` is accepted so the SPA can round-trip the DTO it was given,
- * and is then ignored -- see `fromSettingsPatch`.
- */
+`PUT /api/settings`.
+
+`syncBackoffUntil` is accepted so the SPA can round-trip the DTO it was given,
+and is then ignored -- see `fromSettingsPatch`.
+*/
 export const settingsPatchSchema = z.strictObject({
   timezone: timezone.nullable().optional(),
   calendarId: shortText.optional(),
@@ -195,10 +195,10 @@ export const settingsPatchSchema = z.strictObject({
 });
 
 /**
- * A structured `field` rule. The shape only: whether the paths name anything,
- * and whether the tool and health system exist, is `checkFieldSpec`'s job
- * (`worker/src/policy/validate.ts`), which can say why in a sentence.
- */
+A structured `field` rule. The shape only: whether the paths name anything,
+and whether the tool and health system exist, is `checkFieldSpec`'s job
+(`worker/src/policy/validate.ts`), which can say why in a sentence.
+*/
 const fieldRuleSpecSchema = z.strictObject({
   effect: z.enum(["hide", "allow"]),
   tool: z.string().max(100).nullable(),
@@ -248,14 +248,14 @@ export const policyPreviewSchema = z.strictObject({
 });
 
 /**
- * `POST /api/mcp/tools/:name/call`.
- *
- * Not strict, and not shaped to any one tool: the real shape is a different zod
- * object per tool, enforced by the MCP server itself when the call reaches it
- * (`worker/src/mcp/admin-call.ts`). All this schema does is what the JSON body has to
- * be before that check is even possible -- a plain object, not an array, a string
- * or a bare number.
- */
+`POST /api/mcp/tools/:name/call`.
+
+Not strict, and not shaped to any one tool: the real shape is a different zod
+object per tool, enforced by the MCP server itself when the call reaches it
+(`worker/src/mcp/admin-call.ts`). All this schema does is what the JSON body has to
+be before that check is even possible -- a plain object, not an array, a string
+or a bare number.
+*/
 export const mcpToolCallArgsSchema = z.record(z.string(), z.unknown());
 
 /** `POST /api/sync/run` and `POST /api/health-systems/:id/full-refresh`. */
@@ -269,17 +269,17 @@ export const brandQuerySchema = z.object({
 });
 
 /**
- * `PUT /api/health-systems/:id/portal`.
- *
- * Annotated with the shared request DTO, like `healthSystemSecretSchema`: that is what
- * makes a change to `PutPortalAccountRequest` a compile error here rather than a
- * body the SPA sends and the Worker silently rejects.
- *
- * `mountHint` is a hint, not a path: discovery probes it first and then the generic
- * prefixes, and what gets stored is wherever a login page actually answered. It is
- * bounded and otherwise unvalidated, because the shape of a vanity mount is the
- * deployment's business.
- */
+`PUT /api/health-systems/:id/portal`.
+
+Annotated with the shared request DTO, like `healthSystemSecretSchema`: that is what
+makes a change to `PutPortalAccountRequest` a compile error here rather than a
+body the SPA sends and the Worker silently rejects.
+
+`mountHint` is a hint, not a path: discovery probes it first and then the generic
+prefixes, and what gets stored is wherever a login page actually answered. It is
+bounded and otherwise unvalidated, because the shape of a vanity mount is the
+deployment's business.
+*/
 export const portalAccountSchema: z.ZodType<PutPortalAccountRequest> = z.strictObject({
   username: z.string().min(1).max(200),
   password: z.string().min(1).max(1000),
@@ -306,9 +306,9 @@ export const mailAllowlistSchema = z.strictObject({
 });
 
 /**
- * `POST /api/phone/devices` and `PATCH /api/phone/devices/:id`: the owner's name
- * for a phone. Trimmed first, so a name of spaces is refused rather than stored.
- */
+`POST /api/phone/devices` and `PATCH /api/phone/devices/:id`: the owner's name
+for a phone. Trimmed first, so a name of spaces is refused rather than stored.
+*/
 export const deviceNameSchema: z.ZodType<CreateDeviceRequest> = z.strictObject({
   name: z.string().trim().min(1).max(60),
 });

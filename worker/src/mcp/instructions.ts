@@ -1,11 +1,11 @@
 /**
- * The server instructions a client receives on `initialize`.
- *
- * Shared by the Durable Object server (`server.ts`) and the admin console's
- * in-process one (`admin-call.ts`), so the two cannot describe the surface
- * differently. Short on purpose: a client typically puts this into the model's
- * context on every turn, and each tool's own description carries the detail.
- */
+The server instructions a client receives on `initialize`.
+
+Shared by the Durable Object server (`server.ts`) and the admin console's
+in-process one (`admin-call.ts`), so the two cannot describe the surface
+differently. Short on purpose: a client typically puts this into the model's
+context on every turn, and each tool's own description carries the detail.
+*/
 export const MCP_INSTRUCTIONS =
   "A copy of one person's health record, cached from their health systems. " +
   "Every tool reads that cache and changes nothing, except sync_health_systems, " +

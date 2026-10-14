@@ -1,49 +1,49 @@
 /**
- * The bridge: turn a signed-in shell session into a classic chart session.
- *
- * On a `custom_oidc` deployment the two halves of the portal are two
- * applications. The shell holds the password and the emailed code; the classic
- * pages hold the visits. What joins them is an OpenID hand-off, and every step
- * below is **[confirmed from capture]**: the owner's own browser capture of a
- * successful sign-in, cross-checked against the public scripts that made each
- * request, so both the request and the source of every value in it are known.
- *
- *  1. `POST <api>/sso/token` (body `{}`, `text/plain`) answers `{ yum }`, and
- *     the shell's script writes it as a cookie named `yum` at path `/`. Every
- *     classic-page request from here on carries it.
- *  2. `GET <mount>Authentication/Login` 302s to the `<mount>OpenId?...` stub,
- *     whose controller call carries six server-minted arguments: encrypted
- *     nonce, state and code verifier, the authorization URL, a workflow label,
- *     and a submit-a-form flag.
- *  3. The authorization URL points at the *shell's* authorize route -- a page of
- *     its single-page app, not an authorization server. That page's component
- *     posts `<api>/api/mychartAuth/getAuthCode` with `clientId`, `scope`,
- *     `responseType`, `guid` (= `code_challenge`) and `nonce`, all read off the
- *     URL's own query, and gets `{ authCode }` back. The bridge makes that call
- *     directly instead of loading the page.
- *  4. `GET <redirect_uri>?code=<authCode>&state=<state>` -- the URL's
- *     `redirect_uri` and `state` -- which is `<mount>OpenId/AuthorizeResult`. Its
- *     controller call echoes `(code, state, error, responseMode, issuer)`, and
- *     the page carries the antiforgery token the next POST needs.
- *  5. `POST <mount>OpenId/FinalizeAuthResponse?noCache=...`, form-urlencoded,
- *     as an XHR with that antiforgery token as a header: the five echoed values
- *     plus the stub's three encrypted ones. It answers `{ redirectUri }` and
- *     sets the classic session cookies.
- *  6. `GET <redirectUri>`, which is `<mount>Home`, signed in.
- *
- * Rules the code keeps:
- *
- *  - **No PKCE, nonce or state is generated here.** The classic side minted all
- *    of them and encrypted what it needs to see again; the bridge only carries
- *    values from where the capture shows they come from to where they go.
- *  - **Every hop goes through the jar.** The shell cookies authorise steps 1 and
- *    3; the `yum` cookie and the classic cookies carry the rest.
- *  - **Every failure is `portal_handoff_failed` with a stable `reason`** naming
- *    the step. The shell already accepted the password, so none of these is a
- *    credential problem, and the admin UI has its own sentence for this code.
- *  - **Nothing is logged but a step reason and a status.** Not a URL: these
- *    carry the mount, the host, an authorization code and a state value.
- */
+The bridge: turn a signed-in shell session into a classic chart session.
+
+On a `custom_oidc` deployment the two halves of the portal are two
+applications. The shell holds the password and the emailed code; the classic
+pages hold the visits. What joins them is an OpenID hand-off, and every step
+below is **[confirmed from capture]**: the owner's own browser capture of a
+successful sign-in, cross-checked against the public scripts that made each
+request, so both the request and the source of every value in it are known.
+
+ 1. `POST <api>/sso/token` (body `{}`, `text/plain`) answers `{ yum }`, and
+    the shell's script writes it as a cookie named `yum` at path `/`. Every
+    classic-page request from here on carries it.
+ 2. `GET <mount>Authentication/Login` 302s to the `<mount>OpenId?...` stub,
+    whose controller call carries six server-minted arguments: encrypted
+    nonce, state and code verifier, the authorization URL, a workflow label,
+    and a submit-a-form flag.
+ 3. The authorization URL points at the *shell's* authorize route -- a page of
+    its single-page app, not an authorization server. That page's component
+    posts `<api>/api/mychartAuth/getAuthCode` with `clientId`, `scope`,
+    `responseType`, `guid` (= `code_challenge`) and `nonce`, all read off the
+    URL's own query, and gets `{ authCode }` back. The bridge makes that call
+    directly instead of loading the page.
+ 4. `GET <redirect_uri>?code=<authCode>&state=<state>` -- the URL's
+    `redirect_uri` and `state` -- which is `<mount>OpenId/AuthorizeResult`. Its
+    controller call echoes `(code, state, error, responseMode, issuer)`, and
+    the page carries the antiforgery token the next POST needs.
+ 5. `POST <mount>OpenId/FinalizeAuthResponse?noCache=...`, form-urlencoded,
+    as an XHR with that antiforgery token as a header: the five echoed values
+    plus the stub's three encrypted ones. It answers `{ redirectUri }` and
+    sets the classic session cookies.
+ 6. `GET <redirectUri>`, which is `<mount>Home`, signed in.
+
+Rules the code keeps:
+
+ - **No PKCE, nonce or state is generated here.** The classic side minted all
+   of them and encrypted what it needs to see again; the bridge only carries
+   values from where the capture shows they come from to where they go.
+ - **Every hop goes through the jar.** The shell cookies authorise steps 1 and
+   3; the `yum` cookie and the classic cookies carry the rest.
+ - **Every failure is `portal_handoff_failed` with a stable `reason`** naming
+   the step. The shell already accepted the password, so none of these is a
+   credential problem, and the admin UI has its own sentence for this code.
+ - **Nothing is logged but a step reason and a status.** Not a URL: these
+   carry the mount, the host, an authorization code and a state value.
+*/
 
 import { AppError } from "../../../lib/errors.ts";
 import { sessionLandingOf } from "../client.ts";
@@ -86,10 +86,10 @@ export interface BridgeDeps {
   /** The `noCache` value for the finalize call; injected so a test can pin it. */
   noCache: () => string;
   /**
-   * The liveness check to confirm a landing with. Injected rather than
-   * reimplemented: the classic client already knows how to ask, and it only
-   * says yes for a request that ends on the classic `Home` page.
-   */
+  The liveness check to confirm a landing with. Injected rather than
+  reimplemented: the classic client already knows how to ask, and it only
+  says yes for a request that ends on the classic `Home` page.
+  */
   isSessionAlive: () => Promise<boolean>;
 }
 
@@ -274,11 +274,11 @@ async function runHandoff(deps: BridgeDeps): Promise<void> {
 }
 
 /**
- * Carry the shell session across to the classic pages.
- *
- * Throws `portal_handoff_failed`, with the failing step as `details.reason`,
- * when any step of the hand-off does not do what the capture shows it doing.
- */
+Carry the shell session across to the classic pages.
+
+Throws `portal_handoff_failed`, with the failing step as `details.reason`,
+when any step of the hand-off does not do what the capture shows it doing.
+*/
 export async function bridgeToClassicSession(deps: BridgeDeps): Promise<void> {
   try {
     await runHandoff(deps);

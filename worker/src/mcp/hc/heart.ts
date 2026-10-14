@@ -1,24 +1,24 @@
 /**
- * Heart rate for the tools, from the per-minute rows wherever a minute is
- * fine enough.
- *
- * The store keeps one sealed row of minute statistics per origin per UTC hour,
- * so a day at one-minute resolution is twenty-four rows and no raw chunk. Two
- * things send a question to the raw records instead, and only for the hours
- * concerned:
- *
- *  - a resolution finer than a minute (`raw`, `5s`);
- *  - a minute whose highest reading is above the artefact rule's upper limit
- *    or whose lowest is below its lower one (`HR_MAX_PLAUSIBLE_BPM` and
- *    `HR_MIN_PLAUSIBLE_BPM` in `worker/src/hc/rules.ts`). The minute row
- *    cannot say which of its samples were implausible, so that hour's records
- *    are read, put through `flagHeartRateArtefacts`, and the minute rebuilt
- *    from what the rule kept.
- *
- * Origins are never blended: two devices worn at once are two series. Unless
- * the caller names origins, a phone's series is the one origin with the most
- * samples in the range.
- */
+Heart rate for the tools, from the per-minute rows wherever a minute is
+fine enough.
+
+The store keeps one sealed row of minute statistics per origin per UTC hour,
+so a day at one-minute resolution is twenty-four rows and no raw chunk. Two
+things send a question to the raw records instead, and only for the hours
+concerned:
+
+ - a resolution finer than a minute (`raw`, `5s`);
+ - a minute whose highest reading is above the artefact rule's upper limit
+   or whose lowest is below its lower one (`HR_MAX_PLAUSIBLE_BPM` and
+   `HR_MIN_PLAUSIBLE_BPM` in `worker/src/hc/rules.ts`). The minute row
+   cannot say which of its samples were implausible, so that hour's records
+   are read, put through `flagHeartRateArtefacts`, and the minute rebuilt
+   from what the rule kept.
+
+Origins are never blended: two devices worn at once are two series. Unless
+the caller names origins, a phone's series is the one origin with the most
+samples in the range.
+*/
 
 import { heartRateSamples, minuteSeries, resampleHeartRate } from "../../hc/rollup/hr.ts";
 import {
@@ -66,9 +66,9 @@ function hourRuns(hours: ReadonlySet<number>): Range[] {
 const minuteOf = (ms: number): number => Math.floor(ms / MINUTE_MS) * MINUTE_MS;
 
 /**
- * The suspect minutes of one origin, rebuilt from the raw records with the
- * artefact rule applied, and how many samples the rule took out of them.
- */
+The suspect minutes of one origin, rebuilt from the raw records with the
+artefact rule applied, and how many samples the rule took out of them.
+*/
 async function rebuildMinutes(
   reads: HcReads,
   deviceId: string,
@@ -98,9 +98,9 @@ async function rebuildMinutes(
 }
 
 /**
- * One origin's minute series with every minute that holds an implausible
- * reading replaced by what the artefact rule leaves of it.
- */
+One origin's minute series with every minute that holds an implausible
+reading replaced by what the artefact rule leaves of it.
+*/
 async function cleanSuspectMinutes(
   reads: HcReads,
   deviceId: string,
@@ -123,9 +123,9 @@ async function cleanSuspectMinutes(
 }
 
 /**
- * The origins to answer with: those asked for, else the one whose series
- * weighs most (ties by name).
- */
+The origins to answer with: those asked for, else the one whose series
+weighs most (ties by name).
+*/
 function chooseOrigins<Point>(
   byOrigin: ReadonlyMap<string, Point[]>,
   asked: readonly string[] | undefined,
@@ -141,9 +141,9 @@ function chooseOrigins<Point>(
 }
 
 /**
- * Per-minute heart rate of one phone in a range, artefacts removed.
- * `origins` omitted: the one origin with the most samples.
- */
+Per-minute heart rate of one phone in a range, artefacts removed.
+`origins` omitted: the one origin with the most samples.
+*/
 export async function readMinutes(
   reads: HcReads,
   deviceId: string,
@@ -213,11 +213,11 @@ function regroup(points: readonly HrMinutePoint[], widthMs: number): HrPoint[] {
 }
 
 /**
- * The bucket widths a decimated series is put on, ms: the widths a person
- * would choose for a chart axis. A series that does not fit `maxPoints` is
- * moved to the first of these that does, so a week of minutes becomes
- * five-minute or fifteen-minute points and never a 5.8-day bucket.
- */
+The bucket widths a decimated series is put on, ms: the widths a person
+would choose for a chart axis. A series that does not fit `maxPoints` is
+moved to the first of these that does, so a week of minutes becomes
+five-minute or fifteen-minute points and never a 5.8-day bucket.
+*/
 const GRID_LADDER_MS: readonly number[] = [
   ...[1, 2, 5, 10, 15, 30].map((minutes) => minutes * MINUTE_MS),
   ...[1, 2, 3, 6, 12].map((hours) => hours * HOUR_MS),
@@ -228,10 +228,10 @@ const GRID_LADDER_MS: readonly number[] = [
 const GRID_GROWTH = 2;
 
 /**
- * The widths to try for a series that does not fit, coarsest last: every rung
- * that is a whole multiple of the resolution asked for and at least `fromMs`
- * wide, then doublings of the last rung without end.
- */
+The widths to try for a series that does not fit, coarsest last: every rung
+that is a whole multiple of the resolution asked for and at least `fromMs`
+wide, then doublings of the last rung without end.
+*/
 function* widthsFrom(widthMs: number, fromMs: number): Generator<number> {
   let last = widthMs;
   for (const rung of GRID_LADDER_MS) {
@@ -246,16 +246,16 @@ function* widthsFrom(widthMs: number, fromMs: number): Generator<number> {
 }
 
 /**
- * A minute series at `widthMs` (a whole number of minutes), made coarser when
- * it does not fit `maxPoints` -- never cut short.
- *
- * The coarser width is the first rung of {@link GRID_LADDER_MS} that fits, a
- * whole multiple of the width asked for. Where to start looking is worked out
- * from the series, not counted up to: no width narrower than the span divided
- * by `maxPoints` can fit, and none that merges fewer points than needed. So a
- * sparse series over years reaches its width in a pass or two instead of
- * trying every factor on the way (each pass reads every point).
- */
+A minute series at `widthMs` (a whole number of minutes), made coarser when
+it does not fit `maxPoints` -- never cut short.
+
+The coarser width is the first rung of {@link GRID_LADDER_MS} that fits, a
+whole multiple of the width asked for. Where to start looking is worked out
+from the series, not counted up to: no width narrower than the span divided
+by `maxPoints` can fit, and none that merges fewer points than needed. So a
+sparse series over years reaches its width in a pass or two instead of
+trying every factor on the way (each pass reads every point).
+*/
 export function resampleMinutes(
   points: readonly HrMinutePoint[],
   widthMs: number,
@@ -291,9 +291,9 @@ export interface SampleRead {
 }
 
 /**
- * Every heart-rate sample of one phone in a range, artefacts removed, from the
- * raw records. `origins` omitted: the one origin with the most samples.
- */
+Every heart-rate sample of one phone in a range, artefacts removed, from the
+raw records. `origins` omitted: the one origin with the most samples.
+*/
 export async function readSamples(
   reads: HcReads,
   deviceId: string,

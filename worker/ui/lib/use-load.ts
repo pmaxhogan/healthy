@@ -26,16 +26,16 @@ export interface Loadable<T> {
 }
 
 /**
- * Runs `loader` now and on demand.
- *
- * In-flight requests are aborted when the component goes away or a reload
- * overtakes them, so a slow page the owner navigated off does not later
- * overwrite a fresher one.
- *
- * An `AuthRequiredError` is swallowed: the client has already started a full
- * page navigation to the login wall, and an error banner over a navigating page
- * is noise.
- */
+Runs `loader` now and on demand.
+
+In-flight requests are aborted when the component goes away or a reload
+overtakes them, so a slow page the owner navigated off does not later
+overwrite a fresher one.
+
+An `AuthRequiredError` is swallowed: the client has already started a full
+page navigation to the login wall, and an error banner over a navigating page
+is noise.
+*/
 export function useLoad<T>(loader: (signal: AbortSignal) => Promise<T>): Loadable<T> {
   const data = shallowRef<T | null>(null);
   const loading = ref(true);
@@ -80,11 +80,11 @@ export function useLoad<T>(loader: (signal: AbortSignal) => Promise<T>): Loadabl
 }
 
 /**
- * Wraps a mutation: disables its button while it runs, toasts on failure, and
- * never lets a rejection escape into an unhandled promise.
- *
- * Returns whether it succeeded, so callers can choose to reload only then.
- */
+Wraps a mutation: disables its button while it runs, toasts on failure, and
+never lets a rejection escape into an unhandled promise.
+
+Returns whether it succeeded, so callers can choose to reload only then.
+*/
 export function useAction(): {
   busy: Ref<boolean>;
   run: (fn: () => Promise<void>) => Promise<boolean>;

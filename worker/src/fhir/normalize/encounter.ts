@@ -33,30 +33,30 @@ import type {
 import type * as fhir4 from "fhir/r4";
 
 /**
- * For the MCP policy's `field` rule engine, see `observation.ts`'s comment.
- *
- * `department` and `telehealth` have no entry: both are heuristics this
- * module derives (a best-effort second `location[]` entry, and a pattern
- * match over the visit type and location name) rather than one raw field
- * renamed, so there is nothing in the raw resource a rule against them could
- * alias to.
- *
- * The second group is the appointment view (`appointmentViewFromEncounter`),
- * which `get_appointments` and `get_health_summary` serve tagged
- * `resourceType: "Encounter"`. It renames the same raw fields again --
- * `participant` becomes `practitioner`, `serviceProvider` becomes `org` -- so a
- * rule written against the raw field must strip the view's copy too. Two
- * normalized names sharing one raw field is also what lets the policy filter
- * treat `practitioners` and `practitioner` as the same concept (see
- * `normalizedCandidates` in `worker/src/policy/filter.ts`). `specialty` has no
- * entry: it is read off the referenced Practitioner, not the Encounter.
- *
- * The nested entries map a field inside an array to where the raw resource
- * keeps the same text: a clinician's name is the participant reference's
- * `display`, a place's name the location reference's. Where the normalized
- * value came from a referenced resource instead (a Location's address), the
- * raw Encounter holds only the reference, and there is nothing to alias.
- */
+For the MCP policy's `field` rule engine, see `observation.ts`'s comment.
+
+`department` and `telehealth` have no entry: both are heuristics this
+module derives (a best-effort second `location[]` entry, and a pattern
+match over the visit type and location name) rather than one raw field
+renamed, so there is nothing in the raw resource a rule against them could
+alias to.
+
+The second group is the appointment view (`appointmentViewFromEncounter`),
+which `get_appointments` and `get_health_summary` serve tagged
+`resourceType: "Encounter"`. It renames the same raw fields again --
+`participant` becomes `practitioner`, `serviceProvider` becomes `org` -- so a
+rule written against the raw field must strip the view's copy too. Two
+normalized names sharing one raw field is also what lets the policy filter
+treat `practitioners` and `practitioner` as the same concept (see
+`normalizedCandidates` in `worker/src/policy/filter.ts`). `specialty` has no
+entry: it is read off the referenced Practitioner, not the Encounter.
+
+The nested entries map a field inside an array to where the raw resource
+keeps the same text: a clinician's name is the participant reference's
+`display`, a place's name the location reference's. Where the normalized
+value came from a referenced resource instead (a Location's address), the
+raw Encounter holds only the reference, and there is nothing to alias.
+*/
 export const FIELD_ALIASES: readonly FieldAlias[] = [
   { normalized: ["visitType"], raw: [["type"]] },
   { normalized: ["visitType"], raw: codeTextSources("type"), rendered: true },

@@ -1,83 +1,83 @@
 /**
- * The patient-portal pass: upcoming visits onto the calendar, without waiting for
- * FHIR to admit they exist.
- *
- * It runs at the end of the hourly calendar run, per health system whose portal
- * account is `active`, and it writes through exactly the same mapping, diff and
- * event writer the FHIR pass uses. What is different is only where the
- * appointments came from and what is known about them.
- *
- * ### Why this pass exists at all
- *
- * Epic's patient-facing FHIR view does not reliably return a scheduled
- * appointment before it happens -- the owner's next two visits were absent from
- * it -- while the portal has known about them since they were booked. So the
- * portal is the source for *upcoming* visits and FHIR stays the source for
- * everything else, including history and every clinical resource the MCP serves.
- *
- * ### The five rules that keep one appointment from becoming two events
- *
- * **A portal visit the FHIR pass already mapped is skipped.** Matched by the
- * Encounter's own CSN where there is one, and otherwise by a start time within
- * `DEDUPE_WINDOW_SECONDS`. Counted as `portalSkipped`, so "why is the portal
- * reporting three visits and writing one event" has an answer on the Runs page.
- *
- * **A FHIR Encounter that turns up later adopts the portal's row and its event.**
- * That is `adoptPortalRows`, called from the FHIR pass before its diff: the row is
- * renamed from `<healthSystemId>:csn:<csn>` to `<healthSystemId>:<encounterId>` and the
- * existing calendar entry is patched in place. Without it the portal event would
- * be ghosted (it is no longer "upcoming") and a duplicate inserted beside it.
- * Adoption needs an identity match -- the same CSN, or, for an Encounter with
- * none, the same practitioner at the same time (`sameVisitWithinHealthSystem`).
- * A start time alone is not enough: a cancelled Encounter at the same time as a
- * different, live portal visit would otherwise take over its event and grey it
- * out.
- *
- * **A visit that vanishes while it is still in the future is a cancellation; one
- * that vanishes after its start time is just over.** `LoadUpcoming` only ever
- * returns what is ahead, so every visit eventually disappears from it. Ghosting on
- * absence alone would grey out every appointment the owner ever attended, the hour
- * after they attended it. So a past row is left exactly as it is, and only a
- * future one that stopped being returned is ghosted.
- *
- * **A duplicate already on the calendar is deleted, not ghosted.** A visit
- * another, higher-precedence copy speaks for -- a FHIR Encounter, or the owning
- * organisation's own portal listing of a visit this portal only sees second-hand
- * (see `portal-dedupe.ts`) -- is not inserted. If an earlier run did insert it
- * (before the dedupe knew better, or while the better copy was missing), its event
- * and row are removed; see `removeDuplicates`. That is deliberately *not* the
- * ghost rule below: a ghost says "this visit is cancelled", and a duplicate's
- * visit is not -- it is on the calendar, once, under the other copy. A grey
- * "Cancelled:" twin beside the real event would be both wrong and confusing. Only
- * an event carrying `healthy=1` and the row's own key is ever deleted. Should the
- * better copy later go away, the duplicate stops being one and is inserted again.
- *
- * Deleting is reserved for a match that is not a guess (security review L3): the
- * same CSN, a live (not ghosted) FHIR row or Encounter of this health system at
- * the same time, or -- across health systems -- the same CSN or practitioner. A
- * match on a shared department or location alone only stops a *new* copy being
- * inserted; an event already written for that visit is kept and maintained.
- *
- * **A canceled, no-show or vanished visit is ghosted with its own details.** The
- * event is patched to the grey, transparent, "Cancelled:" variant rather than
- * merely having its row marked. A canceled or no-show visit is still *in* the
- * payload; a vanished future one is rendered from the last copy `portal_visits`
- * kept of it (`vanishedMappings`), stamped `canceled`. Leaving its event alone
- * would leave a cancelled appointment on the owner's calendar looking live. Only a
- * row with no stored copy at all gets the row-only ghost, with the calendar entry
- * left as it is rather than rewritten from guesses.
- *
- * Every visit this pass reads is also written to `portal_visits`, with the same
- * "missing only if still ahead" rule, because that table -- not the calendar -- is
- * what `get_appointments` serves upcoming visits from. The same session then reads
- * the portal's secure messages into `portal_messages` (`syncMessages`), which is
- * what `get_messages` serves.
- *
- * Log lines carry health system ids, counts and stable codes. Never a visit, a
- * practitioner, a CSN, a code or a byte of portal markup -- the CSN is an upstream
- * identifier and is treated exactly like an Encounter id (see
- * `worker/src/db/repos/calendar-events.ts`'s `logSafeKey`).
- */
+The patient-portal pass: upcoming visits onto the calendar, without waiting for
+FHIR to admit they exist.
+
+It runs at the end of the hourly calendar run, per health system whose portal
+account is `active`, and it writes through exactly the same mapping, diff and
+event writer the FHIR pass uses. What is different is only where the
+appointments came from and what is known about them.
+
+### Why this pass exists at all
+
+Epic's patient-facing FHIR view does not reliably return a scheduled
+appointment before it happens -- the owner's next two visits were absent from
+it -- while the portal has known about them since they were booked. So the
+portal is the source for *upcoming* visits and FHIR stays the source for
+everything else, including history and every clinical resource the MCP serves.
+
+### The five rules that keep one appointment from becoming two events
+
+**A portal visit the FHIR pass already mapped is skipped.** Matched by the
+Encounter's own CSN where there is one, and otherwise by a start time within
+`DEDUPE_WINDOW_SECONDS`. Counted as `portalSkipped`, so "why is the portal
+reporting three visits and writing one event" has an answer on the Runs page.
+
+**A FHIR Encounter that turns up later adopts the portal's row and its event.**
+That is `adoptPortalRows`, called from the FHIR pass before its diff: the row is
+renamed from `<healthSystemId>:csn:<csn>` to `<healthSystemId>:<encounterId>` and the
+existing calendar entry is patched in place. Without it the portal event would
+be ghosted (it is no longer "upcoming") and a duplicate inserted beside it.
+Adoption needs an identity match -- the same CSN, or, for an Encounter with
+none, the same practitioner at the same time (`sameVisitWithinHealthSystem`).
+A start time alone is not enough: a cancelled Encounter at the same time as a
+different, live portal visit would otherwise take over its event and grey it
+out.
+
+**A visit that vanishes while it is still in the future is a cancellation; one
+that vanishes after its start time is just over.** `LoadUpcoming` only ever
+returns what is ahead, so every visit eventually disappears from it. Ghosting on
+absence alone would grey out every appointment the owner ever attended, the hour
+after they attended it. So a past row is left exactly as it is, and only a
+future one that stopped being returned is ghosted.
+
+**A duplicate already on the calendar is deleted, not ghosted.** A visit
+another, higher-precedence copy speaks for -- a FHIR Encounter, or the owning
+organisation's own portal listing of a visit this portal only sees second-hand
+(see `portal-dedupe.ts`) -- is not inserted. If an earlier run did insert it
+(before the dedupe knew better, or while the better copy was missing), its event
+and row are removed; see `removeDuplicates`. That is deliberately *not* the
+ghost rule below: a ghost says "this visit is cancelled", and a duplicate's
+visit is not -- it is on the calendar, once, under the other copy. A grey
+"Cancelled:" twin beside the real event would be both wrong and confusing. Only
+an event carrying `healthy=1` and the row's own key is ever deleted. Should the
+better copy later go away, the duplicate stops being one and is inserted again.
+
+Deleting is reserved for a match that is not a guess (security review L3): the
+same CSN, a live (not ghosted) FHIR row or Encounter of this health system at
+the same time, or -- across health systems -- the same CSN or practitioner. A
+match on a shared department or location alone only stops a *new* copy being
+inserted; an event already written for that visit is kept and maintained.
+
+**A canceled, no-show or vanished visit is ghosted with its own details.** The
+event is patched to the grey, transparent, "Cancelled:" variant rather than
+merely having its row marked. A canceled or no-show visit is still *in* the
+payload; a vanished future one is rendered from the last copy `portal_visits`
+kept of it (`vanishedMappings`), stamped `canceled`. Leaving its event alone
+would leave a cancelled appointment on the owner's calendar looking live. Only a
+row with no stored copy at all gets the row-only ghost, with the calendar entry
+left as it is rather than rewritten from guesses.
+
+Every visit this pass reads is also written to `portal_visits`, with the same
+"missing only if still ahead" rule, because that table -- not the calendar -- is
+what `get_appointments` serves upcoming visits from. The same session then reads
+the portal's secure messages into `portal_messages` (`syncMessages`), which is
+what `get_messages` serves.
+
+Log lines carry health system ids, counts and stable codes. Never a visit, a
+practitioner, a CSN, a code or a byte of portal markup -- the CSN is an upstream
+identifier and is treated exactly like an Encounter id (see
+`worker/src/db/repos/calendar-events.ts`'s `logSafeKey`).
+*/
 
 import { blindCsn } from "../db/blind.ts";
 import { encounterRef } from "../db/repos/calendar-events.ts";
@@ -137,22 +137,22 @@ import type { CalendarClient } from "../google/calendar.ts";
 import type { CalendarEventBody, CalendarEventModel, EventRecord } from "../google/types.ts";
 
 /**
- * What the FHIR pass saw for one health system, as the dedupe needs it.
- *
- * Collected during the FHIR pass rather than read back from `calendar_events`,
- * because the strongest signal -- the Encounter's CSN -- is not stored: the row
- * holds only the event key and the shifted start.
- */
+What the FHIR pass saw for one health system, as the dedupe needs it.
+
+Collected during the FHIR pass rather than read back from `calendar_events`,
+because the strongest signal -- the Encounter's CSN -- is not stored: the row
+holds only the event key and the shifted start.
+*/
 export interface FhirSighting {
   /** CSNs the Encounters published. The exact match when both sides have one. */
   csns: Set<string>;
   /** Shifted starts of the events the FHIR pass mapped that are still on the schedule, as unix seconds. */
   starts: number[];
   /**
-   * The same Encounters as the cross-health system dedupe sees them: real (unshifted)
-   * start and CSN. Only a CSN can tie another organisation's portal copy to one
-   * of these -- see `worker/src/sync/portal-dedupe.ts`.
-   */
+  The same Encounters as the cross-health system dedupe sees them: real (unshifted)
+  start and CSN. Only a CSN can tie another organisation's portal copy to one
+  of these -- see `worker/src/sync/portal-dedupe.ts`.
+  */
   sightings: Sighting[];
 }
 
@@ -177,23 +177,23 @@ export interface PortalPassInput {
   /** Narrow the pass to these health systems. The manual button's argument. */
   healthSystemIds?: readonly string[] | undefined;
   /**
-   * How long to wait for an emailed code when a session has to be re-established.
-   *
-   * The default is the full wait, which is right under cron: a scheduled
-   * invocation has the wall clock and the visits are wanted in this run. Zero means
-   * "do not attempt a sign-in at all", which is what the Durable Object passes --
-   * it establishes the session in its own alarm loop first, precisely so that no
-   * single invocation sleeps for minutes. See `portal-runner.ts`.
-   */
+  How long to wait for an emailed code when a session has to be re-established.
+
+  The default is the full wait, which is right under cron: a scheduled
+  invocation has the wall clock and the visits are wanted in this run. Zero means
+  "do not attempt a sign-in at all", which is what the Durable Object passes --
+  it establishes the session in its own alarm loop first, precisely so that no
+  single invocation sleeps for minutes. See `portal-runner.ts`.
+  */
   signInWaitSeconds?: number | undefined;
   /**
-   * True for the scheduled run, which nobody is watching.
-   *
-   * An unattended run re-establishes a dead session only within limits the
-   * owner's own buttons are not held to: it leaves `OWNER_RESERVED_ATTEMPTS` of
-   * the day's sign-ins alone, and it has a code emailed only as often as
-   * `unattendedCodeWait` allows. See `ensureSession`.
-   */
+  True for the scheduled run, which nobody is watching.
+
+  An unattended run re-establishes a dead session only within limits the
+  owner's own buttons are not held to: it leaves `OWNER_RESERVED_ATTEMPTS` of
+  the day's sign-ins alone, and it has a code emailed only as often as
+  `unattendedCodeWait` allows. See `ensureSession`.
+  */
   unattended?: boolean | undefined;
 }
 
@@ -204,19 +204,19 @@ interface PortalCandidateBuild {
   /** True when a better copy already covers this appointment: do not insert it. */
   duplicate: boolean;
   /**
-   * True when that match is strong enough to delete an event already written
-   * for this copy. See the module comment: a place-only match across health
-   * systems is not.
-   */
+  True when that match is strong enough to delete an event already written
+  for this copy. See the module comment: a place-only match across health
+  systems is not.
+  */
   deletable: boolean;
 }
 
 /**
- * Sync every active portal account's upcoming visits.
- *
- * Per-health system isolation, like the FHIR pass: a portal that will not let us in
- * costs one code on `portalErrors` and nothing else. Never throws.
- */
+Sync every active portal account's upcoming visits.
+
+Per-health system isolation, like the FHIR pass: a portal that will not let us in
+costs one code on `portalErrors` and nothing else. Never throws.
+*/
 export async function runPortalPass(input: PortalPassInput): Promise<void> {
   const { ctx, repos } = input;
   const accounts = await repos.portalAccounts.listActive();
@@ -260,13 +260,13 @@ export async function runPortalPass(input: PortalPassInput): Promise<void> {
 }
 
 /**
- * The pass threw for this health system: its account is still `active`, so the
- * next run tries again, and a run of these is what `noteSyncFailure` counts.
- *
- * Unless it was the calendar that threw. The portal answered; the write to
- * Google is what failed, and that is Google's streak, which the calendar sync
- * settles once at the end of the run (`google-watch.ts`).
- */
+The pass threw for this health system: its account is still `active`, so the
+next run tries again, and a run of these is what `noteSyncFailure` counts.
+
+Unless it was the calendar that threw. The portal answered; the write to
+Google is what failed, and that is Google's streak, which the calendar sync
+settles once at the end of the run (`google-watch.ts`).
+*/
 async function portalFailed(
   input: PortalPassInput,
   healthSystemId: string,
@@ -280,20 +280,20 @@ async function portalFailed(
 }
 
 /**
- * The pass stopped for want of a session, and `ensureSession` said why.
- *
- * Two of its reasons are not this function's to count. A sign-in that failed
- * has parked the account (`needs_reauth`): it is out of the scheduled sync
- * until the owner signs in, and the reconnect alert is what says so. And
- * `portal_session_expired` is a manual run that was told not to wait for a
- * code, which is not an attempt at all.
- *
- * What is left is an account still `active` that did not sync: the scheduled
- * run holding back from signing in on its own (`portal_signin_deferred`), or a
- * sign-in already in flight. Each ends by itself, but a portal that has not
- * synced for three runs is a portal the owner can bring back with "Sign in
- * now", and nothing else tells them that out of band.
- */
+The pass stopped for want of a session, and `ensureSession` said why.
+
+Two of its reasons are not this function's to count. A sign-in that failed
+has parked the account (`needs_reauth`): it is out of the scheduled sync
+until the owner signs in, and the reconnect alert is what says so. And
+`portal_session_expired` is a manual run that was told not to wait for a
+code, which is not an attempt at all.
+
+What is left is an account still `active` that did not sync: the scheduled
+run holding back from signing in on its own (`portal_signin_deferred`), or a
+sign-in already in flight. Each ends by itself, but a portal that has not
+synced for three runs is a portal the owner can bring back with "Sign in
+now", and nothing else tells them that out of band.
+*/
 async function noteNoSession(
   input: PortalPassInput,
   healthSystemId: string,
@@ -346,19 +346,19 @@ function detailFieldsOf(visit: PortalVisit | undefined): DetailFields {
 }
 
 /**
- * Every listed visit with what its details page adds: the wait list, the
- * directions and the visit's instructions.
- *
- * One GET per visit, every visit the list returned (all of them upcoming -- the
- * list has nothing else), one after another: the list is a handful of visits,
- * and the page is what the owner's own browser loads for each. With the held
- * session only: this never signs in.
- *
- * A page that cannot be read keeps what the last run stored for that visit, so a
- * transient failure does not strip the directions from the calendar for an hour
- * and put them back the next -- two patches for nothing. A session that dies part
- * way stops the reads, and every visit left keeps its stored copy the same way.
- */
+Every listed visit with what its details page adds: the wait list, the
+directions and the visit's instructions.
+
+One GET per visit, every visit the list returned (all of them upcoming -- the
+list has nothing else), one after another: the list is a handful of visits,
+and the page is what the owner's own browser loads for each. With the held
+session only: this never signs in.
+
+A page that cannot be read keeps what the last run stored for that visit, so a
+transient failure does not strip the directions from the calendar for an hour
+and put them back the next -- two patches for nothing. A session that dies part
+way stops the reads, and every visit left keeps its stored copy the same way.
+*/
 async function withVisitDetails(
   input: PortalPassInput,
   healthSystemId: string,
@@ -448,25 +448,25 @@ async function fetchAttachment(
 }
 
 /**
- * Fetch and seal every attachment the Message Center read listed and the store
- * does not hold yet (`worker/src/db/repos/portal-message-attachments.ts`).
- *
- * It has to be now: the portal names an attachment by a per-session token, so
- * only the run that listed it can ask for it. Every attachment is fetched,
- * however many and however large; each one that is not is on the record -- a
- * `failed` row with a stable code, tried again a day later -- or waiting, never
- * silently dropped:
- *
- *  - An attachment on a message the portal still marks unread is left alone
- *    until it has been read. Opening a message marks it read, and whether the
- *    document download does too has not been observed; a message the owner has
- *    not read yet must stay unread. It is fetched on the first run after.
- *  - A session that ends mid-pass stops the pass: the rest are tried next run,
- *    and none is marked failed for it.
- *
- * Never throws into the message sync: a failure here costs attachment content,
- * not messages.
- */
+Fetch and seal every attachment the Message Center read listed and the store
+does not hold yet (`worker/src/db/repos/portal-message-attachments.ts`).
+
+It has to be now: the portal names an attachment by a per-session token, so
+only the run that listed it can ask for it. Every attachment is fetched,
+however many and however large; each one that is not is on the record -- a
+`failed` row with a stable code, tried again a day later -- or waiting, never
+silently dropped:
+
+ - An attachment on a message the portal still marks unread is left alone
+   until it has been read. Opening a message marks it read, and whether the
+   document download does too has not been observed; a message the owner has
+   not read yet must stay unread. It is fetched on the first run after.
+ - A session that ends mid-pass stops the pass: the rest are tried next run,
+   and none is marked failed for it.
+
+Never throws into the message sync: a failure here costs attachment content,
+not messages.
+*/
 async function syncAttachments(
   input: PortalPassInput,
   healthSystemId: string,
@@ -511,16 +511,16 @@ async function syncAttachments(
 }
 
 /**
- * Read the whole Message Center with the session the visits just used, and store
- * every message (`worker/src/db/repos/portal-messages.ts`).
- *
- * Never a sign-in of its own: it runs only after `ensureSession` handed back a
- * live session, and a session that dies mid-read is recorded on the sync row
- * (`portal_session_expired`) for the MCP's coverage to report, not retried.
- * Isolated from the visits: a failure here costs the MCP one run's freshness and
- * nothing else, so it is logged and recorded but never thrown. The jar is saved
- * either way, because every one of these calls can refresh the session cookie.
- */
+Read the whole Message Center with the session the visits just used, and store
+every message (`worker/src/db/repos/portal-messages.ts`).
+
+Never a sign-in of its own: it runs only after `ensureSession` handed back a
+live session, and a session that dies mid-read is recorded on the sync row
+(`portal_session_expired`) for the MCP's coverage to report, not retried.
+Isolated from the visits: a failure here costs the MCP one run's freshness and
+nothing else, so it is logged and recorded but never thrown. The jar is saved
+either way, because every one of these calls can refresh the session cookie.
+*/
 async function syncMessages(
   input: PortalPassInput,
   healthSystemId: string,
@@ -661,16 +661,16 @@ async function syncPortalCalendar(
 }
 
 /**
- * Keep this run's visits for the MCP, before the calendar diff can fail.
- *
- * `get_appointments` reads upcoming visits from `portal_visits`, not from the
- * calendar, so this is what makes a visit the portal knows about answerable at
- * all. The parse never truncates, so every visit `LoadUpcoming` returned is here
- * and absence from it is a real signal -- `complete: true` is what lets a future
- * visit that stopped coming back be marked missing. A failure here costs the MCP
- * one run's freshness and is logged; it must not cost the owner their calendar,
- * so it does not throw.
- */
+Keep this run's visits for the MCP, before the calendar diff can fail.
+
+`get_appointments` reads upcoming visits from `portal_visits`, not from the
+calendar, so this is what makes a visit the portal knows about answerable at
+all. The parse never truncates, so every visit `LoadUpcoming` returned is here
+and absence from it is a real signal -- `complete: true` is what lets a future
+visit that stopped coming back be marked missing. A failure here costs the MCP
+one run's freshness and is logged; it must not cost the owner their calendar,
+so it does not throw.
+*/
 async function recordVisits(
   input: PortalPassInput,
   healthSystemId: string,
@@ -692,30 +692,30 @@ function keyOf(event: EventRecord): string | null {
 }
 
 /**
- * A live session for this health system, signing in once if the stored one is dead.
- *
- * Null means the pass cannot continue for this health system, and the reason has
- * already been recorded on the account (and on `portalErrors`). Exactly one
- * automatic sign-in attempt per run, and only while the daily budget allows one:
- * the account's own counter is what stops an hourly cron from walking into a
- * lockout, and running out opens the reconnect card rather than retrying.
- *
- * The scheduled run is held to less than that, because nobody is watching it
- * and every code it asks for is an email to the owner:
- *
- *  - it stops at `OWNER_RESERVED_ATTEMPTS` left, so the owner's "Sign in now"
- *    always has attempts to spend, and waits for the next UTC day;
- *  - inside the spacing after its last emailed code it does not sign in at
- *    all -- not even to see whether the trusted device is enough, because
- *    every look costs an attempt -- and says so on `portalErrors`;
- *  - once its daily allowance of codes is spent, a sign-in that wants one stops
- *    before the email (`signInAndWait`'s `unattended`).
- *
- * Only the last ends in `portal_signin_needs_owner` and a reconnect card: a
- * code is really needed and the run may not ask for one. The other two are
- * waits that end on their own, reported as `portal_signin_deferred` with the
- * account left `active`.
- */
+A live session for this health system, signing in once if the stored one is dead.
+
+Null means the pass cannot continue for this health system, and the reason has
+already been recorded on the account (and on `portalErrors`). Exactly one
+automatic sign-in attempt per run, and only while the daily budget allows one:
+the account's own counter is what stops an hourly cron from walking into a
+lockout, and running out opens the reconnect card rather than retrying.
+
+The scheduled run is held to less than that, because nobody is watching it
+and every code it asks for is an email to the owner:
+
+ - it stops at `OWNER_RESERVED_ATTEMPTS` left, so the owner's "Sign in now"
+   always has attempts to spend, and waits for the next UTC day;
+ - inside the spacing after its last emailed code it does not sign in at
+   all -- not even to see whether the trusted device is enough, because
+   every look costs an attempt -- and says so on `portalErrors`;
+ - once its daily allowance of codes is spent, a sign-in that wants one stops
+   before the email (`signInAndWait`'s `unattended`).
+
+Only the last ends in `portal_signin_needs_owner` and a reconnect card: a
+code is really needed and the run may not ask for one. The other two are
+waits that end on their own, reported as `portal_signin_deferred` with the
+account left `active`.
+*/
 async function ensureSession(
   input: PortalPassInput,
   healthSystemId: string,
@@ -801,16 +801,16 @@ function portalMapping(
 }
 
 /**
- * The stored visits the portal stopped returning while they were still ahead,
- * mapped from their last copy and keyed by event key -- what the ghost of a
- * vanished visit is rendered from (see the module comment).
- *
- * The copy is stamped `canceled`: that is what its absence means, and what the
- * MCP already reports for it, so the description's status line agrees with the
- * "Cancelled:" title rather than still saying "scheduled". Never routed through
- * the dedupe either: a visit the portal stopped listing is not a duplicate, and
- * a duplicate's event is deleted.
- */
+The stored visits the portal stopped returning while they were still ahead,
+mapped from their last copy and keyed by event key -- what the ghost of a
+vanished visit is rendered from (see the module comment).
+
+The copy is stamped `canceled`: that is what its absence means, and what the
+MCP already reports for it, so the description's status line agrees with the
+"Cancelled:" title rather than still saying "scheduled". Never routed through
+the dedupe either: a visit the portal stopped listing is not a duplicate, and
+a duplicate's event is deleted.
+*/
 async function vanishedMappings(
   input: PortalPassInput,
   known: readonly StoredPortalVisit[],
@@ -898,18 +898,18 @@ function portalSighting(
 }
 
 /**
- * Every other health system's sightings a visit here could be a copy of: the portal
- * visits they last stored (this run's included -- the first phase stored them)
- * and the Encounters their FHIR pass mapped this run.
- *
- * A visit here that is the same appointment as one of these, and is outranked by
- * it, is treated exactly like a visit the FHIR pass already calendared: not
- * inserted, and deleted from the calendar if it had been (a duplicate, not a
- * cancellation -- see the module comment). That is what keeps a visit two
- * organisations' portals both list to one event, while a visit only another
- * organisation's portal lists -- its own portal is not connected, or failing --
- * is still calendared from the copy there is.
- */
+Every other health system's sightings a visit here could be a copy of: the portal
+visits they last stored (this run's included -- the first phase stored them)
+and the Encounters their FHIR pass mapped this run.
+
+A visit here that is the same appointment as one of these, and is outranked by
+it, is treated exactly like a visit the FHIR pass already calendared: not
+inserted, and deleted from the calendar if it had been (a duplicate, not a
+cancellation -- see the module comment). That is what keeps a visit two
+organisations' portals both list to one event, while a visit only another
+organisation's portal lists -- its own portal is not connected, or failing --
+is still calendared from the copy there is.
+*/
 async function otherSightings(
   input: PortalPassInput,
   healthSystemId: string,
@@ -926,9 +926,9 @@ async function otherSightings(
 }
 
 /**
- * The candidates, the two model maps, the rows that only need a timestamp, and the
- * rows of calendared duplicates, which the diff never sees.
- */
+The candidates, the two model maps, the rows that only need a timestamp, and the
+rows of calendared duplicates, which the diff never sees.
+*/
 async function portalPlanInputs(
   input: PortalPassInput,
   builds: readonly PortalCandidateBuild[],
@@ -1025,17 +1025,17 @@ async function portalPlanInputs(
 }
 
 /**
- * Delete each calendared duplicate's event and forget its row.
- *
- * Not a ghost, and the "ghosts are never deleted" rule does not apply: see the
- * module comment. The `healthy=1` invariant does. The event is found by its key
- * among this run's `healthy=1` listing, or -- when the listing does not have it --
- * fetched by id and deleted only if it still carries `healthy=1` and the row's
- * key. An event that is gone, or no longer ours, just loses its row.
- *
- * Google first, row second, so a failure leaves a row the next run retries. Each
- * duplicate is on its own: one failed delete must not cost the rest of the plan.
- */
+Delete each calendared duplicate's event and forget its row.
+
+Not a ghost, and the "ghosts are never deleted" rule does not apply: see the
+module comment. The `healthy=1` invariant does. The event is found by its key
+among this run's `healthy=1` listing, or -- when the listing does not have it --
+fetched by id and deleted only if it still carries `healthy=1` and the row's
+key. An event that is gone, or no longer ours, just loses its row.
+
+Google first, row second, so a failure leaves a row the next run retries. Each
+duplicate is on its own: one failed delete must not cost the rest of the plan.
+*/
 async function removeDuplicates(
   input: PortalPassInput,
   healthSystemId: string,
@@ -1216,10 +1216,10 @@ async function patchPortal(
 }
 
 /**
- * A patch body whose description merges the model's block into the event's
- * current one, as this run's listing saw it -- so the owner's text above the rule
- * survives without a GET. That text is personal content: never logged.
- */
+A patch body whose description merges the model's block into the event's
+current one, as this run's listing saw it -- so the owner's text above the rule
+survives without a GET. That text is personal content: never logged.
+*/
 function patchBody(
   input: PortalPassInput,
   googleEventId: string,
@@ -1271,22 +1271,22 @@ export interface AdoptPortalInput {
 }
 
 /**
- * Hand the portal's rows and events over to the FHIR pass where they describe the
- * same appointment.
- *
- * Called from the FHIR pass *before* its diff runs, and the ordering is the whole
- * point. By the time an Encounter appears for a visit the portal already
- * calendared, the portal's own row is usually past its start time and therefore
- * (by this module's rules) untouched -- so the FHIR pass would see no row for its
- * key, insert a second event, and leave the owner with two of everything. Renaming
- * the row first turns the situation into an ordinary one: the diff finds a row and
- * an event whose fingerprint no longer matches, patches it, and the appointment
- * keeps the calendar entry it has had all along.
- *
- * Returns the rows and events with the rename applied, so the caller diffs against
- * what is now true rather than re-reading. Never throws: a failed adoption is a
- * duplicate event, which is bad, but a failed *sync* is worse.
- */
+Hand the portal's rows and events over to the FHIR pass where they describe the
+same appointment.
+
+Called from the FHIR pass *before* its diff runs, and the ordering is the whole
+point. By the time an Encounter appears for a visit the portal already
+calendared, the portal's own row is usually past its start time and therefore
+(by this module's rules) untouched -- so the FHIR pass would see no row for its
+key, insert a second event, and leave the owner with two of everything. Renaming
+the row first turns the situation into an ordinary one: the diff finds a row and
+an event whose fingerprint no longer matches, patches it, and the appointment
+keeps the calendar entry it has had all along.
+
+Returns the rows and events with the rename applied, so the caller diffs against
+what is now true rather than re-reading. Never throws: a failed adoption is a
+duplicate event, which is bad, but a failed *sync* is worse.
+*/
 export async function adoptPortalRows(input: AdoptPortalInput): Promise<{
   rows: CalendarEventRow[];
   events: EventRecord[];
@@ -1376,10 +1376,10 @@ async function planRenames(
 }
 
 /**
- * The practitioner each stored portal visit names, by its CSN in the blinded form
- * `calendar_events.portal_csn` holds. The row itself does not keep a name, and
- * the name is the only identity an Encounter without a CSN can be matched on.
- */
+The practitioner each stored portal visit names, by its CSN in the blinded form
+`calendar_events.portal_csn` holds. The row itself does not keep a name, and
+the name is the only identity an Encounter without a CSN can be matched on.
+*/
 async function portalPractitioners(input: AdoptPortalInput): Promise<Map<string, string>> {
   const stored = await input.repos.portalVisits.list(input.healthSystemId);
   const out = new Map<string, string>();
@@ -1392,12 +1392,12 @@ async function portalPractitioners(input: AdoptPortalInput): Promise<Map<string,
 }
 
 /**
- * True when a portal row and a FHIR mapping are two sightings of one visit, by
- * `sameVisitWithinHealthSystem`: the same CSN, or -- when the Encounter has none --
- * the same practitioner at the same time. A time-only match adopts nothing: the
- * Encounter may be a different, cancelled visit, and adopting would grey out the
- * live one. `blindedCsn` is the mapping's CSN in the form the row stores it.
- */
+True when a portal row and a FHIR mapping are two sightings of one visit, by
+`sameVisitWithinHealthSystem`: the same CSN, or -- when the Encounter has none --
+the same practitioner at the same time. A time-only match adopts nothing: the
+Encounter may be a different, cancelled visit, and adopting would grey out the
+live one. `blindedCsn` is the mapping's CSN in the form the row stores it.
+*/
 function sameVisit(
   row: CalendarEventRow,
   mapping: CalendarMapping,
