@@ -499,7 +499,12 @@ export function registerHcRecordTools(server: McpServer, deps: ToolDeps): void {
         "day is a local day, 23 or 25 hours across a clock change). One row per bucket: " +
         "`bucket`, `start`, `end`, `hasData`, `origins`, `method`, and `values.<field>` " +
         "with the `metrics` asked for (`sum`, `mean`, `min`, `max`, `n`, `first`, `last`; " +
-        "plus row-level `records`, `duration` and, for sleep, `in_bed`). Every bucket from " +
+        "plus row-level `records`, `duration` and, for sleep, `in_bed`). The key under " +
+        "`values` depends on the type (`count` for steps, `distance`, `energy`, `floors`, " +
+        "`bpm`, ...), so each row names its type's headline one as `field`: read it as " +
+        "`.values[.field].sum` (or `.mean`), not `.values.sum`; `values` may hold others " +
+        "beside it (blood pressure's `diastolic`, nutrition's nutrients), and sleep and " +
+        "exercise have no `field` (read `durationMs`). Every bucket from " +
         "`start` to the end of the range -- or to now -- is returned, the empty ones " +
         'filled with zero (or null with `fill: "null"`) and `hasData: false`, so a gap is ' +
         "visible; if the answer is cut by the byte budget it says `truncated` and `total` " +

@@ -1750,6 +1750,7 @@ const HC_BUCKET = {
   records: "integer",
   durationMs: ["number", "How long the records ran; for sleep, the time asleep"],
   inBedMs: ["number", "Sleep only: the nights from start to end"],
+  field: ["string", "The key under values that holds the type's headline figure"],
   values: ["object?", "Per field of the type, the metrics asked for"],
   duplicatesDropped: "integer",
   longRecordSum: ["number", "Of the total, what comes from records longer than an hour"],

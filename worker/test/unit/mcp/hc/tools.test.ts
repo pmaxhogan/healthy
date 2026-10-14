@@ -626,6 +626,7 @@ describe("hc_aggregate", () => {
       hasData: true,
       method: "platform_and_max_origin",
       origins: [WEARABLE, PLATFORM],
+      field: "count",
       values: { count: { sum: 4 * 520 + 6 * 500 } },
       duplicatesDropped: 6,
     });
@@ -711,6 +712,20 @@ describe("hc_aggregate", () => {
 
     expect(answer.items.map((item) => item.bucket)).toStrictEqual([TODAY]);
     expect(all.items).toHaveLength(3);
+  });
+
+  it("names each row's headline key under values, so one jq program reads every type", async () => {
+    const read = ".[] | select(.hasData) | .values[.field].sum";
+    const steps = await call("hc_aggregate", { type: "Steps", ...RANGE, jq: read });
+    const energy = await call("hc_aggregate", { type: "TotalCaloriesBurned", ...RANGE, jq: read });
+    const heart = await call("hc_aggregate", { type: "HeartRate", ...RANGE });
+    const sleep = await call("hc_aggregate", { type: "SleepSession", ...RANGE });
+
+    expect(steps.items).toStrictEqual([4 * 520 + 6 * 500]);
+    expect(energy.items).toStrictEqual([1000]);
+    expect(heart.items.every((item) => item.field === "bpm")).toBe(true);
+    // A session type has no field: its figure is the row's own durationMs.
+    expect(sleep.items.every((item) => !Object.hasOwn(item, "field"))).toBe(true);
   });
 
   it("refuses a bucket or an origin mode it does not know", async () => {

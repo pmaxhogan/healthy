@@ -122,7 +122,7 @@ export const JQ_EXAMPLES = {
   ],
   hc_aggregate: [
     ".[] | select(.hasData) | {bucket, values, origins, method}",
-    ".[] | [.bucket, (.values | to_entries[0].value.sum)]",
+    ".[] | [.bucket, .values[.field].sum]",
   ],
   hr_series: [".[] | [.t, .mean]", ".[] | select(.max > 120) | {t, max, origin}"],
   hr_events: [
