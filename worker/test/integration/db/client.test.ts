@@ -170,6 +170,7 @@ describe("reposFor", () => {
         "mailInbox",
         "mcpAudit",
         "mcpPolicy",
+        "mcpSyncRequests",
         "oauthStates",
         "portalAccounts",
         "portalMessageAttachments",
@@ -177,6 +178,7 @@ describe("reposFor", () => {
         "portalVisits",
         "healthSystems",
         "runLog",
+        "syncFailures",
       ]),
     );
     expect(repos.ctx.now()).toBe(T0);

@@ -8,6 +8,8 @@
  *     Google, then the Encounter-only calendar sync. The keepalive runs first on
  *     purpose: if a grant has died, the sync's own token calls would each discover
  *     it separately, and the alert is more useful before the sync than during it.
+ *     Last, the alert sweep (`sweepReconnectAlerts`): anything left waiting for
+ *     the owner that has no alert yet gets one.
  *   - `23 2,6,10,14,18,22 * * *` — every four hours. The full-scope refresh of
  *     the MCP's read cache, then a calendar sync, because the refresh has just
  *     filled the cache the sync's reference resolution reads from and will
@@ -36,6 +38,7 @@ import { makeRepos } from "../db/index.ts";
 import { pokeIngestRunners } from "../hc/store/poke.ts";
 import { errorFields, makeLogger } from "../lib/log.ts";
 
+import { sweepReconnectAlerts } from "./alerts.ts";
 import { runCalendarSync } from "./calendar-sync.ts";
 import { runFullRefresh } from "./full-refresh.ts";
 import { runTokenKeepalive } from "./keepalive.ts";
@@ -74,11 +77,14 @@ export async function handleScheduled(
       case CRON_HOURLY: {
         await runTokenKeepalive(ctx, deps);
         await runCalendarSync(ctx, { trigger: "calendar", deps });
+        // After the work, so that whatever this hour parked is carded this hour.
+        await sweepReconnectAlerts(ctx, deps);
         return;
       }
       case CRON_FULL_REFRESH: {
         await runFullRefresh(ctx, { trigger: "full", deps });
         await runCalendarSync(ctx, { trigger: "calendar", deps });
+        await sweepReconnectAlerts(ctx, deps);
         // Last, and after the work: pruning is housekeeping, and a failure here
         // must not look like a failed sync.
         ectx.waitUntil(prune(ctx));

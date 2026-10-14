@@ -11,6 +11,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.maxhogan.healthy.companion.graph
+import dev.maxhogan.healthy.companion.sync.SyncTrigger
 
 /**
  * The app's only launchable activity: the status screen, with the pairing screen swapped in
@@ -22,7 +23,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         val graph = graph
         // Opening the app is a request for fresh data; a rotation is not.
-        if (savedInstanceState == null) graph.syncController.syncNow()
+        if (savedInstanceState == null) graph.syncController.syncNow(SyncTrigger.APP_OPEN)
 
         setContent {
             HealthyTheme {

@@ -24,6 +24,7 @@ import { registerHcStatusTools } from "./hc-status.ts";
 import { registerHealthSystemTools } from "./health-systems.ts";
 import { registerMessageTools } from "./messages.ts";
 import { registerSummaryTool } from "./summary.ts";
+import { registerSyncTool } from "./sync.ts";
 
 import type { ToolDeps } from "../deps.ts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -33,6 +34,7 @@ export { TOOL_NAMES } from "../tool-names.ts";
 export function registerTools(server: McpServer, deps: ToolDeps): void {
   registerSummaryTool(server, deps);
   registerHealthSystemTools(server, deps);
+  registerSyncTool(server, deps);
   registerAppointmentTools(server, deps);
   registerClinicalTools(server, deps);
   registerDocumentTools(server, deps);

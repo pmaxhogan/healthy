@@ -39,10 +39,43 @@ export function relativeTime(iso: string | null | undefined, now: number = Date.
   return future ? `in ${amount}` : `${amount} ago`;
 }
 
-/** True when the instant is in the past. Used to call an expired token expired. */
+/** True when the instant is in the past. */
 export function isPast(iso: string | null | undefined, now: number = Date.now()): boolean {
   const date = parseIso(iso);
   return date !== null && date.getTime() < now;
+}
+
+/** What `tokenSummary` reads: the same three fields on a connection and on Google. */
+interface TokenFacts {
+  status: string;
+  accessExpiresAt: string | null;
+  lastRefreshAt: string | null;
+}
+
+/**
+ * What to say about a stored access token: "expires in 43 min", "renews when
+ * needed · renewed 52 min ago", "expired 3 d ago", or "—" when there is none.
+ *
+ * An access token that has lapsed is not a fault. It is renewed lazily, by the
+ * next run that needs one, from the refresh token; a vendor whose access tokens
+ * live a few minutes therefore has a lapsed one for most of every hour while
+ * the connection is perfectly healthy. So a lapsed token only reads as
+ * "expired" where it will not be renewed without the owner (`needs_reauth`),
+ * and it is never styled as an error anywhere: the status pill and the error
+ * code are what say a connection is in trouble.
+ */
+export function tokenSummary(
+  token: TokenFacts | null | undefined,
+  now: number = Date.now(),
+): string {
+  if (!token?.accessExpiresAt) return "—";
+  if (!isPast(token.accessExpiresAt, now)) {
+    return `expires ${relativeTime(token.accessExpiresAt, now)}`;
+  }
+  if (token.status === "needs_reauth") return `expired ${relativeTime(token.accessExpiresAt, now)}`;
+  return token.lastRefreshAt
+    ? `renews when needed · renewed ${relativeTime(token.lastRefreshAt, now)}`
+    : "renews when needed";
 }
 
 function formatIn(

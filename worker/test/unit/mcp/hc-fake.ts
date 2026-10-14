@@ -19,6 +19,7 @@ import { rollupBucket } from "../../../src/hc/rollup/hour.ts";
 import { hrMinutesOfHour } from "../../../src/hc/rollup/hr-minute.ts";
 import { heartRateSamples } from "../../../src/hc/rollup/hr.ts";
 import { summariseSleep } from "../../../src/hc/rollup/sleep.ts";
+import { newestRuns } from "../../../src/hc/upload-runs.ts";
 import { recordEndMs, recordStartMs } from "../../../src/hc/wire.ts";
 
 import type { IngestLogRow, PermissionState, SyncStateRow } from "../../../src/hc/device.ts";
@@ -305,6 +306,8 @@ export function fakeHcReads(hc: FakeHc): FakeHcReads {
       ),
     ingestLog: (deviceId, limit) =>
       Promise.resolve((hc.ingestLog.get(deviceId) ?? []).slice(0, limit)),
+    recentUploads: (deviceId, limit) =>
+      Promise.resolve(newestRuns(hc.ingestLog.get(deviceId) ?? [], limit).runs),
     origins: (deviceId, type) =>
       Promise.resolve(distinct(ofType(deviceId, type).map((record) => record.origin))),
 
@@ -623,6 +626,10 @@ export function hcWorld(nowSeconds: number): FakeHc {
       bodyBytes: 100,
       rawBytes: 1000,
       applyMs: 12,
+      runTrigger: "periodic",
+      runStartedMs: (nowSeconds - 605) * 1000,
+      prevRunStartedMs: null,
+      prevRunEnd: null,
     },
     {
       receivedAt: nowSeconds - 4000,
@@ -638,6 +645,10 @@ export function hcWorld(nowSeconds: number): FakeHc {
       bodyBytes: 10,
       rawBytes: 100,
       applyMs: null,
+      runTrigger: null,
+      runStartedMs: null,
+      prevRunStartedMs: null,
+      prevRunEnd: null,
     },
   ]);
   return hc;

@@ -270,6 +270,23 @@ interface FakeCalendar {
   patches: number;
   /** `events.move` calls that actually relocated an event. */
   moves: number;
+  /**
+   * Set to answer every write (insert, patch, move, delete) with this status
+   * while reads still work: a calendar that lists and refuses changes. 403 is
+   * the one to use, because the client reports it at once where a 5xx would
+   * spend its retries.
+   */
+  writeStatus: number | null;
+  /** Set to answer the event listing with this status. */
+  listStatus: number | null;
+}
+
+/** What Google sends with a refusal that is not about quota. */
+function refused(status: number): Response {
+  return Response.json(
+    { error: { code: status, message: "refused", errors: [{ reason: "forbidden" }] } },
+    { status },
+  );
 }
 
 function makeFakeCalendar(): {
@@ -281,6 +298,7 @@ function makeFakeCalendar(): {
   // on, and a test that switches the target has to be able to prove that.
   const stores = new Map<string, StoredEvent[]>();
   const counters = { inserts: 0, patches: 0, moves: 0, nextId: 1 };
+  const failing: { writes: number | null; list: number | null } = { writes: null, list: null };
 
   const storeFor = (calendarId: string): StoredEvent[] => {
     let list = stores.get(calendarId);
@@ -335,6 +353,18 @@ function makeFakeCalendar(): {
     },
     get moves() {
       return counters.moves;
+    },
+    get writeStatus() {
+      return failing.writes;
+    },
+    set writeStatus(status) {
+      failing.writes = status;
+    },
+    get listStatus() {
+      return failing.list;
+    },
+    set listStatus(status) {
+      failing.list = status;
     },
   };
 
@@ -400,10 +430,12 @@ function makeFakeCalendar(): {
 
   const handle = (url: URL, init: RequestInit | undefined): Response => {
     const method = init?.method ?? "GET";
+    if (method !== "GET" && failing.writes !== null) return refused(failing.writes);
+    const eventId = eventIdFrom(url);
+    if (method === "GET" && eventId === null && failing.list !== null) return refused(failing.list);
     const body =
       typeof init?.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : {};
     const calendarId = calendarIdFrom(url);
-    const eventId = eventIdFrom(url);
 
     if (eventId === null) return handleCollection(method, url, calendarId, body);
     return isMove(url)
@@ -495,6 +527,8 @@ export interface FhirServer {
   tokenInvalidGrant: boolean;
   /** Answer the token endpoint with this status instead of a token. */
   tokenStatus: number | null;
+  /** Answer a search for this resource type (never Encounter) with this status. */
+  searchStatus: Map<string, number>;
   searchCalls: number;
   readCalls: number;
   tokenCalls: number;
@@ -513,6 +547,7 @@ export function fhirServer(overrides: Partial<FhirServer> = {}): FhirServer {
     retryAfter: null,
     tokenInvalidGrant: false,
     tokenStatus: null,
+    searchStatus: new Map(),
     searchCalls: 0,
     readCalls: 0,
     tokenCalls: 0,
@@ -527,6 +562,8 @@ export interface Upstreams {
   trelloCalls: { method: string; path: string }[];
   /** Cards the Trello stub has "created". */
   trelloCards: { name: string; desc: string }[];
+  /** Answer every Trello call with this status from now on; null puts Trello back. */
+  failTrello(status: number | null): void;
   googleRefreshes: number;
 }
 
@@ -542,6 +579,7 @@ export function stubUpstreams(servers: Record<string, FhirServer>): Upstreams {
   const trelloCalls: { method: string; path: string }[] = [];
   const trelloCards: { name: string; desc: string }[] = [];
   const counters = { googleRefreshes: 0 };
+  const trello: { status: number | null } = { status: null };
 
   const answer = (url: URL, init: RequestInit | undefined): Response => {
     if (url.hostname === "www.googleapis.com") return handleCalendar(url, init);
@@ -568,7 +606,12 @@ export function stubUpstreams(servers: Record<string, FhirServer>): Upstreams {
     const url = urlOf(input);
     const method = init?.method ?? "GET";
     trelloCalls.push({ method, path: url.pathname });
+    if (trello.status !== null) {
+      return Promise.resolve(new Response("trello is down", { status: trello.status }));
+    }
     if (method === "GET") return Promise.resolve(Response.json([]));
+    // A PUT completes a card that exists; only a POST creates one.
+    if (method !== "POST") return Promise.resolve(Response.json({ id: "completed" }));
     trelloCards.push({
       name: url.searchParams.get("name") ?? "",
       desc: url.searchParams.get("desc") ?? "",
@@ -589,6 +632,9 @@ export function stubUpstreams(servers: Record<string, FhirServer>): Upstreams {
     calendar,
     trelloCalls,
     trelloCards,
+    failTrello: (status) => {
+      trello.status = status;
+    },
     get googleRefreshes() {
       return counters.googleRefreshes;
     },
@@ -667,6 +713,8 @@ function handleFhir(server: FhirServer, url: URL): Response {
  * per-resource-type bundle every other test already relies on.
  */
 function genericSearch(server: FhirServer, resourceType: string, url: URL): Response {
+  const status = server.searchStatus.get(resourceType);
+  if (status !== undefined) return new Response(null, { status });
   const category = url.searchParams.get("category");
   if (category !== null) {
     const page = url.searchParams.get("page") ?? "1";
@@ -833,6 +881,7 @@ const TABLES = [
   "mcp_audit",
   "run_log",
   "alerts",
+  "sync_failures",
   "calendar_events",
   "fhir_sync_state",
   "fhir_cache",

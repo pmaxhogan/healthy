@@ -126,7 +126,10 @@ ${extraStyles(options.nonce)}
   </dl>
   <p class="warn">Approving grants read-only access to appointments, conditions,
   medications, results and documents from every connected health system, subject to
-  your exposure policy. You can revoke it at any time from the MCP page.</p>
+  your exposure policy. It also lets this client ask the server to sync your health
+  systems sooner than the schedule would, within fixed limits; it can never sign in
+  to a patient portal, and a tool rule on the MCP page switches that off. You can
+  revoke access at any time from the MCP page.</p>
   <input type="hidden" name="oauth_req" value="${escapeHtml(encodeRequest(request))}">
   <div class="row">
     <button type="submit" name="decision" value="deny" class="deny">Deny</button>

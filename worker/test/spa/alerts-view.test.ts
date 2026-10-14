@@ -19,6 +19,7 @@ function alert(overrides: Partial<AlertDto> = {}): AlertDto {
     trelloCardId: null,
     openedAt: "2026-09-21T11:00:00.000Z",
     resolvedAt: null,
+    reasonCode: null,
     ...overrides,
   };
 }
@@ -62,6 +63,74 @@ describe("AlertsView", () => {
     expect(item.get(".subject").text()).toBe("Google Calendar");
     expect(item.text()).toContain("needs re-auth");
     expect(item.find("a").exists()).toBe(false);
+  });
+
+  it("says which code a connection needs re-authenticating for, when it has one", async () => {
+    const wrapper = await mounted([alert({ reasonCode: "needs_reauth" })]);
+
+    expect(wrapper.get("ul.alerts li").text()).toContain("needs re-auth (needs reauth)");
+  });
+
+  it("says a sync keeps failing, with its code, and that nothing needs reconnecting", async () => {
+    const system = healthSystem();
+    const wrapper = await mounted([
+      alert({
+        kind: "sync_failing",
+        subject: `health_system:${system.id}`,
+        healthSystemId: system.id,
+        reasonCode: "upstream_unavailable",
+        trelloCardId: "c1",
+      }),
+    ]);
+
+    const item = wrapper.get("ul.alerts li");
+    expect(item.get(".subject").text()).toBe(system.displayName);
+    expect(item.text()).toContain("sync keeps failing (upstream unavailable)");
+    expect(item.text()).toContain("nothing to reconnect");
+    expect(item.text()).not.toContain("needs re-auth");
+    expect(item.text()).toContain("card opened");
+  });
+
+  it("tells a failing portal from the health system's own connection", async () => {
+    const system = healthSystem();
+    const wrapper = await mounted([
+      alert({
+        kind: "sync_failing",
+        subject: `portal:${system.id}`,
+        healthSystemId: system.id,
+        reasonCode: "portal_parse_failed",
+      }),
+      alert({
+        id: "alert-3",
+        kind: "reconnect",
+        subject: `portal:${system.id}`,
+        healthSystemId: system.id,
+        resolvedAt: "2026-09-21T11:30:00.000Z",
+      }),
+    ]);
+
+    const subjects = wrapper.findAll("ul.alerts li .subject").map((node) => node.text());
+    expect(subjects).toStrictEqual([
+      `${system.displayName} patient portal`,
+      `${system.displayName} patient portal`,
+    ]);
+    expect(wrapper.text()).toContain("sync keeps failing (portal parse failed)");
+  });
+
+  it("names Google and the sync itself rather than showing a raw subject", async () => {
+    const wrapper = await mounted([
+      alert({ kind: "sync_failing", subject: "google", reasonCode: "upstream_auth" }),
+      alert({ id: "alert-4", kind: "sync_failing", subject: "sync", reasonCode: null }),
+    ]);
+
+    const items = wrapper.findAll("ul.alerts li");
+    expect(items.map((item) => item.get(".subject").text())).toStrictEqual([
+      "Google Calendar",
+      "Scheduled sync",
+    ]);
+    // No code recorded: the sentence still reads, without empty brackets.
+    expect(items[1]?.text()).toContain("sync keeps failing");
+    expect(items[1]?.text()).not.toContain("()");
   });
 
   it("lists a resolved phone alert under Resolved, and says so when nothing is open", async () => {

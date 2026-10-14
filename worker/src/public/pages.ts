@@ -53,8 +53,10 @@ logging in anywhere. An appointment that disappears from the portal is marked
 cancelled rather than deleted.</li>
 <li><strong>A read-only MCP server.</strong> The same record is exposed over the
 Model Context Protocol so the operator can ask an AI assistant questions about
-their own health history. Every tool is read-only: nothing the assistant does can
-write to a patient record, a portal, or a calendar. Access is OAuth-protected and
+their own health history. The record is read-only to the assistant: nothing it does
+can change a patient record or write to a portal. The one thing it can ask for is a
+sync sooner than the schedule, the same sync the operator's own button starts, held
+to fixed limits and never a portal sign-in. Access is OAuth-protected and
 scoped to the operator, each call is logged, and a server-side policy can withhold
 whole categories or individual fields before anything is serialised.</li>
 </ul>
@@ -97,8 +99,9 @@ clinical record is encrypted by the application before it is written, with a key
 held only as a deployment secret.</li>
 <li>The whole administrative interface sits behind two independent gates: a
 single-sign-on identity check, and a password.</li>
-<li>Assistant access goes through OAuth, is read-only, and is filtered by a
-server-side policy before any data leaves the process.</li>
+<li>Assistant access goes through OAuth, is read-only apart from asking for a sync
+within fixed limits, and is filtered by a server-side policy before any data leaves
+the process.</li>
 <li>Logs record counts, timings and error codes. They deliberately never record
 clinical content, credentials or identifiers.</li>
 </ul>

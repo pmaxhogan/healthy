@@ -1613,6 +1613,20 @@ const HEALTH_SYSTEM_ROW = {
   portalLastErrorCode: "string",
 } as const;
 
+const SYNC_REQUEST_ROW = {
+  kind: ["string", "sync_request"],
+  ...TAGS,
+  sync: ["string", "Which sync was asked for: ordinary, full or portal"],
+  outcome: ["string", "started, would_start, already_running, refused, skipped or failed"],
+  code: ["string", "Why, as a stable code"],
+  nextAllowedAt: ["string", "When the same request may be made again"],
+  lastCompletedAt: ["string", "When a sync of this kind last finished"],
+  lastRequestedAt: ["string", "When a sync of this kind was last asked for over MCP"],
+  requestsToday: "integer",
+  dailyLimit: "integer",
+  cooldownSeconds: "integer",
+} as const;
+
 const RESOURCE_SYNC_ROW = {
   kind: ["string", "resource_sync"],
   ...TAGS,
@@ -1686,6 +1700,10 @@ const HC_DEVICE_ROW = {
   parkedBatches: "integer",
   recentBatches: "integer",
   recentFailures: ["object?[]", "Failed uploads among the recent ones"],
+  recentUploads: [
+    "object?[]",
+    "The newest sync runs: when, what started each, what it sent, whether it finished",
+  ],
 } as const;
 
 const HC_TYPE_SYNC_ROW = {
@@ -1872,7 +1890,10 @@ const HC_DAY = {
 
 const HC_FINDING = {
   ...HC_TAGS,
-  kind: ["string", "duplicate, artefact, gap, source_switch, overlapping_origins, ..."],
+  kind: [
+    "string",
+    "duplicate, artefact, gap, source_switch, overlapping_origins, stale_platform_total, ...",
+  ],
   reason: "string",
   origin: "string",
   origins: ["object?", "The apps involved"],
@@ -2147,6 +2168,13 @@ const SHAPES: readonly ShapeDef[] = [
     vocabulary: "normalized",
     fields: RESOURCE_SYNC_ROW,
   },
+  {
+    id: "system:sync_request",
+    label: "Sync request row",
+    resourceType: null,
+    vocabulary: "normalized",
+    fields: SYNC_REQUEST_ROW,
+  },
   ...HC_SHAPES.map(({ rows: _rows, ...shape }): ShapeDef => ({
     ...shape,
     resourceType: null,
@@ -2182,6 +2210,7 @@ const TOOL_SHAPES = {
   ],
   list_health_systems: ["system:health_system"],
   get_sync_status: ["system:health_system", "system:resource_sync"],
+  sync_health_systems: ["system:sync_request"],
   get_patient_profile: collectionShapes("Patient"),
   get_appointments: [APPOINTMENT_SHAPE, "raw:Encounter"],
   get_encounters: collectionShapes("Encounter"),

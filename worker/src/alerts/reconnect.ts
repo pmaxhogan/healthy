@@ -12,7 +12,18 @@
  * occurrence time is rendered in UTC and labeled as such instead.
  */
 
-type ReconnectKind = "epic" | "google" | "portal";
+/**
+ * One kind per fix, because the steps are the card.
+ *
+ * `portal` is a portal the owner has to give something to again (the password,
+ * or their confirmation of a new address). `portal_signin` is a portal whose
+ * sign-in failed for a reason the stored password has nothing to do with -- the
+ * emailed code never arrived, the portal was unreachable, a page stopped
+ * parsing -- where the scheduled sync has stopped trying and pressing "Sign in
+ * now" is the whole fix. Telling that owner to re-enter a password would be
+ * telling them to fix the one thing that is not broken.
+ */
+type ReconnectKind = "epic" | "google" | "portal" | "portal_signin";
 
 export interface BuildReconnectCardInput {
   kind: ReconnectKind;
@@ -57,7 +68,7 @@ function portalNoun(kind: ReconnectKind): string {
 
 /** What the card calls the thing that needs reconnecting. */
 function subjectName(input: BuildReconnectCardInput): string {
-  return input.kind === "portal"
+  return input.kind === "portal" || input.kind === "portal_signin"
     ? `${input.healthSystemName} ${PORTAL_LABEL}`
     : input.healthSystemName;
 }
@@ -72,6 +83,13 @@ function subjectName(input: BuildReconnectCardInput): string {
  */
 function stepsFor(input: BuildReconnectCardInput): string {
   const open = `1. Open ${input.reconnectUrl} (sign in with Cloudflare Access, then the Healthy password).`;
+  if (input.kind === "portal_signin") {
+    return [
+      open,
+      `2. In the Patient portal card, press "Sign in now". The password on file is kept and nothing needs re-entering; if the portal emails a code, leave it to pick that up. Healthy has stopped signing in on its own until you do.`,
+      `3. Done — this card completes itself when the sync sees the portal again. If the sign-in fails again with the same code, the portal itself is the problem: try again later.`,
+    ].join("\n");
+  }
   const settles = `3. Done — this card completes itself when the sync sees the new connection.`;
   if (input.kind === "portal") {
     return [
@@ -89,7 +107,10 @@ function stepsFor(input: BuildReconnectCardInput): string {
 
 export function buildReconnectCard(input: BuildReconnectCardInput): ReconnectCard {
   const name = subjectName(input);
-  const title = `Reconnect ${name} to Healthy`;
+  const title =
+    input.kind === "portal_signin"
+      ? `Sign in to ${name} again in Healthy`
+      : `Reconnect ${name} to Healthy`;
   const when = formatOccurredAt(input.occurredAt);
   const reason = input.reason === undefined ? undefined : clamp(input.reason, MAX_REASON_LENGTH);
 

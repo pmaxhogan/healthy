@@ -204,13 +204,31 @@ export interface CalendarEventDbRow extends Omit<CalendarEventRow, "calendar_id"
 
 export interface AlertRow {
   id: string;
-  /** `reconnect`: a grant or session to renew. `hc_parked`: a phone's uploads set aside. */
-  kind: "reconnect" | "hc_parked";
-  /** 'health_system:<id>', 'portal:<id>', 'google' or 'device:<id>'. */
+  /**
+   * `reconnect`: a grant or session to renew. `hc_parked`: a phone's uploads set
+   * aside. `sync_failing`: a sync that keeps failing though nothing needs renewing.
+   */
+  kind: "reconnect" | "hc_parked" | "sync_failing";
+  /** 'health_system:<id>', 'portal:<id>', 'google', 'sync' or 'device:<id>'. */
   subject: string;
   trello_card_id: string | null;
   opened_at: number;
   resolved_at: number | null;
+  /** The stable error code the alert was opened with. Null on rows older than 0019. */
+  reason_code: string | null;
+}
+
+/** One failing streak. See `worker/src/db/repos/sync-failures.ts`. */
+export interface SyncFailureRow {
+  /** An `alerts.subject`: 'health_system:<id>', 'portal:<id>', 'google' or 'sync'. */
+  subject: string;
+  /** Which pass of the subject is failing; they run on different schedules. */
+  check_name: "calendar" | "refresh" | "visits" | "messages";
+  /** Consecutive failed attempts. */
+  failures: number;
+  first_failed_at: number;
+  last_failed_at: number;
+  last_error_code: string;
 }
 
 export interface McpAuditRow {
@@ -263,6 +281,43 @@ export interface RunLogRow {
   finished_at: number | null;
   ok: number | null;
   summary_json: string;
+}
+
+/** Which sync an MCP client asked for (CHECK-constrained): see migration 0018. */
+export type McpSyncKind = "ordinary" | "full" | "portal";
+
+/** One (health system, kind of sync) pair's request history. Nothing personal. */
+export interface McpSyncRequestRow {
+  health_system_id: string;
+  kind: McpSyncKind;
+  requested_at: number;
+  /** Whole UTC days since the epoch `day_count` belongs to. */
+  day: number;
+  day_count: number;
+  client_id: string | null;
+}
+
+/**
+ * What one (health system, kind) pair is held to. Here, beside the row, rather
+ * than in the repo: the MCP tool layer reads these shapes and must not import
+ * a module that touches D1.
+ */
+export interface McpSyncRequestLimits {
+  /** Least seconds between two requests that are let through. */
+  cooldownSeconds: number;
+  /** Most requests let through in one UTC day. */
+  dailyLimit: number;
+}
+
+/** A pair's stored history, as the tool reads it. */
+export interface McpSyncRequestEntry {
+  healthSystemId: string;
+  kind: McpSyncKind;
+  /** Unix seconds of the last request that was let through. */
+  requestedAt: number;
+  /** Whole UTC days since the epoch `dayCount` belongs to. */
+  day: number;
+  dayCount: number;
 }
 
 export interface LoginAttemptRow {

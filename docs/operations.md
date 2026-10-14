@@ -47,7 +47,9 @@ watching it and every code it asks for is an email to the owner:
 - **It leaves the day's last two attempts for the owner.** The daily budget
   (`portal_login_attempt_limit`) is shared with the button; once only two
   are left, the scheduled run stops signing in until the next UTC day
-  (reported as `portal_signin_deferred`; the account stays `active`).
+  (reported as `portal_signin_deferred`; the account stays `active`). Three
+  scheduled runs in a row that end this way open a failing-sync card (below):
+  the portal has not synced for hours, and "Sign in now" brings it back.
 - **At most two emailed codes a UTC day, at least six hours apart.** A sign-in
   that needs no code (a password alone, or a device the portal trusts) is not
   limited by this. Inside the six hours after its last code the run does not
@@ -71,6 +73,38 @@ organisation that starts rate-limiting a patient-facing endpoint is
 throttling the whole app, not one request, and retrying in the 60 seconds
 a header asked for just burns the next quota window too.
 
+## Syncs an MCP client asks for
+
+An assistant connected over MCP can ask for a sync with the
+`sync_health_systems` tool ([mcp.md](mcp.md#asking-for-a-sync-sync_health_systems)).
+What that means in operation:
+
+- Its runs appear on the **Runs** page like any other. An `ordinary` or
+  `portal` request is one `manual` run over every health system the call
+  named; a `full` request is one `full` run per health system, queued on the
+  same Durable Object the **Full refresh** button uses.
+- It never signs in to a patient portal. A portal whose session has expired
+  shows `portal_session_expired` on that run and nothing else changes: no
+  sign-in attempt is spent, no code is emailed and no reconnect card opens. The
+  hourly sync re-establishes the session under the limits above, or you do.
+- It never clears a backoff. While `sync_backoff_until` is in the future every
+  request is refused as `backed_off`; **Sync now** in the admin UI is still the
+  only override.
+- The cooldown and the daily count live in D1, in `mcp_sync_requests`: one row
+  per health system and kind, with when a request was last let through, how
+  many were that UTC day, and which client asked. Deleting a row lifts that
+  pair's cooldown; nothing else reads it.
+- Every call is in the MCP audit log (which client, which health systems, how
+  many rows), started or not.
+- To switch it off, add a `tool` rule for `sync_health_systems` on the MCP
+  page. The read tools are unaffected.
+
+One thing to know when reading its refusals: `run_in_flight` means _some_ sync
+run is open, not necessarily one for that health system, because a scheduled
+run's row does not say which health systems it covers. A run whose invocation
+died stays open until the next run sweeps it (30 minutes), and requests are
+refused for that long.
+
 ## The run log
 
 Every sync (scheduled or manual) writes one row to `run_log`: its kind
@@ -85,7 +119,8 @@ content. View recent runs in the admin UI's **Runs** page, or `GET
 
 When a connection's token refresh fails with `invalid_grant`, Healthy opens
 a Trello card via `openReconnectCard` and records an `alerts` row. There is
-at most one open alert per subject (`health_system:<id>` or `google`) — a
+at most one open alert per subject (`health_system:<id>`, `portal:<id>` or
+`google`) — a
 partial unique index enforces that a second failure while one is already
 open is a no-op, not a duplicate card.
 
@@ -114,13 +149,57 @@ carries a health system's display name) and no id, record type or value. It
 upload that was retried is applied, or when the phone is deleted. The Alerts page
 lists it as "Phone uploads", with a link to the Phone page.
 
-**Not every OAuth failure opens a card.** Only `invalid_grant` on a
+### A sync that keeps failing
+
+A third kind, `sync_failing`, is for everything that stops a sync while nothing
+needs signing in to again: a token endpoint that answers 500, an appointment
+search or a full refresh that fails upstream, a portal whose pages stop parsing
+or whose message centre cannot be read, a calendar that refuses writes, a run
+that stops before it reaches any connection. One failure is a blip and raises
+nothing. The same pass failing **three attempts in a row, over at least an hour
+and a half**, opens one alert and one card; on the hourly schedule that is the
+third failed run, and for the four-hourly refresh the third failed refresh.
+
+The streak is counted per subject and per pass in `sync_failures` (a row exists
+only while something is failing): `calendar` and `refresh` for a health system,
+`visits` and `messages` for its portal (`portal:<id>`), `calendar` for `google`,
+and `calendar` or `refresh` for `sync`, the run itself. A rate-limit backoff is
+not an attempt. The card says which pass is failing and for whom, the stable
+error code, how many runs and since when (UTC), and that nothing needs
+reconnecting; a portal's card adds that "Sign in now" may help. It **completes
+itself** on the next attempt of that pass that works. The Alerts page lists it
+as "sync keeps failing" with the code.
+
+What does not count:
+
+- a resource type the health system does not offer (`unsupported`), or
+  documents skipped past a vendor's daily cap;
+- a refresh in which some resource types fail and most succeed. Each type's
+  failure is on the Health systems page and in the MCP's `coverage`; a refresh
+  is only failing when more of the types it attempted failed than worked;
+- one visit's details page, or one attachment;
+- `needs_reauth`, which has its reconnect card, and `not_connected`.
+
+A subject has one open alert at a time. A failing sync opens nothing while a
+reconnect card is open for the same subject, and a reconnect card replaces a
+failing-sync card (the old one is completed), because "nothing needs
+reconnecting" has stopped being true.
+
+A portal **sign-in** that fails is different: the account is parked
+(`needs_reauth`) and the scheduled sync never signs in to a parked account, so
+there is no next attempt to wait for. Every failed sign-in opens its card at
+once, worded by the fix (re-enter the password, or just press "Sign in now"),
+except a first verification code that never arrived, which is carded by the
+sweep at the end of that hour's scheduled sync if the account is still parked.
+
+**Not every OAuth failure opens a reconnect card.** Only `invalid_grant` on a
 _refresh_ attempt means "the owner must reconnect": the refresh token
 expired, was revoked in the portal, or was invalidated by a password reset
 there. `invalid_client` and `unauthorized_client` are wrong-credential
 errors — a misconfigured client id or secret — and are deliberately **not**
 treated as needs-reauth, because sending the owner through a reconnect flow
 cannot fix a bad client secret; those show up as connection errors instead
+(and, after three runs, as a failing-sync card with that code)
 and need a secret rotated (see below).
 
 ## What "needs re-auth" means
@@ -268,8 +347,13 @@ applied and the median apply time of the last twenty. Under it is the ingest
 log, newest first, fifty rows at a time (**Show more** goes to 200, then 500;
 the caption says how many there are in all): when a batch arrived, its
 status (`queued`, `applying`, `applied` or `failed`; a `failed` row is a parked
-batch), counts of upserts, deletes and rejected records, size, how long applying
-took, and an error code. **Finished**, **Waiting** and **All** choose which
+batch), what started the sync run it was uploaded in (_Trigger_: `periodic` for
+the 15-minute background job, `alarm` for the watchdog alarm that fires when
+nothing has run, `manual` for Sync now or an automation, `app_open`, `backfill`;
+a dash for a build of the app that does not say), counts of upserts, deletes and
+rejected records, size, how long applying took, and an error code. The MCP tool
+`hc_sync_status` groups the same rows into runs (`recentUploads`), with whether
+each one finished: see [mcp.md](mcp.md). **Finished**, **Waiting** and **All** choose which
 batches are listed; during a backfill the newest are all waiting, so the list
 starts on the finished ones. All of it is counts, instants and stable codes; nothing on this
 page is a health value. The card's other buttons are **Rename**, **Rotate token**,

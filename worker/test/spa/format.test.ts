@@ -12,6 +12,7 @@ import {
   maskCalendarId,
   parseIso,
   relativeTime,
+  tokenSummary,
 } from "../../ui/lib/format.ts";
 
 import { NOW } from "./helpers.ts";
@@ -59,6 +60,51 @@ describe("relativeTime", () => {
 
   it("switches to months past sixty days", () => {
     expect(relativeTime(at(-60 * 24 * 90), NOW)).toBe("3 mo ago");
+  });
+});
+
+/** A lapsed token on a healthy connection, unless overridden. */
+function token(
+  overrides: Partial<{
+    status: string;
+    accessExpiresAt: string | null;
+    lastRefreshAt: string | null;
+  }> = {},
+): { status: string; accessExpiresAt: string | null; lastRefreshAt: string | null } {
+  return { status: "connected", accessExpiresAt: at(-50), lastRefreshAt: at(-55), ...overrides };
+}
+
+describe("tokenSummary", () => {
+  it("says when a live token expires", () => {
+    const live = token({ accessExpiresAt: at(43) });
+    expect(tokenSummary(live, NOW)).toBe("expires in 43 min");
+  });
+
+  it("calls a lapsed token on a healthy connection renewable, not expired", () => {
+    const text = tokenSummary(token(), NOW);
+    expect(text).toBe("renews when needed · renewed 55 min ago");
+    expect(text).not.toContain("expired");
+  });
+
+  it("says the same while a transient error is being retried", () => {
+    const retrying = token({ status: "error" });
+    expect(tokenSummary(retrying, NOW)).toContain("renews when needed");
+  });
+
+  it("leaves out the last renewal when there has not been one", () => {
+    const never = token({ lastRefreshAt: null });
+    expect(tokenSummary(never, NOW)).toBe("renews when needed");
+  });
+
+  it("calls it expired only where the owner has to reconnect", () => {
+    const dead = token({ status: "needs_reauth" });
+    expect(tokenSummary(dead, NOW)).toBe("expired 50 min ago");
+  });
+
+  it("shows a dash when there is no token", () => {
+    const none = token({ accessExpiresAt: null });
+    expect(tokenSummary(none, NOW)).toBe("—");
+    expect(tokenSummary(null, NOW)).toBe("—");
   });
 });
 

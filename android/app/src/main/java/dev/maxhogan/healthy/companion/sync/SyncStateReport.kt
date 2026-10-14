@@ -3,6 +3,7 @@ package dev.maxhogan.healthy.companion.sync
 import dev.maxhogan.healthy.companion.hc.Grant
 import dev.maxhogan.healthy.companion.hc.HealthAccess
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -29,8 +30,17 @@ data class DeviceFacts(
 object SyncStateReport {
     private const val MAX_VERSION_LENGTH = 64
 
+    /** What the server takes for `runTrigger` and for `previousRun.end`. */
+    private val TRIGGER = Regex("^[a-z][a-z0-9_]{0,23}$")
+    private val RUN_END = Regex("^[a-z][a-z0-9_]{0,39}$")
+
+    /** Stands for a code the server would not take as it is; none of the app's own is one. */
+    private const val UNNAMED = "other"
+
     /**
      * @param types every record type the app knows, granted or not, in display order
+     * @param backfillSinceMs set for a batch the backfill loop uploads: when its session began.
+     *   Such a batch belongs to no incremental run, and says so; see [runMembers]
      */
     fun build(
         types: List<String>,
@@ -38,6 +48,7 @@ object SyncStateReport {
         snapshot: SyncSnapshot,
         facts: DeviceFacts,
         nowMs: Long,
+        backfillSinceMs: Long? = null,
     ): JsonObject = buildJsonObject {
         put(
             "types",
@@ -108,6 +119,36 @@ object SyncStateReport {
                 },
             )
         }
+        runMembers(snapshot.global, backfillSinceMs).forEach { (key, value) -> put(key, value) }
+    }
+
+    /**
+     * Which run the batch is uploaded in, and how the incremental run before that one ended. With
+     * these the server can tell a run that was cut off (its batches stop without a closing
+     * report, and the next run calls it `interrupted`) from one that had nothing more to send.
+     *
+     * - `runTrigger` and `runStartedAt` are the same on every batch of a run, its closing report
+     *   included. For a batch of the backfill they are `backfill` and the moment its session
+     *   began, which every batch of that session shares.
+     * - `previousRun` is left out until there has been a run to speak of. For a batch of the
+     *   backfill it is the latest incremental run: the backfill and a sync never run at once, so
+     *   one that has recorded no end by then did not reach one.
+     *
+     * Nothing is reported for a state no run has written yet.
+     */
+    private fun runMembers(global: GlobalState, backfillSinceMs: Long?): Map<String, JsonElement> = buildMap {
+        val current = if (backfillSinceMs != null) RunRecord(backfillSinceMs, SyncTrigger.BACKFILL_CODE) else global.run
+        if (current == null) return@buildMap
+        put("runTrigger", JsonPrimitive(current.trigger.takeIf(TRIGGER::matches) ?: UNNAMED))
+        put("runStartedAt", JsonPrimitive(current.startedAtMs.coerceAtLeast(0)))
+        val previous = (if (backfillSinceMs != null) global.run else global.previousRun)?.ended() ?: return@buildMap
+        put(
+            "previousRun",
+            buildJsonObject {
+                put("startedAt", JsonPrimitive(previous.startedAtMs.coerceAtLeast(0)))
+                put("end", JsonPrimitive(previous.end?.takeIf(RUN_END::matches) ?: UNNAMED))
+            },
+        )
     }
 
     /**

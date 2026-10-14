@@ -1,6 +1,7 @@
 # Setting up Trello alerts
 
 Trello is the only alert channel: when a connection needs re-authorising,
+or a sync keeps failing,
 a card opens automatically and closes itself once the connection is
 restored again. See [docs/operations.md](operations.md) for the lifecycle;
 this page is just getting the credentials and list ids in place.

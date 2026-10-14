@@ -64,7 +64,9 @@ screen off. Being told to slow down, by Health Connect's rate limit or the
 server's 429, is waited out by the backfill and the periodic sync alike and is
 not counted as a failed run. It also uploads Health Connect's own hourly
 totals for nine metrics as `Agg.<Metric>` records; a re-run also deletes the
-totals of hours that no longer have one. A record too large to send even
+totals of hours that no longer have one, and the hours the server says hold a
+stale total (a deleted record's, which Health Connect dates nowhere) are worked
+out again over the next syncs. A record too large to send even
 alone does not block its type: it is uploaded as an envelope-only stub and counted
 (`record_oversize_stubbed`). A 401 stops uploads until the phone is paired again,
 and three failed runs in a row post a notification. The details, including every

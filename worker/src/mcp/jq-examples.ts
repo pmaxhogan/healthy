@@ -32,6 +32,10 @@ export const JQ_EXAMPLES = {
     '.[] | select(.kind == "resource_sync") | select(any(.warnings[]; .severity != "info")) | {healthSystem, resourceType, warnings: [.warnings[] | select(.severity != "info")]}',
     String.raw`map(select(.kind == "resource_sync")) | group_by(.healthSystemId)[] | {healthSystem: .[0].healthSystem, notOk: [.[] | select(.status != "ok") | "\(.resourceType): \(.status)"]}`,
   ],
+  sync_health_systems: [
+    ".[] | {healthSystem, sync, outcome, code, nextAllowedAt}",
+    '.[] | select(.outcome != "started") | {healthSystem, outcome, code, nextAllowedAt}',
+  ],
   get_patient_profile: [".[] | {healthSystem, name, gender, address}"],
   get_appointments: [
     ".[] | {start, visitType, practitioner, department, telehealth, source}",
@@ -109,6 +113,7 @@ export const JQ_EXAMPLES = {
   ],
   hc_sync_status: [
     '.[] | select(.kind == "device") | {healthSystem, status, lastUploadAt, hoursSinceUpload, phoneBacklog, queuedBatches, recentFailures}',
+    '.[] | select(.kind == "device") | .recentUploads[] | select(.closed == false or .ended == "interrupted") | {startedAt, trigger, batches, ended}',
     '.[] | select(.kind == "type_sync") | {type, recordCount, backlog, backfillComplete, backfillOldestAt}',
   ],
   hc_records: [

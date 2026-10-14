@@ -264,7 +264,7 @@ private fun SyncCard(state: SyncUiState, controller: SyncController) {
             Text("${it.errorCode}, ${Format.dateTime(it.atMs)}", style = MaterialTheme.typography.bodySmall)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = controller::syncNow, enabled = paired && idle) { Text("Sync now") }
+            Button(onClick = { controller.syncNow() }, enabled = paired && idle) { Text("Sync now") }
             // Always available: after a complete backfill it runs the whole thing again, which
             // is how the owner recovers when the server is missing something. That is hours of
             // re-uploading, so it is confirmed first.

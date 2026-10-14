@@ -10,7 +10,13 @@ import StateBlock from "../components/StateBlock.vue";
 import StatusPill from "../components/StatusPill.vue";
 import TimezoneSelect from "../components/TimezoneSelect.vue";
 import TitleTemplateField from "../components/TitleTemplateField.vue";
-import { formatDateTime, maskAccount, maskCalendarId, relativeTime } from "../lib/format.ts";
+import {
+  formatDateTime,
+  maskAccount,
+  maskCalendarId,
+  relativeTime,
+  tokenSummary,
+} from "../lib/format.ts";
 import { GOOGLE_START } from "../lib/oauth.ts";
 import { toastSuccess } from "../lib/toasts.ts";
 import { useAction, useLoad } from "../lib/use-load.ts";
@@ -152,7 +158,7 @@ async function onDisconnect(): Promise<void> {
             </div>
             <div>
               <dt>Token</dt>
-              <dd>{{ relativeTime(google.data.value.accessExpiresAt) }}</dd>
+              <dd>{{ tokenSummary(google.data.value) }}</dd>
             </div>
             <div v-if="google.data.value.needsReauthSince">
               <dt>Needs re-auth since</dt>

@@ -37,3 +37,12 @@ export function mcpErrorCode(code: string): string | null {
   if (PER_TYPE_CODES.has(code)) return null;
   return WHOLE_PHONE_CODES.has(code) || ACCESS_WORDING.test(code) ? PHONE_NOT_READING : code;
 }
+
+/**
+ * What started a sync run, as an MCP client sees it. A trigger is not an
+ * error, so there is nothing to reword one as: a code that talks about access
+ * (a newer app's, were it ever to name one so) is withheld.
+ */
+export function mcpRunTrigger(code: string | null): string | null {
+  return code !== null && mcpErrorCode(code) === code ? code : null;
+}

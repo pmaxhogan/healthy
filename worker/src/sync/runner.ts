@@ -29,6 +29,25 @@
  *
  * Nothing personal is stored: a job is health system ids, a run id, counts and Epic
  * codes. Same rule as the run log, for the same reason.
+ *
+ * ### The second kind of job: a calendar sync asked for over MCP
+ *
+ * The MCP tool `sync_health_systems` can ask for the ordinary sync (the hourly
+ * run, narrowed to some health systems) or for the patient-portal pass alone.
+ * Neither can run where the tool runs: a tool call is answered from a Durable
+ * Object session or from an admin request, and the sync must outlive both. So
+ * it is queued here as a `calendar` job on one object of its own, addressed by
+ * `CALENDAR_SYNC_OBJECT` rather than by a health system id: **one** job for the
+ * whole selection, because the calendar run decides which copy of a visit two
+ * organisations both list gets the event, and it can only decide that inside
+ * one run (see `runPortalPass`). One alarm runs `runCalendarSync` once.
+ *
+ * It is always run with `signInWaitSeconds: 0`, so the portal pass uses a
+ * session that is already live and **never signs in**: a dead session is
+ * recorded as `portal_session_expired` and costs no attempt and no emailed
+ * code. It never passes `force`, so a rate-limit backoff still holds.
+ *
+ * `busy()` is what lets the tool report a job in flight without starting one.
  */
 
 import { DurableObject } from "cloudflare:workers";
@@ -37,6 +56,7 @@ import { makeCtx } from "../db/client.ts";
 import { errorFields, makeLogger } from "../lib/log.ts";
 import { nowSeconds } from "../lib/time.ts";
 
+import { runCalendarSync } from "./calendar-sync.ts";
 import { CHUNK_BUDGET_MS, runFullRefreshChunk } from "./full-refresh.ts";
 import { abandon } from "./run.ts";
 
@@ -66,9 +86,22 @@ const JOB_KEY = "job";
  */
 const MAX_CHUNKS = 2000;
 
+/**
+ * The name of the one object that runs calendar syncs asked for over MCP.
+ *
+ * Not a health system id and never mistakable for one: an id this app mints
+ * has no hyphen in it.
+ */
+const CALENDAR_SYNC_OBJECT = "mcp-calendar-sync";
+
 /** A job plus how many chunks it has already had. */
 interface StoredJob extends RefreshJob {
   chunks: number;
+  /**
+   * Present on a calendar sync job; absent on a full refresh, which is every job
+   * stored before this field existed.
+   */
+  calendar?: { portalOnly: boolean };
 }
 
 /** What `start` tells the caller. False means one was already in flight. */
@@ -77,6 +110,45 @@ export interface RefreshStarted {
 }
 
 export class FullRefreshRunner extends DurableObject<Env> {
+  /**
+   * The calendar job: one run, at most once.
+   *
+   * `runCalendarSync` never throws and writes its own run row. The job is kept
+   * while it runs, which is what makes `busy()` true for its length, and marked
+   * before the run starts: an alarm the platform delivers again, because the
+   * invocation that held the run died, finds the mark and drops the job instead
+   * of running the sync a second time. The run row that invocation left open is
+   * closed by the sweep at the head of the next run.
+   */
+  private async runCalendarJob(job: StoredJob, portalOnly: boolean): Promise<void> {
+    const log = makeLogger({ src: "sync.requested" });
+    if (job.chunks > 0) {
+      await this.ctx.storage.delete(JOB_KEY);
+      log.warn("sync.requested.abandoned", { healthSystems: job.pending.length });
+      return;
+    }
+    await this.ctx.storage.put<StoredJob>(JOB_KEY, { ...job, chunks: 1 });
+    const ctx: Ctx = makeCtx(this.env.DB, this.env, { log });
+    try {
+      const summary = await runCalendarSync(ctx, {
+        healthSystemIds: [...job.pending],
+        trigger: "manual",
+        portalOnly,
+        // Zero: use a live portal session or none. See the header.
+        signInWaitSeconds: 0,
+      });
+      log.info("sync.requested.done", {
+        healthSystems: job.pending.length,
+        portalOnly,
+        errors: summary.errors.length,
+        portalErrors: summary.portalErrors.length,
+        backedOff: summary.backedOff,
+      });
+    } finally {
+      await this.ctx.storage.delete(JOB_KEY);
+    }
+  }
+
   /**
    * Queue a refresh for this object's health system and return.
    *
@@ -98,6 +170,35 @@ export class FullRefreshRunner extends DurableObject<Env> {
   }
 
   /**
+   * Queue one calendar sync over `healthSystemIds` and return.
+   *
+   * `started: false` means a job is already stored on this object. See the
+   * header for why this is one job and not one per health system.
+   */
+  async startCalendar(
+    healthSystemIds: readonly string[],
+    options: { portalOnly: boolean },
+  ): Promise<RefreshStarted> {
+    const existing = await this.ctx.storage.get<StoredJob>(JOB_KEY);
+    if (existing !== undefined) return { started: false };
+    await this.ctx.storage.put<StoredJob>(JOB_KEY, {
+      pending: [...healthSystemIds],
+      cycleStartedAt: nowSeconds(),
+      runId: null,
+      state: null,
+      chunks: 0,
+      calendar: { portalOnly: options.portalOnly },
+    });
+    await this.ctx.storage.setAlarm(Date.now());
+    return { started: true };
+  }
+
+  /** Whether a job is stored on this object: queued, running or waiting to re-arm. */
+  async busy(): Promise<boolean> {
+    return (await this.ctx.storage.get<StoredJob>(JOB_KEY)) !== undefined;
+  }
+
+  /**
    * One chunk, then either re-arm or finish.
    *
    * `runFullRefreshChunk` never throws and writes its own run row, so there is
@@ -108,6 +209,10 @@ export class FullRefreshRunner extends DurableObject<Env> {
   override async alarm(): Promise<void> {
     const job = await this.ctx.storage.get<StoredJob>(JOB_KEY);
     if (job === undefined) return;
+    if (job.calendar !== undefined) {
+      await this.runCalendarJob(job, job.calendar.portalOnly);
+      return;
+    }
     const log = makeLogger({ src: "refresh" });
     const ctx: Ctx = makeCtx(this.env.DB, this.env, { log });
     const chunks = job.chunks + 1;
@@ -166,4 +271,31 @@ export async function startFullRefresh(
 ): Promise<RefreshStarted> {
   const stub = ctx.env.FULL_REFRESH.getByName(options.healthSystemId);
   return stub.start([options.healthSystemId]);
+}
+
+/** Whether a full refresh is queued or running for one health system. */
+export async function fullRefreshBusy(
+  ctx: Ctx,
+  options: { healthSystemId: string },
+): Promise<boolean> {
+  return ctx.env.FULL_REFRESH.getByName(options.healthSystemId).busy();
+}
+
+/**
+ * Queue one calendar sync over some health systems, on the object that runs
+ * them one at a time. See the header: it never signs in to a portal.
+ *
+ * `portalOnly` skips every FHIR search and runs the patient-portal pass alone.
+ */
+export async function startCalendarSync(
+  ctx: Ctx,
+  options: { healthSystemIds: readonly string[]; portalOnly: boolean },
+): Promise<RefreshStarted> {
+  const stub = ctx.env.FULL_REFRESH.getByName(CALENDAR_SYNC_OBJECT);
+  return stub.startCalendar([...options.healthSystemIds], { portalOnly: options.portalOnly });
+}
+
+/** Whether a calendar sync asked for over MCP is queued or running. */
+export async function calendarSyncBusy(ctx: Ctx): Promise<boolean> {
+  return ctx.env.FULL_REFRESH.getByName(CALENDAR_SYNC_OBJECT).busy();
 }

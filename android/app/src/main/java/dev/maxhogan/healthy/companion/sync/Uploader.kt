@@ -10,6 +10,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -39,6 +40,13 @@ sealed interface UploadResult {
         val serverTime: Long?,
         /** Ids of rejected records, as far as the server listed them (the first hundred). */
         val rejectedIds: Set<String> = emptySet(),
+        /**
+         * The hours whose platform total the server holds stale, by record type, each as the
+         * epoch ms of its start: the whole of what it knows to be stale, as far as one answer
+         * carries. Null when the answer did not say (the server could not tell just then, or is
+         * a build that does not send it): what the phone was told before still stands.
+         */
+        val staleHours: Map<String, List<Long>>? = null,
     ) : UploadResult
 
     /** 401: the token is revoked or rotated. Stop until the owner pairs again. */
@@ -111,7 +119,24 @@ object UploadClassifier {
             rejectedIds = (json["rejected"] as? JsonArray).orEmpty().mapNotNullTo(HashSet()) { entry ->
                 ((entry as? JsonObject)?.get("id") as? JsonPrimitive)?.takeIf { it.isString }?.content
             },
+            staleHours = staleHours(json["staleHours"]),
         )
+    }
+
+    /**
+     * `staleHours`, read leniently: an hour that is not a whole UTC hour, or anything that is not
+     * a number, is left out, and so is a value that is not a list. Anything other than an object
+     * is the field not being there.
+     */
+    private fun staleHours(element: JsonElement?): Map<String, List<Long>>? {
+        val byType = element as? JsonObject ?: return null
+        return byType.mapValues { (_, hours) ->
+            (hours as? JsonArray).orEmpty()
+                .mapNotNull { (it as? JsonPrimitive)?.takeIf { hour -> !hour.isString }?.longOrNull }
+                .filter { it >= 0 && it % Hours.MS == 0L }
+                .distinct()
+                .sorted()
+        }
     }
 
     private fun errorCode(body: String): String? =

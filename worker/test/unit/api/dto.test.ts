@@ -429,6 +429,7 @@ describe("toAlertDto", () => {
     trello_card_id: "card-1",
     opened_at: T0,
     resolved_at: null,
+    reason_code: null,
   };
 
   it("extracts the health system id from the subject", () => {

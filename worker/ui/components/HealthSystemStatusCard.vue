@@ -7,7 +7,7 @@
 
 import { computed } from "vue";
 
-import { humanizeCode, isPast, relativeTime } from "../lib/format.ts";
+import { humanizeCode, relativeTime, tokenSummary } from "../lib/format.ts";
 import { reconnectHref } from "../lib/oauth.ts";
 
 import StatusPill from "./StatusPill.vue";
@@ -18,7 +18,6 @@ const props = defineProps<{ healthSystem: HealthSystemDto }>();
 
 const connection = computed(() => props.healthSystem.connection);
 const status = computed(() => connection.value?.status ?? "disconnected");
-const expired = computed(() => isPast(connection.value?.accessExpiresAt));
 const href = computed(() => reconnectHref(props.healthSystem));
 </script>
 
@@ -34,9 +33,9 @@ const href = computed(() => reconnectHref(props.healthSystem));
     <dl class="facts">
       <div>
         <dt>Token</dt>
-        <dd :class="{ 'danger-text': expired }">
-          {{ connection?.accessExpiresAt ? relativeTime(connection.accessExpiresAt) : "—" }}
-        </dd>
+        <!-- Never styled as an error: a lapsed access token is renewed by the next
+             run that needs one. See `tokenSummary`. -->
+        <dd>{{ tokenSummary(connection) }}</dd>
       </div>
       <div>
         <dt>Last sync</dt>

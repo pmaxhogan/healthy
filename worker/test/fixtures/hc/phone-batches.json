@@ -15,7 +15,7 @@
         "v": 1,
         "deviceId": "01HZZZZZZZZZZZZZZZZZZZZZZZ",
         "appVersion": "0.1.0",
-        "batchId": "w51ZrsQP2o42TdyEnFTgkDLWuKXdkHrIbFg09oyecLg",
+        "batchId": "b9lK6NslV1wgIVp1P2MOqLavGtrP4hX1tv7wX1Os2uo",
         "phoneTime": 1790000600000,
         "upserts": [
           {
@@ -1535,6 +1535,12 @@
           "lastError": {
             "errorCode": "network",
             "at": 1790000000000
+          },
+          "runTrigger": "periodic",
+          "runStartedAt": 1790000596000,
+          "previousRun": {
+            "startedAt": 1789999696000,
+            "end": "interrupted"
           }
         }
       }
@@ -1552,7 +1558,7 @@
         "v": 1,
         "deviceId": "01HZZZZZZZZZZZZZZZZZZZZZZZ",
         "appVersion": "0.1.0",
-        "batchId": "hUjaTQfAsdig_d4K527Gc1Q81j-4_3DwNbY-f_9Kmf8",
+        "batchId": "UsJFbK6kLrmDsYGXO47nBPuq7jEbNh-JwtL60MtLcA0",
         "phoneTime": 1790000600000,
         "upserts": [
           {
@@ -2157,6 +2163,12 @@
           "lastError": {
             "errorCode": "network",
             "at": 1790000000000
+          },
+          "runTrigger": "backfill",
+          "runStartedAt": 1790000540000,
+          "previousRun": {
+            "startedAt": 1789999696000,
+            "end": "network"
           }
         }
       }
@@ -2798,7 +2810,9 @@
           "lastError": {
             "errorCode": "network",
             "at": 1790000000000
-          }
+          },
+          "runTrigger": "app_open",
+          "runStartedAt": 1790000596000
         }
       }
     }

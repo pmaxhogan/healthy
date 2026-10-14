@@ -87,4 +87,11 @@ export interface IngestLogRow {
   bodyBytes: number;
   rawBytes: number;
   applyMs: number | null;
+  /** What started the sync run the batch was uploaded in; null when it did not say. */
+  runTrigger: string | null;
+  /** When that run began, by the phone's clock, epoch ms: what groups a run's batches. */
+  runStartedMs: number | null;
+  /** The run before it, named by its start, and how the batch says that one ended. */
+  prevRunStartedMs: number | null;
+  prevRunEnd: string | null;
 }

@@ -86,8 +86,9 @@ import { isAppError } from "../lib/errors.ts";
 import { errorFields } from "../lib/log.ts";
 import { fromIso, toIso } from "../lib/time.ts";
 
-import { resolveReconnectAlert } from "./alerts.ts";
+import { noteSyncFailure, noteSyncOk, resolveReconnectAlert } from "./alerts.ts";
 import { mergeDescription } from "./description.ts";
+import { isCalendarFault } from "./google-watch.ts";
 import { buildCalendarModel, connectedPortalOf, ghostModel } from "./mapping.ts";
 import { planChanges } from "./plan.ts";
 import {
@@ -237,26 +238,76 @@ export async function runPortalPass(input: PortalPassInput): Promise<void> {
   const loaded: { healthSystemId: string; visits: PortalVisit[] }[] = [];
   for (const account of selected) {
     const healthSystemId = account.health_system_id;
+    const reported = input.state.summary.portalErrors.length;
     try {
       const visits = await loadPortalVisits(input, healthSystemId);
-      if (visits !== null) loaded.push({ healthSystemId, visits });
+      if (visits === null) {
+        await noteNoSession(input, healthSystemId, input.state.summary.portalErrors.at(reported));
+      } else {
+        loaded.push({ healthSystemId, visits });
+      }
     } catch (error) {
-      portalFailed(input, healthSystemId, error);
+      await portalFailed(input, healthSystemId, error);
     }
   }
   for (const { healthSystemId, visits } of loaded) {
     try {
       await syncPortalCalendar(input, healthSystemId, visits);
     } catch (error) {
-      portalFailed(input, healthSystemId, error);
+      await portalFailed(input, healthSystemId, error);
     }
   }
 }
 
-function portalFailed(input: PortalPassInput, healthSystemId: string, error: unknown): void {
+/**
+ * The pass threw for this health system: its account is still `active`, so the
+ * next run tries again, and a run of these is what `noteSyncFailure` counts.
+ *
+ * Unless it was the calendar that threw. The portal answered; the write to
+ * Google is what failed, and that is Google's streak, which the calendar sync
+ * settles once at the end of the run (`google-watch.ts`).
+ */
+async function portalFailed(
+  input: PortalPassInput,
+  healthSystemId: string,
+  error: unknown,
+): Promise<void> {
   const code = isAppError(error) ? error.code : "internal";
   input.state.summary.portalErrors.push(code);
   input.ctx.log.error("portal.health_system_failed", { healthSystemId, ...errorFields(error) });
+  if (isCalendarFault(error)) return;
+  await noteSyncFailure(input.ctx, { healthSystemId, portal: true }, "visits", code, input.deps);
+}
+
+/**
+ * The pass stopped for want of a session, and `ensureSession` said why.
+ *
+ * Two of its reasons are not this function's to count. A sign-in that failed
+ * has parked the account (`needs_reauth`): it is out of the scheduled sync
+ * until the owner signs in, and the reconnect alert is what says so. And
+ * `portal_session_expired` is a manual run that was told not to wait for a
+ * code, which is not an attempt at all.
+ *
+ * What is left is an account still `active` that did not sync: the scheduled
+ * run holding back from signing in on its own (`portal_signin_deferred`), or a
+ * sign-in already in flight. Each ends by itself, but a portal that has not
+ * synced for three runs is a portal the owner can bring back with "Sign in
+ * now", and nothing else tells them that out of band.
+ */
+async function noteNoSession(
+  input: PortalPassInput,
+  healthSystemId: string,
+  code: string | undefined,
+): Promise<void> {
+  if (code === undefined || code === "portal_session_expired") return;
+  try {
+    const account = await input.repos.portalAccounts.get(healthSystemId);
+    if (account?.session_state !== "active") return;
+  } catch (error) {
+    input.ctx.log.warn("portal.state_unread", { healthSystemId, ...errorFields(error) });
+    return;
+  }
+  await noteSyncFailure(input.ctx, { healthSystemId, portal: true }, "visits", code, input.deps);
 }
 
 /** One health system's first phase: session, visits, and the stored copy. Null: no session. */
@@ -496,9 +547,13 @@ async function syncMessages(
       complete: result.complete,
     });
     await syncAttachments(input, healthSystemId, session, recorded.attachments);
+    await noteSyncOk(ctx, { healthSystemId, portal: true }, "messages", input.deps);
   } catch (error) {
     const code = isAppError(error) ? error.code : "internal";
     ctx.log.warn("portal.messages_failed", { healthSystemId, ...errorFields(error) });
+    // Its own streak, apart from the visits': the message centre is a whole
+    // source for the MCP, and it can stop reading while the visit list is fine.
+    await noteSyncFailure(ctx, { healthSystemId, portal: true }, "messages", code, input.deps);
     try {
       await repos.portalMessages.markSync(healthSystemId, { ok: false, errorCode: code });
     } catch (markError) {
@@ -602,6 +657,7 @@ async function syncPortalCalendar(
   // The portal answered, so whatever the reconnect card was warning about is over.
   await repos.portalAccounts.markActive(healthSystemId);
   await resolveReconnectAlert(ctx, { healthSystemId, portal: true }, input.deps);
+  await noteSyncOk(ctx, { healthSystemId, portal: true }, "visits", input.deps);
 }
 
 /**

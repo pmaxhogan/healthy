@@ -9,9 +9,11 @@
  * whenever the client happens to reconnect.
  *
  * Note what this file does NOT expose upward: no `Env`, no `Repos`, no `fetch`, no
- * token, no write path except the audit row. The `ToolDeps` interface is the
- * whole of what a tool can do, and this is the only place that decides what that
- * means.
+ * token, and two write paths only: the audit row, and `sync`, through which
+ * `sync_health_systems` asks the sync engine for a run (see `SyncControls` in
+ * `deps.ts`, and `makeSyncControls` below for exactly what that reaches). The
+ * `ToolDeps` interface is the whole of what a tool can do, and this is the only
+ * place that decides what that means.
  */
 
 import { blindHcRecordId, blinderFor } from "../db/blind.ts";
@@ -32,6 +34,14 @@ import { parseBatch } from "../hc/wire.ts";
 import { makeLogger } from "../lib/log.ts";
 import { nowSeconds } from "../lib/time.ts";
 import { buildRules } from "../policy/rules.ts";
+import {
+  STALE_RUN_SECONDS,
+  calendarSyncBusy,
+  fullRefreshBusy,
+  portalSignInState,
+  startCalendarSync,
+  startFullRefresh,
+} from "../sync/index.ts";
 
 import { documentText } from "./binary.ts";
 import { REFERENCE_TYPES } from "./collect.ts";
@@ -48,10 +58,12 @@ import type {
   PortalMessageSyncEntry,
   PortalVisitRecord,
   HealthSystemInfo,
+  SyncControls,
   SyncStatusEntry,
   ToolDeps,
 } from "./deps.ts";
 import type { HcReads } from "./hc/reads.ts";
+import type { Ctx } from "../db/client.ts";
 import type { Repos } from "../db/index.ts";
 import type { StoredAttachment } from "../db/repos/portal-message-attachments.ts";
 import type { ConnectionRow, HealthSystemRow, PortalAccountRow } from "../db/rows.ts";
@@ -59,6 +71,35 @@ import type { Env } from "../env.ts";
 import type { HcSyncState } from "../hc/wire.ts";
 import type { Logger } from "../lib/log.ts";
 import type { PolicyRules } from "../policy/rules.ts";
+import type { PortalSignInState } from "@shared/types.ts";
+
+/**
+ * The sync engine's entry points `sync_health_systems` is allowed to reach.
+ *
+ * The live ones are `worker/src/sync/index.ts`'s own: the queue the admin UI's
+ * full-refresh button uses, the calendar job beside it (which never signs in to
+ * a portal), whether either is in flight, and the portal sign-in's progress.
+ * An option rather than a direct call so an integration test can stand in for
+ * the Durable Objects.
+ */
+export interface SyncEngine {
+  startCalendarSync(
+    ctx: Ctx,
+    options: { healthSystemIds: readonly string[]; portalOnly: boolean },
+  ): Promise<{ started: boolean }>;
+  startFullRefresh(ctx: Ctx, options: { healthSystemId: string }): Promise<{ started: boolean }>;
+  calendarSyncBusy(ctx: Ctx): Promise<boolean>;
+  fullRefreshBusy(ctx: Ctx, options: { healthSystemId: string }): Promise<boolean>;
+  portalSignInState(ctx: Ctx, options: { healthSystemId: string }): Promise<PortalSignInState>;
+}
+
+const LIVE_SYNC_ENGINE: SyncEngine = {
+  startCalendarSync,
+  startFullRefresh,
+  calendarSyncBusy,
+  fullRefreshBusy,
+  portalSignInState,
+};
 
 export interface ToolDepsOptions {
   env: Env;
@@ -67,6 +108,8 @@ export interface ToolDepsOptions {
   log?: Logger;
   /** Unix seconds. Overridden by tests. */
   now?: () => number;
+  /** The sync engine. Production omits it; see {@link SyncEngine}. */
+  syncEngine?: SyncEngine;
 }
 
 /** Everything memoised for one tool call. Replaced wholesale by `beginCall`. */
@@ -135,6 +178,7 @@ function healthSystemInfo(
         ? null
         : {
             state: portal.session_state,
+            hasCredentials: portal.username_enc !== null && portal.password_enc !== null,
             lastOkAt: portal.last_ok_at,
             lastErrorCode: portal.last_error_code,
             needsReauthSince: portal.needs_reauth_since,
@@ -327,6 +371,8 @@ function makeHcReads(repos: Repos, cache: () => CallCache): HcReads {
     backlog: (deviceId) => once("backlog", deviceId, () => storeBacklog(ctx, deviceId)),
     ingestLog: (deviceId, limit) =>
       once("ingestLog", [deviceId, limit], () => repos.hcStatus.ingestLog(deviceId, limit)),
+    recentUploads: (deviceId, limit) =>
+      once("recentUploads", [deviceId, limit], () => repos.hcStatus.recentRuns(deviceId, limit)),
     origins: (deviceId, type) =>
       once("origins", [deviceId, type], async () => {
         const refs = await listOrigins(ctx, deviceId, type);
@@ -363,10 +409,71 @@ function makeHcReads(repos: Repos, cache: () => CallCache): HcReads {
   };
 }
 
+/**
+ * How long a portal sign-in's phase is believed. The runner's own figure for an
+ * abandoned job (`portal-runner.ts`): a phase older than this was left behind
+ * by a job that no longer exists.
+ */
+const SIGN_IN_PHASE_STALE_SECONDS = 15 * 60;
+
+/** The phases in which a sign-in is actually under way. */
+const SIGN_IN_ACTIVE_PHASES: ReadonlySet<string> = new Set([
+  "logging_in",
+  "awaiting_code",
+  "validating",
+]);
+
+/**
+ * The real {@link SyncControls}.
+ *
+ * Reads: the backoff setting, open `run_log` rows, the two runners' "is a job
+ * stored" answers, the sign-in phase and `mcp_sync_requests`. Writes: one
+ * `mcp_sync_requests` row per claim, and a job on a runner. Nothing here
+ * decides anything; `worker/src/mcp/sync-request.ts` does.
+ */
+function makeSyncControls(repos: Repos, engine: SyncEngine, caller: CallerIdentity): SyncControls {
+  const { ctx } = repos;
+  return {
+    async backoffUntil(): Promise<number | null> {
+      const until = await getSetting(ctx, "sync_backoff_until");
+      return until !== null && until > ctx.now() ? until : null;
+    },
+
+    async runInFlight(): Promise<boolean> {
+      const open = await repos.runLog.countOpen(ctx.now() - STALE_RUN_SECONDS);
+      return open > 0 || (await engine.calendarSyncBusy(ctx));
+    },
+
+    fullRefreshInFlight(healthSystemId: string): Promise<boolean> {
+      return engine.fullRefreshBusy(ctx, { healthSystemId });
+    },
+
+    async portalSignInInFlight(healthSystemId: string): Promise<boolean> {
+      const state = await engine.portalSignInState(ctx, { healthSystemId });
+      return (
+        SIGN_IN_ACTIVE_PHASES.has(state.phase) &&
+        state.updatedAt !== null &&
+        ctx.now() - state.updatedAt < SIGN_IN_PHASE_STALE_SECONDS
+      );
+    },
+
+    history: (kind) => repos.mcpSyncRequests.list(kind),
+
+    claim: (healthSystemId, kind, limits) =>
+      repos.mcpSyncRequests.claim(healthSystemId, kind, limits, caller.clientId),
+
+    startCalendarSync: (healthSystemIds, startOptions) =>
+      engine.startCalendarSync(ctx, { healthSystemIds, portalOnly: startOptions.portalOnly }),
+
+    startFullRefresh: (healthSystemId) => engine.startFullRefresh(ctx, { healthSystemId }),
+  };
+}
+
 export function makeToolDeps(options: ToolDepsOptions): ToolDeps {
   const log = options.log ?? makeLogger({ src: "mcp" });
   const now = options.now ?? ((): number => nowSeconds());
   const repos = reposFor(options.env.DB, options.env, { log, now });
+  const sync = makeSyncControls(repos, options.syncEngine ?? LIVE_SYNC_ENGINE, options.caller);
   let cache = emptyCache();
 
   const loadedMessages = (healthSystemId: string): Promise<LoadedMessages> => {
@@ -384,6 +491,7 @@ export function makeToolDeps(options: ToolDepsOptions): ToolDeps {
     log,
     caller: options.caller,
     hc,
+    sync,
 
     timezone(): Promise<string> {
       cache.timezone ??= getTimezone(repos.ctx);

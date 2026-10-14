@@ -18,6 +18,11 @@ import { AppError } from "./errors.ts";
 /** Seconds in a day. Exported because window arithmetic reads better with it. */
 export const DAY_SECONDS = 86_400;
 
+/** Whole UTC days since the epoch: what a per-day counter is keyed on. */
+export function utcDayNumber(unixSeconds: number): number {
+  return Math.floor(unixSeconds / DAY_SECONDS);
+}
+
 /** Current time as an integer unix second. */
 export function nowSeconds(clock: () => number = Date.now): number {
   return Math.floor(clock() / 1000);

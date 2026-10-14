@@ -11,6 +11,7 @@ import { readRecords } from "../../../src/hc/store/read.ts";
 import { wipeDevice } from "../../../src/hc/store/wipe.ts";
 
 import {
+  aggSteps,
   count,
   drain,
   enqueue,
@@ -41,6 +42,8 @@ const HC_TABLES = [
   "hc_sleep_night",
   "hc_exercise_session",
   "hc_sync_state",
+  "hc_platform_stale",
+  "hc_platform_scan",
 ];
 
 /** A device with a row in every table, one batch still queued. */
@@ -55,6 +58,9 @@ async function populated(name: string): Promise<string> {
       heartRate("hr-1", T, [[0, 60]]),
       interval("night-1", "SleepSession", T, T + 8 * HOUR_MS, {}),
       interval("run-1", "ExerciseSession", T, T + 30 * MINUTE_MS, { exerciseType: "RUNNING" }),
+      // A platform total of an hour with no steps in it: the store's scan
+      // marks it stale.
+      aggSteps(T + 20 * HOUR_MS, 5),
     ],
   });
   await drain(ctx, deviceId);

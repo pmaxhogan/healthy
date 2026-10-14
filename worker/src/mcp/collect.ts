@@ -14,9 +14,11 @@
  *  - The normalized item and the raw resource behind it stay index-aligned, so
  *    `applyPolicy` dropping one drops the other.
  *
- * Nothing here talks to a health system. Every tool but `get_document_text` reads
- * only what the scheduled refresh already cached, which is why they are all fast
- * and none of them can be made to spend an organisation's API quota.
+ * Nothing here talks to a health system. Every reading tool but
+ * `get_document_text` reads only what a sync already cached, which is why they
+ * are all fast and none of them can be made to spend an organisation's API
+ * quota. (`sync_health_systems` is the tool that can, and it does not come
+ * through here: see `tools/sync.ts`.)
  */
 
 import { mapResolver, normalizeResource } from "../fhir/normalize/index.ts";

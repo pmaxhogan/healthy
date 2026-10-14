@@ -163,9 +163,12 @@ describe("HcIngestRunner", () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
 
-      expect(await job()).toMatchObject({
-        failures: 1,
-        head: { batchId: "batch-0001", failures: 1 },
+      // At least one: on a slow machine the retry's own alarm can fire between
+      // the loop seeing the first failure and this read, and count a second.
+      const failed = (await job()) as { failures: number; head: { failures: number } };
+      expect(failed.failures).toBeGreaterThanOrEqual(1);
+      expect(failed).toMatchObject({
+        head: { batchId: "batch-0001", failures: failed.failures },
       });
       // Retried later, not at once and not never.
       const alarm = await runInDurableObject(stub, (_instance, state) => state.storage.getAlarm());

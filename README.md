@@ -3,7 +3,8 @@
 A single-tenant Cloudflare Worker that reads one person's own medical record
 from their patient portals and does two things with it: keeps their upcoming
 appointments in sync on their own Google Calendar, and serves the whole
-aggregated record read-only to an AI assistant over MCP. It talks to health
+aggregated record to an AI assistant over MCP: read-only, apart from one tool
+that lets the assistant ask for a sync sooner than the schedule. It talks to health
 systems the same way MyChart's own app does — patient-facing SMART on FHIR,
 authorised by the account owner — so it can only ever read what that person
 has already consented to share about themselves. A small Android companion
@@ -30,7 +31,7 @@ are largely in place; hardening and the first real deployment are ongoing.
   The one thing the sync deletes is a duplicate — a second copy of a visit
   another, better source already has an event for — because that visit is not
   cancelled and must appear exactly once.
-- **Read-only MCP.** Serves the aggregated record over MCP (Streamable HTTP)
+- **MCP, read-only but for one tool.** Serves the aggregated record over MCP (Streamable HTTP)
   with its own OAuth flow, so an assistant such as Claude can answer
   questions about medications, labs, conditions, and appointments across
   every connected health system — without ever being handed a credential.
@@ -40,6 +41,17 @@ are largely in place; hardening and the first real deployment are ongoing.
   Health Connect tool, an `hc:<Type>` resource type, a phone as a source, or a
   field, and a field rule removes that measurement under every name it has in
   every tool, including the values joined or derived from it.
+- **A sync on request.** One MCP tool acts rather than reads:
+  `sync_health_systems` lets the assistant ask for a sync now, of one health
+  system, several, or (only when it says `all: true`) every one. It names the
+  kind each time (`ordinary`, the hourly appointment sync plus a read of an
+  already signed-in portal; `full`, every resource type; or `portal`, the
+  patient-portal pass alone) and there is no default. It is held to a durable
+  cooldown and a daily limit per health system and per kind, is refused while a
+  run is in flight or a health system is rate limiting the app, can never sign
+  in to a portal, and has a dry run that reports what would happen. A `tool`
+  rule in the deny-list switches it off. The numbers and the reasoning are in
+  [SECURITY.md](SECURITY.md#mcp-sync-tool) and [docs/mcp.md](docs/mcp.md#asking-for-a-sync-sync_health_systems).
 - **Secure messages.** Where a patient portal is connected, the hourly portal
   pass also reads its Message Center -- every folder, every conversation, every
   message -- with the session it already holds, and the MCP serves them
@@ -64,7 +76,9 @@ are largely in place; hardening and the first real deployment are ongoing.
   `obtainium://add/https://github.com/pmaxhogan/healthy`.
 - **Alerts.** When a connection's refresh token stops working, opens a Trello
   card with a one-click reconnect link, and closes it automatically once the
-  connection is restored. A phone whose uploads have been set aside gets a card
+  connection is restored. A sync that keeps failing for any other reason (three
+  runs in a row) gets a card that says what is failing and completes itself on
+  the next run that works. A phone whose uploads have been set aside gets a card
   of its own, which completes itself when nothing from the phone is waiting.
 - **Admin UI.** A small Vue SPA, served by the Worker, for adding
   connections, choosing the target calendar, tuning how events look,
@@ -148,7 +162,9 @@ device, and read nothing back. See [SECURITY.md](SECURITY.md).
   seconds after the response — so the manual refresh button queues the work on
   a per-health system Durable Object whose alarm does one bounded chunk per
   invocation and re-arms until the record is walked. The nightly refresh runs
-  straight through, because a cron invocation has the wall clock for it.
+  straight through, because a cron invocation has the wall clock for it. A sync
+  an MCP client asks for is queued the same way, on the same kind of object: a
+  tool call is answered at once and the run happens on an alarm.
 - **Encryption.** Tokens, per-organisation client secrets, patient
   identifiers, every cached clinical payload and every Health Connect record
   and rollup are AES-GCM-256 encrypted by

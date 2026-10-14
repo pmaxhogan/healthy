@@ -1,5 +1,5 @@
 /**
- * Close an open reconnect alert from the API, card and all.
+ * Close a subject's open alert from the API, card and all.
  *
  * Distinct from the sync engine's `resolveReconnectAlert`, which is the path a
  * successful reconnection takes. This is the administrative one: the owner deleted
@@ -18,6 +18,9 @@ import type { ApiContext } from "./http.ts";
 import type { Env } from "../env.ts";
 
 export async function closeAlert(api: ApiContext, env: Env, subject: string): Promise<void> {
+  // The streaks go with the alert: nothing will ever count this subject's
+  // next success, so a row left here would outlive what it describes.
+  await api.repos.syncFailures.clearSubject(subject);
   const alert = await api.repos.alerts.resolve(subject);
   const cardId = alert?.trello_card_id ?? null;
   if (cardId === null) return;

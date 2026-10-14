@@ -71,11 +71,12 @@ import { isAppError } from "../lib/errors.ts";
 import { errorFields } from "../lib/log.ts";
 import { DAY_SECONDS, dateInZone, fromIso, startOfDayInZone, toIso } from "../lib/time.ts";
 
-import { resolveReconnectAlert } from "./alerts.ts";
+import { noteRunOutcome, noteSyncFailure, noteSyncOk, resolveReconnectAlert } from "./alerts.ts";
 import { backoffUntilSeconds, rateLimitOf } from "./backoff.ts";
 import { mergeDescription } from "./description.ts";
 import { getCapabilityIndex } from "./discovery.ts";
 import { getGoogleCalendarFor } from "./google-tokens.ts";
+import { isCalendarFault, watchCalendar } from "./google-watch.ts";
 import { sha256Hex } from "./hash.ts";
 import { buildCalendarModel, ghostModel } from "./mapping.ts";
 import { eventKeyOf, planChanges } from "./plan.ts";
@@ -90,6 +91,7 @@ import { titleDigest, titleDigestsFor, titledBody, titleSeeds } from "./titles.t
 import { getFhirClientFor } from "./tokens.ts";
 
 import type { SyncDeps } from "./deps.ts";
+import type { WatchedCalendar } from "./google-watch.ts";
 import type { CalendarMapping, MappingSettings } from "./mapping.ts";
 import type { PlanCandidate, PlanEntry } from "./plan.ts";
 import type { Sighting } from "./portal-dedupe.ts";
@@ -185,6 +187,7 @@ export async function runCalendarSync(
   const outcome = await record(ctx, options.trigger ?? "calendar", async (state) => {
     await syncAllHealthSystems(ctx, repos, settings, state, options, deps);
   });
+  await noteRunOutcome(ctx, "calendar", outcome.summary.errors, deps);
   return outcome.summary;
 }
 
@@ -238,15 +241,20 @@ async function syncAllHealthSystems(
 
   // Resolved before the health system loop: without a calendar there is nothing to do
   // with any appointment, and failing N times identically is just noise.
-  let calendar: CalendarClient;
+  // Watched, so that a write Google refuses in the middle of a health system's
+  // pass is counted against Google and not against the health system. See
+  // `google-watch.ts`.
+  let watched: WatchedCalendar;
   try {
-    calendar = await getGoogleCalendarFor(ctx, deps);
+    watched = watchCalendar(await getGoogleCalendarFor(ctx, deps));
   } catch (error) {
     ctx.log.error("sync.google_unavailable", errorFields(error));
     state.summary.errors.push({ healthSystemId: "google", code: codeOf(error) });
+    await noteSyncFailure(ctx, "google", "calendar", codeOf(error), deps);
     return;
   }
 
+  const calendar = watched.client;
   const timezone = await getTimezone(ctx);
   const nowIso = toIso(ctx.now());
   const windowStartIso = toIso(
@@ -263,6 +271,9 @@ async function syncAllHealthSystems(
   } catch (error) {
     ctx.log.error("sync.google_list_failed", errorFields(error));
     state.summary.errors.push({ healthSystemId: "google", code: codeOf(error) });
+    // Covers a token that will not refresh as well: the listing is the first
+    // call that asks for one.
+    await noteSyncFailure(ctx, "google", "calendar", codeOf(error), deps);
     return;
   }
 
@@ -295,6 +306,7 @@ async function syncAllHealthSystems(
     try {
       await syncHealthSystem(run, target);
       await repos.connections.recordSync(target.connection.id, "calendar");
+      await noteSyncOk(ctx, { healthSystemId: target.healthSystem.id }, "calendar", deps);
     } catch (error) {
       const limit = rateLimitOf(error);
       state.summary.errors.push({ healthSystemId: target.healthSystem.id, code: codeOf(error) });
@@ -302,6 +314,19 @@ async function syncAllHealthSystems(
         healthSystemId: target.healthSystem.id,
         ...errorFields(error),
       });
+      // Once per run, here and not in the token manager: a token endpoint that
+      // is down fails the keepalive and then this pass in the same hour, and
+      // counting both would call one bad hour two. Not at all when it was the
+      // calendar that failed: that is Google's streak, settled below.
+      if (!isCalendarFault(error)) {
+        await noteSyncFailure(
+          ctx,
+          { healthSystemId: target.healthSystem.id },
+          "calendar",
+          codeOf(error),
+          deps,
+        );
+      }
       if (limit === null) continue;
       // See the module comment: a 429 anywhere stops everything.
       await setSyncBackoff(ctx, backoffUntilSeconds(ctx.now(), limit.retryAfterMs));
@@ -310,13 +335,36 @@ async function syncAllHealthSystems(
         status: limit.status,
         retryAfterMs: limit.retryAfterMs ?? null,
       });
+      await noteGoogleOutcome(ctx, watched, deps);
       return;
     }
   }
 
   // Last, and after every health system: the portal pass needs to know what the FHIR
   // pass mapped before it decides which of its visits are already calendared.
-  await runPortalPass(portalInput(run, options));
+  try {
+    await runPortalPass(portalInput(run, options));
+  } finally {
+    await noteGoogleOutcome(ctx, watched, deps);
+  }
+}
+
+/**
+ * Google's one outcome for the run, once every pass that writes to it is over.
+ *
+ * At the end and not after the listing: a calendar that lists and then refuses
+ * every write is failing, and saying it worked after the first call would end
+ * its streak every hour. Any call that failed counts, including one the pass
+ * that made it carried on past (a duplicate that could not be deleted).
+ */
+async function noteGoogleOutcome(
+  ctx: Ctx,
+  watched: WatchedCalendar,
+  deps: SyncDeps,
+): Promise<void> {
+  const failure = watched.failure();
+  if (failure === null) await noteSyncOk(ctx, "google", "calendar", deps);
+  else await noteSyncFailure(ctx, "google", "calendar", failure, deps);
 }
 
 /** The portal pass's input, from the run context that already holds all of it. */

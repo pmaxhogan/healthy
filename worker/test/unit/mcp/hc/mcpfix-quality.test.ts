@@ -537,3 +537,79 @@ describe("a long range, a window at a time", () => {
     });
   });
 });
+
+/** An instant as the tools write it in UTC, the zone these tests run in. */
+const utcIso = (ms: number): string => new Date(ms).toISOString().replace(".000Z", "+00:00");
+
+describe("a stale platform total", () => {
+  const start = NOW_MS - 10 * DAY_MS;
+  const hour = Math.floor(start / HOUR_MS) + 24;
+  const at = (offset: number, minutes = 0): number =>
+    (hour + offset) * HOUR_MS + minutes * MINUTE_MS;
+  const RANGE = { start: iso(start), end: iso(NOW_MS - 1) };
+
+  /** The phone's synthetic total of one hour of steps. */
+  function total(offset: number, origins: readonly string[]): HcRecord {
+    return interval(
+      `agg:Steps:${String(at(offset))}`,
+      "Agg.Steps",
+      at(offset),
+      at(offset + 1),
+      {
+        value: 100,
+        unit: "count",
+        origins: [...origins],
+      },
+      { origin: "healthconnect" },
+    );
+  }
+
+  it("is a finding per run of hours whose total counts an app with no steps there", async () => {
+    const records: HcRecord[] = [
+      interval("w-0", "Steps", at(0, 10), at(0, 11), { count: 100 }),
+      // Runs from the hour before into hour 4: the phone app is there.
+      interval("p-3", "Steps", at(3, 50), at(4, 20), { count: 40 }, { origin: PHONE }),
+      total(0, [WEARABLE]),
+      // The wearable's records of these two hours were deleted; its totals were not.
+      total(1, [WEARABLE]),
+      total(2, [WEARABLE]),
+      total(4, [PHONE]),
+      // A total that counts an app with nothing here at all.
+      total(6, [WEARABLE, PHONE]),
+    ];
+
+    const answer = await ask(phoneWith(records), "data_quality", RANGE);
+    const stale = answer.items.filter((item) => item.kind === "stale_platform_total");
+    const [from, to] = [utcIso(at(1)), utcIso(at(3))];
+
+    expect(stale).toStrictEqual([
+      expect.objectContaining({
+        resourceType: "hc:Steps",
+        reason: "no_records",
+        start: from,
+        end: to,
+        count: 2,
+        origins: [WEARABLE],
+      }),
+      expect.objectContaining({
+        resourceType: "hc:Steps",
+        reason: "no_records",
+        count: 1,
+        origins: [WEARABLE, PHONE],
+      }),
+    ]);
+  });
+
+  it("is not reported when steps are not asked about", async () => {
+    const records = [
+      interval("w-0", "Steps", at(0, 10), at(0, 11), { count: 100 }),
+      interval("hr-0", "HeartRate", at(0, 10), at(0, 11), { samples: [] }),
+      total(1, [WEARABLE]),
+    ];
+    const answer = await ask(phoneWith(records), "data_quality", {
+      ...RANGE,
+      types: ["HeartRate"],
+    });
+    expect(answer.items.filter((item) => item.kind === "stale_platform_total")).toStrictEqual([]);
+  });
+});

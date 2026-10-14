@@ -32,7 +32,14 @@
  *      than one may carry is refused whole so the phone splits it.
  *   6. Queue        -- the body is sealed into `hc_ingest_queue` in one
  *      transaction, and only then is the batch acknowledged. A batch id seen
- *      before is acknowledged again only if its content is the same.
+ *      before is acknowledged again only if its content is the same. The log
+ *      row written with it carries which sync run the batch says it is part
+ *      of, so a run can be seen the moment it uploads and not once applied.
+ *   7. Stale totals -- with the batch queued, the answer says which hours of
+ *      the device's platform totals the store knows to be out of date, when it
+ *      can tell (`staleHoursFor`, worker/src/hc/store/platform-stale.ts). The
+ *      only way anything reaches the phone from here: it has no route of its
+ *      own, and must never get one beneath this path (see above).
  *
  * It does not apply the batch. A month of backfill touches hundreds of stored
  * rows, which does not fit one request's D1 query budget; the alarm-driven
@@ -40,21 +47,30 @@
  * `accepted` in the answer means "validated and durably queued", which is the
  * promise the phone needs before it commits its changes token.
  *
- * It can only add. Nothing here reads a record back, so a stolen token can
- * push data to its own device and can do nothing else: not read the store, not
- * touch another device, not reach the admin API or the MCP.
+ * It adds, and reads back one thing. Nothing here reads a record back: the
+ * one thing the answer carries out of the store is which hours of which record
+ * types of THIS device have a platform total that is out of date (step 7), so
+ * that the phone can work them out again. That is record type names -- the
+ * SDK's class names, the same for every user -- and hours: when the device's
+ * owner had activity of a type, to the hour, and no value, no origin, nothing
+ * else. So a stolen token can push data to its own device and learn those
+ * hours of its own device, and can do nothing else: not read a record or a
+ * total, not touch another device, not reach the admin API or the MCP.
  *
- * Logging: this app's own device id, counts, sizes and stable error codes.
- * Never the token, never a record id, never an origin app's package name.
+ * Logging: this app's own device id, counts, sizes, stable error codes and
+ * the code for what started the sync run. Never the token, never a record id, never an origin app's package name.
  */
 
 import { Hono } from "hono";
 
+import { makeCtx } from "../db/client.ts";
 import { reposFor } from "../db/index.ts";
 import { bearerDeviceToken, verifyDeviceToken } from "../hc/device-token.ts";
 import { kickIngestRunner } from "../hc/kick.ts";
-import { exceedsRecordLimit, parseBatch } from "../hc/wire.ts";
-import { makeLogger } from "../lib/log.ts";
+import { carriedPlatformHours } from "../hc/platform-totals.ts";
+import { staleHoursFor } from "../hc/store/platform-stale.ts";
+import { exceedsRecordLimit, parseBatch, runStampOf } from "../hc/wire.ts";
+import { errorFields, makeLogger } from "../lib/log.ts";
 
 import { MAX_COMPRESSED_BYTES, MAX_RAW_BYTES, gunzipCapped, readCapped } from "./body.ts";
 
@@ -103,6 +119,16 @@ interface IngestResponse {
   duplicate: boolean;
   /** Epoch milliseconds. */
   serverTime: number;
+  /**
+   * Hours whose stored platform total is out of date, for the phone to work
+   * out again: by record type (`Steps`), each hour as the epoch milliseconds
+   * of its start. Present only when the store can say -- nothing else of the
+   * device's is waiting to be applied -- and then the whole of what is stale,
+   * up to `STALE_HOURS_PER_ANSWER` hours of each type, the earliest (the rest
+   * come in later answers; nothing is dropped). An empty object means none.
+   * Absent means "not known now": the phone keeps what it was told before.
+   */
+  staleHours?: Record<string, number[]>;
 }
 
 function refuse(
@@ -219,6 +245,27 @@ async function readBatch(
     : refused("device_mismatch", "bad_request", 400);
 }
 
+/**
+ * Step 7: the device's stale platform-total hours, or null when the answer
+ * cannot say. The batch is already queued and acknowledged by now, so a read
+ * that fails leaves the field out -- "not known now" -- and does not turn the
+ * acknowledgement into an error the phone would answer by sending it again.
+ */
+async function readStaleHours(
+  c: IngestContext,
+  deviceId: string,
+  parsed: ParsedBatch,
+  log: Log,
+): Promise<Record<string, number[]> | null> {
+  try {
+    const ctx = makeCtx(c.env.DB, c.env, { log });
+    return await staleHoursFor(ctx, deviceId, parsed.batchId, carriedPlatformHours(parsed));
+  } catch (error) {
+    log.warn("ingest.stale_hours_failed", { deviceId, ...errorFields(error) });
+    return null;
+  }
+}
+
 export const ingestRouter = new Hono<AppHonoEnv>();
 
 ingestRouter.post(INGEST_PATH, async (c) => {
@@ -246,6 +293,7 @@ ingestRouter.post(INGEST_PATH, async (c) => {
   const { parsed, compressed, rawBytes } = read;
 
   // --- 6. Queue, then acknowledge --------------------------------------------
+  const run = runStampOf(parsed.syncState);
   const { duplicate, conflict } = await repos.hcIngestQueue.enqueue({
     deviceId,
     batchId: parsed.batchId,
@@ -255,6 +303,7 @@ ingestRouter.post(INGEST_PATH, async (c) => {
     deletes: parsed.deletes.length,
     rejected: parsed.rejected.length,
     phoneTime: parsed.phoneTime,
+    run,
   });
   if (conflict) {
     // The same batch id, different content. Acknowledging it would tell the
@@ -276,7 +325,10 @@ ingestRouter.post(INGEST_PATH, async (c) => {
     rejected: parsed.rejected.length,
     bodyBytes: compressed.length,
     rawBytes,
+    runTrigger: run.trigger,
   });
+  // --- 7. Stale platform totals ---------------------------------------------
+  const staleHours = await readStaleHours(c, deviceId, parsed, log);
   const body: IngestResponse = {
     accepted: parsed.upserts.length,
     deleted: parsed.deletes.length,
@@ -284,6 +336,7 @@ ingestRouter.post(INGEST_PATH, async (c) => {
     rejectedTotal: parsed.rejected.length,
     duplicate,
     serverTime: Date.now(),
+    ...(staleHours !== null && { staleHours }),
   };
   return c.json(body, 200, { "cache-control": "no-store" });
 });

@@ -87,6 +87,15 @@ enum class AggMetric(val metric: String, val sourceType: String, val unit: Strin
 
     companion object {
         fun forType(type: String): AggMetric? = entries.firstOrNull { it.sourceType == type }
+
+        /** The metric and hour a [recordId] names, or null for any other id. */
+        fun hourOf(recordId: String): Pair<AggMetric, Long>? {
+            val parts = recordId.split(':')
+            if (parts.size != 3 || parts[0] != "agg") return null
+            val metric = entries.firstOrNull { it.metric == parts[1] } ?: return null
+            val hour = parts[2].toLongOrNull() ?: return null
+            return metric to hour
+        }
     }
 }
 

@@ -449,6 +449,145 @@ describe("runFullRefresh", () => {
   });
 });
 
+const FOUR_HOURS = 4 * 3600;
+
+/** The `alerts.subject` of the harness's health system. */
+function subject(h: Harness): string {
+  return `health_system:${h.healthSystemId}`;
+}
+
+/**
+ * Refuse the appointment search and every clinical search this suite's
+ * organisation supports. What still answers is the handful of reference types
+ * (the patient, organisations, practitioners, locations), so more of the
+ * refresh fails than works.
+ */
+function refuseMost(h: Harness): void {
+  h.server.encounterStatus = 403;
+  for (const resource of searchable()) h.server.searchStatus.set(resource.type, 403);
+}
+
+// Whether a refresh counts as failing, for the alert that says a sync keeps
+// failing (worker/src/sync/alerts.ts). The line is "more of what it attempted
+// failed than worked": one type a vendor refuses every time is not a card.
+describe("a refresh that keeps failing", () => {
+  it("is not one resource type failing while the rest succeed", async () => {
+    const h = await setup();
+    h.server.searchStatus.set("Observation", 403);
+
+    for (let run = 0; run < 3; run++) {
+      if (run > 0) h.time.advance(FOUR_HOURS);
+      await runFullRefresh(h.ctx, { deps: h.upstreams.deps });
+    }
+
+    const repos = syncRepos(h.ctx);
+    const states = await repos.fhirSyncState.listByHealthSystem(h.healthSystemId);
+    expect(states.find((state) => state.resourceType === "Observation")?.lastOk).toBe(false);
+    await expect(repos.syncFailures.listForSubject(subject(h))).resolves.toStrictEqual([]);
+    await expect(repos.alerts.listOpen()).resolves.toStrictEqual([]);
+  });
+
+  it("is not the types the organisation does not offer, or documents past the daily cap", async () => {
+    const h = await setup();
+    h.server.searches.set("DocumentReference", documentCapBundle());
+
+    await runFullRefresh(h.ctx, { deps: h.upstreams.deps });
+
+    const repos = syncRepos(h.ctx);
+    const states = await repos.fhirSyncState.listByHealthSystem(h.healthSystemId);
+    const notOk = states.filter((state) => !state.lastOk);
+    // The precondition that makes this a test: counted naively, this healthy
+    // refresh has more rows that are not ok than rows that are.
+    expect(notOk.length).toBeGreaterThan(states.length - notOk.length);
+    expect(new Set(notOk.map((state) => state.lastErrorCode))).toStrictEqual(
+      new Set(["unsupported", "epic_4135"]),
+    );
+    await expect(repos.syncFailures.listForSubject(subject(h))).resolves.toStrictEqual([]);
+  });
+
+  it("is most of what it attempted failing, and alerts on the third refresh in a row", async () => {
+    const h = await setup();
+    refuseMost(h);
+
+    const first = await runFullRefresh(h.ctx, { deps: h.upstreams.deps });
+
+    // Still not an error on the run: each type's failure is its own row.
+    expect(first.errors).toStrictEqual([]);
+    const repos = syncRepos(h.ctx);
+    await expect(repos.syncFailures.listForSubject(subject(h))).resolves.toMatchObject([
+      { check_name: "refresh", failures: 1, last_error_code: "upstream_auth" },
+    ]);
+    await expect(repos.alerts.listOpen()).resolves.toStrictEqual([]);
+
+    h.time.advance(FOUR_HOURS);
+    await runFullRefresh(h.ctx, { deps: h.upstreams.deps });
+    await expect(repos.alerts.listOpen()).resolves.toStrictEqual([]);
+    h.time.advance(FOUR_HOURS);
+    await runFullRefresh(h.ctx, { deps: h.upstreams.deps });
+
+    await expect(repos.alerts.listOpen()).resolves.toMatchObject([
+      { kind: "sync_failing", subject: subject(h), reason_code: "upstream_auth" },
+    ]);
+
+    // And a fourth opens nothing more.
+    h.time.advance(FOUR_HOURS);
+    await runFullRefresh(h.ctx, { deps: h.upstreams.deps });
+    await expect(repos.alerts.listRecent()).resolves.toHaveLength(1);
+  });
+
+  it("closes the alert on the next refresh that mostly works", async () => {
+    const h = await setup();
+    refuseMost(h);
+    for (let run = 0; run < 3; run++) {
+      if (run > 0) h.time.advance(FOUR_HOURS);
+      await runFullRefresh(h.ctx, { deps: h.upstreams.deps });
+    }
+    const repos = syncRepos(h.ctx);
+    await expect(repos.alerts.listOpen()).resolves.toHaveLength(1);
+
+    h.server.encounterStatus = null;
+    h.server.searchStatus.clear();
+    // One type still refused: the refresh works again all the same.
+    h.server.searchStatus.set("Observation", 403);
+    h.time.advance(FOUR_HOURS);
+    await runFullRefresh(h.ctx, { deps: h.upstreams.deps });
+
+    await expect(repos.alerts.listOpen()).resolves.toStrictEqual([]);
+    await expect(repos.syncFailures.listForSubject(subject(h))).resolves.toStrictEqual([]);
+  });
+
+  it("counts a refresh that throws for the health system, by its code", async () => {
+    const h = await setup();
+    h.server.tokenStatus = 500;
+    // Past the seeded token's life, so the refresh has to ask for a new one.
+    h.time.advance(2 * 3600);
+
+    const summary = await runFullRefresh(h.ctx, { deps: h.upstreams.deps });
+
+    expect(summary.errors).toStrictEqual([
+      { healthSystemId: h.healthSystemId, code: "upstream_unavailable" },
+    ]);
+    await expect(syncRepos(h.ctx).syncFailures.listForSubject(subject(h))).resolves.toMatchObject([
+      { check_name: "refresh", failures: 1, last_error_code: "upstream_unavailable" },
+    ]);
+  });
+
+  it("says nothing about a chunk that is coming back", async () => {
+    const h = await setup();
+    refuseMost(h);
+
+    const result = await runFullRefreshChunk(h.ctx, {
+      deps: oneTypePerChunk(h.upstreams),
+      budgetMs: ONE_TYPE_BUDGET_MS,
+    });
+
+    expect(result.job).not.toBeNull();
+    await expect(syncRepos(h.ctx).syncFailures.listForSubject(subject(h))).resolves.toStrictEqual(
+      [],
+    );
+  });
+});
+
 /**
  * A wall clock that jumps by a fixed step every time it is read.
  *

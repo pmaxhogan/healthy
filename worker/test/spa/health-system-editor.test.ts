@@ -141,6 +141,26 @@ describe("HealthSystemEditor", () => {
     expect(second).not.toHaveProperty("arrivalOffsetMin");
   });
 
+  it("words a lapsed token on a connected health system as renewable", () => {
+    const lapsed = connection({
+      accessExpiresAt: new Date(Date.now() - 6 * 60_000).toISOString(),
+      lastRefreshAt: new Date(Date.now() - 11 * 60_000).toISOString(),
+    });
+    const text = mountEditor(healthSystem({ connection: lapsed })).text();
+
+    expect(text).toContain("token renews when needed · renewed 11 min ago");
+    expect(text).not.toContain("token 6 min ago");
+  });
+
+  it("says when a live token expires", () => {
+    const live = connection({
+      accessExpiresAt: new Date(Date.now() + 30 * 60_000 + 5000).toISOString(),
+    });
+    expect(mountEditor(healthSystem({ connection: live })).text()).toContain(
+      "token expires in 30 min",
+    );
+  });
+
   it("reports whether a client secret is on file", () => {
     expect(mountEditor().text()).toContain("secret set");
     expect(

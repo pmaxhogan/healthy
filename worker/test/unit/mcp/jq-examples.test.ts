@@ -379,6 +379,8 @@ const HC_RANGE = {
 /** The arguments each example runs with, beyond `jq`. */
 const EXTRA_ARGS: Partial<Record<(typeof TOOL_NAMES)[number], Record<string, unknown>>> = {
   get_document_text: { healthSystem: NAME_A, id: "doc-1" },
+  // A dry run: the examples are about the rows, and nothing needs starting.
+  sync_health_systems: { all: true, kind: "ordinary", dryRun: true },
   get_message_thread: { threadId: "thread-1" },
   get_message_attachment: { attachmentId: "att-1" },
   // The two days up to the fake clock: the phone's invented day and the one before.

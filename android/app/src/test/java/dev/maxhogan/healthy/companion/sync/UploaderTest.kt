@@ -26,6 +26,21 @@ class UploaderTest {
     }
 
     @Test
+    fun `stale hours are read per type, leniently, and their absence is not an empty list`() {
+        val h = Hours.MS
+        val body = """{"accepted":0,"deleted":0,"rejected":[],"duplicate":false,"serverTime":5,""" +
+            """"staleHours":{"Steps":[${3 * h},${h},"x",${h + 1},-$h,${h}],"Distance":"no","Hydration":[]}}"""
+        assertEquals(
+            mapOf("Steps" to listOf(h, 3 * h), "Distance" to emptyList(), "Hydration" to emptyList()),
+            (classify(200, body) as UploadResult.Ok).staleHours,
+        )
+        val none = """{"accepted":0,"deleted":0,"rejected":[],"duplicate":false,"serverTime":5}"""
+        assertEquals(null, (classify(200, none) as UploadResult.Ok).staleHours)
+        val odd = """{"accepted":0,"deleted":0,"rejected":[],"duplicate":false,"serverTime":5,"staleHours":[1]}"""
+        assertEquals(null, (classify(200, odd) as UploadResult.Ok).staleHours)
+    }
+
+    @Test
     fun `409 is a conflict, never an acknowledgement and never a bug`() {
         assertEquals(UploadResult.Conflict, classify(409, """{"error":"batch_id_conflict"}"""))
     }

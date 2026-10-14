@@ -21,7 +21,7 @@ import { deviceStatus, hoursSince } from "../../hc/coverage.ts";
 import { recordEndMs } from "../../hc/wire.ts";
 import { AVAILABILITY_NOTE, BUDGET_NOTE, hcArgs } from "../hc/args.ts";
 import { openStampedPage } from "../hc/page.ts";
-import { mcpErrorCode } from "../hc/phone-errors.ts";
+import { mcpErrorCode, mcpRunTrigger } from "../hc/phone-errors.ts";
 import { policyResourceType } from "../hc/policy.ts";
 import {
   availabilityByType,
@@ -38,6 +38,7 @@ import { toolError } from "../respond.ts";
 
 import { readTool } from "./register.ts";
 
+import type { UploadRun } from "../../hc/upload-runs.ts";
 import type { CoverageEntry } from "../coverage.ts";
 import type { ToolDeps } from "../deps.ts";
 import type { HcDevice, SyncStateRow } from "../hc/reads.ts";
@@ -46,6 +47,9 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 /** How many of the newest uploads `hc_sync_status` looks through for failures. */
 const DEFAULT_RECENT_BATCHES = 50;
+
+/** How many of the newest sync runs `hc_sync_status` lists. */
+const DEFAULT_RECENT_UPLOADS = 20;
 
 /**
  * The one store warning this tool repeats. Queued and pending work is what its
@@ -83,8 +87,21 @@ const RECENT_BATCHES_ARG = z
       "No maximum.",
   );
 
+const RECENT_UPLOADS_ARG = z
+  .number()
+  .int()
+  .min(1)
+  .optional()
+  .describe(
+    `How many of the newest sync runs to list in \`recentUploads\` (default ${String(DEFAULT_RECENT_UPLOADS)}). ` +
+      "No maximum.",
+  );
+
 const COVERAGE_SCHEMA = hcArgs("hc_coverage", { types: TYPES_ARG, origins: ORIGINS_ARG });
-const SYNC_SCHEMA = hcArgs("hc_sync_status", { recent_batches: RECENT_BATCHES_ARG });
+const SYNC_SCHEMA = hcArgs("hc_sync_status", {
+  recent_batches: RECENT_BATCHES_ARG,
+  recent_uploads: RECENT_UPLOADS_ARG,
+});
 
 /**
  * A unix-second bookkeeping instant in the answer's zone, like every other
@@ -239,17 +256,37 @@ async function coverageItems(
   return items;
 }
 
+/**
+ * One sync run, as an answer shows it. `startedAt` is the phone's clock and
+ * `receivedAt` this server's, both written in the answer's zone. How the run
+ * ended is one of the phone's error codes, so it is worded as `mcpErrorCode`
+ * words them, and the trigger is held to the same rule.
+ */
+function uploadItem(call: HcCall, run: UploadRun): Record<string, unknown> {
+  return {
+    startedAt: call.clock.isoOrNull(run.startedMs),
+    receivedAt: at(call, run.receivedAt),
+    trigger: mcpRunTrigger(run.trigger),
+    batches: run.batches,
+    upserts: run.upserts,
+    deletes: run.deletes,
+    closed: run.closed,
+    ended: run.ended === null ? null : mcpErrorCode(run.ended),
+  };
+}
+
 async function deviceItem(
   deps: ToolDeps,
   call: HcCall,
   view: DeviceView,
-  recentBatches: number,
+  recent: { batches: number; uploads: number },
 ): Promise<Record<string, unknown>> {
   const { device } = view;
-  const [report, backlog, log] = await Promise.all([
+  const [report, backlog, log, runs] = await Promise.all([
     deps.hc.phoneReport(device.id),
     deps.hc.backlog(device.id),
-    deps.hc.ingestLog(device.id, recentBatches),
+    deps.hc.ingestLog(device.id, recent.batches),
+    deps.hc.recentUploads(device.id, recent.uploads),
   ]);
   // Only the types this call lists are counted: the ones with stored records
   // that the policy lets it see. A total over all of them would say how much a
@@ -304,6 +341,8 @@ async function deviceItem(
     rollupsPending: backlog.dirty,
     recentBatches: log.length,
     recentFailures,
+    // The newest sync runs, whether or not they had anything to upload.
+    recentUploads: runs.map((run) => uploadItem(call, run)),
   };
 }
 
@@ -403,8 +442,27 @@ export function registerHcStatusTools(server: McpServer, deps: ToolDeps): void {
         "`queuedBatches` and `rollupsPending` (work this server still has to do: non-zero " +
         "means the newest upload may not be in every answer yet), `parkedBatches` (uploads " +
         "that could not be applied and are set aside: their records are missing until they " +
-        "are queued again, and the answer warns `hc_batches_parked:...`), and `recentFailures` " +
-        "among the last `recent_batches` uploads. Then one `kind: type_sync` row per record " +
+        "are queued again, and the answer warns `hc_batches_parked:...`), `recentFailures` " +
+        "among the last `recent_batches` uploads, and `recentUploads`: the newest " +
+        "`recent_uploads` sync runs (default 20), newest first, each `{ startedAt, " +
+        "receivedAt, trigger, batches, upserts, deletes, closed, ended }`. A run is one " +
+        "sync on the phone, and is listed even when it found nothing new to upload, so " +
+        "this is the record of when the phone actually synced. `startedAt` is when it " +
+        "began by the phone's clock, `receivedAt` when its last batch arrived here, and " +
+        "`batches`, `upserts` and `deletes` what it sent. `trigger` is what started it: " +
+        "`periodic` (the 15-minute background job), `alarm` (the watchdog alarm, because " +
+        "nothing had run), `manual` (the owner pressed Sync now, or an automation asked), " +
+        "`app_open` (the app was opened), `backfill` (history upload); other codes may " +
+        "appear. A `periodic` or `alarm` run happened with nobody touching the phone. " +
+        "`closed` is true when the run sent its closing report and false when it stopped " +
+        "before that; `ended` is what the NEXT run reported of it (`ok`, `interrupted`, or " +
+        "an error code such as `network`, worded like `lastPhoneError`), null while no later " +
+        "run has said or the app is " +
+        'too old to say. `closed: false` or `ended: "interrupted"` means the run was cut ' +
+        "off, and the record types it had not reached arrive with the next run, about " +
+        "fifteen minutes later. An upload from an app version that does not report runs is " +
+        "listed as a run of one batch with `startedAt`, `trigger` and `closed` null. " +
+        "Then one `kind: type_sync` row per record " +
         "type that has stored records: `availability`, `tokenAgeS` (age of the phone's " +
         "change token), `backlog`, `backfillComplete`, `backfillOldestAt` (how far back the " +
         "phone has uploaded this type's history so far. A UTC instant, written `...Z` and " +
@@ -423,7 +481,10 @@ export function registerHcStatusTools(server: McpServer, deps: ToolDeps): void {
       if (!opened.ok) return toolError(opened.errorCode);
       const { page } = opened;
       const coverage = await deviceCoverageFor(deps, call);
-      const recent = args.recent_batches ?? DEFAULT_RECENT_BATCHES;
+      const recent = {
+        batches: args.recent_batches ?? DEFAULT_RECENT_BATCHES,
+        uploads: args.recent_uploads ?? DEFAULT_RECENT_UPLOADS,
+      };
       const deviceRows: Record<string, unknown>[] = [];
       const typeRows: Record<string, unknown>[] = [];
       const warnings: string[] = [];

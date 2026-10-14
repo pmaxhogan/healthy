@@ -34,6 +34,21 @@ class AggregatesTest {
     }
 
     @Test
+    fun `spans join hours up to the bridge apart, and no span is longer than asked`() {
+        val nine = ms("2026-03-10T09:00:00Z")
+        val hours = listOf(nine + 30 * h, nine, nine + 2 * h, nine + 3 * h, nine + 2 * h)
+        assertEquals(listOf(nine until nine + 4 * h, nine + 30 * h until nine + 31 * h), Hours.spans(hours, bridgeHours = 24))
+        assertEquals(listOf(nine until nine + 31 * h), Hours.spans(hours, bridgeHours = 27))
+        assertEquals(
+            listOf(nine until nine + h, nine + 2 * h until nine + 4 * h, nine + 30 * h until nine + 31 * h),
+            Hours.spans(hours, bridgeHours = 1),
+        )
+        val long = (0 until 10).map { nine + it * h }
+        assertEquals(listOf(nine until nine + 4 * h, nine + 4 * h until nine + 8 * h, nine + 8 * h until nine + 10 * h), Hours.spans(long, 24, maxHours = 4))
+        assertEquals(emptyList<LongRange>(), Hours.spans(emptyList(), 24))
+    }
+
+    @Test
     fun `hours before the epoch floor downwards`() {
         assertEquals(-h, Hours.floor(-1))
         assertEquals(0L, Hours.floor(h - 1))

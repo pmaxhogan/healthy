@@ -60,6 +60,7 @@ import { SEARCH_REGISTRY, filterSupported, withoutCategoryScope } from "../fhir/
 import { isAppError } from "../lib/errors.ts";
 import { errorFields } from "../lib/log.ts";
 
+import { noteRunOutcome, noteSyncFailure, noteSyncOk } from "./alerts.ts";
 import { backoffUntilSeconds, rateLimitOf } from "./backoff.ts";
 import { getCapabilityIndex } from "./discovery.ts";
 import { emptySummary, record } from "./run.ts";
@@ -83,6 +84,9 @@ const FULL_REFRESH_TTL_MS = 8 * 24 * 60 * 60 * 1000;
 
 /** Resource types whose retrieval is capped by Epic's daily document quota. */
 const DOCUMENT_TYPES: ReadonlySet<string> = new Set(["DocumentReference", "Binary"]);
+
+/** What `fhir_sync_state` records for a document type skipped past that quota. */
+const DOCUMENT_CAP_CODE = `epic_${EPIC_DOCUMENT_CAP}`;
 
 /** The category (or other single distinguishing parameter) an entry's parameter set names, for a warning. Never the patient id. */
 function categoryOf(params: Record<string, string>): string {
@@ -227,11 +231,19 @@ export async function runFullRefreshChunk(
             break;
           }
           await repos.connections.recordSync(target.connection.id, "full");
+          await noteRefreshOutcome(ctx, repos, target.healthSystem.id, cycleStartedAt, deps);
         } catch (error) {
           state.summary.errors.push({
             healthSystemId: target.healthSystem.id,
             code: codeOf(error),
           });
+          await noteSyncFailure(
+            ctx,
+            { healthSystemId: target.healthSystem.id },
+            "refresh",
+            codeOf(error),
+            deps,
+          );
           ctx.log.error("refresh.health_system_failed", {
             healthSystemId: target.healthSystem.id,
             ...errorFields(error),
@@ -250,6 +262,8 @@ export async function runFullRefreshChunk(
     },
     { runId: openRunId, state: resuming?.state ?? null },
   );
+  // A chunk that is coming back has not finished the run, so it says nothing yet.
+  if (!outcome.unfinished) await noteRunOutcome(ctx, "refresh", outcome.summary.errors, deps);
 
   return {
     summary: outcome.summary,
@@ -263,6 +277,66 @@ export async function runFullRefreshChunk(
           }
         : null,
   };
+}
+
+/**
+ * Whether one health system's finished pass counts as a refresh that worked.
+ *
+ * `refreshResourceType` never rethrows, so a pass in which every search failed
+ * still comes back as finished: this is the only place that can say it was not
+ * a success. Judged from what the pass itself recorded in `fhir_sync_state`
+ * (rows stamped in this cycle), which is also what makes it right for a chunked
+ * refresh whose types were spread over several invocations.
+ *
+ * The line: a pass fails when more of the types it attempted failed than
+ * succeeded. One or two types a vendor rejects every time, with the rest fine,
+ * is a nuisance that `coverage` already reports per type and is not worth a
+ * card; most of the record being unreadable is. A type the organisation does
+ * not offer and a document type past the daily cap were not attempted at all,
+ * so they are on neither side.
+ */
+async function noteRefreshOutcome(
+  ctx: Ctx,
+  repos: Repos,
+  healthSystemId: string,
+  cycleStartedAt: number,
+  deps: SyncDeps,
+): Promise<void> {
+  try {
+    const states = await repos.fhirSyncState.listByHealthSystem(healthSystemId);
+    const attempted = states.filter(
+      (state) =>
+        state.lastFullAt !== null &&
+        state.lastFullAt >= cycleStartedAt &&
+        state.lastErrorCode !== UNSUPPORTED_ERROR_CODE &&
+        state.lastErrorCode !== DOCUMENT_CAP_CODE,
+    );
+    const failed = attempted.filter((state) => !state.lastOk);
+    if (failed.length > attempted.length - failed.length) {
+      await noteSyncFailure(ctx, { healthSystemId }, "refresh", commonestCode(failed), deps);
+    } else {
+      await noteSyncOk(ctx, { healthSystemId }, "refresh", deps);
+    }
+  } catch (error) {
+    // Bookkeeping about a refresh that has already happened: never its failure.
+    ctx.log.warn("refresh.outcome_unread", { healthSystemId, ...errorFields(error) });
+  }
+}
+
+/** The code most of the failed types share, so the alert names the usual cause. */
+function commonestCode(failed: readonly { lastErrorCode: string | null }[]): string {
+  const counts = new Map<string, number>();
+  let best = "internal";
+  let bestCount = 0;
+  for (const state of failed) {
+    const code = state.lastErrorCode ?? "internal";
+    const count = (counts.get(code) ?? 0) + 1;
+    counts.set(code, count);
+    if (count <= bestCount) continue;
+    best = code;
+    bestCount = count;
+  }
+  return best;
 }
 
 /**
@@ -345,7 +419,7 @@ async function processRegistryEntry(
     ctx.log.info("refresh.documents.capped", { healthSystemId, resourceType: entry.resourceType });
     await repos.fhirSyncState.record(healthSystemId, entry.resourceType, {
       ok: false,
-      errorCode: `epic_${EPIC_DOCUMENT_CAP}`,
+      errorCode: DOCUMENT_CAP_CODE,
     });
     return;
   }

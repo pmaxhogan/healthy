@@ -17,7 +17,16 @@
  *    nothing between days with something, and the app that supplies a type
  *    changing: from one per-day, per-origin count of each type;
  *  - a date with overnight vitals and no sleep session to account for them:
- *    from the vitals' hour rollups and the stored nights.
+ *    from the vitals' hour rollups and the stored nights;
+ *  - an hour whose platform total (`Agg.<Metric>`) counts an app that has no
+ *    record of the type in that hour, or has a figure where the type has no
+ *    record at all: the total from before those records were deleted. From
+ *    the totals themselves (one record an hour) and the type's hour rollups --
+ *    with the records they list as running past their hour -- or, for the few
+ *    totalled types whose records are not divided among hours (sessions,
+ *    drinks), the records. The rule is `staleTotals`
+ *    (worker/src/hc/platform-totals.ts), the one the store's own scan uses to
+ *    have the phone work such hours out again.
  *
  * The last two groups and the precision check are observations, not rules
  * about any one record, so their thresholds live here.
@@ -75,7 +84,15 @@
  * the types the gap rule covers.
  */
 
+import {
+  PLATFORM_SOURCE_TYPES,
+  addPresence,
+  aggTypeOf,
+  staleTotals,
+  totalOrigins,
+} from "../../hc/platform-totals.ts";
 import { dayBoundsMs } from "../../hc/rollup/day.ts";
+import { isSpreadType } from "../../hc/rollup/hour.ts";
 import { SLEEP_MATCH_TOLERANCE_MS } from "../../hc/rollup/sleep.ts";
 import {
   FLOORS_MAX_PER_MINUTE,
@@ -95,7 +112,7 @@ import {
   flagWeightArtefacts,
   isOverThreeHours,
 } from "../../hc/rules.ts";
-import { recordStartMs } from "../../hc/wire.ts";
+import { recordEndMs, recordStartMs } from "../../hc/wire.ts";
 
 import { aggregate, isCounter } from "./aggregate.ts";
 import { groupSessions, leftRunningReasons } from "./sessions.ts";
@@ -106,6 +123,7 @@ import type { AggregateRow } from "./aggregate.ts";
 import type { HcReads } from "./reads.ts";
 import type { Group, LeftRunningReason, Spanned } from "./sessions.ts";
 import type { Range, ZoneClock } from "./time.ts";
+import type { Presence, StaleTotal } from "../../hc/platform-totals.ts";
 import type { ArtefactFlag, ArtefactResult } from "../../hc/rules.ts";
 import type { HcRecord } from "../../hc/wire.ts";
 
@@ -156,6 +174,23 @@ export function isGapType(type: string): boolean {
  * change of source; a watch left in a drawer contributes nothing at all.
  */
 const SOURCE_SWITCH_MAX_PREVIOUS_SHARE = 0.1;
+
+/**
+ * True for the local day that holds "now", on which no switch is looked for.
+ * The rule weighs each app's share of a DAY's total, and the day still being
+ * lived has no total yet. Apps upload on their own schedules, so minutes after
+ * midnight the day holds whatever the first app to sync has written and
+ * nothing of the app that supplies the type, which reads exactly like that app
+ * going away. No age in hours fixes that (an app that syncs once in the
+ * evening is absent at noon as well), and a finding that is there at 00:20 and
+ * gone by breakfast is worse than one reported a day late: a real switch today
+ * is found from tomorrow on, dated today.
+ *
+ * `QUALITY_RULES.sourceSwitchJudgesUnfinishedDay` says so in the answer.
+ */
+function isUnfinishedDay(label: string, request: QualityRequest): boolean {
+  return label === request.clock.day(request.nowMs);
+}
 
 /**
  * A value printed with this many decimals or fewer is "rounded": what a
@@ -246,6 +281,8 @@ export const QUALITY_RULES = {
   gapMinDaysWithData: GAP_MIN_DAYS_WITH_DATA,
   sessionMissingMinVitalTypes: SESSION_MISSING_MIN_VITALS,
   sourceSwitchMaxPreviousShare: SOURCE_SWITCH_MAX_PREVIOUS_SHARE,
+  // Not a threshold but a rule of the same finding: see `isUnfinishedDay`.
+  sourceSwitchJudgesUnfinishedDay: false,
   precisionRoundedMaxDecimals: PRECISION_ROUNDED_MAX_DECIMALS,
   precisionUnroundedMinDecimals: PRECISION_UNROUNDED_MIN_DECIMALS,
   windowDays: QUALITY_WINDOW_DAYS,
@@ -806,14 +843,16 @@ interface Lead {
  * {@link SOURCE_SWITCH_MAX_PREVIOUS_SHARE} of that day's total. Two apps
  * recording side by side trade the lead without either leaving, and that is
  * not reported -- the "previous" supplier stays the one last established,
- * so when it does stop the switch is still found.
+ * so when it does stop the switch is still found. The local day that holds
+ * "now" is not judged at all: see {@link isUnfinishedDay}. It is the last day
+ * there is, so leaving the supplier as it was changes nothing after it.
  *
  * `lead` continues a silence that began before the first of `days`.
  */
 function gapsAndSwitches(
   type: string,
   days: ReadonlyMap<string, Map<string, DayShare>>,
-  lead: Lead | null = null,
+  { lead, request }: { lead: Lead | null; request: QualityRequest },
 ): Finding[] {
   const labels = listOf(days.keys());
   const withData = labels.filter((label) => (days.get(label)?.size ?? 0) > 0);
@@ -850,17 +889,32 @@ function gapsAndSwitches(
       previous = source;
       continue;
     }
-    if (source === previous) continue;
-    const previousShare = shareOf(origins, previous);
-    if (previousShare > SOURCE_SWITCH_MAX_PREVIOUS_SHARE) continue;
-    out.push({
-      type,
-      kind: "source_switch",
-      detail: { date: label, from: previous, to: source, previousShare },
-    });
+    if (isUnfinishedDay(label, request)) continue;
+    const change = switchFinding(type, { label, origins, source }, previous);
+    if (change === null) continue;
+    out.push(change);
     previous = source;
   }
   return out;
+}
+
+/**
+ * The switch on one finished day, or null: another app recorded the most and
+ * the one that supplied the type before is absent, or nearly.
+ */
+function switchFinding(
+  type: string,
+  day: { label: string; origins: ReadonlyMap<string, DayShare>; source: string },
+  previous: string,
+): Finding | null {
+  if (day.source === previous) return null;
+  const previousShare = shareOf(day.origins, previous);
+  if (previousShare > SOURCE_SWITCH_MAX_PREVIOUS_SHARE) return null;
+  return {
+    type,
+    kind: "source_switch",
+    detail: { date: day.label, from: previous, to: day.source, previousShare },
+  };
 }
 
 /** `days` after `day` (`YYYY-MM-DD`); negative for before. Calendar arithmetic, no zone. */
@@ -930,9 +984,10 @@ async function dayFindings(scan: Scan): Promise<Finding[]> {
   const findings: Finding[] = [];
   for (const type of request.types) {
     const days = await scan.days(type, range);
+    const lead = await leadInto(scan, type, days);
     const found = [
       ...overlappingOrigins(type, days),
-      ...gapsAndSwitches(type, days, await leadInto(scan, type, days)),
+      ...gapsAndSwitches(type, days, { lead, request }),
     ];
     findings.push(...found.filter((finding) => datedHere(finding, startDay)));
   }
@@ -1013,6 +1068,114 @@ async function missingSessionFindings(scan: Scan): Promise<Finding[]> {
   return findings;
 }
 
+/**
+ * How far before a window the records that may run into its first hours are
+ * looked for. Two days: the bound the rollups divide records over, and longer
+ * than any session.
+ */
+const PLATFORM_LOOKBACK_MS = 2 * DAY_MS;
+
+/**
+ * Which apps have records of `type` in which hours of the window: from the hour
+ * rollups -- the hour each record starts in, and every hour a record listed as
+ * running past its own (`crossing`) reaches -- for a running count, whose
+ * records those lists cover; from the records themselves for the other
+ * totalled types (sessions, drinks), of which there are a handful a day.
+ */
+async function presenceIn(
+  scan: Scan,
+  type: string,
+  window: { fromHour: number; toHour: number },
+): Promise<Presence> {
+  const { deviceId } = scan.request;
+  const presence: Presence = new Map();
+  const startMs = window.fromHour * HOUR_MS - PLATFORM_LOOKBACK_MS;
+  const endMs = window.toHour * HOUR_MS;
+  if (isSpreadType(type)) {
+    const rollups = await scan.reads.hourRollups({ deviceId, type, startMs, endMs });
+    for (const row of rollups) {
+      const hourMs = row.hourUtc * HOUR_MS;
+      addPresence(presence, row.origin, { startMs: hourMs, endMs: hourMs + 1 }, window);
+      const crossing = row.rollup.crossing ?? [];
+      for (const record of crossing) {
+        addPresence(presence, row.origin, { startMs: record.s, endMs: record.e }, window);
+      }
+    }
+    return presence;
+  }
+  const records = await scan.reads.records({ deviceId, type, startMs, endMs });
+  for (const record of records) {
+    const span = { startMs: recordStartMs(record), endMs: recordEndMs(record) };
+    addPresence(presence, record.origin, span, window);
+  }
+  return presence;
+}
+
+/** Consecutive stale hours with the same reason and the same missing apps, as one finding. */
+function staleRuns(type: string, stale: readonly StaleTotal[], clock: ZoneClock): Finding[] {
+  const findings: Finding[] = [];
+  let run: { first: StaleTotal; last: number; count: number } | null = null;
+  const close = (): void => {
+    if (run === null) return;
+    findings.push({
+      type,
+      kind: "stale_platform_total",
+      detail: {
+        reason: run.first.reason,
+        start: clock.iso(run.first.hourUtc * HOUR_MS),
+        end: clock.iso((run.last + 1) * HOUR_MS),
+        count: run.count,
+        origins: run.first.missing,
+      },
+    });
+    run = null;
+  };
+  const ordered = sortedBy(stale, (left, right) => left.hourUtc - right.hourUtc);
+  for (const hour of ordered) {
+    const same =
+      run !== null &&
+      hour.hourUtc === run.last + 1 &&
+      hour.reason === run.first.reason &&
+      JSON.stringify(hour.missing) === JSON.stringify(run.first.missing);
+    if (run !== null && same) {
+      run.last = hour.hourUtc;
+      run.count += 1;
+    } else {
+      close();
+      run = { first: hour, last: hour.hourUtc, count: 1 };
+    }
+  }
+  close();
+  return findings;
+}
+
+/**
+ * Hours of the window whose stored platform total no longer agrees with the
+ * records: see `staleTotals`. Reported under the type the total is of (a
+ * stale `Agg.Steps` hour is a `Steps` finding), one finding per run of
+ * consecutive hours that are stale the same way.
+ */
+async function platformFindings(scan: Scan): Promise<Finding[]> {
+  const findings: Finding[] = [];
+  for (const type of PLATFORM_SOURCE_TYPES) {
+    const aggType = aggTypeOf(type);
+    if (aggType === null || !scan.types.has(type)) continue;
+    const totals = await scan.raw(aggType);
+    if (totals.length === 0) continue;
+    const window = {
+      fromHour: Math.floor(scan.window.startMs / HOUR_MS),
+      toHour: Math.ceil(scan.window.endMs / HOUR_MS),
+    };
+    const presence = await presenceIn(scan, type, window);
+    const stored = totals.map((record) => ({
+      hourUtc: Math.floor(recordStartMs(record) / HOUR_MS),
+      origins: totalOrigins(record),
+    }));
+    findings.push(...staleRuns(type, staleTotals(stored, presence), scan.request.clock));
+  }
+  return findings;
+}
+
 /** Everything worth knowing about one window of a phone's data. */
 async function assess(
   reads: HcReads,
@@ -1030,6 +1193,7 @@ async function assess(
     ...(await missingSessionFindings(scan)),
     ...(await exerciseFindings(scan)),
     ...(await dayFindings(scan)),
+    ...(await platformFindings(scan)),
   ];
 }
 

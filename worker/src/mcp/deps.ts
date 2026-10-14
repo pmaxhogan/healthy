@@ -12,9 +12,20 @@
  *    an in-memory implementation of this interface, with no workerd and no D1.
  *
  * `worker/src/mcp/deps-d1.ts` is the one real implementation.
+ *
+ * Everything here reads, with two exceptions that are named as such: the audit
+ * row, and {@link SyncControls}, the one way a tool can make this server act
+ * (ask the sync engine for a run). No tool but `sync_health_systems` touches
+ * the second.
  */
 
-import type { ConnectionStatus, HealthSystemEnvironment } from "../db/rows.ts";
+import type {
+  ConnectionStatus,
+  HealthSystemEnvironment,
+  McpSyncKind,
+  McpSyncRequestEntry,
+  McpSyncRequestLimits,
+} from "../db/rows.ts";
 import type { SyncWarning } from "../db/schemas.ts";
 import type { HcReads } from "./hc/reads.ts";
 import type { PortalMessage, PortalThread, PortalVisit } from "../ehr/mychart/index.ts";
@@ -55,6 +66,11 @@ export interface HealthSystemInfo {
 export interface PortalAccountInfo {
   /** `portal_accounts.session_state`. */
   state: "none" | "active" | "needs_reauth";
+  /**
+   * Whether a login is stored for it. A fact about the row and nothing more:
+   * the login itself is sealed and no tool can reach it.
+   */
+  hasCredentials: boolean;
   /** Unix seconds the portal last answered a signed-in read (or a sign-in completed). */
   lastOkAt: number | null;
   lastErrorCode: string | null;
@@ -238,6 +254,47 @@ export interface CallerIdentity {
   grantId: string | null;
 }
 
+/**
+ * The door from a tool to the sync engine: what `sync_health_systems` needs to
+ * decide whether a sync may be asked for, and to ask for it.
+ *
+ * Deliberately narrow. It can start the three kinds of run the admin UI's own
+ * buttons start and nothing else: it cannot sign in to a patient portal, clear
+ * a rate-limit backoff, refresh a token or change a setting, and it is handed
+ * no credential, URL or portal identifier. Health system ids in, booleans and
+ * instants out.
+ */
+export interface SyncControls {
+  /** Unix seconds a rate-limit backoff runs to, or null when none is set. */
+  backoffUntil(): Promise<number | null>;
+  /**
+   * True while any sync run is open -- the scheduled ones and the admin
+   * buttons' included -- or a calendar sync asked for here is still queued.
+   */
+  runInFlight(): Promise<boolean>;
+  /** True while a full refresh is queued or running for this health system. */
+  fullRefreshInFlight(healthSystemId: string): Promise<boolean>;
+  /** True while a patient-portal sign-in is in progress for this health system. */
+  portalSignInInFlight(healthSystemId: string): Promise<boolean>;
+  /** Every health system's request history for one kind of sync. */
+  history(kind: McpSyncKind): Promise<McpSyncRequestEntry[]>;
+  /**
+   * Take the cooldown slot for one request, atomically. False means another
+   * request holds it; nothing was written and nothing may be started.
+   */
+  claim(healthSystemId: string, kind: McpSyncKind, limits: McpSyncRequestLimits): Promise<boolean>;
+  /**
+   * Queue one calendar sync over these health systems. It never signs in to a
+   * portal. `started: false` means one was already queued.
+   */
+  startCalendarSync(
+    healthSystemIds: readonly string[],
+    options: { portalOnly: boolean },
+  ): Promise<{ started: boolean }>;
+  /** Queue a full refresh of one health system. `started: false`: already queued. */
+  startFullRefresh(healthSystemId: string): Promise<{ started: boolean }>;
+}
+
 export interface ToolDeps {
   readonly log: Logger;
   /** The OAuth client behind this session, for the audit row. */
@@ -304,6 +361,8 @@ export interface ToolDeps {
    * needed. The only tool path that talks to an organisation at request time.
    */
   documentText(input: DocumentTextRequest): Promise<DocumentTextResult>;
+  /** Asking the sync engine for a run. Only `sync_health_systems` uses it. */
+  readonly sync: SyncControls;
   /** Write the audit row. Never throws into the tool's own result. */
   recordAudit(entry: AuditRecord): Promise<void>;
   /** Drop audit rows past the one-year retention window. Sampled, not per call. */

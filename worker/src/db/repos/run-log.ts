@@ -109,6 +109,23 @@ export function makeRunLogRepo(ctx: Ctx) {
       return changes;
     },
 
+    /**
+     * How many runs opened at or after `startedSince` have not closed.
+     *
+     * A row older than that belongs to an invocation that no longer exists (see
+     * `sweepStale`), so it is not counted as a run in flight.
+     */
+    async countOpen(startedSince: number): Promise<number> {
+      const row = await one<{ open: number }>(
+        ctx.db
+          .prepare(
+            "SELECT COUNT(*) AS open FROM run_log WHERE finished_at IS NULL AND started_at >= ?",
+          )
+          .bind(startedSince),
+      );
+      return row?.open ?? 0;
+    },
+
     async get(id: string): Promise<RunEntry | null> {
       const row = await one<RunLogRow>(
         ctx.db.prepare("SELECT * FROM run_log WHERE id = ?").bind(id),

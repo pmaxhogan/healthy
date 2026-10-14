@@ -13,7 +13,7 @@
 import { computed, reactive, ref, watch } from "vue";
 
 import { endpoints } from "../api/endpoints.ts";
-import { humanizeCode, relativeTime } from "../lib/format.ts";
+import { humanizeCode, relativeTime, tokenSummary } from "../lib/format.ts";
 import { reconnectHref } from "../lib/oauth.ts";
 import { DEFAULT_TITLE_TEMPLATE } from "../lib/template.ts";
 import { toastSuccess } from "../lib/toasts.ts";
@@ -211,7 +211,7 @@ async function onRemove(): Promise<void> {
 
     <p class="muted">
       Last sync {{ relativeTime(healthSystem.connection?.lastSyncAt) }} · token
-      {{ relativeTime(healthSystem.connection?.accessExpiresAt) }} ·
+      {{ tokenSummary(healthSystem.connection) }} ·
       {{ secretLabel }}
     </p>
 

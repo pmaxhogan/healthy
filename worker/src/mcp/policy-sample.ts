@@ -17,6 +17,11 @@
  *  - It never samples `get_document_text`, which is the one tool that can spend
  *    a health system's metered document quota. Its preview runs the draft over a
  *    made-up item of the tool's shape instead, and says so (`synthetic`).
+ *  - It never runs `sync_health_systems`, the one tool that acts: a preview is
+ *    recomputed on every keystroke of a draft, and must not be able to start a
+ *    sync or spend a cooldown. That tool is previewed on a made-up item too,
+ *    and locked out twice over: `runTool` refuses it, and the dependencies every
+ *    sample runs with (`sampleDeps`) can neither claim a slot nor start a run.
  *
  * The baseline a draft is compared against is the owner's stored `resource` and
  * `health_system` rules -- what decides which items exist at all -- and none of
@@ -48,8 +53,14 @@ import type {
   PolicyStructureDto,
 } from "@shared/types.ts";
 
-/** The one tool never sampled for real. See the module comment. */
+/** The one reading tool never sampled for real. See the module comment. */
 const METERED_TOOL = "get_document_text";
+
+/** The one tool that acts. Never run from here; see the module comment. */
+const ACTION_TOOL = "sync_health_systems";
+
+/** The tools a sample never runs: their previews use a made-up item. */
+const NEVER_RUN: ReadonlySet<string> = new Set([METERED_TOOL, ACTION_TOOL]);
 
 /** A tool answer, parsed: the items and, with `raw: true`, the raw entries. */
 interface Answer {
@@ -66,7 +77,15 @@ function own(value: Record<string, unknown>, key: string): unknown {
   return Object.hasOwn(value, key) ? Reflect.get(value, key) : undefined;
 }
 
-/** Deps that run under `rules`, write no audit row, and ignore the MCP switch. */
+/** What a sample's dependencies answer when asked to queue a run. */
+function refuseToStart(): Promise<never> {
+  return Promise.reject(new Error("a sample starts nothing"));
+}
+
+/**
+ * Deps that run under `rules`, write no audit row, ignore the MCP switch, and
+ * cannot make the sync engine do anything.
+ */
 function sampleDeps(deps: ToolDeps, rules: PolicyRules): ToolDeps {
   return {
     ...deps,
@@ -74,6 +93,14 @@ function sampleDeps(deps: ToolDeps, rules: PolicyRules): ToolDeps {
     rules: () => Promise.resolve(rules),
     recordAudit: () => Promise.resolve(),
     pruneAudit: () => Promise.resolve(),
+    // A sample reads. Whatever tool it runs, it can take no cooldown slot and
+    // queue no run.
+    sync: {
+      ...deps.sync,
+      claim: () => Promise.resolve(false),
+      startCalendarSync: refuseToStart,
+      startFullRefresh: refuseToStart,
+    },
   };
 }
 
@@ -231,6 +258,7 @@ async function runTool(
   rules: PolicyRules,
   resourceType?: string,
 ): Promise<Answer | null> {
+  if (NEVER_RUN.has(tool)) return null;
   const args = await recordArgs(deps, tool, rules, resourceType);
   if (args === null) return null;
   const result = await callMcpTool(sampleDeps(deps, rules), tool, args);
@@ -264,6 +292,30 @@ function syntheticDocumentText(): Answer {
         cached: true,
         chars: 44,
         text: "Example note text. Not from your record.",
+      },
+    ],
+    raw: [],
+    warnings: [],
+  };
+}
+
+/** A made-up `sync_health_systems` item: the tool's shape, and nothing was asked for. */
+function syntheticSyncRequest(): Answer {
+  return {
+    items: [
+      {
+        kind: "sync_request",
+        healthSystem: "Example Health",
+        healthSystemId: "example",
+        sync: "ordinary",
+        outcome: "would_start",
+        code: "dry_run",
+        nextAllowedAt: null,
+        lastCompletedAt: "2026-01-01T00:00:00.000Z",
+        lastRequestedAt: null,
+        requestsToday: 0,
+        dailyLimit: 12,
+        cooldownSeconds: 900,
       },
     ],
     raw: [],
@@ -362,7 +414,7 @@ export async function sampleStructure(
   tool: string,
   resourceType?: string,
 ): Promise<PolicyStructureDto | null> {
-  if (tool === METERED_TOOL) return { tool, items: 0, item: [], raw: [] };
+  if (NEVER_RUN.has(tool)) return { tool, items: 0, item: [], raw: [] };
   const answer = await runTool(deps, tool, EMPTY_RULES, resourceType);
   if (answer === null) return null;
   const sample = onlyType(tool, answer, resourceType);
@@ -430,8 +482,8 @@ async function beforeAndAfter(
 ): Promise<{ before: Answer; after: Answer } | null> {
   const before = baselineRules(stored);
   const after = withDraft(stored, field);
-  if (tool === METERED_TOOL) {
-    const sample = syntheticDocumentText();
+  if (NEVER_RUN.has(tool)) {
+    const sample = tool === ACTION_TOOL ? syntheticSyncRequest() : syntheticDocumentText();
     const run = (rules: PolicyRules): Answer => {
       const filtered = applyPolicy({ tool, items: sample.items, rules });
       return { items: filtered.items, raw: [], warnings: filtered.warnings };
@@ -463,7 +515,7 @@ async function previewOne(
   stored: readonly McpPolicyRow[],
   input: { tool: string; resourceType?: string | undefined; field: FieldRuleSpec },
 ): Promise<PolicyToolPreviewDto | null> {
-  const synthetic = input.tool === METERED_TOOL;
+  const synthetic = NEVER_RUN.has(input.tool);
   const answers = await beforeAndAfter(deps, input.tool, input.field, stored);
   if (answers === null) return null;
   const { before: beforeAnswer, after: afterAnswer } = answers;
@@ -511,7 +563,7 @@ async function previewOne(
 function candidateTools(field: FieldRuleSpec, tool: string | undefined): string[] {
   const named = tool ?? field.tool;
   const reached = (name: string): boolean =>
-    name !== METERED_TOOL &&
+    !NEVER_RUN.has(name) &&
     shapesForScope({ tool: name, resourceType: field.resourceType }).length > 0;
   return named === null ? TOOL_NAMES.filter((name) => reached(name)) : [named];
 }

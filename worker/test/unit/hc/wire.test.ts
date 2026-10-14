@@ -2,7 +2,13 @@
 
 import { describe, expect, it } from "vitest";
 
-import { parseBatch, recordEndMs, recordStartMs } from "../../../src/hc/wire.ts";
+import {
+  MAX_EPOCH_MS,
+  parseBatch,
+  recordEndMs,
+  recordStartMs,
+  runStampOf,
+} from "../../../src/hc/wire.ts";
 
 const T = 1_790_000_000_000;
 
@@ -39,6 +45,12 @@ function envelope(overrides: Record<string, unknown> = {}): Record<string, unkno
     deletes: ["rec-gone"],
     ...overrides,
   };
+}
+
+/** The sync report of a batch whose report carries `fields`, as it was read. */
+function reportWith(fields: Record<string, unknown>): unknown {
+  const batch = envelope({ syncState: { types: [], ...fields } });
+  return parseBatch(batch)?.syncState;
 }
 
 describe("parseBatch", () => {
@@ -124,6 +136,74 @@ describe("parseBatch", () => {
     expect(
       parseBatch(envelope({ syncState: { types: [{ type: "Steps", permission: "maybe" }] } })),
     ).toBeNull();
+  });
+
+  it("reads which sync run a batch belongs to, and how the one before it ended", () => {
+    const syncState = {
+      types: [],
+      runTrigger: "periodic",
+      runStartedAt: T - 5000,
+      previousRun: { startedAt: T - 900_000, end: "interrupted" },
+    };
+
+    const parsed = parseBatch(envelope({ syncState }));
+
+    expect(parsed?.syncState).toMatchObject(syncState);
+    expect(runStampOf(parsed?.syncState)).toStrictEqual({
+      trigger: "periodic",
+      startedMs: T - 5000,
+      previousStartedMs: T - 900_000,
+      previousEnd: "interrupted",
+    });
+  });
+
+  it("takes a batch that names no run, exactly as before", () => {
+    const parsed = parseBatch(envelope({ syncState: { types: [] } }));
+
+    expect(parsed?.syncState).toStrictEqual({ types: [] });
+    expect(runStampOf(parsed?.syncState)).toStrictEqual({
+      trigger: null,
+      startedMs: null,
+      previousStartedMs: null,
+      previousEnd: null,
+    });
+    const silent = parseBatch(envelope());
+    expect(runStampOf(silent?.syncState).startedMs).toBeNull();
+  });
+
+  it("stores a trigger it has never heard of, and takes each run field without the others", () => {
+    expect(reportWith({ runTrigger: "wear_os_2" })).toMatchObject({ runTrigger: "wear_os_2" });
+    expect(reportWith({ runTrigger: "a".repeat(24) })).toBeDefined();
+    expect(reportWith({ runStartedAt: 0 })).toMatchObject({ runStartedAt: 0 });
+    expect(reportWith({ previousRun: { startedAt: T, end: "ok" } })).toBeDefined();
+    expect(reportWith({ previousRun: { startedAt: T, end: "e".repeat(40) } })).toBeDefined();
+  });
+
+  it.each([
+    ["an upper-case trigger", { runTrigger: "Periodic" }],
+    ["a trigger that starts with a digit", { runTrigger: "1st" }],
+    ["a trigger with a space", { runTrigger: "app open" }],
+    ["an empty trigger", { runTrigger: "" }],
+    ["a trigger over 24 characters", { runTrigger: "a".repeat(25) }],
+    ["a trigger that is not text", { runTrigger: 7 }],
+    ["a null trigger", { runTrigger: null }],
+    ["a negative start", { runStartedAt: -1 }],
+    ["a fractional start", { runStartedAt: 1.5 }],
+    ["a start written as text", { runStartedAt: String(T) }],
+    ["a start that is not a time", { runStartedAt: MAX_EPOCH_MS + 1 }],
+    ["a previous run with no start", { previousRun: { end: "ok" } }],
+    ["a previous run with no end", { previousRun: { startedAt: T } }],
+    ["a previous run whose end is not a code", { previousRun: { startedAt: T, end: "Not OK" } }],
+    [
+      "a previous run whose end is over 40 characters",
+      {
+        previousRun: { startedAt: T, end: "e".repeat(41) },
+      },
+    ],
+    ["a previous run whose start is not a time", { previousRun: { startedAt: -5, end: "ok" } }],
+    ["a previous run that is not an object", { previousRun: "ok" }],
+  ])("refuses a batch whose report carries %s", (_name, fields) => {
+    expect(parseBatch(envelope({ syncState: { types: [], ...fields } }))).toBeNull();
   });
 });
 

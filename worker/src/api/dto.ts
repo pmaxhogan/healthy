@@ -404,6 +404,7 @@ export function toAlertDto(row: AlertRow): AlertDto {
     trelloCardId: row.trello_card_id,
     openedAt: toIso(row.opened_at),
     resolvedAt: isoOrNull(row.resolved_at),
+    reasonCode: row.reason_code,
   };
 }
 
@@ -584,6 +585,8 @@ export function toDeviceIngestLogDto(row: IngestLogRow): DeviceIngestLogDto {
     bodyBytes: row.bodyBytes,
     rawBytes: row.rawBytes,
     applyMs: row.applyMs,
+    runTrigger: row.runTrigger,
+    runStartedAt: isoFromMs(row.runStartedMs),
   };
 }
 

@@ -13,7 +13,9 @@ read from; and, where a phone is paired, that person's own Health Connect data
 holds) together with the device token that lets the phone upload it. There is no
 other user's data in the system, which removes a whole class of authorisation
 bugs and concentrates the risk on three things: the admin surface, the MCP
-surface, and the one machine-facing upload route.
+surface (which reads, and through one tool can ask for a sync: see
+["Read-only, with one tool that acts"](#mcp-sync-tool)), and the one
+machine-facing upload route.
 
 ## Assets and where they live
 
@@ -66,11 +68,13 @@ Three treatments, and every column is in exactly one of them:
 | Uploads waiting to be applied, or parked (set aside, kept until retried or wiped)             | D1 `hc_ingest_queue`                                                      | The whole gzip body sealed (`v3:`)                                                  |
 | Alert card about parked uploads: the phone's name, a count, a stable error code, a UTC time   | Trello                                                                    | Plaintext at Trello; no id, record type or value (see "Alert cards")                |
 | Upload log, per-type sync state                                                               | D1 `hc_ingest_log`, `hc_sync_state`                                       | Plaintext: counts, instants, permission states, stable codes                        |
+| Hours whose platform total is stale, and the one-off scan for them                            | D1 `hc_platform_stale`, `hc_platform_scan`                                | Plaintext: record type names, UTC hours, queue sequence numbers, instants           |
 | Device token on the phone                                                                     | Android app storage                                                       | Encrypted under a non-exportable Android Keystore key                               |
 | MCP access and refresh tokens                                                                 | Workers KV                                                                | Managed by `@cloudflare/workers-oauth-provider`                                     |
 | Admin password                                                                                | Worker secret                                                             | PBKDF2-SHA256, 100k iterations, per-hash salt                                       |
 | Encryption key, API credentials                                                               | Worker secrets                                                            | Cloudflare-managed                                                                  |
-| Full-refresh progress                                                                         | Durable Object                                                            | Plaintext: health system ids, a run id, counts, codes                               |
+| Full-refresh progress, and a calendar sync an MCP client asked for                            | Durable Object                                                            | Plaintext: health system ids, a run id, counts, codes                               |
+| When an MCP client last had each kind of sync started, per health system                      | D1 `mcp_sync_requests`                                                    | Plaintext: this app's ids, a fixed word, instants, a counter, the client id         |
 | Portal sign-in progress                                                                       | Durable Object                                                            | Plaintext: a health system id, a step, counts, codes                                |
 | Health Connect apply progress                                                                 | Durable Object                                                            | Plaintext: a device id, a position in a batch, a keyed digest of the zone           |
 
@@ -125,6 +129,11 @@ listed rather than left to be inferred:
   counts — never its text), and each sync run's counts and error codes. The owner's activity
   times and clinical counts (for example a tool's `result_count`) are visible
   here; that is accepted.
+- **`mcp_sync_requests`**: for each health system and each of three kinds of
+  sync, when an MCP client last had one started, how many it had that UTC day,
+  and that client's id (the value `mcp_audit` already holds). It is what the
+  cooldown on `sync_health_systems` is kept in; see
+  ["Read-only, with one tool that acts"](#mcp-sync-tool).
 - **The other settings** (`default_title_template`, `default_color_id`,
   `ghost_color_id`, `window_past_days`, `default_arrival_offset_min`,
   `sync_backoff_until`, `mcp_enabled`, `portal_login_attempt_limit`): generic
@@ -157,8 +166,9 @@ schema, so it is listed plainly:
   refused.
 - **Instants**: the UTC hour of every chunk and rollup row, the day of every
   daily rollup (a civil date), the moment a queued upload was set aside
-  (`hc_ingest_queue.parked_at`), and the start and end of every sleep night and
-  exercise session. A reader of a snapshot can therefore see _when_ the phone
+  (`hc_ingest_queue.parked_at`), the start and end of every sleep night and
+  exercise session, and the UTC hours whose stored platform total is out of date
+  because a record of that type in them was deleted or moved (`hc_platform_stale`). A reader of a snapshot can therefore see _when_ the phone
   held data of each type: the hours a heart-rate series exists, and the times
   of every recorded sleep and workout. They cannot see a value.
 - **Counts and sizes**: records per chunk and per type, first and last record
@@ -351,9 +361,13 @@ the phone's own sync report, which sets that device's per-type permission states
 battery and background flags and last error as the Phone page and the MCP
 `hc_coverage` and `hc_sync_status` tools show them. So a thief can add false
 records, delete or overwrite records whose ids it knows, and misreport the
-phone's state. It cannot read anything back (no response carries a stored
-record), cannot touch another device, and cannot reach the admin API, the MCP or
-the calendar. The route reads no record in order to answer.
+phone's state. It can read back one thing: the answer to an upload names the UTC
+hours of its own device whose stored platform total is out of date, by record
+type name, so that the phone can work them out again. That says when the owner
+had activity of a type, to the hour, and nothing more: no value, no origin, no
+record. Beyond that it cannot read anything back (no response carries a stored
+record or a total), cannot touch another device, and cannot reach the admin API,
+the MCP or the calendar. The route reads no record in order to answer.
 
 The thief chooses every string it sends, and **Health Connect free text is
 untrusted input that reaches the MCP client.** Titles, notes, nutrition names, the
@@ -457,9 +471,85 @@ can now make this Worker execute code of its choosing. What limits it:
   its length and the item counts in and out — not the program, which can name
   what the caller was looking for.
 
-**Read-only by construction.** Every MCP tool is annotated `readOnlyHint` and
-there is no code path from a tool call to a write, to a health system or to the
-calendar.
+<a id="mcp-sync-tool"></a>**Read-only, with one tool that acts.** Every MCP tool but one is annotated
+`readOnlyHint` and has no code path to a write, to a health system or to the
+calendar: it reads the cache. The exception is `sync_health_systems`, which lets
+an assistant ask this server to run a sync now. It is annotated as what it is
+(`readOnlyHint: false`, `openWorldHint: true`), so a client asks the person
+before running it, and the annotation is stamped by the registrar a tool goes
+through (`worker/src/mcp/tools/register.ts`), not chosen per tool.
+
+That tool changes the threat model, so what it can and cannot do is stated
+exactly. A caller holding a valid MCP token is a third-party language model,
+which may be steered by text it has just read (see Known limits on untrusted
+prose), and which can call a tool in a loop without meaning to.
+
+What it **can** cause: the three runs the admin UI's own buttons start, for the
+health systems it names. An `ordinary` sync (the hourly run: an appointment
+search against the health system's FHIR API, calendar writes for what changed,
+and a read of the patient portal's visits and messages over a session that is
+already signed in); a `full` refresh (every resource type re-read into the
+cache); the `portal` pass alone. So it causes outbound requests to health
+systems and to Google, spends their rate limits, and writes to the owner's
+calendar exactly as the scheduled sync does. It reads nothing back: the answer
+is one row per health system of fixed words, counts and instants.
+
+What it **cannot** do, by construction rather than by policy:
+
+- _Sign in to a patient portal._ A sign-in can email the owner a verification
+  code and spends the portal's small daily allowance, so no path from this tool
+  reaches one. The portal kind is offered only for an account whose session is
+  `active` and whose login is stored (the same check the admin API makes before
+  queuing a portal sync, plus two it does not: an account that needs
+  re-authorising or has never signed in is skipped). The run it queues is given
+  no sign-in wait, so a session that turns out to be dead is recorded as
+  `portal_session_expired` and left alone: no attempt, no code, no reconnect
+  card. Re-establishing a session stays with the hourly sync, under its own
+  limits, and with the owner.
+- _Clear a rate-limit backoff._ Only the admin UI's buttons pass `force`. While
+  a health system is rate limiting this app the tool refuses every kind.
+- _Refresh a token, disconnect, change a setting, a rule or a credential._ The
+  tool's whole reach is `SyncControls` in `worker/src/mcp/deps.ts`: two
+  starters, five questions and one row.
+- _Reach a health system the exposure policy denies._ A `health_system` rule
+  removes it before the target is resolved, so neither its name nor `all: true`
+  selects it.
+
+What stops it being spammed, in the order the checks run (a request refused by
+an earlier one has not spent a later one):
+
+1. _Nothing is implied._ `kind` has no default, so the expensive full refresh
+   is never what a bare call means. The target is either named health systems
+   or a literal `all: true`; a call with neither, or both, is refused whole.
+2. _A rate-limit backoff_ (above).
+3. _A run in flight._ Any open sync run (the scheduled ones and the admin
+   buttons' included), a full refresh already queued for that health system, or
+   a portal sign-in in progress for it: the answer is `already_running` and
+   nothing is queued behind it.
+4. _Fresh data._ A sync of that kind that finished moments ago, whoever started
+   it, is not repeated: 5 minutes for `ordinary`, 30 for `full`, 10 for
+   `portal`.
+5. _A cooldown and a daily limit, per health system and per kind_, held in D1
+   (`mcp_sync_requests`, migration 0018) so they survive a client reconnecting,
+   a Durable Object being evicted and a deploy: `ordinary` once every 15 minutes
+   and 12 times a UTC day, `full` once every 4 hours and 3 times a day, `portal`
+   once every 30 minutes and 8 times a day. The slot is taken by a single SQL
+   statement whose `WHERE` decides, so two calls arriving together cannot both
+   win. A refused request is refused, never queued for later.
+
+So the worst a looping or hijacked client can do in a day, per health system, is
+12 appointment searches, 3 full refreshes and 8 portal reads over a session
+that already existed, on top of what the schedule does anyway. `dryRun: true`
+reports every one of those verdicts and starts nothing.
+
+The owner's off switch is the one every tool has: a `tool` deny rule for
+`sync_health_systems` on the MCP page, which makes it answer `policy_denied`
+before it reads anything, and the MCP switch itself. The rule builder's preview
+and structure endpoints, which otherwise run real tools over real data, never
+run this one: it is previewed on a made-up row, and the dependencies every
+sample runs with can neither take a cooldown slot nor queue a run. Every call
+is audited like any other (tool, client, health system ids, row count), and the
+log line per health system is an id, the kind and two stable codes.
 
 **The "Try a tool" panel runs in a sandboxed, opaque-origin iframe.** The admin
 UI's `/connectors` page lets the owner call a real MCP tool from the browser
@@ -549,10 +639,15 @@ a type) is refused when it is saved rather than saved and silently ineffective.
 A type the owner has not permitted to the app is reported as "not permitted",
 never silently absent. [docs/mcp.md](docs/mcp.md) has the rule syntax.
 
-**Alert cards.** Two conditions open a Trello card and complete it when they clear:
-a connection that needs reconnecting, and a phone whose uploads are parked. What
+**Alert cards.** Three conditions open a Trello card and complete it when they clear:
+a connection that needs reconnecting, a sync that keeps failing, and a phone whose
+uploads are parked. What
 the card says leaves this system's encryption and is plaintext at Trello. A
 reconnect card carries the health system's display name, as the owner entered it. A
+failing-sync card carries that name too (or "Google Calendar", or nothing when
+it is the sync itself that stops), which pass is failing, a stable error code,
+how many runs and since when in UTC, and a link to an admin page with no id in
+it; never a message or anything from a response. A
 parked-uploads card carries the name the owner gave the phone, how many uploads
 are parked, a stable error code, the time in UTC, and the link to the Phone page. It
 carries **no id, record type, value or origin app**, and the link is the page's own
@@ -711,7 +806,19 @@ history in CI.
   department as a denied one is hidden as well.
 - D1 has no per-row access control; the encryption is what stands in for it.
 - The consent page authorises the whole `health:read` scope. There is no
-  per-tool consent granularity beyond the deny-list the owner sets.
+  per-tool consent granularity beyond the deny-list the owner sets. That scope
+  now also covers asking for a sync (`sync_health_systems`): there is no
+  separate scope for the one tool that acts, so a client approved to read can
+  also ask, within the limits above, unless a `tool` rule denies it.
+- **A sync asked for over MCP is bounded, not prevented.** A client that has
+  been steered by text in the record can still spend the day's allowance of
+  syncs (12 ordinary, 3 full, 8 portal reads per health system). Each of those
+  is a request the schedule makes anyway; none can sign in to a portal.
+- **"A run in flight" is coarser than a health system.** The scheduled runs
+  record no health system on their run row, so the tool treats any open run as
+  covering every health system and refuses until it closes. A run whose
+  invocation died leaves its row open until the sweep closes it (30 minutes),
+  and the tool refuses for that long.
 
 ## Reporting a vulnerability
 

@@ -150,10 +150,12 @@ const TABLES = [
   "portal_message_sync",
   "portal_visits",
   "portal_accounts",
+  "mcp_sync_requests",
   "mcp_policy",
   "mcp_audit",
   "run_log",
   "alerts",
+  "sync_failures",
   "calendar_events",
   "fhir_sync_state",
   "fhir_cache",
@@ -173,6 +175,8 @@ const TABLES = [
   "hc_exercise_session",
   "hc_dirty",
   "hc_sync_state",
+  "hc_platform_stale",
+  "hc_platform_scan",
   "devices",
 ];
 
