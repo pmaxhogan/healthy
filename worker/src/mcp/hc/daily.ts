@@ -17,7 +17,9 @@
  *    MEDIAN, over the night and not the day, and the two are not one figure.
  *  - sleep: the night that ENDED on the day -- the day you woke up, which is
  *    also where `hc_aggregate` files a night (the longest, when there are
- *    several; the others are counted as `naps`).
+ *    several; the others are counted as `naps`, their time asleep as
+ *    `napMin`, and `totalAsleepMin` is the two together: the day's figure
+ *    `hc_aggregate` gives as `durationMs`).
  *  - blood pressure: the day's readings after the duplicate rule.
  *  - weight: the day's last weighing after the profile-setup rule. Every
  *    weighing is still listed (`weighings`), each with the flag it earned.
@@ -388,8 +390,13 @@ function sleepSection(
   nights: readonly Group<SleepNight>[],
   clock: ZoneClock,
 ): Record<string, unknown> | null {
-  const night = mainNight(nights)?.primary.summary;
+  const main = mainNight(nights);
+  const night = main?.primary.summary;
   if (night === undefined) return null;
+  // The day's other sleeps, each counted as hc_aggregate counts it: the
+  // figures of its longest session, copies of one sleep once.
+  let napMin = 0;
+  for (const group of nights) if (group !== main) napMin += group.primary.summary.asleepMin;
   return {
     start: clock.iso(night.startMs),
     end: clock.iso(night.endMs),
@@ -400,6 +407,8 @@ function sleepSection(
     skinTempDelta: night.skinTempDelta,
     origin: night.origin,
     naps: nights.length - 1,
+    napMin,
+    totalAsleepMin: night.asleepMin + napMin,
   };
 }
 

@@ -95,6 +95,8 @@ const DAILY_UNITS = {
   activeKcal: "kcal",
   totalKcal: "kcal",
   asleepMin: "min",
+  napMin: "min",
+  totalAsleepMin: "min",
   inBedMin: "min",
   awakeMin: "min",
   skinTempDelta: "celsius",
@@ -170,7 +172,10 @@ export function registerHcDailyTools(server: McpServer, deps: ToolDeps): void {
         "day's energy as one long record, that record only counts in the hours no app " +
         "measured, and the day is then flagged `long_record_used`), `sleep` (the night that " +
         "ended that day, the day you woke up -- the same date `sleep_sessions` and " +
-        "`hc_aggregate` give it: `asleepMin`, `inBedMin`, `awakeMin`, `start`, `end`, `naps`), " +
+        "`hc_aggregate` give it: `asleepMin`, `inBedMin`, `awakeMin`, `start`, `end` of the " +
+        "main night, the longest; `naps`, how many other sleeps ended that day, `napMin`, " +
+        "their time asleep, and `totalAsleepMin`, the main night and the naps together -- " +
+        "the day's sleep as `hc_aggregate`'s `durationMs` counts it), " +
         "`restingHr` (from the wearable's resting-heart-rate records; a blood-pressure " +
         "cuff's pulse written as one is excluded), `hrvRmssdMean` (the MEAN of the day's " +
         "HRV readings -- not the night's median that `sleep_sessions` gives as " +

@@ -1222,7 +1222,14 @@ describe("daily_summary", () => {
       activeKcal: 200,
       // What was recorded: ten hours of it, and no basal padding.
       totalKcal: 1000,
-      sleep: { asleepMin: 460, inBedMin: 480, naps: 0, origin: WEARABLE },
+      sleep: {
+        asleepMin: 460,
+        inBedMin: 480,
+        naps: 0,
+        napMin: 0,
+        totalAsleepMin: 460,
+        origin: WEARABLE,
+      },
       // The wearable's 52, not the mean of it and the cuff's 68.
       restingHr: 52,
       hrvRmssdMean: 43,
@@ -1270,6 +1277,25 @@ describe("daily_summary", () => {
       "hc_other_origins_dropped:6",
       "resting_hr_cuff_pulse_excluded:1",
     ]);
+  });
+
+  it("gives the day's sleep with its naps, as hc_aggregate counts it", async () => {
+    world.state.hc.records
+      .get(DEVICE_ID)
+      ?.push(interval("nap", "SleepSession", at(14, 30), at(15, 10), {}));
+
+    const day = await call("daily_summary", { date: TODAY });
+    const aggregate = await call("hc_aggregate", { type: "SleepSession", ...RANGE });
+    const asleepMs = aggregate.items.find((item) => item.bucket === TODAY)?.durationMs;
+
+    // The main night is still the longest one; the nap is counted beside it.
+    expect(day.items[0]?.sleep).toMatchObject({
+      asleepMin: 460,
+      naps: 1,
+      napMin: 40,
+      totalAsleepMin: 500,
+    });
+    expect(asleepMs).toBe(500 * 60_000);
   });
 
   it("takes one date, and today when given nothing", async () => {

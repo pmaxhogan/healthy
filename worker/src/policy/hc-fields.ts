@@ -172,6 +172,8 @@ export const OWN_FIELDS = {
     "sleep.wearableWake",
     "sleep.origin",
     "sleep.naps",
+    "sleep.napMin",
+    "sleep.totalAsleepMin",
     "exercises.title",
     "exercises.exerciseType",
     "exercises.start",
