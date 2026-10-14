@@ -186,6 +186,7 @@ describe("a program run over the items a piece at a time", () => {
     const items = [1, undefined, 3];
 
     expect(await runJqOverItems(".[] | [.]", items, 1)).toEqual(
+      // eslint-disable-next-line unicorn/no-unsafe-json-serialization -- JSON.stringify's handling of undefined is the behaviour under comparison.
       await runJq(".[] | [.]", JSON.stringify(items)),
     );
   });

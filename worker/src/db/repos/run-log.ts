@@ -1,17 +1,17 @@
 /**
- * History of scheduled and manual runs.
- *
- * A row is opened by `start` before any work happens and closed by `finish`, so a
- * run that was cut off mid-flight -- a Worker that hit its CPU limit, a deploy in
- * the middle of a sync -- leaves a row with `finished_at IS NULL`. That is the
- * only way to see those at all, which is why the two halves are separate calls.
- *
- * Nothing *inside* such a run can close its own row: the invocation stopped
- * existing, so neither a `catch` nor a `finally` ever ran. `sweepStale` is the net,
- * and `worker/src/sync/run.ts` calls it at the head of every later run.
- *
- * `summary_json` is counts and stable codes. See `runSummarySchema`.
- */
+History of scheduled and manual runs.
+
+A row is opened by `start` before any work happens and closed by `finish`, so a
+run that was cut off mid-flight -- a Worker that hit its CPU limit, a deploy in
+the middle of a sync -- leaves a row with `finished_at IS NULL`. That is the
+only way to see those at all, which is why the two halves are separate calls.
+
+Nothing *inside* such a run can close its own row: the invocation stopped
+existing, so neither a `catch` nor a `finally` ever ran. `sweepStale` is the net,
+and `worker/src/sync/run.ts` calls it at the head of every later run.
+
+`summary_json` is counts and stable codes. See `runSummarySchema`.
+*/
 
 import { newId } from "../../lib/ids.ts";
 import { all, one, run } from "../client.ts";
@@ -32,11 +32,11 @@ export interface RunEntry {
 }
 
 /**
- * The error code a swept run carries.
- *
- * Stable, and deliberately not `internal`: "the invocation died" is a different
- * fact from "the work threw", and the Runs page has to be able to say which.
- */
+The error code a swept run carries.
+
+Stable, and deliberately not `internal`: "the invocation died" is a different
+fact from "the work threw", and the Runs page has to be able to say which.
+*/
 export const RUN_ABORTED_CODE = "aborted";
 
 export interface RunStats {
@@ -85,16 +85,16 @@ export function makeRunLogRepo(ctx: Ctx) {
     },
 
     /**
-     * Close every row still open from before `startedBefore`, as `aborted`.
-     *
-     * The only way a row stays open is an invocation that stopped existing --- a
-     * `waitUntil` past its deadline, a CPU limit, a deploy mid-run --- and none of
-     * those run cleanup code, so this has to be done by a *later* invocation.
-     *
-     * `ok = 0` with a single `aborted` error code, which `GET /api/runs` then
-     * shows. No partial counts are recovered because none were written:
-     * `summary_json` is only ever set by `finish`.
-     */
+    Close every row still open from before `startedBefore`, as `aborted`.
+
+    The only way a row stays open is an invocation that stopped existing --- a
+    `waitUntil` past its deadline, a CPU limit, a deploy mid-run --- and none of
+    those run cleanup code, so this has to be done by a *later* invocation.
+
+    `ok = 0` with a single `aborted` error code, which `GET /api/runs` then
+    shows. No partial counts are recovered because none were written:
+    `summary_json` is only ever set by `finish`.
+    */
     async sweepStale(startedBefore: number): Promise<number> {
       const summary = runSummarySchema.parse({ errors: [RUN_ABORTED_CODE] });
       const { changes } = await run(
@@ -110,11 +110,11 @@ export function makeRunLogRepo(ctx: Ctx) {
     },
 
     /**
-     * How many runs opened at or after `startedSince` have not closed.
-     *
-     * A row older than that belongs to an invocation that no longer exists (see
-     * `sweepStale`), so it is not counted as a run in flight.
-     */
+    How many runs opened at or after `startedSince` have not closed.
+
+    A row older than that belongs to an invocation that no longer exists (see
+    `sweepStale`), so it is not counted as a run in flight.
+    */
     async countOpen(startedSince: number): Promise<number> {
       const row = await one<{ open: number }>(
         ctx.db
@@ -145,7 +145,7 @@ export function makeRunLogRepo(ctx: Ctx) {
     },
 
     /** Per-kind health, for the overview panel. */
-    async stats(sinceSeconds?: number): Promise<RunStats[]> {
+    async stats(sinceSeconds = 0): Promise<RunStats[]> {
       const rows = await all<{
         kind: RunKind;
         runs: number;
@@ -163,7 +163,7 @@ export function makeRunLogRepo(ctx: Ctx) {
                FROM run_log WHERE started_at >= ?
               GROUP BY kind ORDER BY kind`,
           )
-          .bind(sinceSeconds ?? 0),
+          .bind(sinceSeconds),
       );
 
       return Promise.all(

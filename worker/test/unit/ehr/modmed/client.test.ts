@@ -244,8 +244,8 @@ describe("login", () => {
 });
 
 /** A jar already holding a live token pair. */
-function signedInJar(clock: () => number, accessLeft = 600, refreshLeft = 3600): CookieJar {
-  const jar = new CookieJar({ now: clock });
+function signedInJar(accessLeft = 600, refreshLeft = 3600): CookieJar {
+  const jar = new CookieJar({ now });
   jar.setExtra(TOKEN_EXTRAS.accessToken, "synthetic-access-0");
   jar.setExtra(TOKEN_EXTRAS.accessExpiresAt, String(T0 + accessLeft));
   jar.setExtra(TOKEN_EXTRAS.refreshToken, "synthetic-refresh-0");
@@ -268,9 +268,7 @@ describe("reading appointments", () => {
         },
       },
     ]);
-    const visits = await client(stub.fetchImpl, now, signedInJar(now)).loadUpcoming(
-      "Europe/Lisbon",
-    );
+    const visits = await client(stub.fetchImpl, now, signedInJar()).loadUpcoming("Europe/Lisbon");
 
     expect(visits).toHaveLength(60);
     expect(stub.calls).toHaveLength(2);
@@ -297,9 +295,7 @@ describe("reading appointments", () => {
           ),
       },
     ]);
-    const visits = await client(stub.fetchImpl, now, signedInJar(now)).loadUpcoming(
-      "Europe/Lisbon",
-    );
+    const visits = await client(stub.fetchImpl, now, signedInJar()).loadUpcoming("Europe/Lisbon");
     expect(visits).toHaveLength(50);
     expect(stub.calls).toHaveLength(2);
   });
@@ -308,7 +304,7 @@ describe("reading appointments", () => {
     const stub = router([
       { method: "GET", match: PAST_URL, respond: () => json([pastRow()], { count: "1" }) },
     ]);
-    const [visit] = await client(stub.fetchImpl, now, signedInJar(now)).loadPast("Europe/Lisbon");
+    const [visit] = await client(stub.fetchImpl, now, signedInJar()).loadPast("Europe/Lisbon");
     expect(visit).toMatchObject({
       csn: "visit:70001",
       status: "completed",
@@ -332,7 +328,7 @@ describe("reading appointments", () => {
       },
       { method: "GET", match: UPCOMING_URL, respond: () => json([], { count: "0" }) },
     ]);
-    const portal = client(stub.fetchImpl, now, signedInJar(now, 30));
+    const portal = client(stub.fetchImpl, now, signedInJar(30));
     await portal.loadUpcoming("Europe/Lisbon");
 
     const refresh = stub.calls.find((call) => call.method === "POST");
@@ -352,18 +348,16 @@ describe("reading appointments", () => {
       },
     ]);
     await expect(
-      client(stub.fetchImpl, now, signedInJar(now, 0)).loadUpcoming("Europe/Lisbon"),
+      client(stub.fetchImpl, now, signedInJar(0)).loadUpcoming("Europe/Lisbon"),
     ).rejects.toMatchObject({ code: "portal_session_expired" });
-    await expect(client(stub.fetchImpl, now, signedInJar(now, 0)).isSessionAlive()).resolves.toBe(
-      false,
-    );
+    await expect(client(stub.fetchImpl, now, signedInJar(0)).isSessionAlive()).resolves.toBe(false);
   });
 
   it("treats a lapsed refresh token as expired without asking the identity provider", async () => {
     const stub = router([]);
-    await expect(
-      client(stub.fetchImpl, now, signedInJar(now, 0, -1)).isSessionAlive(),
-    ).resolves.toBe(false);
+    await expect(client(stub.fetchImpl, now, signedInJar(0, -1)).isSessionAlive()).resolves.toBe(
+      false,
+    );
     expect(stub.calls).toHaveLength(0);
   });
 
@@ -386,9 +380,7 @@ describe("reading appointments", () => {
         },
       },
     ]);
-    const visits = await client(stub.fetchImpl, now, signedInJar(now)).loadUpcoming(
-      "Europe/Lisbon",
-    );
+    const visits = await client(stub.fetchImpl, now, signedInJar()).loadUpcoming("Europe/Lisbon");
     expect(visits).toHaveLength(1);
     expect(gets).toBe(2);
   });
@@ -397,9 +389,7 @@ describe("reading appointments", () => {
     const stub = router([
       { method: "GET", match: UPCOMING_URL, respond: () => json([], { count: "0" }) },
     ]);
-    await expect(client(stub.fetchImpl, now, signedInJar(now)).isSessionAlive()).resolves.toBe(
-      true,
-    );
+    await expect(client(stub.fetchImpl, now, signedInJar()).isSessionAlive()).resolves.toBe(true);
     expect(stub.calls[0]?.url.searchParams.get("paging.pageSize")).toBe("1");
     // The list answers a 500 without `from`, so the probe always sends one.
     expect(stub.calls[0]?.url.searchParams.get("from")).toMatch(/T00:00:00\.000Z$/u);
@@ -418,9 +408,9 @@ describe("reading appointments", () => {
         },
       },
     ]);
-    await expect(
-      client(stub.fetchImpl, now, signedInJar(now)).isSessionAlive(),
-    ).rejects.toMatchObject({ code: "portal_bot_blocked" });
+    await expect(client(stub.fetchImpl, now, signedInJar()).isSessionAlive()).rejects.toMatchObject(
+      { code: "portal_bot_blocked" },
+    );
     expect(gets).toBe(2);
     expect(stub.calls.filter((call) => call.method === "POST")).toHaveLength(1);
   });
@@ -438,9 +428,7 @@ describe("reading appointments", () => {
         respond: () => new Response("<html>denied</html>", { status: 403 }),
       },
     ]);
-    await expect(client(stub.fetchImpl, now, signedInJar(now)).isSessionAlive()).resolves.toBe(
-      false,
-    );
+    await expect(client(stub.fetchImpl, now, signedInJar()).isSessionAlive()).resolves.toBe(false);
   });
 });
 
@@ -471,7 +459,7 @@ describe("reading secure messages", () => {
         respond: () => json([sentRow({ subject: "Notice 3" })], { count: "1" }),
       },
     ]);
-    const result = await client(stub.fetchImpl, now, signedInJar(now)).loadMessages();
+    const result = await client(stub.fetchImpl, now, signedInJar()).loadMessages();
 
     expect(result.complete).toBe(true);
     expect(result.pages).toBe(3);
@@ -497,7 +485,7 @@ describe("reading secure messages", () => {
           }),
       },
     ]);
-    const file = await client(stub.fetchImpl, now, signedInJar(now)).loadMessageAttachment({
+    const file = await client(stub.fetchImpl, now, signedInJar()).loadMessageAttachment({
       dcsId: "801",
       fileExtension: "PDF",
       organizationId: "",
@@ -556,7 +544,7 @@ describe("review fixes", () => {
         },
       },
     ]);
-    const visits = await client(stub.fetchImpl, now, signedInJar(now)).loadUpcoming("UTC");
+    const visits = await client(stub.fetchImpl, now, signedInJar()).loadUpcoming("UTC");
     expect(visits).toHaveLength(60);
     expect(stub.calls).toHaveLength(3);
   });
@@ -573,7 +561,7 @@ describe("review fixes", () => {
         },
       },
     ]);
-    const visits = await client(stub.fetchImpl, now, signedInJar(now)).loadUpcoming("UTC");
+    const visits = await client(stub.fetchImpl, now, signedInJar()).loadUpcoming("UTC");
     expect(visits).toHaveLength(30);
     expect(stub.calls).toHaveLength(2);
   });
@@ -594,7 +582,7 @@ describe("review fixes", () => {
         respond: () => json([], { count: "0" }),
       },
     ]);
-    const result = await client(stub.fetchImpl, now, signedInJar(now)).loadMessages();
+    const result = await client(stub.fetchImpl, now, signedInJar()).loadMessages();
     expect(result.complete).toBe(false);
     expect(result.threads).toHaveLength(1);
   });
@@ -607,7 +595,7 @@ describe("review fixes", () => {
         respond: () => new Response("down", { status: 503 }),
       },
     ]);
-    const jar = signedInJar(now, 0);
+    const jar = signedInJar(0);
     await expect(client(stub.fetchImpl, now, jar).loadUpcoming("UTC")).rejects.toMatchObject({
       code: "portal_unreachable",
     });

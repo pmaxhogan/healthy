@@ -1,88 +1,88 @@
 /**
- * `data_quality`: what in a range should be read with care.
- *
- * Every duplicate and artefact rule is the one in `worker/src/hc/rules.ts` --
- * this module only decides where to point them. To stay cheap over a long
- * range it looks at rollups first and opens raw records only where a rollup
- * says a rule could fire:
- *
- *  - heart rate outside the plausible limits, speed above its limit, an
- *    implausible floor count: found from the hour rollup's `max` (or `min`),
- *    then counted exactly from that hour's records;
- *  - weights written by a profile screen, duplicated blood-pressure readings,
- *    precision changes: types with a handful of records a day, read whole;
- *  - overlapping, duplicated, zero-length and left-running sessions: from the
- *    stored session summaries;
- *  - several apps recording the same cumulative type on one day, days with
- *    nothing between days with something, and the app that supplies a type
- *    changing: from one per-day, per-origin count of each type;
- *  - a date with overnight vitals and no sleep session to account for them:
- *    from the vitals' hour rollups and the stored nights;
- *  - an hour whose platform total (`Agg.<Metric>`) has a figure where the
- *    type has no record at all: the total from before those records were
- *    deleted. From
- *    the totals themselves (one record an hour) and the type's hour rollups --
- *    with the records they list as running past their hour -- or, for the few
- *    totalled types whose records are not divided among hours (sessions,
- *    drinks), the records. The rule is `staleTotals`
- *    (worker/src/hc/platform-totals.ts), the one the store's own scan uses to
- *    have the phone work such hours out again.
- *
- * The last two groups and the precision check are observations, not rules
- * about any one record, so their thresholds live here.
- *
- * `request.types` says which types to REPORT findings for: what the caller
- * asked about, of what the phone holds and the exposure policy allows. It does
- * not decide what a rule may read for context. A profile-setup weight is told
- * by the height beside it and a left-running session by heart rate and steps;
- * asking about `Weight` alone must still find the profile weight. Context is
- * gated by the exposure policy only (`request.allowed`): a denied type is
- * never read, as a finding or as context.
- *
- * ### Long ranges
- *
- * Everything above is read per WINDOW of the range, never for the range at
- * once. One read of a whole history is every sealed day and hour rollup of
- * every type, opened and held together, and that is more than one request can
- * carry: it is what a full-history call died of. Two ways in:
- *
- *  - {@link dataQualityPage} walks the range in windows of
- *    {@link QUALITY_WINDOW_DAYS} local days from wherever its caller's cursor
- *    left off, and stops -- at a window's end, never inside one -- once it has
- *    `maxBytes` of findings or has read {@link QUALITY_MAX_WINDOWS_PER_CALL}
- *    windows. It says where it stopped (`untilMs`, and `done`), which is what
- *    a tool turns into `truncated: true` and a cursor (`HcAnswer.scan` in
- *    `./sources.ts`). Nothing is dropped and no range is refused: a longer
- *    range is more pages.
- *  - {@link dataQuality} is every page in one call. It holds one window of
- *    the store at a time, so it no longer has the whole history in memory,
- *    but it does all the reading at once: it bounds memory, not work.
- *
- * A range no longer than a window is one window either way, and reads as it
- * always has.
- *
- * A window is assessed with what came before it in view, so cutting the range
- * loses nothing at a cut:
- *
- *  - the day-level rules (a gap, a change of source) read
- *    {@link QUALITY_LOOKBACK_DAYS} days before the window as well and report
- *    what falls inside it. A silence longer than that is still found: when a
- *    regularly recorded type has nothing in the lookback, the days before it
- *    are read for that one type to learn when it stopped;
- *  - a precision change is judged against the same app's previous value up to
- *    the lookback before the window;
- *  - a session belongs to the window it ENDS in (the last window also takes
- *    one that runs past the range), and sessions are read
- *    {@link SESSION_MARGIN_MS} either side so an overlapping pair that
- *    straddles a cut is still seen as a pair.
- *
- * Two things do depend on the span looked at, and so can differ between one
- * window over a long range and several: whether a type counts as "recorded
- * most days" is judged over the window and its lookback, not the whole range
- * (a type worn daily this year and never before is regular this year); and a
- * source switch after a silence longer than the lookback is reported only for
- * the types the gap rule covers.
- */
+`data_quality`: what in a range should be read with care.
+
+Every duplicate and artefact rule is the one in `worker/src/hc/rules.ts` --
+this module only decides where to point them. To stay cheap over a long
+range it looks at rollups first and opens raw records only where a rollup
+says a rule could fire:
+
+ - heart rate outside the plausible limits, speed above its limit, an
+   implausible floor count: found from the hour rollup's `max` (or `min`),
+   then counted exactly from that hour's records;
+ - weights written by a profile screen, duplicated blood-pressure readings,
+   precision changes: types with a handful of records a day, read whole;
+ - overlapping, duplicated, zero-length and left-running sessions: from the
+   stored session summaries;
+ - several apps recording the same cumulative type on one day, days with
+   nothing between days with something, and the app that supplies a type
+   changing: from one per-day, per-origin count of each type;
+ - a date with overnight vitals and no sleep session to account for them:
+   from the vitals' hour rollups and the stored nights;
+ - an hour whose platform total (`Agg.<Metric>`) has a figure where the
+   type has no record at all: the total from before those records were
+   deleted. From
+   the totals themselves (one record an hour) and the type's hour rollups --
+   with the records they list as running past their hour -- or, for the few
+   totalled types whose records are not divided among hours (sessions,
+   drinks), the records. The rule is `staleTotals`
+   (worker/src/hc/platform-totals.ts), the one the store's own scan uses to
+   have the phone work such hours out again.
+
+The last two groups and the precision check are observations, not rules
+about any one record, so their thresholds live here.
+
+`request.types` says which types to REPORT findings for: what the caller
+asked about, of what the phone holds and the exposure policy allows. It does
+not decide what a rule may read for context. A profile-setup weight is told
+by the height beside it and a left-running session by heart rate and steps;
+asking about `Weight` alone must still find the profile weight. Context is
+gated by the exposure policy only (`request.allowed`): a denied type is
+never read, as a finding or as context.
+
+### Long ranges
+
+Everything above is read per WINDOW of the range, never for the range at
+once. One read of a whole history is every sealed day and hour rollup of
+every type, opened and held together, and that is more than one request can
+carry: it is what a full-history call died of. Two ways in:
+
+ - {@link dataQualityPage} walks the range in windows of
+   {@link QUALITY_WINDOW_DAYS} local days from wherever its caller's cursor
+   left off, and stops -- at a window's end, never inside one -- once it has
+   `maxBytes` of findings or has read {@link QUALITY_MAX_WINDOWS_PER_CALL}
+   windows. It says where it stopped (`untilMs`, and `done`), which is what
+   a tool turns into `truncated: true` and a cursor (`HcAnswer.scan` in
+   `./sources.ts`). Nothing is dropped and no range is refused: a longer
+   range is more pages.
+ - {@link dataQuality} is every page in one call. It holds one window of
+   the store at a time, so it no longer has the whole history in memory,
+   but it does all the reading at once: it bounds memory, not work.
+
+A range no longer than a window is one window either way, and reads as it
+always has.
+
+A window is assessed with what came before it in view, so cutting the range
+loses nothing at a cut:
+
+ - the day-level rules (a gap, a change of source) read
+   {@link QUALITY_LOOKBACK_DAYS} days before the window as well and report
+   what falls inside it. A silence longer than that is still found: when a
+   regularly recorded type has nothing in the lookback, the days before it
+   are read for that one type to learn when it stopped;
+ - a precision change is judged against the same app's previous value up to
+   the lookback before the window;
+ - a session belongs to the window it ENDS in (the last window also takes
+   one that runs past the range), and sessions are read
+   {@link SESSION_MARGIN_MS} either side so an overlapping pair that
+   straddles a cut is still seen as a pair.
+
+Two things do depend on the span looked at, and so can differ between one
+window over a long range and several: whether a type counts as "recorded
+most days" is judged over the window and its lookback, not the whole range
+(a type worn daily this year and never before is regular this year); and a
+source switch after a silence longer than the lookback is reported only for
+the types the gap rule covers.
+*/
 
 import {
   PLATFORM_SOURCE_TYPES,
@@ -128,29 +128,29 @@ import type { ArtefactFlag, ArtefactResult } from "../../hc/rules.ts";
 import type { HcRecord } from "../../hc/wire.ts";
 
 /**
- * A type is "recorded daily" -- so that a day without it is a gap worth
- * reporting -- when it has records on at least this share of the days between
- * its first and last day in the span looked at. Half: a watch worn most days
- * qualifies, a scale stepped on now and then does not.
- */
+A type is "recorded daily" -- so that a day without it is a gap worth
+reporting -- when it has records on at least this share of the days between
+its first and last day in the span looked at. Half: a watch worn most days
+qualifies, a scale stepped on now and then does not.
+*/
 const GAP_MIN_DAY_COVERAGE = 0.5;
 
 /** And it needs at least this many days with records before a gap means anything. */
 const GAP_MIN_DAYS_WITH_DATA = 3;
 
 /**
- * The types a gap is reported for: those a device records by itself, day in
- * day out, so that a day with none means the device was off or its data did
- * not arrive. The sensor counters (`isCounter`: steps, distance, energy,
- * floors ...), the vitals a wearable samples unasked, and sleep -- a night is
- * expected every night.
- *
- * Everything else is EVENT data, written when a person does something: a
- * workout, a blood-pressure reading, a weighing, a meal, a meditation. Nobody
- * exercises on a schedule a tool can know, so a week without a workout is a
- * week without a workout and not a hole in the data; reporting it as one is
- * noise. Event types still get every other rule.
- */
+The types a gap is reported for: those a device records by itself, day in
+day out, so that a day with none means the device was off or its data did
+not arrive. The sensor counters (`isCounter`: steps, distance, energy,
+floors ...), the vitals a wearable samples unasked, and sleep -- a night is
+expected every night.
+
+Everything else is EVENT data, written when a person does something: a
+workout, a blood-pressure reading, a weighing, a meal, a meditation. Nobody
+exercises on a schedule a tool can know, so a week without a workout is a
+week without a workout and not a hole in the data; reporting it as one is
+noise. Event types still get every other rule.
+*/
 const PASSIVE_VITALS: ReadonlySet<string> = new Set([
   "HeartRate",
   "RestingHeartRate",
@@ -167,50 +167,50 @@ export function isGapType(type: string): boolean {
 }
 
 /**
- * The app supplying a type has "switched" only when the app that supplied it
- * before is absent, or nearly: at most this share of the day's total on the
- * day another app takes over. A tenth: two apps recording side by side trade
- * the lead from day to day without either going away, and that is not a
- * change of source; a watch left in a drawer contributes nothing at all.
- */
+The app supplying a type has "switched" only when the app that supplied it
+before is absent, or nearly: at most this share of the day's total on the
+day another app takes over. A tenth: two apps recording side by side trade
+the lead from day to day without either going away, and that is not a
+change of source; a watch left in a drawer contributes nothing at all.
+*/
 const SOURCE_SWITCH_MAX_PREVIOUS_SHARE = 0.1;
 
 /**
- * True for the local day that holds "now", on which no switch is looked for.
- * The rule weighs each app's share of a DAY's total, and the day still being
- * lived has no total yet. Apps upload on their own schedules, so minutes after
- * midnight the day holds whatever the first app to sync has written and
- * nothing of the app that supplies the type, which reads exactly like that app
- * going away. No age in hours fixes that (an app that syncs once in the
- * evening is absent at noon as well), and a finding that is there at 00:20 and
- * gone by breakfast is worse than one reported a day late: a real switch today
- * is found from tomorrow on, dated today.
- *
- * `QUALITY_RULES.sourceSwitchJudgesUnfinishedDay` says so in the answer.
- */
+True for the local day that holds "now", on which no switch is looked for.
+The rule weighs each app's share of a DAY's total, and the day still being
+lived has no total yet. Apps upload on their own schedules, so minutes after
+midnight the day holds whatever the first app to sync has written and
+nothing of the app that supplies the type, which reads exactly like that app
+going away. No age in hours fixes that (an app that syncs once in the
+evening is absent at noon as well), and a finding that is there at 00:20 and
+gone by breakfast is worse than one reported a day late: a real switch today
+is found from tomorrow on, dated today.
+
+`QUALITY_RULES.sourceSwitchJudgesUnfinishedDay` says so in the answer.
+*/
 function isUnfinishedDay(label: string, request: QualityRequest): boolean {
   return label === request.clock.day(request.nowMs);
 }
 
 /**
- * A value printed with this many decimals or fewer is "rounded": what a
- * person types or a display shows.
- */
+A value printed with this many decimals or fewer is "rounded": what a
+person types or a display shows.
+*/
 const PRECISION_ROUNDED_MAX_DECIMALS = 2;
 
 /**
- * A value printed with this many decimals or more is "unrounded": what a unit
- * conversion leaves behind (a weight entered in pounds, stored in kilograms).
- * A value between the two says nothing either way -- a rounded value that
- * happens to end in a zero prints shorter, and must not read as a change.
- */
+A value printed with this many decimals or more is "unrounded": what a unit
+conversion leaves behind (a weight entered in pounds, stored in kilograms).
+A value between the two says nothing either way -- a rounded value that
+happens to end in a zero prints shorter, and must not read as a change.
+*/
 const PRECISION_UNROUNDED_MIN_DECIMALS = 4;
 
 /**
- * What a wearable writes for a night. A date with readings of at least
- * {@link SESSION_MISSING_MIN_VITALS} of these that no stored sleep session
- * accounts for is a night the wearable measured whose session did not arrive.
- */
+What a wearable writes for a night. A date with readings of at least
+{@link SESSION_MISSING_MIN_VITALS} of these that no stored sleep session
+accounts for is a night the wearable measured whose session did not arrive.
+*/
 const OVERNIGHT_VITALS: readonly string[] = [
   "HeartRateVariabilityRmssd",
   "RespiratoryRate",
@@ -219,11 +219,11 @@ const OVERNIGHT_VITALS: readonly string[] = [
 ];
 
 /**
- * Two, not one: a resting heart rate alone is a daily figure some apps write
- * whether or not the wearer slept in the device, and a single HRV reading can
- * be a daytime spot check. Two different overnight types on one date are a
- * night.
- */
+Two, not one: a resting heart rate alone is a daily figure some apps write
+whether or not the wearer slept in the device, and a single HRV reading can
+be a daytime spot check. Two different overnight types on one date are a
+night.
+*/
 const SESSION_MISSING_MIN_VITALS = 2;
 
 const TYPE_SLEEP = "SleepSession";
@@ -236,18 +236,18 @@ export const QUALITY_WINDOW_DAYS = 183;
 export const QUALITY_LOOKBACK_DAYS = 183;
 
 /**
- * How many windows one call of {@link dataQualityPage} reads before it stops
- * and hands back a cursor, however little it has found. Two: a year of the
- * store a call, which is a few hundred reads -- a request has a ceiling on
- * how many it may make, and a quiet history must not be a way to reach it.
- */
+How many windows one call of {@link dataQualityPage} reads before it stops
+and hands back a cursor, however little it has found. Two: a year of the
+store a call, which is a few hundred reads -- a request has a ceiling on
+how many it may make, and a quiet history must not be a way to reach it.
+*/
 export const QUALITY_MAX_WINDOWS_PER_CALL = 2;
 
 /**
- * How far either side of a window sessions are read, so that both of an
- * overlapping pair are seen when a cut falls between their ends. Two days:
- * longer than the longest session that is ever merged with another.
- */
+How far either side of a window sessions are read, so that both of an
+overlapping pair are seen when a cut falls between their ends. Two days:
+longer than the longest session that is ever merged with another.
+*/
 const SESSION_MARGIN_MS = 2 * DAY_MS;
 
 /** Types with few records a day whose values are read whole, and the field checked. */
@@ -304,14 +304,14 @@ export interface QualityRequest {
   /** Whether one type's day rollups can answer the range: see `dayRollupsUsable` in `./sources.ts`. */
   dayRollupsUsable: (type: string, range: Range) => Promise<boolean>;
   /**
-   * The record types to report findings for: what was asked about, of what
-   * the phone holds and the policy lets this call read.
-   */
+  The record types to report findings for: what was asked about, of what
+  the phone holds and the policy lets this call read.
+  */
   types: readonly string[];
   /**
-   * Whether the exposure policy lets this call read a record type. What gates
-   * a rule's context, whatever `types` narrows the report to.
-   */
+  Whether the exposure policy lets this call read a record type. What gates
+  a rule's context, whatever `types` narrows the report to.
+  */
   allowed: (type: string) => boolean;
 }
 
@@ -340,12 +340,12 @@ interface DayShare {
 }
 
 /**
- * What a day's row weighs when origins are compared: the sum of the type's
- * primary field (steps, metres, kcal), a session type's duration, or -- for a
- * type with neither -- its record count. Never the record count when there is
- * a sum: one app writing a record a minute and another a record an hour would
- * otherwise be compared by how chatty they are.
- */
+What a day's row weighs when origins are compared: the sum of the type's
+primary field (steps, metres, kcal), a session type's duration, or -- for a
+type with neither -- its record count. Never the record count when there is
+a sum: one app writing a record a minute and another a record an hour would
+otherwise be compared by how chatty they are.
+*/
 function shareWeight(row: AggregateRow): number {
   const primary = Object.values(row.values)[0]?.sum;
   if (primary !== null && primary !== undefined) return primary;
@@ -433,10 +433,10 @@ function inWindow(scan: Scan, ms: number): boolean {
 }
 
 /**
- * True for a session (or a group of them) that belongs to this window: it
- * ends inside it. The last window also takes one that runs past the end of
- * the range, so a session still open when the range ends is not lost.
- */
+True for a session (or a group of them) that belongs to this window: it
+ends inside it. The last window also takes one that runs past the end of
+the range, so a session still open when the range ends is not lost.
+*/
 function endsHere(scan: Scan, span: { startMs: number; endMs: number }): boolean {
   const touches = span.endMs >= scan.window.startMs && span.startMs < scan.window.endMs;
   return touches && (span.endMs < scan.window.endMs || scan.last);
@@ -489,9 +489,9 @@ const DENSE_RULES: readonly DenseRule[] = [
 ];
 
 /**
- * Artefacts of a dense type: hours whose rollup says the rule could fire are
- * read raw and put through it.
- */
+Artefacts of a dense type: hours whose rollup says the rule could fire are
+read raw and put through it.
+*/
 async function denseArtefacts(scan: Scan, dense: DenseRule): Promise<ArtefactFlag[]> {
   const { deviceId } = scan.request;
   const range = scan.window;
@@ -537,7 +537,7 @@ function flagsByHour(type: string, flags: readonly ArtefactFlag[], clock: ZoneCl
   for (const group of groups.values()) {
     const first = group[0];
     if (first === undefined) continue;
-    const values = group.flatMap((flag) => (flag.value === null ? [] : [flag.value]));
+    const values = group.flatMap((flag) => flag.value ?? []);
     findings.push({
       type,
       kind: "artefact",
@@ -578,10 +578,10 @@ async function denseFindings(scan: Scan): Promise<Finding[]> {
 }
 
 /**
- * The one finding that is about a type and not about any stretch of time:
- * floors are an estimate wherever they come from. Said once per answer, with
- * the first window -- not once per window.
- */
+The one finding that is about a type and not about any stretch of time:
+floors are an estimate wherever they come from. Said once per answer, with
+the first window -- not once per window.
+*/
 function standingFindings(scan: Scan): Finding[] {
   const first = scan.window.startMs <= scan.request.range.startMs;
   if (!first || !scan.types.has("FloorsClimbed")) return [];
@@ -598,10 +598,10 @@ function standingFindings(scan: Scan): Finding[] {
 }
 
 /**
- * Where one origin's values of a sparse type go from rounded to unrounded, or
- * back. `records` may begin before the window (the lookback): a change is
- * reported when the value that changed is inside it.
- */
+Where one origin's values of a sparse type go from rounded to unrounded, or
+back. `records` may begin before the window (the lookback): a change is
+reported when the value that changed is inside it.
+*/
 function precisionChanges(
   scan: Scan,
   type: string,
@@ -817,10 +817,10 @@ function overlappingOrigins(
 }
 
 /**
- * What came before the days being walked, when the type was silent for all of
- * them up to its first record there: the silence began earlier than the
- * lookback reaches.
- */
+What came before the days being walked, when the type was silent for all of
+them up to its first record there: the silence began earlier than the
+lookback reaches.
+*/
 interface Lead {
   /** The first day of the silence, `YYYY-MM-DD`. */
   from: string;
@@ -831,24 +831,24 @@ interface Lead {
 }
 
 /**
- * Gaps and source switches of one type, walking its days from first record to
- * last.
- *
- * A gap is reported only for a type a device records unasked
- * ({@link isGapType}) and that is recorded most days.
- *
- * A switch is the app that supplied a type going away and another taking
- * over: reported on the first day a different app recorded the most AND the
- * app that supplied it before recorded at most
- * {@link SOURCE_SWITCH_MAX_PREVIOUS_SHARE} of that day's total. Two apps
- * recording side by side trade the lead without either leaving, and that is
- * not reported -- the "previous" supplier stays the one last established,
- * so when it does stop the switch is still found. The local day that holds
- * "now" is not judged at all: see {@link isUnfinishedDay}. It is the last day
- * there is, so leaving the supplier as it was changes nothing after it.
- *
- * `lead` continues a silence that began before the first of `days`.
- */
+Gaps and source switches of one type, walking its days from first record to
+last.
+
+A gap is reported only for a type a device records unasked
+({@link isGapType}) and that is recorded most days.
+
+A switch is the app that supplied a type going away and another taking
+over: reported on the first day a different app recorded the most AND the
+app that supplied it before recorded at most
+{@link SOURCE_SWITCH_MAX_PREVIOUS_SHARE} of that day's total. Two apps
+recording side by side trade the lead without either leaving, and that is
+not reported -- the "previous" supplier stays the one last established,
+so when it does stop the switch is still found. The local day that holds
+"now" is not judged at all: see {@link isUnfinishedDay}. It is the last day
+there is, so leaving the supplier as it was changes nothing after it.
+
+`lead` continues a silence that began before the first of `days`.
+*/
 function gapsAndSwitches(
   type: string,
   days: ReadonlyMap<string, Map<string, DayShare>>,
@@ -899,9 +899,9 @@ function gapsAndSwitches(
 }
 
 /**
- * The switch on one finished day, or null: another app recorded the most and
- * the one that supplied the type before is absent, or nearly.
- */
+The switch on one finished day, or null: another app recorded the most and
+the one that supplied the type before is absent, or nearly.
+*/
 function switchFinding(
   type: string,
   day: { label: string; origins: ReadonlyMap<string, DayShare>; source: string },
@@ -923,11 +923,11 @@ function addDays(day: string, days: number): string {
 }
 
 /**
- * The silence a type came out of, when it has no record in the lookback and
- * recorded something before it: read from the days between the start of the
- * range and the lookback, for this one type. Null when there is nothing
- * earlier to continue -- the type simply begins in this window.
- */
+The silence a type came out of, when it has no record in the lookback and
+recorded something before it: read from the days between the start of the
+range and the lookback, for this one type. Null when there is nothing
+earlier to continue -- the type simply begins in this window.
+*/
 async function leadInto(
   scan: Scan,
   type: string,
@@ -995,11 +995,11 @@ async function dayFindings(scan: Scan): Promise<Finding[]> {
 }
 
 /**
- * When one overnight type was measured in the window, to the hour rollup's
- * resolution: the first and the last reading of every hour that has any. No
- * record is opened -- a wearable that logs a figure all night makes a handful
- * of rows a night, and one that stamps it once makes one.
- */
+When one overnight type was measured in the window, to the hour rollup's
+resolution: the first and the last reading of every hour that has any. No
+record is opened -- a wearable that logs a figure all night makes a handful
+of rows a night, and one that stamps it once makes one.
+*/
 async function vitalInstants(scan: Scan, type: string): Promise<number[]> {
   const { window } = scan;
   const rollups = await scan.reads.hourRollups({
@@ -1018,22 +1018,22 @@ async function vitalInstants(scan: Scan, type: string): Promise<number[]> {
 }
 
 /**
- * Dates on which the wearable wrote its overnight figures and no sleep session
- * accounts for them: the night was measured, and its session is not in the
- * store.
- *
- * A reading is accounted for when it is timed inside a stored sleep session or
- * within {@link SLEEP_MATCH_TOLERANCE_MS} of either end -- the reach the night
- * summaries themselves use to give a reading to a session. What is left is
- * filed under its local date, and a date with unaccounted readings of at least
- * {@link SESSION_MISSING_MIN_VITALS} DIFFERENT overnight types is a finding.
- * Judged by time and not by date, so the evening half of a night that is
- * there is never mistaken for a night that is not.
- *
- * A finding about `SleepSession`, so it is reported when sleep is asked
- * about; the vitals are context, read wherever the policy allows them and
- * never when it does not.
- */
+Dates on which the wearable wrote its overnight figures and no sleep session
+accounts for them: the night was measured, and its session is not in the
+store.
+
+A reading is accounted for when it is timed inside a stored sleep session or
+within {@link SLEEP_MATCH_TOLERANCE_MS} of either end -- the reach the night
+summaries themselves use to give a reading to a session. What is left is
+filed under its local date, and a date with unaccounted readings of at least
+{@link SESSION_MISSING_MIN_VITALS} DIFFERENT overnight types is a finding.
+Judged by time and not by date, so the evening half of a night that is
+there is never mistaken for a night that is not.
+
+A finding about `SleepSession`, so it is reported when sleep is asked
+about; the vitals are context, read wherever the policy allows them and
+never when it does not.
+*/
 async function missingSessionFindings(scan: Scan): Promise<Finding[]> {
   if (!scan.types.has(TYPE_SLEEP)) return [];
   const { request } = scan;
@@ -1069,19 +1069,19 @@ async function missingSessionFindings(scan: Scan): Promise<Finding[]> {
 }
 
 /**
- * How far before a window the records that may run into its first hours are
- * looked for. Two days: the bound the rollups divide records over, and longer
- * than any session.
- */
+How far before a window the records that may run into its first hours are
+looked for. Two days: the bound the rollups divide records over, and longer
+than any session.
+*/
 const PLATFORM_LOOKBACK_MS = 2 * DAY_MS;
 
 /**
- * Which apps have records of `type` in which hours of the window: from the hour
- * rollups -- the hour each record starts in, and every hour a record listed as
- * running past its own (`crossing`) reaches -- for a running count, whose
- * records those lists cover; from the records themselves for the other
- * totalled types (sessions, drinks), of which there are a handful a day.
- */
+Which apps have records of `type` in which hours of the window: from the hour
+rollups -- the hour each record starts in, and every hour a record listed as
+running past its own (`crossing`) reaches -- for a running count, whose
+records those lists cover; from the records themselves for the other
+totalled types (sessions, drinks), of which there are a handful a day.
+*/
 async function presenceIn(
   scan: Scan,
   type: string,
@@ -1149,11 +1149,11 @@ function staleRuns(type: string, stale: readonly StaleTotal[], clock: ZoneClock)
 }
 
 /**
- * Hours of the window whose stored platform total no longer agrees with the
- * records: see `staleTotals`. Reported under the type the total is of (a
- * stale `Agg.Steps` hour is a `Steps` finding), one finding per run of
- * consecutive hours that are stale the same way.
- */
+Hours of the window whose stored platform total no longer agrees with the
+records: see `staleTotals`. Reported under the type the total is of (a
+stale `Agg.Steps` hour is a `Steps` finding), one finding per run of
+consecutive hours that are stale the same way.
+*/
 async function platformFindings(scan: Scan): Promise<Finding[]> {
   const findings: Finding[] = [];
   for (const type of PLATFORM_SOURCE_TYPES) {
@@ -1197,10 +1197,10 @@ async function assess(
 }
 
 /**
- * A range assessed as ONE window: every read spans all of it. What the
- * windowed forms are held against in the tests, and right for nothing longer
- * than a window -- over years it is the read that a request cannot carry.
- */
+A range assessed as ONE window: every read spans all of it. What the
+windowed forms are held against in the tests, and right for nothing longer
+than a window -- over years it is the read that a request cannot carry.
+*/
 export async function dataQualityInOneRead(
   reads: HcReads,
   request: QualityRequest,
@@ -1211,15 +1211,15 @@ export async function dataQualityInOneRead(
 /** Where one page of a windowed assessment starts and how much it may carry. */
 interface QualityPageOptions {
   /**
-   * Where this page starts: the `nextMs` of the page before it. Omitted (or
-   * outside the range): the start of the range.
-   */
+  Where this page starts: the `nextMs` of the page before it. Omitted (or
+  outside the range): the start of the range.
+  */
   fromMs?: number | null | undefined;
   /**
-   * Where this page must stop, for a page that is being read AGAIN: a cursor
-   * that cut inside a page's rows resumes by offset, so the rows have to be
-   * the same rows. Omitted: the page stops by its budget.
-   */
+  Where this page must stop, for a page that is being read AGAIN: a cursor
+  that cut inside a page's rows resumes by offset, so the rows have to be
+  the same rows. Omitted: the page stops by its budget.
+  */
   untilMs?: number | null | undefined;
   /** Bytes of findings after which no further window is read. Soft: a window is never cut. */
   maxBytes: number;
@@ -1259,13 +1259,13 @@ function bytesOf(findings: readonly Finding[]): number {
 }
 
 /**
- * One page of a range's assessment: whole windows from `fromMs`, until the
- * page holds `maxBytes` of findings, {@link QUALITY_MAX_WINDOWS_PER_CALL}
- * windows have been read, or the range ends. See "Long ranges" above.
- *
- * What the store has memoised of each window is released before the next
- * (`HcReads.releaseReads`), so a page holds one window's rows at a time.
- */
+One page of a range's assessment: whole windows from `fromMs`, until the
+page holds `maxBytes` of findings, {@link QUALITY_MAX_WINDOWS_PER_CALL}
+windows have been read, or the range ends. See "Long ranges" above.
+
+What the store has memoised of each window is released before the next
+(`HcReads.releaseReads`), so a page holds one window's rows at a time.
+*/
 export async function dataQualityPage(
   reads: HcReads,
   request: QualityRequest,
@@ -1296,15 +1296,15 @@ export async function dataQualityPage(
 }
 
 /**
- * Everything worth knowing about one phone's data in a range: every page of
- * {@link dataQualityPage}, one after another, as one list.
- *
- * It walks the range in the same windows and lets go of each before the
- * next, so however long the range is it never holds more than a window of
- * the store -- which is what a single read of a whole history could not do.
- * It still does all the work in one call: a caller that can hand back a
- * cursor should page with `dataQualityPage` instead and do a bounded part.
- */
+Everything worth knowing about one phone's data in a range: every page of
+{@link dataQualityPage}, one after another, as one list.
+
+It walks the range in the same windows and lets go of each before the
+next, so however long the range is it never holds more than a window of
+the store -- which is what a single read of a whole history could not do.
+It still does all the work in one call: a caller that can hand back a
+cursor should page with `dataQualityPage` instead and do a bounded part.
+*/
 export async function dataQuality(reads: HcReads, request: QualityRequest): Promise<Finding[]> {
   const findings: Finding[] = [];
   let fromMs: number | null = null;

@@ -60,8 +60,13 @@ const ctx = testCtx({ now: time.now });
 const repos = makeRepos(ctx);
 
 /** Every Steps record the device holds, as `id:count`, in start order. */
-async function stored(deviceId: string, type = "Steps"): Promise<string[]> {
-  const records = await readRecords(ctx, { deviceId, type, startMs: 0, endMs: T + 1000 * HOUR_MS });
+async function stored(deviceId: string): Promise<string[]> {
+  const records = await readRecords(ctx, {
+    deviceId,
+    type: "Steps",
+    startMs: 0,
+    endMs: T + 1000 * HOUR_MS,
+  });
   return records.map((record) => `${record.id}:${String(record.data.count)}`);
 }
 

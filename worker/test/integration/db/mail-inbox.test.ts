@@ -35,25 +35,27 @@ const ALLOWLIST = ["portal.example.org", "google.com"];
 const PORTAL_HOST = "portal.example.org";
 
 /**
- * The filter a first-ever sign-in passes: no expected sender yet, the allowlist
- * plus this portal's own host. `portalHost` defaults to `PORTAL_HOST` -- the
- * multi-portal tests below pass their own.
- */
-function unbound(since: number, now: number, portalHost: string | null = PORTAL_HOST) {
-  return { since, now, expectedSender: null, allowlist: ALLOWLIST, portalHost };
-}
-
-/** The filter a health system that already knows its sender passes. `portalHost` is unused here. */
-function boundTo(expectedSender: string, since: number, now: number) {
-  return { since, now, expectedSender, allowlist: ALLOWLIST, portalHost: null };
+The filter a first-ever sign-in passes: no expected sender yet, the allowlist
+plus this portal's own host, `PORTAL_HOST`.
+*/
+function unbound(since: number, now: number) {
+  return { since, now, expectedSender: null, allowlist: ALLOWLIST, portalHost: PORTAL_HOST };
 }
 
 /**
- * A row with no TTL at all, as every kind could have before 0005.
- *
- * A shape the repo can no longer write, and exactly what the purge's age
- * ceiling exists for.
- */
+The filter a health system that already knows its sender (`PORTAL_HOST`)
+passes, from `since` 500. `portalHost` is unused here.
+*/
+function boundToPortal(now: number) {
+  return { since: 500, now, expectedSender: PORTAL_HOST, allowlist: ALLOWLIST, portalHost: null };
+}
+
+/**
+A row with no TTL at all, as every kind could have before 0005.
+
+A shape the repo can no longer write, and exactly what the purge's age
+ceiling exists for.
+*/
 async function seedLegacyRowWithoutTtl(id: string, receivedAt: number): Promise<void> {
   await env.DB.prepare(
     `INSERT INTO mail_inbox (id, received_at, kind, expires_at, raw_size)
@@ -258,7 +260,7 @@ describe("mailInbox.takeFreshOtp", () => {
     await seedOtp("999999", 1000, "attacker@portal.example.org.attacker.example");
     const mine = await seedOtp("111111", 1100);
 
-    const claimed = await repos.mailInbox.takeFreshOtp(boundTo("portal.example.org", 500, 1200));
+    const claimed = await repos.mailInbox.takeFreshOtp(boundToPortal(1200));
 
     expect(claimed?.id).toBe(mine.id);
     expect(claimed?.code).toBe("111111");
@@ -268,18 +270,18 @@ describe("mailInbox.takeFreshOtp", () => {
     const repos = testRepos();
     await seedOtp("999999", 1000, "attacker@other.example.net");
 
-    expect(await repos.mailInbox.takeFreshOtp(boundTo("portal.example.org", 500, 1100))).toBeNull();
+    expect(await repos.mailInbox.takeFreshOtp(boundToPortal(1100))).toBeNull();
   });
 
   it("accepts a subdomain of the expected sender, and nothing that merely contains it", async () => {
     const repos = testRepos();
     const subdomain = await seedOtp("111111", 1000, "noreply@mail.portal.example.org");
 
-    const claimed = await repos.mailInbox.takeFreshOtp(boundTo("portal.example.org", 500, 1100));
+    const claimed = await repos.mailInbox.takeFreshOtp(boundToPortal(1100));
     expect(claimed?.id).toBe(subdomain.id);
 
     await seedOtp("222222", 1200, "noreply@notportal.example.org");
-    expect(await repos.mailInbox.takeFreshOtp(boundTo("portal.example.org", 500, 1300))).toBeNull();
+    expect(await repos.mailInbox.takeFreshOtp(boundToPortal(1300))).toBeNull();
   });
 
   it("falls back to the allowlist when there is no expected sender, anchored at a label", async () => {

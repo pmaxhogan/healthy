@@ -385,10 +385,10 @@ const ISSUED_DEVICE_ID = "synthetic-remembered-device-0001";
 const ROTATED_DEVICE_ID = "synthetic-remembered-device-0002";
 
 /**
- * The code step as the capture showed it: the challenge page reached with
- * `ranDeviceCheck=1`, XHRs answering JSON, then `inside.asp` redirecting
- * through an intermediate hop to a Home page that carries a token.
- */
+The code step as the capture showed it: the challenge page reached with
+`ranDeviceCheck=1`, XHRs answering JSON, then `inside.asp` redirecting
+through an intermediate hop to a Home page that carries a token.
+*/
 function validatingPortal(
   overrides: {
     validate?: () => Response;
@@ -963,7 +963,8 @@ describe("request shape", () => {
 });
 
 /** A portal whose visits page serves the token and whose LoadPast answers JSON. */
-function pastPortal(payload: unknown = pastPayload()): PortalFetchStub {
+function pastPortal(): PortalFetchStub {
+  const payload = pastPayload();
   return routed({
     "GET /MyChart/Visits/VisitsList": () => html(visitsListPage()),
     "POST /MyChart/Visits/VisitsList/LoadPast": () => json(payload),

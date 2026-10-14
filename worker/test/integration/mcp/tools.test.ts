@@ -63,11 +63,11 @@ const INLINE_NOTE = {
 };
 
 /**
- * A single-attachment DocumentReference whose body lives in a Binary, not
- * inline. Its `_binary_text` cache entry is seeded directly (below) so the
- * Binary-reference paths can be exercised without a fake organisation to fetch
- * from -- exactly what `INLINE_NOTE` does for the plain DocumentReference-id path.
- */
+A single-attachment DocumentReference whose body lives in a Binary, not
+inline. Its `_binary_text` cache entry is seeded directly (below) so the
+Binary-reference paths can be exercised without a fake organisation to fetch
+from -- exactly what `INLINE_NOTE` does for the plain DocumentReference-id path.
+*/
 const REMOTE_NOTE = {
   resourceType: "DocumentReference",
   id: "doc-remote",
@@ -78,10 +78,10 @@ const REMOTE_NOTE = {
 };
 
 /**
- * A DocumentReference with two attachments, RTF first and HTML second.
- * `pickAttachment`'s default choice is the first convertible one (RTF), so a
- * Binary reference naming the HTML attachment must resolve to different text.
- */
+A DocumentReference with two attachments, RTF first and HTML second.
+`pickAttachment`'s default choice is the first convertible one (RTF), so a
+Binary reference naming the HTML attachment must resolve to different text.
+*/
 const MULTI_ATTACHMENT_NOTE = {
   resourceType: "DocumentReference",
   id: "doc-multi",
@@ -95,10 +95,10 @@ const MULTI_ATTACHMENT_NOTE = {
 };
 
 /**
- * Health system B's own document, naming a Binary id ("bin-html") that
- * collides with health system A's `MULTI_ATTACHMENT_NOTE` on purpose: the
- * reverse Binary search must stay scoped to the health system asked about.
- */
+Health system B's own document, naming a Binary id ("bin-html") that
+collides with health system A's `MULTI_ATTACHMENT_NOTE` on purpose: the
+reverse Binary search must stay scoped to the health system asked about.
+*/
 const CROSS_HEALTH_SYSTEM_NOTE = {
   resourceType: "DocumentReference",
   id: "doc-b-html",
@@ -538,10 +538,10 @@ function upcomingRow(csn: string, iso: string, practitioner?: string): Record<st
 }
 
 /**
- * Seven synthetic visits across all three `LoadUpcoming` buckets and about seven
- * months, parsed by the real parser and stored by the real repo -- the path the
- * hourly portal pass takes.
- */
+Seven synthetic visits across all three `LoadUpcoming` buckets and about seven
+months, parsed by the real parser and stored by the real repo -- the path the
+hourly portal pass takes.
+*/
 async function storeSevenMonths(healthSystemId: string): Promise<void> {
   const parsed = parseUpcoming(
     {
@@ -1042,13 +1042,13 @@ describe("portal messages through the MCP", () => {
     body: "An invented reply both portals show.",
     attachments: [],
   };
-  const thread = (external: boolean, extra: (typeof shared)[] = []) => ({
+  const thread = (external: boolean) => ({
     subject: "Invented subject",
     folder: "conversations" as const,
     external,
     ...(external && { organization: NAME_A }),
     practitioners: [{ name: "Nurse Example A" }],
-    messages: [shared, ...extra],
+    messages: [shared],
   });
 
   async function storeBoth(): Promise<void> {

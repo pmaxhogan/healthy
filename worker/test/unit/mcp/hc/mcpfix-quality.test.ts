@@ -60,9 +60,9 @@ function phoneWith(records: readonly HcRecord[]): FakeHc {
   return hc;
 }
 
-async function ask(hc: FakeHc, name: string, args: Record<string, unknown>): Promise<ToolAnswer> {
+async function askQuality(hc: FakeHc, args: Record<string, unknown>): Promise<ToolAnswer> {
   const client = await connectTools(fakeDeps(fakeState({ hc })));
-  return callTool(client, name, { max_bytes: 1_000_000, ...args });
+  return callTool(client, "data_quality", { max_bytes: 1_000_000, ...args });
 }
 
 /** A sorted copy, in code-unit order. */
@@ -121,7 +121,7 @@ describe("a gap", () => {
       );
     }
 
-    const answer = await ask(phoneWith(records), "data_quality", RANGE);
+    const answer = await askQuality(phoneWith(records), RANGE);
     const gaps = answer.items.filter((item) => item.kind === "gap");
     const [from, resumed] = [iso(day(8)), iso(day(11))];
 
@@ -145,7 +145,7 @@ describe("a gap", () => {
       );
     }
 
-    const answer = await ask(phoneWith(records), "data_quality", RANGE);
+    const answer = await askQuality(phoneWith(records), RANGE);
     const gaps = answer.items.filter((item) => item.kind === "gap");
     const from = iso(day(12));
 
@@ -188,7 +188,7 @@ describe("a night whose session is missing", () => {
   it("is found by the overnight figures the wearable wrote for it", async () => {
     const records = [night(0), ...vitals(0), ...vitals(1), night(2), ...vitals(2)];
 
-    const answer = await ask(phoneWith(records), "data_quality", RANGE);
+    const answer = await askQuality(phoneWith(records), RANGE);
 
     expect(missing(answer)).toStrictEqual([
       {
@@ -204,7 +204,7 @@ describe("a night whose session is missing", () => {
   it("is not reported when every night's figures have their session", async () => {
     const records = [0, 1, 2].flatMap((index) => [night(index), ...vitals(index)]);
 
-    const answer = await ask(phoneWith(records), "data_quality", RANGE);
+    const answer = await askQuality(phoneWith(records), RANGE);
 
     expect(missing(answer)).toStrictEqual([]);
   });
@@ -214,7 +214,7 @@ describe("a night whose session is missing", () => {
     // night's evening readings fall on the same date and belong to its session.
     const records = [night(0), ...vitals(0), night(2), ...vitals(2)];
 
-    const answer = await ask(phoneWith(records), "data_quality", RANGE);
+    const answer = await askQuality(phoneWith(records), RANGE);
 
     expect(missing(answer)).toStrictEqual([]);
   });
@@ -228,7 +228,7 @@ describe("a night whose session is missing", () => {
       ...vitals(2),
     ];
 
-    const answer = await ask(phoneWith(records), "data_quality", RANGE);
+    const answer = await askQuality(phoneWith(records), RANGE);
 
     expect(missing(answer)).toStrictEqual([]);
   });
@@ -236,7 +236,7 @@ describe("a night whose session is missing", () => {
   it("is a finding about sleep: not reported when sleep was not asked about", async () => {
     const records = [night(0), ...vitals(0), ...vitals(1)];
 
-    const answer = await ask(phoneWith(records), "data_quality", {
+    const answer = await askQuality(phoneWith(records), {
       ...RANGE,
       types: ["RestingHeartRate"],
     });
@@ -466,9 +466,9 @@ describe("a long range, a window at a time", () => {
   });
 
   /**
-   * One call of the tool as it is to be wired: open the cursor, read the page
-   * it names, hand the rows and the stretch that was read to `hcRespond`.
-   */
+  One call of the tool as it is to be wired: open the cursor, read the page
+  it names, hand the rows and the stretch that was read to `hcRespond`.
+  */
   async function toolPage(args: Record<string, unknown>): Promise<Page> {
     const deps = fakeDeps(fakeState({ hc: world.hc }));
     const call = await beginHcCall(deps, { rules: EMPTY_RULES, now: NOW }, args);
@@ -578,7 +578,7 @@ describe("a stale platform total", () => {
       total(6, [WEARABLE, PHONE]),
     ];
 
-    const answer = await ask(phoneWith(records), "data_quality", RANGE);
+    const answer = await askQuality(phoneWith(records), RANGE);
     const stale = answer.items.filter((item) => item.kind === "stale_platform_total");
     const [from, to] = [utcIso(at(1)), utcIso(at(3))];
 
@@ -606,7 +606,7 @@ describe("a stale platform total", () => {
       interval("hr-0", "HeartRate", at(0, 10), at(0, 11), { samples: [] }),
       total(1, [WEARABLE]),
     ];
-    const answer = await ask(phoneWith(records), "data_quality", {
+    const answer = await askQuality(phoneWith(records), {
       ...RANGE,
       types: ["HeartRate"],
     });

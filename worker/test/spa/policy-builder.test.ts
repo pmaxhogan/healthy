@@ -78,9 +78,9 @@ function mountBuilder(props: Record<string, unknown> = {}): ReturnType<typeof mo
   });
 }
 
-async function chooseTool(wrapper: ReturnType<typeof mount>, tool: string): Promise<void> {
+async function chooseCareTeamTool(wrapper: ReturnType<typeof mount>): Promise<void> {
   await wrapper.find('input[type="radio"][value="tool"]').setValue(true);
-  await wrapper.find('[data-test="scope-tool"]').setValue(tool);
+  await wrapper.find('[data-test="scope-tool"]').setValue("get_care_team");
   await flushPromises();
 }
 
@@ -108,7 +108,7 @@ afterEach(() => {
 describe("PolicyRuleBuilder", () => {
   it("shows the scope's shapes as a tree, and opens a list to pick inside it", async () => {
     const wrapper = mountBuilder();
-    await chooseTool(wrapper, "get_care_team");
+    await chooseCareTeamTool(wrapper);
 
     const groupHeads = wrapper.findAll(".group-head").map((head) => head.text());
     expect(groupHeads[0]).toContain("CareTeam item");
@@ -125,7 +125,7 @@ describe("PolicyRuleBuilder", () => {
 
   it("finds a nested field by search, across every group", async () => {
     const wrapper = mountBuilder();
-    await chooseTool(wrapper, "get_care_team");
+    await chooseCareTeamTool(wrapper);
 
     await wrapper.find('[data-test="field-search"]').setValue("display");
 
@@ -135,7 +135,7 @@ describe("PolicyRuleBuilder", () => {
 
   it("picks several fields into one rule, previews it, and saves it as one rule", async () => {
     const wrapper = mountBuilder();
-    await chooseTool(wrapper, "get_care_team");
+    await chooseCareTeamTool(wrapper);
     await wrapper.find('[data-test="field-search"]').setValue("name");
     await checkbox(wrapper, "participants[].name").setValue(true);
     await checkbox(wrapper, "name").setValue(true);
@@ -188,7 +188,7 @@ describe("PolicyRuleBuilder", () => {
 
   it("shows the raw FHIR before and after on its own tab", async () => {
     const wrapper = mountBuilder();
-    await chooseTool(wrapper, "get_care_team");
+    await chooseCareTeamTool(wrapper);
     await wrapper.find('[data-test="field-search"]').setValue("name");
     await checkbox(wrapper, "participants[].name").setValue(true);
     await vi.advanceTimersByTimeAsync(600);
@@ -202,7 +202,7 @@ describe("PolicyRuleBuilder", () => {
 
   it("adds a typed path, canonicalized, and refuses one that is not a path", async () => {
     const wrapper = mountBuilder();
-    await chooseTool(wrapper, "get_care_team");
+    await chooseCareTeamTool(wrapper);
 
     await wrapper.find('[data-test="raw-path"]').setValue("participant.[].member.display");
     await wrapper.find('[data-test="raw-path"]').trigger("keydown", { key: "Enter" });
@@ -228,7 +228,7 @@ describe("PolicyRuleBuilder", () => {
       }),
     );
     const wrapper = mountBuilder();
-    await chooseTool(wrapper, "get_care_team");
+    await chooseCareTeamTool(wrapper);
     await wrapper.find('[data-test="raw-path"]').setValue("participants[].nmae");
     await wrapper.find('[data-test="raw-path"]').trigger("keydown", { key: "Enter" });
     await vi.advanceTimersByTimeAsync(600);

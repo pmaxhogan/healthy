@@ -13,18 +13,18 @@ import {
 
 const NONCE = "test-nonce";
 
-function directives(nonce = NONCE): Map<string, string> {
+function directives(): Map<string, string> {
   const map = new Map<string, string>();
-  for (const directive of contentSecurityPolicy(nonce).split("; ")) {
+  for (const directive of contentSecurityPolicy(NONCE).split("; ")) {
     const space = directive.indexOf(" ");
     map.set(directive.slice(0, space), directive.slice(space + 1));
   }
   return map;
 }
 
-function sandboxDirectives(nonce = NONCE): Map<string, string> {
+function sandboxDirectives(): Map<string, string> {
   const map = new Map<string, string>();
-  for (const directive of sandboxContentSecurityPolicy(nonce).split("; ")) {
+  for (const directive of sandboxContentSecurityPolicy(NONCE).split("; ")) {
     const space = directive.indexOf(" ");
     map.set(directive.slice(0, space), directive.slice(space + 1));
   }

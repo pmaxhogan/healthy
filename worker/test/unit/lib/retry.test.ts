@@ -15,10 +15,11 @@ import type { ErrorClass, RetryOpts, RetryOutcome } from "../../../src/lib/retry
 const URL = "https://fhir.example.test/R4/Encounter";
 
 /** A fetch that answers from a script, recording the sleeps it caused. */
-function harness(
-  script: (Response | Error)[],
-  overrides: RetryOpts = {},
-): { opts: RetryOpts; sleeps: number[]; calls: number } {
+function harness(script: (Response | Error)[]): {
+  opts: RetryOpts;
+  sleeps: number[];
+  calls: number;
+} {
   const sleeps: number[] = [];
   const state = { calls: 0 };
   let clock = 1_000_000;
@@ -39,7 +40,6 @@ function harness(
       }
       return next instanceof Error ? Promise.reject(next) : Promise.resolve(next);
     },
-    ...overrides,
   };
   return {
     opts,

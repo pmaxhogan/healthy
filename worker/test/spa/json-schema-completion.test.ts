@@ -45,8 +45,9 @@ function stateFor(doc: string): EditorState {
   return EditorState.create({ doc });
 }
 
-function contextAt(doc: string, pos: number, explicit = false): CompletionContext {
-  return new CompletionContext(stateFor(doc), pos, explicit);
+/** An explicit (user-requested) completion context at `pos`. */
+function contextAt(doc: string, pos: number): CompletionContext {
+  return new CompletionContext(stateFor(doc), pos, true);
 }
 
 /** The sources in this module are always synchronous; unwrap that for the tests. */
@@ -170,7 +171,7 @@ describe("jsonSchemaCompletionSource", () => {
   const source = jsonSchemaCompletionSource(() => TOOL_SCHEMA);
 
   it("lists the schema's properties with required ones first", () => {
-    const result = complete(source, contextAt("{}", 1, true));
+    const result = complete(source, contextAt("{}", 1));
     expect(result).not.toBeNull();
     const labels = result?.options.map((option) => option.label) ?? [];
     expect(labels[0]).toBe("healthSystem");
@@ -185,7 +186,7 @@ describe("jsonSchemaCompletionSource", () => {
 
   it("excludes a key the object already has", () => {
     const doc = '{"healthSystem":"","}';
-    const result = complete(source, contextAt(doc, doc.length - 1, true));
+    const result = complete(source, contextAt(doc, doc.length - 1));
     const labels = result?.options.map((option) => option.label) ?? [];
     expect(labels).not.toContain("healthSystem");
     expect(labels).toContain("id");
@@ -198,7 +199,7 @@ describe("jsonSchemaCompletionSource", () => {
     // silently produced zero completions (CodeMirror's own fuzzy matcher
     // rejects every label against text that includes a stray '}').
     const doc = '{"}';
-    const result = complete(source, contextAt(doc, 2, true));
+    const result = complete(source, contextAt(doc, 2));
     expect(result).not.toBeNull();
     expect(result?.from).toBe(2);
     expect(result?.to).toBe(2);
@@ -208,7 +209,7 @@ describe("jsonSchemaCompletionSource", () => {
 
   it("produces a snippet that stays valid JSON when a sibling follows", () => {
     const doc = '{"id":""}';
-    const result = complete(source, contextAt(doc, 1, true));
+    const result = complete(source, contextAt(doc, 1));
     const healthSystem = result?.options.find((option) => option.label === "healthSystem");
     expect(healthSystem).toBeDefined();
     const apply = healthSystem?.apply;
@@ -226,27 +227,27 @@ describe("jsonSchemaCompletionSource", () => {
 
   it("offers enum values at a value position", () => {
     const doc = '{"status":"';
-    const result = complete(source, contextAt(doc, doc.length, true));
+    const result = complete(source, contextAt(doc, doc.length));
     const labels = result?.options.map((option) => option.label) ?? [];
     expect(labels).toEqual(["active", "cancelled"]);
   });
 
   it("offers true/false for a boolean value position", () => {
     const doc = '{"raw":';
-    const result = complete(source, contextAt(doc, doc.length, true));
+    const result = complete(source, contextAt(doc, doc.length));
     const labels = result?.options.map((option) => option.label) ?? [];
     expect(labels).toEqual(["true", "false"]);
   });
 
   it("completes inside a nested array of objects", () => {
     const doc = '{"items":[{"';
-    const result = complete(source, contextAt(doc, doc.length, true));
+    const result = complete(source, contextAt(doc, doc.length));
     const labels = result?.options.map((option) => option.label) ?? [];
     expect(labels).toEqual(["foo"]);
   });
 
   it("returns null outside any completable position", () => {
-    expect(complete(source, contextAt("", 0, true))).toBeNull();
+    expect(complete(source, contextAt("", 0))).toBeNull();
   });
 });
 

@@ -12,11 +12,11 @@ import {
 } from "../../../src/auth/ratelimit.ts";
 
 /**
- * An in-memory store with the same semantics as the D1 UPSERT: bump the counter,
- * restarting it when the window has rolled over. The SQL itself is exercised
- * against real D1 in worker/test/integration/auth/login.test.ts; what is under test here
- * is the limiter's arithmetic and its decisions.
- */
+An in-memory store with the same semantics as the D1 UPSERT: bump the counter,
+restarting it when the window has rolled over. The SQL itself is exercised
+against real D1 in worker/test/integration/auth/login.test.ts; what is under test here
+is the limiter's arithmetic and its decisions.
+*/
 function memoryStore(): LoginAttemptStore & { rows: Map<string, LoginAttemptWindow> } {
   const rows = new Map<string, LoginAttemptWindow>();
   return {
@@ -55,8 +55,9 @@ function hashOf(ip: string, key = KEY): Promise<string> {
   );
 }
 
-async function sha256Hex(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+/** The plain, unkeyed sha256 hex of the test client address 203.0.113.7. */
+async function plainSha256OfTestIp(): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("203.0.113.7"));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
@@ -177,8 +178,8 @@ describe("hashClientIp", () => {
     expect(hash).toMatch(/^~[\w-]{43}$/u);
     expect(hash).not.toContain("203");
     // The point of keying it: every IPv4 address's plain sha256 is a lookup away.
-    expect(hash).not.toBe(await sha256Hex("203.0.113.7"));
-    expect(hash).not.toContain(await sha256Hex("203.0.113.7"));
+    expect(hash).not.toBe(await plainSha256OfTestIp());
+    expect(hash).not.toContain(await plainSha256OfTestIp());
   });
 
   it("depends on the key: another DATA_KEY gives another digest", async () => {

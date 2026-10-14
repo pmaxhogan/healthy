@@ -47,28 +47,28 @@
 //   justify it.
 
 /**
- * @typedef {Object} SlimBrand
- * @property {string} id
- * @property {string} name
- * @property {string[]} [aliases]
- * @property {string} [portalUrl]
- * @property {string} fhirBaseUrl
- * @property {string[]} [locations]
- */
+@typedef {Object} SlimBrand
+@property {string} id
+@property {string} name
+@property {string[]} [aliases]
+@property {string} [portalUrl]
+@property {string} fhirBaseUrl
+@property {string[]} [locations]
+*/
 
 /**
- * A `SlimBrand` before dedup, carrying the two canonical-name signals. Never
- * returned to a caller: both extra fields are deleted once dedup picks a winner.
- * @typedef {SlimBrand & {locationCount?: number, matchesManagingOrg?: boolean}} Candidate
- */
+A `SlimBrand` before dedup, carrying the two canonical-name signals. Never
+returned to a caller: both extra fields are deleted once dedup picks a winner.
+@typedef {SlimBrand & {locationCount?: number, matchesManagingOrg?: boolean}} Candidate
+*/
 
 /**
- * Build a lookup of every possible reference key for a bundle entry:
- * its fullUrl (e.g. "urn:uuid:...") and, if the resource has an id,
- * "<ResourceType>/<id>" (the other common FHIR reference form).
- * @param {{fullUrl?: string, resource: any}} entry
- * @returns {string[]}
- */
+Build a lookup of every possible reference key for a bundle entry:
+its fullUrl (e.g. "urn:uuid:...") and, if the resource has an id,
+"<ResourceType>/<id>" (the other common FHIR reference form).
+@param {{fullUrl?: string, resource: any}} entry
+@returns {string[]}
+*/
 function referenceKeysFor(entry) {
   const keys = [];
   if (entry.fullUrl) keys.push(entry.fullUrl);
@@ -80,7 +80,7 @@ function referenceKeysFor(entry) {
 }
 
 function slugify(value) {
-  return String(value || "")
+  return (value ? String(value) : "")
     .toLowerCase()
     .trim()
     .replaceAll(/[^a-z0-9]+/g, "-")
@@ -88,12 +88,12 @@ function slugify(value) {
 }
 
 /**
- * Determine whether an Endpoint resource represents a FHIR R4 endpoint, per the
- * two signals Epic's data actually uses: the address path, and (as a fallback)
- * the endpoint-fhir-version extension.
- * @param {any} endpoint
- * @returns {boolean}
- */
+Determine whether an Endpoint resource represents a FHIR R4 endpoint, per the
+two signals Epic's data actually uses: the address path, and (as a fallback)
+the endpoint-fhir-version extension.
+@param {any} endpoint
+@returns {boolean}
+*/
 function isR4Endpoint(endpoint) {
   const address = typeof endpoint.address === "string" ? endpoint.address : "";
   if (/\/api\/fhir\/r4(\/|$)/i.test(address)) return true;
@@ -109,7 +109,7 @@ function isR4Endpoint(endpoint) {
 }
 
 function normalizeBaseUrl(address) {
-  return String(address || "").replace(/\/+$/, "");
+  return (address ? String(address) : "").replace(/\/+$/, "");
 }
 
 function formatLocation(address) {
@@ -121,11 +121,11 @@ function formatLocation(address) {
 }
 
 /**
- * Slim an Epic "User-access Brands Bundle" (FHIR R4 Bundle) down to a compact,
- * deduped, sorted array of brand records.
- * @param {any} bundle
- * @returns {SlimBrand[]}
- */
+Slim an Epic "User-access Brands Bundle" (FHIR R4 Bundle) down to a compact,
+deduped, sorted array of brand records.
+@param {any} bundle
+@returns {SlimBrand[]}
+*/
 export function slimBrandsBundle(bundle) {
   const entries = Array.isArray(bundle && bundle.entry) ? bundle.entry : [];
 
@@ -258,14 +258,14 @@ export function slimBrandsBundle(bundle) {
 }
 
 /**
- * Whether `name` (a candidate Organization's own name) is the endpoint's
- * `managingOrganization.display`, case- and whitespace-insensitively. See the
- * header comment for why this is safe to use as a canonical-name signal even
- * though `managingOrganization.display` is often a generic hosting system's name.
- * @param {string} name
- * @param {any} endpoint
- * @returns {boolean}
- */
+Whether `name` (a candidate Organization's own name) is the endpoint's
+`managingOrganization.display`, case- and whitespace-insensitively. See the
+header comment for why this is safe to use as a canonical-name signal even
+though `managingOrganization.display` is often a generic hosting system's name.
+@param {string} name
+@param {any} endpoint
+@returns {boolean}
+*/
 function canonicalNameMatchesManagingOrg(name, endpoint) {
   const display = endpoint.managingOrganization && endpoint.managingOrganization.display;
   return typeof display !== "string" || !display.trim()
@@ -274,12 +274,12 @@ function canonicalNameMatchesManagingOrg(name, endpoint) {
 }
 
 /**
- * Whether `a` should be canonical over `b` when they share a `fhirBaseUrl`.
- * `a` and `b` are the internally-annotated candidates built above.
- * @param {Candidate} a
- * @param {Candidate} b
- * @returns {boolean}
- */
+Whether `a` should be canonical over `b` when they share a `fhirBaseUrl`.
+`a` and `b` are the internally-annotated candidates built above.
+@param {Candidate} a
+@param {Candidate} b
+@returns {boolean}
+*/
 function isBetterCanonical(a, b) {
   return a.matchesManagingOrg === b.matchesManagingOrg
     ? (a.locationCount ?? 0) > (b.locationCount ?? 0)
@@ -287,14 +287,14 @@ function isBetterCanonical(a, b) {
 }
 
 /**
- * Fold `secondary` into `primary` in place: `secondary`'s name (and any aliases
- * it already carried) become `primary`'s aliases, its portal URL fills in a gap,
- * and its locations are unioned in up to the 5-location cap. Order-independent,
- * so a chain of merges (three or more Organizations on one endpoint) converges
- * to the same result regardless of which pairs are merged first.
- * @param {Candidate} primary
- * @param {Candidate} secondary
- */
+Fold `secondary` into `primary` in place: `secondary`'s name (and any aliases
+it already carried) become `primary`'s aliases, its portal URL fills in a gap,
+and its locations are unioned in up to the 5-location cap. Order-independent,
+so a chain of merges (three or more Organizations on one endpoint) converges
+to the same result regardless of which pairs are merged first.
+@param {Candidate} primary
+@param {Candidate} secondary
+*/
 function mergeBrandInto(primary, secondary) {
   const aliases = new Set(primary.aliases || []);
   if (secondary.name !== primary.name) aliases.add(secondary.name);
@@ -316,13 +316,13 @@ function mergeBrandInto(primary, secondary) {
 }
 
 /**
- * Best-effort extraction of a public-facing portal URL from an Organization,
- * inspecting both `extension` and `telecom` since Epic's schema for this is not
- * formally documented. Real Epic data does not currently populate either, but
- * this keeps the module forward-compatible and is exercised by unit tests.
- * @param {any} org
- * @returns {string | undefined}
- */
+Best-effort extraction of a public-facing portal URL from an Organization,
+inspecting both `extension` and `telecom` since Epic's schema for this is not
+formally documented. Real Epic data does not currently populate either, but
+this keeps the module forward-compatible and is exercised by unit tests.
+@param {any} org
+@returns {string | undefined}
+*/
 function extractPortalUrl(org) {
   for (const telecom of org.telecom || []) {
     if (telecom && telecom.system === "url" && typeof telecom.value === "string" && telecom.value) {
@@ -343,17 +343,15 @@ function extractPortalUrl(org) {
 }
 
 /**
- * Case-insensitive substring search over name/aliases/locations, returning up
- * to the top 20 matches. Name matches rank above alias matches, which rank
- * above location matches; ties keep alphabetical order.
- * @param {SlimBrand[]} list
- * @param {string} query
- * @returns {SlimBrand[]}
- */
+Case-insensitive substring search over name/aliases/locations, returning up
+to the top 20 matches. Name matches rank above alias matches, which rank
+above location matches; ties keep alphabetical order.
+@param {SlimBrand[]} list
+@param {string} query
+@returns {SlimBrand[]}
+*/
 export function searchBrands(list, query) {
-  const q = String(query || "")
-    .trim()
-    .toLowerCase();
+  const q = (query ? String(query) : "").trim().toLowerCase();
   if (!q) return [];
 
   /** @type {{brand: SlimBrand, rank: number}[]} */

@@ -866,12 +866,9 @@ describe("hr_series", () => {
   });
 });
 
-/** A minute-by-minute heart rate that sits at 60 for twelve minutes and then at 110. */
-function rise(minutes: number): [number, number][] {
-  return Array.from({ length: minutes }, (_, minute) => [
-    minute * MINUTE_MS,
-    minute < 12 ? 60 : 110,
-  ]);
+/** 25 minutes of minute-by-minute heart rate that sits at 60 for twelve minutes and then at 110. */
+function rise(): [number, number][] {
+  return Array.from({ length: 25 }, (_, minute) => [minute * MINUTE_MS, minute < 12 ? 60 : 110]);
 }
 
 describe("hr_events", () => {
@@ -908,12 +905,12 @@ describe("hr_events", () => {
   it("says where an event fell: a workout, a waking", async () => {
     const records = world.state.hc.records.get(DEVICE_ID) ?? [];
     records.push(
-      heartRate("hr-gym", at(13), rise(25)),
+      heartRate("hr-gym", at(13), rise()),
       interval("gym", "ExerciseSession", at(13, 10), at(13, 30), {
         exerciseType: "STRENGTH_TRAINING",
       }),
       // A second, short sleep that ends as the heart rate climbs.
-      heartRate("hr-nap", at(15), rise(25)),
+      heartRate("hr-nap", at(15), rise()),
       interval("nap", "SleepSession", at(14, 30), at(15, 10), {}),
     );
 

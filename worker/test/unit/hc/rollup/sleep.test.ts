@@ -52,9 +52,9 @@ function context(overrides: Partial<SleepContext>): SleepContext {
 }
 
 /**
- * One reading a minute, thirty seconds into the minute, for minute `from` up
- * to but not including minute `to` of the night.
- */
+One reading a minute, thirty seconds into the minute, for minute `from` up
+to but not including minute `to` of the night.
+*/
 function hrMinutes(from: number, to: number, bpm: number): { t: number; bpm: number }[] {
   return steady(START + from * MIN + 30 * SECOND, to - from, bpm);
 }
@@ -527,13 +527,13 @@ describe("summariseSleep: matching nightly readings", () => {
   });
 
   it("matches skin temperature at the session's start, else inside it", () => {
-    const skin = (start: number, deltas: number[], origin = WEARABLE): HcRecord =>
+    const skin = (start: number, deltas: number[]): HcRecord =>
       interval(
         "SkinTemperature",
         start,
         start + HOUR,
         { deltas: deltas.map((delta, index) => ({ t: start + index * MIN, delta })) },
-        { origin },
+        { origin: WEARABLE },
       );
     const anchored = summariseSleep(
       plain,

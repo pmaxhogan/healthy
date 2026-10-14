@@ -59,10 +59,12 @@ const WITH_DST = "Pacific/Auckland";
 const FRACTIONAL_ZONES = ["Asia/Kolkata", "Asia/Kathmandu"];
 
 /** One Steps record of 100 at every UTC hour of `[fromMs, toMs)`, `offsetMs` past the hour. */
-function hourly(fromMs: number, toMs: number, offsetMs = 0, origin = WEARABLE): HcRecord[] {
+function hourly(fromMs: number, toMs: number, offsetMs = 0): HcRecord[] {
   const records: HcRecord[] = [];
   for (let at = fromMs; at < toMs; at += HOUR_MS) {
-    records.push(steps(`${origin}-${String(at + offsetMs)}`, at + offsetMs, 100, { origin }));
+    records.push(
+      steps(`${WEARABLE}-${String(at + offsetMs)}`, at + offsetMs, 100, { origin: WEARABLE }),
+    );
   }
   return records;
 }

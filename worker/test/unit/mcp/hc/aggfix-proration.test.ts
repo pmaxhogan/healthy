@@ -45,8 +45,8 @@ const TOTAL = "TotalCaloriesBurned";
 
 const energy = (id: string, startMs: number, endMs: number, kcal: number, origin: string) =>
   interval(id, TOTAL, startMs, endMs, { energy: kcal }, { origin });
-const steps = (id: string, startMs: number, endMs: number, count: number, origin = WEARABLE) =>
-  interval(id, "Steps", startMs, endMs, { count }, { origin });
+const steps = (id: string, startMs: number, endMs: number, count: number) =>
+  interval(id, "Steps", startMs, endMs, { count }, { origin: WEARABLE });
 
 function store(records: readonly HcRecord[], timezone = UTC): FakeHc {
   const hc = emptyHc();
@@ -80,8 +80,8 @@ function ask(
 
 const sums = (result: AggregateResult, field = "energy"): number[] =>
   result.rows.map((row) => row.values[field]?.sum ?? 0);
-const total = (result: AggregateResult, field = "energy"): number =>
-  sums(result, field).reduce((sum, value) => sum + value, 0);
+const total = (result: AggregateResult): number =>
+  sums(result).reduce((sum, value) => sum + value, 0);
 
 /** The wearable's hours: 100 kcal each, basal included, for the hours given. */
 const measured = (hours: readonly number[], day = D0): HcRecord[] =>
