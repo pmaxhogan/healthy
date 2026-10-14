@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": ["scripts/*.{ts,mjs}", "test/**/*.test.ts", "test/**/setup.ts", "ui/sandbox/main.ts"],
+  "entry": ["scripts/*.{ts,mjs}", "test/**/*.test.ts", "test/**/setup.ts"],
   "project": [
     "src/**/*.ts",
     "ui/**/*.{ts,vue}",

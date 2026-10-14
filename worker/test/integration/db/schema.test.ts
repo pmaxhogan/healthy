@@ -22,7 +22,11 @@ describe("the health_systems rename (0010)", () => {
 
     for (const object of objects.results) {
       expect(object.name, object.name).not.toMatch(/provider/iu);
-      expect(object.sql ?? "", object.name).not.toMatch(/provider/iu);
+      // Identifiers only: since @cloudflare/vitest-plugin the stored SQL keeps
+      // the `--` comments an earlier, immutable migration wrote, and a
+      // comment names no table, column or index.
+      const code = (object.sql ?? "").replaceAll(/--[^\n]*/gu, "");
+      expect(code, object.name).not.toMatch(/provider/iu);
     }
   });
 

@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-workers";
+import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import vue from "@vitejs/plugin-vue";
 import { defineConfig } from "vitest/config";
 
@@ -127,12 +127,6 @@ export default defineConfig({
           cloudflareTest({
             wrangler: { configPath: "./wrangler.jsonc" },
             miniflare: {
-              // @cloudflare/vitest-pool-workers 0.22.0 bundles a workerd that
-              // only understands compatibility dates up to 2026-08-22, while
-              // the deployed Worker is pinned to 2026-09-01. Overriding it here
-              // rather than in wrangler.jsonc keeps production on the intended
-              // date; drop this line once the pool ships a newer workerd.
-              compatibilityDate: "2026-08-22",
               // The dummy secrets come last so they override anything the
               // config (or the operator's .dev.vars) supplied. See TEST_SECRETS.
               bindings: { TEST_MIGRATIONS: migrations, ...TEST_SECRETS },
@@ -153,9 +147,9 @@ export default defineConfig({
           // RPCs over a WebSocket owned by its runner object, and a line
           // logged from inside another Durable Object (an alarm of
           // `HcIngestRunner` or `FullRefreshRunner`, say) cannot use that
-          // socket: @cloudflare/vitest-pool-workers 0.22.0 catches the "I/O on
-          // behalf of a different Durable Object" error and holds the line
-          // back until the runner next sends something. If the alarm logs
+          // socket: the pool (seen in @cloudflare/vitest-pool-workers 0.22.0)
+          // catches the "I/O on behalf of a different Durable Object" error
+          // and holds the line back until the runner next sends something. If the alarm logs
           // after the runner's last message, nothing is ever sent again: the
           // file waits on an answer to a line that never left, at 0% CPU,
           // with no timeout. An alarm chain still working when the last test
