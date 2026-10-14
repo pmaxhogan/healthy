@@ -18,9 +18,9 @@
  *    changing: from one per-day, per-origin count of each type;
  *  - a date with overnight vitals and no sleep session to account for them:
  *    from the vitals' hour rollups and the stored nights;
- *  - an hour whose platform total (`Agg.<Metric>`) counts an app that has no
- *    record of the type in that hour, or has a figure where the type has no
- *    record at all: the total from before those records were deleted. From
+ *  - an hour whose platform total (`Agg.<Metric>`) has a figure where the
+ *    type has no record at all: the total from before those records were
+ *    deleted. From
  *    the totals themselves (one record an hour) and the type's hour rollups --
  *    with the records they list as running past their hour -- or, for the few
  *    totalled types whose records are not divided among hours (sessions,
@@ -1111,7 +1111,7 @@ async function presenceIn(
   return presence;
 }
 
-/** Consecutive stale hours with the same reason and the same missing apps, as one finding. */
+/** Consecutive stale hours whose totals name the same apps, as one finding. */
 function staleRuns(type: string, stale: readonly StaleTotal[], clock: ZoneClock): Finding[] {
   const findings: Finding[] = [];
   let run: { first: StaleTotal; last: number; count: number } | null = null;
@@ -1135,7 +1135,6 @@ function staleRuns(type: string, stale: readonly StaleTotal[], clock: ZoneClock)
     const same =
       run !== null &&
       hour.hourUtc === run.last + 1 &&
-      hour.reason === run.first.reason &&
       JSON.stringify(hour.missing) === JSON.stringify(run.first.missing);
     if (run !== null && same) {
       run.last = hour.hourUtc;

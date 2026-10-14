@@ -130,8 +130,7 @@ export function carriedPlatformHours(batch: {
  * A month: longer than any record a device writes (a day's total written as one
  * record is a day), and the most hours the phone asks Health Connect for in one
  * call. What lies beyond it of such a record is not marked; the `data_quality`
- * finding below still names any hour whose total counts an app that has
- * nothing there.
+ * finding below still names any such hour left with no record at all.
  */
 export const MAX_MARKED_SPAN_MS = 31 * 24 * HOUR_MS;
 
@@ -193,25 +192,37 @@ export interface StoredTotal {
 }
 
 /** Why an hour's total no longer agrees with the records. Stable strings: they are emitted. */
-type StaleReason = "origin_without_records" | "no_records";
+type StaleReason = "no_records";
 
 /** An hour whose stored total counts something the store does not hold. */
 export interface StaleTotal {
   hourUtc: number;
   reason: StaleReason;
-  /** The origins the total names that have no record of the type in the hour. */
+  /** The origins the total names: none of them has a record of the type in the hour. */
   missing: string[];
 }
 
 /**
- * The stored totals that count an app with no record of the type in their
- * hour -- or that have a figure while the type has no record there at all.
+ * The stored totals that have a figure in an hour where the type has no
+ * record at all.
  *
- * That is what a total looks like once the records it counted were deleted:
+ * That is what a total looks like once every record it counted was deleted:
  * the store took the deletion, and the total from before it is still there.
  * It can also be a total over records that never arrived (refused by the
  * server, say); either way the hour's total and its records disagree, and
  * working the total out again is what settles it.
+ *
+ * Only that, and not "the total names an app with no record in the hour",
+ * although a total does carry the apps it counted (`data.origins`). Health
+ * Connect's list is not the hour's: a total it has just worked out, for an
+ * hour with records of one app only, names every app with records anywhere in
+ * the span the phone asked about (seen on the owner's phone, 2026-10-14, for
+ * hours re-fetched minutes before). Held to the hour, the list made a fresh
+ * total look stale, and the phone would have been sent to fetch it again
+ * every time the scan ran. So a total that still counts a deleted app in an
+ * hour another app also recorded in cannot be told from the stored rows; the
+ * marks the apply writes as it takes the deletion are what find those
+ * (worker/src/hc/store/platform-stale.ts).
  */
 export function staleTotals(totals: readonly StoredTotal[], presence: Presence): StaleTotal[] {
   const stale: StaleTotal[] = [];
@@ -219,11 +230,6 @@ export function staleTotals(totals: readonly StoredTotal[], presence: Presence):
     const present = presence.get(total.hourUtc);
     if (present === undefined || present.size === 0) {
       stale.push({ hourUtc: total.hourUtc, reason: "no_records", missing: [...total.origins] });
-      continue;
-    }
-    const missing = total.origins.filter((origin) => !present.has(origin));
-    if (missing.length > 0) {
-      stale.push({ hourUtc: total.hourUtc, reason: "origin_without_records", missing });
     }
   }
   return stale;

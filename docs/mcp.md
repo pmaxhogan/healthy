@@ -965,12 +965,16 @@ quality of: it yields no finding and the answer warns
 `not_assessed:hc:Agg.<Metric>`, so that silence does not read as "nothing
 found". What `stale_platform_total` reports is about the totals' agreement with
 the records, under the type they are totals of: a run of hours whose stored
-platform total counts an app with no record of the type in those hours (listed
-in `origins`, `reason: origin_without_records`), or has a figure where the type
-has no record at all (`no_records`), `start` to `end`, `count` hours. That is a
-total from before those records were deleted; `hc_priority` and `daily_summary`
-read high there until the phone works the hours out again, which the server asks
-it to do on its next syncs.
+platform total has a figure where the type has no record at all
+(`reason: no_records`; `origins` are the apps the total says it counted),
+`start` to `end`, `count` hours. That is a total from before those records
+were deleted; `hc_priority` and `daily_summary` read high there until the
+phone works the hours out again, which the server asks it to do on its next
+syncs. A total that still counts a deleted app in an hour another app also
+recorded in is not reported: the apps Health Connect lists with an hourly
+total are those of the whole span the phone asked about, not of the hour, so
+they cannot tell it apart from a fresh one. The server marks those hours
+itself as it applies the deletion, and the phone repairs them all the same.
 
 `data_quality` answers a long range **in pages**. It assesses the range half a
 year at a time, oldest first, each window with the half year before it in
