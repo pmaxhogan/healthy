@@ -46,12 +46,12 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 export const oauthRouter = new Hono<AppHonoEnv>();
 
 /**
- * A thrown failure anywhere in a flow becomes a page, not JSON.
- *
- * Only the stable code travels. An `AppError`'s message here can quote an
- * organisation's own error response, which is exactly the kind of text that must
- * not be rendered into a document or written to a log.
- */
+A thrown failure anywhere in a flow becomes a page, not JSON.
+
+Only the stable code travels. An `AppError`'s message here can quote an
+organisation's own error response, which is exactly the kind of text that must
+not be rendered into a document or written to a log.
+*/
 oauthRouter.onError((error, c) => {
   const code = isAppError(error) ? error.code : "internal";
   const status = (isAppError(error) ? error.status : 500) as ContentfulStatusCode;
@@ -70,21 +70,21 @@ oauthRouter.route("/", epicRouter);
 oauthRouter.route("/", googleOAuthRouter);
 
 /**
- * `GET /oauth/reconnect/:connectionId` -- the link in a Trello card.
- *
- * It is a redirect rather than a page so the card's link does the whole job: the
- * owner taps it on a phone, clears Access and the password, and lands on the
- * portal's sign-in. One hop, no decisions.
- *
- * `:connectionId` accepts three things, because three different things hold a
- * reference to a connection and making the caller normalise them is how a card ends
- * up with a dead link:
- *
- *   - the literal `google` (which is what `alerts.subject` holds for the calendar
- *     account -- it has no connection row at all)
- *   - a `connections.id`, which is what the admin UI has
- *   - a `health_systems.id`, which is what a reconnect alert's subject encodes
- */
+`GET /oauth/reconnect/:connectionId` -- the link in a Trello card.
+
+It is a redirect rather than a page so the card's link does the whole job: the
+owner taps it on a phone, clears Access and the password, and lands on the
+portal's sign-in. One hop, no decisions.
+
+`:connectionId` accepts three things, because three different things hold a
+reference to a connection and making the caller normalise them is how a card ends
+up with a dead link:
+
+  - the literal `google` (which is what `alerts.subject` holds for the calendar
+    account -- it has no connection row at all)
+  - a `connections.id`, which is what the admin UI has
+  - a `health_systems.id`, which is what a reconnect alert's subject encodes
+*/
 oauthRouter.get("/reconnect/:connectionId", async (c) => {
   const id = c.req.param("connectionId");
   if (id === "google") return c.redirect("/oauth/google/start", 302);

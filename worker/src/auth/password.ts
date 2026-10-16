@@ -16,42 +16,42 @@ import {
 import { b64urlDecode, b64urlEncode, timingSafeEqual, utf8, type Bytes } from "./primitives.ts";
 
 /**
- * Hashes below this cost are refused outright rather than verified.
- *
- * A stored hash carries its own iteration count, which is what lets the cost be
- * raised without invalidating the deployed secret -- but it also means an
- * attacker who can write PASSWORD_HASH could downgrade it to one iteration.
- * This floor makes that rewrite useless, and catches a hash minted by an older
- * or hand-rolled tool at a cost that is no longer acceptable.
- */
+Hashes below this cost are refused outright rather than verified.
+
+A stored hash carries its own iteration count, which is what lets the cost be
+raised without invalidating the deployed secret -- but it also means an
+attacker who can write PASSWORD_HASH could downgrade it to one iteration.
+This floor makes that rewrite useless, and catches a hash minted by an older
+or hand-rolled tool at a cost that is no longer acceptable.
+*/
 export const MIN_PBKDF2_ITERATIONS = 100_000;
 
 /**
- * The most iterations this runtime will actually derive.
- *
- * Deployed workerd caps PBKDF2 at 100,000 and *throws* above it -- "iteration
- * counts above 100000 are not supported" -- while the workerd the vitest pool runs
- * accepts far more. That asymmetry is how a 600,000-iteration PASSWORD_HASH passed
- * every test and then 500'd the first real login (2026-09-22). Nothing local can
- * reproduce the throw, so the cap is asserted here as a value instead: see
- * `isCostUnsupported`, which turns it into a diagnosis the owner can read.
- *
- * Equal to the floor, which makes the cost of a valid hash exactly one number.
- * Raising either without proving a real deploy derives at the new cost is how the
- * same incident happens twice. Defined in worker/shared/password.ts so the script that
- * mints the hash refuses an over-cap cost too; re-exported here for the Worker.
- */
+The most iterations this runtime will actually derive.
+
+Deployed workerd caps PBKDF2 at 100,000 and *throws* above it -- "iteration
+counts above 100000 are not supported" -- while the workerd the vitest pool runs
+accepts far more. That asymmetry is how a 600,000-iteration PASSWORD_HASH passed
+every test and then 500'd the first real login (2026-09-22). Nothing local can
+reproduce the throw, so the cap is asserted here as a value instead: see
+`isCostUnsupported`, which turns it into a diagnosis the owner can read.
+
+Equal to the floor, which makes the cost of a valid hash exactly one number.
+Raising either without proving a real deploy derives at the new cost is how the
+same incident happens twice. Defined in worker/shared/password.ts so the script that
+mints the hash refuses an over-cap cost too; re-exported here for the Worker.
+*/
 export { MAX_PBKDF2_ITERATIONS } from "@shared/password.ts";
 
 /**
- * Digests shorter than this are refused too, for a subtler reason.
- *
- * PBKDF2's output is a prefix: the first 16 bytes derived for a 16-byte key are
- * byte-for-byte the first 16 bytes derived for a 32-byte one. So a stored hash
- * *truncated* to a few bytes still verifies against the right password -- while
- * being brute-forceable in seconds. A 128-bit floor makes a truncated envelope a
- * hard failure instead of a silent downgrade.
- */
+Digests shorter than this are refused too, for a subtler reason.
+
+PBKDF2's output is a prefix: the first 16 bytes derived for a 16-byte key are
+byte-for-byte the first 16 bytes derived for a 32-byte one. So a stored hash
+*truncated* to a few bytes still verifies against the right password -- while
+being brute-forceable in seconds. A 128-bit floor makes a truncated envelope a
+hard failure instead of a silent downgrade.
+*/
 const MIN_DIGEST_BYTES = 16;
 
 interface ParsedHash {
@@ -61,37 +61,37 @@ interface ParsedHash {
 }
 
 /**
- * Splits the `pbkdf2$sha256$<iter>$<salt>$<hash>` envelope, or returns null.
- *
- * Everything structural is rejected here -- wrong scheme, wrong digest,
- * unparseable cost, an iteration count under {@link MIN_PBKDF2_ITERATIONS},
- * undecodable base64url, empty salt or hash -- so the one place that derives a
- * key only ever sees well-formed input.
- */
+Splits the `pbkdf2$sha256$<iter>$<salt>$<hash>` envelope, or returns null.
+
+Everything structural is rejected here -- wrong scheme, wrong digest,
+unparseable cost, an iteration count under {@link MIN_PBKDF2_ITERATIONS},
+undecodable base64url, empty salt or hash -- so the one place that derives a
+key only ever sees well-formed input.
+*/
 function parseStoredHash(stored: string): ParsedHash | null {
   if (!PASSWORD_HASH_PATTERN.test(stored)) return null;
-  const [scheme, digest, iterationsRaw, saltRaw, hashRaw] = stored.split("$", 5);
+  const [scheme, digest, iterationsRaw, saltRaw = "", hashRaw = ""] = stored.split("$", 5);
   if (scheme !== "pbkdf2" || digest !== "sha256") return null;
 
   const iterations = Number(iterationsRaw);
   if (!Number.isSafeInteger(iterations) || iterations < MIN_PBKDF2_ITERATIONS) return null;
 
-  const salt = b64urlDecode(saltRaw ?? "");
-  const expected = b64urlDecode(hashRaw ?? "");
+  const salt = b64urlDecode(saltRaw);
+  const expected = b64urlDecode(hashRaw);
   return !salt || !expected || salt.length < PBKDF2_SALT_BYTES || expected.length < MIN_DIGEST_BYTES
     ? null
     : { iterations, salt, expected };
 }
 
 /**
- * True when `stored` is well formed but names a cost this runtime cannot derive.
- *
- * Deliberately narrow. A missing, malformed or too-cheap PASSWORD_HASH is a failed
- * login and nothing more -- saying otherwise tells an attacker about the
- * deployment. This one case is different: the secret is exactly what the minting
- * script produced, the owner's password is right, and the only possible outcome is
- * a 500 on every attempt. That is a misconfiguration to report, not a refusal.
- */
+True when `stored` is well formed but names a cost this runtime cannot derive.
+
+Deliberately narrow. A missing, malformed or too-cheap PASSWORD_HASH is a failed
+login and nothing more -- saying otherwise tells an attacker about the
+deployment. This one case is different: the secret is exactly what the minting
+script produced, the owner's password is right, and the only possible outcome is
+a 500 on every attempt. That is a misconfiguration to report, not a refusal.
+*/
 export function isCostUnsupported(stored: string): boolean {
   if (!PASSWORD_HASH_PATTERN.test(stored)) return false;
   const iterations = Number(stored.split("$", 5)[2]);
@@ -114,13 +114,13 @@ async function deriveBits(
 }
 
 /**
- * Mints a hash in the PASSWORD_HASH storage format.
- *
- * The Worker never needs this at runtime -- `npm run set-password` mints the
- * real secret in Node -- but the tests do, and a verifier tested only against
- * hashes from a *different* implementation is not testing much. Keeping both
- * halves in one module is also what guarantees they cannot drift.
- */
+Mints a hash in the PASSWORD_HASH storage format.
+
+The Worker never needs this at runtime -- `npm run set-password` mints the
+real secret in Node -- but the tests do, and a verifier tested only against
+hashes from a *different* implementation is not testing much. Keeping both
+halves in one module is also what guarantees they cannot drift.
+*/
 export async function hashPassword(
   password: string,
   iterations: number = PBKDF2_ITERATIONS,
@@ -131,12 +131,12 @@ export async function hashPassword(
 }
 
 /**
- * Verifies `password` against a stored envelope in constant time.
- *
- * Returns false -- never throws -- for every kind of malformed input, so a
- * corrupted secret reads as a wrong password rather than a 500 that tells an
- * attacker the secret is broken.
- */
+Verifies `password` against a stored envelope in constant time.
+
+Returns false -- never throws -- for every kind of malformed input, so a
+corrupted secret reads as a wrong password rather than a 500 that tells an
+attacker the secret is broken.
+*/
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const parsed = parseStoredHash(stored);
   if (!parsed) return false;

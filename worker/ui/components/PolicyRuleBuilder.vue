@@ -102,10 +102,10 @@ const descriptions = computed(
 );
 const sourceName = computed(() => sourceNamer(props.healthSystems, props.devices));
 /**
- * The sources on offer. A rule being edited may name one that is gone (a phone
- * that was removed): it stays selectable, named for what it is, so the select
- * never shows a blank for a value the rule really holds.
- */
+The sources on offer. A rule being edited may name one that is gone (a phone
+that was removed): it stays selectable, named for what it is, so the select
+never shows a blank for a value the rule really holds.
+*/
 const sources = computed(() => {
   const groups = sourceGroups(props.healthSystems, props.devices);
   const held = [healthSystemId.value, target.value].filter((id) => id !== "");
@@ -165,9 +165,9 @@ const spec = computed<FieldRuleSpec>(() => ({
 const structures = ref(new Map<string, PolicyStructureDto>());
 
 /**
- * The tool whose real answer the tree's "in your data" overlay is read from:
- * the scope's own tool, or the first tool that carries the scope's type.
- */
+The tool whose real answer the tree's "in your data" overlay is read from:
+the scope's own tool, or the first tool that carries the scope's type.
+*/
 const structureTool = computed(() => {
   if (scope.value.tool !== null) return scope.value.tool;
   if (scope.value.resourceType === null) return "";

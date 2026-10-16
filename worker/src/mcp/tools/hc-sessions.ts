@@ -1,34 +1,34 @@
 /**
- * `sleep_sessions` and `exercise_sessions`: one row per night, one per workout.
- *
- * Both answer from the summaries the store builds when a session arrives
- * (`hc_sleep_night`, `hc_exercise_session`): stage minutes, the overnight
- * heart-rate and HRV joins, the heart-rate-checked wake, the left-running
- * flag. The only raw records opened are the sessions themselves, for one
- * thing: their ids. A summary is stored under a keyed blind of its record's
- * id, which is not a thing to hand out and joins to nothing; the `id` of a row
- * and of each of its `members` is the record's own, the one `hc_records` gives
- * it (`sessionRecordIds`), so a session here can be looked up there.
- *
- * What is decided here, at answer time, is which stored sessions are the same
- * stretch of time: two apps writing one night, or one workout logged twice.
- * That is `mergeOverlappingSessions` in `worker/src/hc/rules.ts`; a row is one
- * of its groups, and every figure on it -- `start`, `end`, `durationMin`, the
- * heart rate, steps and energy -- is the group's longest session's, so they
- * all describe the same span. The stretch the whole group covers is beside
- * them (`spanStart`, `spanEnd`, `spanMin`) and every session it stands for is
- * listed in `members`, so nothing a merge absorbed disappears. A session
- * flagged as left running, one longer than the rule's bound, or one of a
- * different exercise type is never merged into: it gets its own row.
- *
- * A joined or derived figure belongs to the record type it was measured as:
- * the overnight heart rate is heart-rate data, and `likelyLeftRunning` was
- * read off heart rate and steps. Every row goes out through `stripJoined`
- * (`../hc/policy.ts`), the one table of which field comes from which type, so
- * a deny rule on `hc:HeartRate` removes those fields here as well. A removed
- * `likelyLeftRunning` is dropped, not recomputed from duration alone: a flag
- * that silently changed meaning with the policy would be worse than no flag.
- */
+`sleep_sessions` and `exercise_sessions`: one row per night, one per workout.
+
+Both answer from the summaries the store builds when a session arrives
+(`hc_sleep_night`, `hc_exercise_session`): stage minutes, the overnight
+heart-rate and HRV joins, the heart-rate-checked wake, the left-running
+flag. The only raw records opened are the sessions themselves, for one
+thing: their ids. A summary is stored under a keyed blind of its record's
+id, which is not a thing to hand out and joins to nothing; the `id` of a row
+and of each of its `members` is the record's own, the one `hc_records` gives
+it (`sessionRecordIds`), so a session here can be looked up there.
+
+What is decided here, at answer time, is which stored sessions are the same
+stretch of time: two apps writing one night, or one workout logged twice.
+That is `mergeOverlappingSessions` in `worker/src/hc/rules.ts`; a row is one
+of its groups, and every figure on it -- `start`, `end`, `durationMin`, the
+heart rate, steps and energy -- is the group's longest session's, so they
+all describe the same span. The stretch the whole group covers is beside
+them (`spanStart`, `spanEnd`, `spanMin`) and every session it stands for is
+listed in `members`, so nothing a merge absorbed disappears. A session
+flagged as left running, one longer than the rule's bound, or one of a
+different exercise type is never merged into: it gets its own row.
+
+A joined or derived figure belongs to the record type it was measured as:
+the overnight heart rate is heart-rate data, and `likelyLeftRunning` was
+read off heart rate and steps. Every row goes out through `stripJoined`
+(`../hc/policy.ts`), the one table of which field comes from which type, so
+a deny rule on `hc:HeartRate` removes those fields here as well. A removed
+`likelyLeftRunning` is dropped, not recomputed from duration alone: a flag
+that silently changed meaning with the policy would be worse than no flag.
+*/
 
 import { z } from "zod";
 
@@ -99,10 +99,10 @@ const EXERCISE_SCHEMA = hcArgs("exercise_sessions", {
 });
 
 /**
- * The row fields every merged group carries. `members` lists every session
- * the row stands for, the one that describes it included, each by its own id,
- * times and origin: a session a merge absorbed is still there to be seen.
- */
+The row fields every merged group carries. `members` lists every session
+the row stands for, the one that describes it included, each by its own id,
+times and origin: a session a merge absorbed is still there to be seen.
+*/
 function groupFields<Summary extends Spanned>(
   call: HcCall,
   group: Group<Summary>,
@@ -131,10 +131,10 @@ function groupFields<Summary extends Spanned>(
 type RecordIds = ReadonlyMap<string, string>;
 
 /**
- * The id `hc_records` gives a stored session. Null when the record is not
- * there to be read (deleted since its summary was built, and the summary not
- * yet rebuilt): the summary's own key is internal and is never sent in its place.
- */
+The id `hc_records` gives a stored session. Null when the record is not
+there to be read (deleted since its summary was built, and the summary not
+yet rebuilt): the summary's own key is internal and is never sent in its place.
+*/
 function recordIdOf(recordIds: RecordIds, key: string): string | null {
   return recordIds.get(key) ?? null;
 }
@@ -255,16 +255,16 @@ async function sessionIds(
 type StoredNight = Awaited<ReturnType<ToolDeps["hc"]["sleepNights"]>>[number];
 
 /**
- * The sleeps OUTSIDE the range that ended on a local date the answer has a
- * row for. They are never returned and never counted: they are read so that
- * which sleep of a date carries the day's resting heart rate
- * (`restingHrByDay`) does not depend on where the range was cut.
- *
- * Only two dates can be cut: the one the range starts in, and whatever lies
- * between the range's end and the end of the last date a returned sleep ended
- * on. So this is at most two reads a phone however long the range is, and none
- * when the range is whole days that hold every sleep's end, the usual case.
- */
+The sleeps OUTSIDE the range that ended on a local date the answer has a
+row for. They are never returned and never counted: they are read so that
+which sleep of a date carries the day's resting heart rate
+(`restingHrByDay`) does not depend on where the range was cut.
+
+Only two dates can be cut: the one the range starts in, and whatever lies
+between the range's end and the end of the last date a returned sleep ended
+on. So this is at most two reads a phone however long the range is, and none
+when the range is whole days that hold every sleep's end, the usual case.
+*/
 async function sleepsBeyondRange(
   deps: ToolDeps,
   call: HcCall,

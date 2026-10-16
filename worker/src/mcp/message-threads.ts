@@ -1,26 +1,26 @@
 /**
- * Secure messages grouped into conversations: what `get_messages` and
- * `get_message_thread` actually answer with.
- *
- * `message-items.ts` hands `respond()` one item per message, and the exposure
- * policy judges each of those on its own -- above all the sender's name, by who
- * the sender is, so a rule withholding the patient's name takes the patient's
- * name and nothing else. Only then, in `respond()`'s `reshape` step, are the
- * policy-filtered messages grouped here into one item per conversation. Nothing a
- * thread carries (a participant, a preview, a count, a date) can therefore hold a
- * value the policy withheld from the message it came from; and `respond()` runs
- * the policy over the thread items once more, so a rule written against a
- * thread's own fields (`lastMessage.preview`, `messages[].body`) reaches them too.
- *
- * A conversation is the messages that share a `threadId` AND a health system.
- * The id is the same whichever portal a conversation was read through, and
- * after the cross-portal dedupe a conversation is almost always answered from
- * one health system; when its messages come from two (one portal has a reply the
- * other has not listed yet), it is answered as one item per health system, so
- * each item is still judged under its own health system's rules.
- *
- * Pure: no bindings, no I/O.
- */
+Secure messages grouped into conversations: what `get_messages` and
+`get_message_thread` actually answer with.
+
+`message-items.ts` hands `respond()` one item per message, and the exposure
+policy judges each of those on its own -- above all the sender's name, by who
+the sender is, so a rule withholding the patient's name takes the patient's
+name and nothing else. Only then, in `respond()`'s `reshape` step, are the
+policy-filtered messages grouped here into one item per conversation. Nothing a
+thread carries (a participant, a preview, a count, a date) can therefore hold a
+value the policy withheld from the message it came from; and `respond()` runs
+the policy over the thread items once more, so a rule written against a
+thread's own fields (`lastMessage.preview`, `messages[].body`) reaches them too.
+
+A conversation is the messages that share a `threadId` AND a health system.
+The id is the same whichever portal a conversation was read through, and
+after the cross-portal dedupe a conversation is almost always answered from
+one health system; when its messages come from two (one portal has a reply the
+other has not listed yet), it is answered as one item per health system, so
+each item is still judged under its own health system's rules.
+
+Pure: no bindings, no I/O.
+*/
 
 import type { ReshapeRow, Reshaped } from "./respond.ts";
 
@@ -74,12 +74,12 @@ function byTime(a: Message, b: Message): number {
 }
 
 /**
- * Group policy-filtered message items by conversation.
- *
- * A message whose `threadId` a rule withheld cannot be placed in its
- * conversation, and is answered as a conversation of its own rather than
- * dropped.
- */
+Group policy-filtered message items by conversation.
+
+A message whose `threadId` a rule withheld cannot be placed in its
+conversation, and is answered as a conversation of its own rather than
+dropped.
+*/
 function groupMessages(rows: readonly ReshapeRow[]): Group[] {
   const groups = new Map<string, Group>();
   for (const [index, row] of rows.entries()) {
@@ -107,9 +107,9 @@ function groupMessages(rows: readonly ReshapeRow[]): Group[] {
 const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 /**
- * Whitespace collapsed; the first {@link PREVIEW_CHARS} characters, counted as
- * a reader sees them (grapheme clusters), so a cut never splits one.
- */
+Whitespace collapsed; the first {@link PREVIEW_CHARS} characters, counted as
+a reader sees them (grapheme clusters), so a cut never splits one.
+*/
 export function previewOf(body: string): { preview: string; previewTruncated: boolean } {
   const flat = body.replaceAll(/\s+/gu, " ").trim();
   const kept: string[] = [];
@@ -269,11 +269,11 @@ export interface ThreadView {
 }
 
 /**
- * The reshape both message tools hand `respond()`: group, search, summarise.
- *
- * `total` is the conversations answered; the envelope adds `messages`, how many
- * messages they hold.
- */
+The reshape both message tools hand `respond()`: group, search, summarise.
+
+`total` is the conversations answered; the envelope adds `messages`, how many
+messages they hold.
+*/
 export function threadsReshape(view: ThreadView): (rows: readonly ReshapeRow[]) => Reshaped {
   return (rows) => {
     let groups = groupMessages(rows);

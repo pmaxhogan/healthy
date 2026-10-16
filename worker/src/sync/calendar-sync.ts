@@ -1,61 +1,61 @@
 /**
- * The hourly appointment sync.
- *
- * One pass, per health system, isolated: `Encounter?patient=…&date=ge…` -> resolve the
- * references -> map to calendar events -> diff against `calendar_events` and
- * Google -> insert, patch, ghost or restore. A health system that fails is recorded on
- * the run summary and the run carries on with the next one, because one
- * organisation's outage must not cost the owner the other's appointments.
- *
- * The parts that are subtle rather than merely long:
- *
- * **The window is the ghosting boundary.** The search asks for
- * `date >= today - window_past_days` in the owner's zone, so an appointment older
- * than that is absent from every run by construction. Diffing it would ghost a
- * real, finished visit for the crime of being old, so rows are narrowed to the
- * window before the diff sees them -- and Google is listed 30 days wider so an
- * event just outside the window is still recognised rather than orphaned.
- *
- * **Google is listed once, then partitioned.** `listSyncedEvents` returns every
- * event carrying `healthy=1`, across every health system. Each health system's slice is
- * taken by the `healthSystemId:` prefix on the event key; without that, health system A
- * would see B's events as orphans.
- *
- * **A vanished appointment is rebuilt from the cache.** Ghosting needs the
- * original title, address and practitioner, and the organisation has stopped
- * returning them. Every run therefore writes the Encounters it saw into
- * `fhir_cache`, and the ghost is built from that copy. When even the cache has
- * forgotten, the row is marked ghost with no Google write and the event is left as
- * it is -- better a stale event than one whose details we invented.
- *
- * **Epic 4119 suppresses ghosting for that health system.** The organisation has
- * admitted the patient-facing view filtered results, so absence proves nothing:
- * inserts and patches proceed, ghosts wait for a run that saw everything.
- *
- * **Any 429 stops the whole run.** `sync_backoff_until` is set to
- * `now + max(Retry-After, 2h)` and the remaining health systems are not attempted --
- * hammering a second organisation while the first is throttling us is how an app
- * gets its access reviewed.
- *
- * **The patient-portal pass runs last, and is a separate module.** The portal
- * knows about an upcoming visit before Epic's patient-facing FHIR view admits it
- * exists, so `portal-sync.ts` calendars those and this pass stays the source for
- * everything else. Two seams connect them, both of which exist to stop one
- * appointment becoming two events: this pass hands `runPortalPass` the CSNs and
- * start times it mapped, so the portal can skip what is already calendared; and it
- * calls `adoptPortalRows` before its own diff, so an Encounter arriving for a visit
- * the portal calendared weeks ago takes over that row and its calendar entry rather
- * than inserting a duplicate beside it.
- *
- * **A row follows its event when the target calendar changes.** An event id is
- * only valid on the calendar it was created on, and the Google listing above is
- * always against the *current* target -- so a row still pointing at the old one
- * is invisible to this run until `followCalendarMoves` moves it, before the diff
- * ever sees it.
- *
- * Nothing here logs a title, a name, an address, a URL or a resource body. Ids of
- * our own rows, counts, resource type names, HTTP statuses and Epic codes only.
- */
+The hourly appointment sync.
+
+One pass, per health system, isolated: `Encounter?patient=…&date=ge…` -> resolve the
+references -> map to calendar events -> diff against `calendar_events` and
+Google -> insert, patch, ghost or restore. A health system that fails is recorded on
+the run summary and the run carries on with the next one, because one
+organisation's outage must not cost the owner the other's appointments.
+
+The parts that are subtle rather than merely long:
+
+**The window is the ghosting boundary.** The search asks for
+`date >= today - window_past_days` in the owner's zone, so an appointment older
+than that is absent from every run by construction. Diffing it would ghost a
+real, finished visit for the crime of being old, so rows are narrowed to the
+window before the diff sees them -- and Google is listed 30 days wider so an
+event just outside the window is still recognised rather than orphaned.
+
+**Google is listed once, then partitioned.** `listSyncedEvents` returns every
+event carrying `healthy=1`, across every health system. Each health system's slice is
+taken by the `healthSystemId:` prefix on the event key; without that, health system A
+would see B's events as orphans.
+
+**A vanished appointment is rebuilt from the cache.** Ghosting needs the
+original title, address and practitioner, and the organisation has stopped
+returning them. Every run therefore writes the Encounters it saw into
+`fhir_cache`, and the ghost is built from that copy. When even the cache has
+forgotten, the row is marked ghost with no Google write and the event is left as
+it is -- better a stale event than one whose details we invented.
+
+**Epic 4119 suppresses ghosting for that health system.** The organisation has
+admitted the patient-facing view filtered results, so absence proves nothing:
+inserts and patches proceed, ghosts wait for a run that saw everything.
+
+**Any 429 stops the whole run.** `sync_backoff_until` is set to
+`now + max(Retry-After, 2h)` and the remaining health systems are not attempted --
+hammering a second organisation while the first is throttling us is how an app
+gets its access reviewed.
+
+**The patient-portal pass runs last, and is a separate module.** The portal
+knows about an upcoming visit before Epic's patient-facing FHIR view admits it
+exists, so `portal-sync.ts` calendars those and this pass stays the source for
+everything else. Two seams connect them, both of which exist to stop one
+appointment becoming two events: this pass hands `runPortalPass` the CSNs and
+start times it mapped, so the portal can skip what is already calendared; and it
+calls `adoptPortalRows` before its own diff, so an Encounter arriving for a visit
+the portal calendared weeks ago takes over that row and its calendar entry rather
+than inserting a duplicate beside it.
+
+**A row follows its event when the target calendar changes.** An event id is
+only valid on the calendar it was created on, and the Google listing above is
+always against the *current* target -- so a row still pointing at the old one
+is invisible to this run until `followCalendarMoves` moves it, before the diff
+ever sees it.
+
+Nothing here logs a title, a name, an address, a URL or a resource body. Ids of
+our own rows, counts, resource type names, HTTP statuses and Epic codes only.
+*/
 
 import { blinderFor } from "../db/blind.ts";
 import { makeRepos } from "../db/index.ts";
@@ -118,11 +118,11 @@ const FILTERED_VIEW_CODE = "4119";
 const ENCOUNTER_TTL_MS = 8 * 24 * 60 * 60 * 1000;
 
 /**
- * Extra days of Google events to list beyond the FHIR window.
- *
- * An event whose start is a day either side of the window boundary must still be
- * recognised as ours, or it is reported as an orphan every run.
- */
+Extra days of Google events to list beyond the FHIR window.
+
+An event whose start is a day either side of the window boundary must still be
+recognised as ours, or it is reported as an orphan every run.
+*/
 const GOOGLE_WINDOW_MARGIN_DAYS = 30;
 
 export interface CalendarSyncOptions {
@@ -133,35 +133,35 @@ export interface CalendarSyncOptions {
   /** Ignore (and clear) an active backoff. Only ever set by a human action. */
   force?: boolean;
   /**
-   * Run only the patient-portal pass, skipping every FHIR search.
-   *
-   * What `POST /api/health-systems/:id/portal/sync` asks for, through the Durable
-   * Object in `portal-runner.ts`. It is the same run row, the same Google listing
-   * and the same writer -- only the upstream that is not consulted differs -- so
-   * the Runs page reports it exactly like any other manual run.
-   */
+  Run only the patient-portal pass, skipping every FHIR search.
+
+  What `POST /api/health-systems/:id/portal/sync` asks for, through the Durable
+  Object in `portal-runner.ts`. It is the same run row, the same Google listing
+  and the same writer -- only the upstream that is not consulted differs -- so
+  the Runs page reports it exactly like any other manual run.
+  */
   portalOnly?: boolean;
   /**
-   * How long the portal pass may wait for an emailed verification code.
-   *
-   * Left alone under cron, which has the wall clock for the full wait and wants
-   * the visits in this run. The Durable Object passes 0: it has already
-   * established the session in its own alarm loop, one ten-second step per
-   * invocation, precisely so that no invocation sleeps for minutes -- and a 0 here
-   * guarantees that a session that died between its check and this pass cannot
-   * start the whole wait over inside one alarm.
-   */
+  How long the portal pass may wait for an emailed verification code.
+
+  Left alone under cron, which has the wall clock for the full wait and wants
+  the visits in this run. The Durable Object passes 0: it has already
+  established the session in its own alarm loop, one ten-second step per
+  invocation, precisely so that no invocation sleeps for minutes -- and a 0 here
+  guarantees that a session that died between its check and this pass cannot
+  start the whole wait over inside one alarm.
+  */
   signInWaitSeconds?: number;
   /** Test seams; production omits it. See `deps.ts`. */
   deps?: SyncDeps;
 }
 
 /**
- * Sync every eligible health system's appointments to the calendar.
- *
- * Writes one `run_log` row and resolves with its summary. Does not throw: a
- * caller in a request handler is expected to `ectx.waitUntil(...)` this.
- */
+Sync every eligible health system's appointments to the calendar.
+
+Writes one `run_log` row and resolves with its summary. Does not throw: a
+caller in a request handler is expected to `ectx.waitUntil(...)` this.
+*/
 export async function runCalendarSync(
   ctx: Ctx,
   options: CalendarSyncOptions = {},
@@ -209,14 +209,14 @@ interface RunContext {
   /** Blinds event keys and keys fingerprints; see `worker/src/db/blind.ts`. */
   blinder: Blinder;
   /**
-   * What the FHIR pass mapped, per health system, for the portal pass to dedupe
-   * against.
-   *
-   * Filled in as each health system is synced and read once at the end. It carries the
-   * Encounters' CSNs, which `calendar_events` does not store and which are the one
-   * exact way to tell that a portal visit and an Encounter are the same
-   * appointment.
-   */
+  What the FHIR pass mapped, per health system, for the portal pass to dedupe
+  against.
+
+  Filled in as each health system is synced and read once at the end. It carries the
+  Encounters' CSNs, which `calendar_events` does not store and which are the one
+  exact way to tell that a portal visit and an Encounter are the same
+  appointment.
+  */
   fhirSeen: Map<string, FhirSighting>;
 }
 
@@ -350,13 +350,13 @@ async function syncAllHealthSystems(
 }
 
 /**
- * Google's one outcome for the run, once every pass that writes to it is over.
- *
- * At the end and not after the listing: a calendar that lists and then refuses
- * every write is failing, and saying it worked after the first call would end
- * its streak every hour. Any call that failed counts, including one the pass
- * that made it carried on past (a duplicate that could not be deleted).
- */
+Google's one outcome for the run, once every pass that writes to it is over.
+
+At the end and not after the listing: a calendar that lists and then refuses
+every write is failing, and saying it worked after the first call would end
+its streak every hour. Any call that failed counts, including one the pass
+that made it carried on past (a duplicate that could not be deleted).
+*/
 async function noteGoogleOutcome(
   ctx: Ctx,
   watched: WatchedCalendar,
@@ -523,13 +523,13 @@ async function syncHealthSystem(run: RunContext, target: SyncTarget): Promise<vo
 }
 
 /**
- * Remember what this health system's appointments look like, for the portal pass.
- *
- * The shifted start rather than the reported one, because that is what
- * `calendar_events.start_at` holds and what the portal's own mapping produces: the
- * two sides are then comparable without either having to undo an arrive-early
- * offset it cannot see.
- */
+Remember what this health system's appointments look like, for the portal pass.
+
+The shifted start rather than the reported one, because that is what
+`calendar_events.start_at` holds and what the portal's own mapping produces: the
+two sides are then comparable without either having to undo an arrive-early
+offset it cannot see.
+*/
 function recordSightings(
   run: RunContext,
   healthSystemId: string,
@@ -579,15 +579,15 @@ async function portalCopies(run: RunContext, healthSystemId: string): Promise<Po
 }
 
 /**
- * What the portal knows about the same visit, folded into an Encounter's view:
- * the details-page link, the directions and the visit's instructions.
- *
- * The match is `sameVisitWithinHealthSystem` on start and practitioner, with the
- * CSN left out on purpose: FHIR's CSN is Epic's number and the portal's is its
- * own opaque token, so comparing them would say "different visit" every time and
- * block the practitioner match. A visit another organisation's portal listed is
- * never linked (see `portalVisitView`). No match: the view as it was.
- */
+What the portal knows about the same visit, folded into an Encounter's view:
+the details-page link, the directions and the visit's instructions.
+
+The match is `sameVisitWithinHealthSystem` on start and practitioner, with the
+CSN left out on purpose: FHIR's CSN is Epic's number and the portal's is its
+own opaque token, so comparing them would say "different visit" every time and
+block the practitioner match. A visit another organisation's portal listed is
+never linked (see `portalVisitView`). No match: the view as it was.
+*/
 function withPortalCopy(
   view: NormalizedAppointmentView,
   portal: PortalCopies,
@@ -688,39 +688,39 @@ async function cacheEncounters(
 }
 
 /**
- * The health system's rows that the diff may consider.
- *
- * Narrowed to the window, plus rows with no start at all -- those were written
- * from an Encounter whose period was unusable, and dropping them would leave a
- * row nothing ever reconciles.
- */
+The health system's rows that the diff may consider.
+
+Narrowed to the window, plus rows with no start at all -- those were written
+from an Encounter whose period was unusable, and dropping them would leave a
+row nothing ever reconciles.
+*/
 async function windowRows(run: RunContext, healthSystemId: string): Promise<CalendarEventRow[]> {
   const rows = await run.repos.calendarEvents.list({ healthSystemId });
   return rows.filter((row) => row.start_at === null || row.start_at >= run.windowStartSeconds);
 }
 
 /**
- * Follow a row's event onto the current target calendar when the owner has
- * moved the target since the row was written.
- *
- * `run.googleEvents` is listed once per run, from `run.calendarId`, before any
- * health system is touched -- so a row whose `calendar_id` is stale is invisible to
- * `eventByKey` no matter what the plan does with it: its event id was never
- * valid anywhere but the calendar it was created on. Left alone, the plan sees
- * "no matching event" and does the same thing it does for one the owner deleted
- * by hand -- re-insert an upcoming appointment, or quietly ghost a past one with
- * no Google write -- which duplicates every tracked appointment onto the new
- * calendar and strands the original, still looking live, on the old one.
- *
- * Calling Google's `events.move` here, before the diff runs, turns a stale row
- * back into an ordinary one: the moved event (same id, same
- * `extendedProperties`, now on `run.calendarId`) is folded into this
- * health system's event set below, so the rest of this run treats it exactly as if
- * it had always lived there. A row whose event has *also* vanished from the old
- * calendar (`moveEvent` -> `null`) is left untouched -- that is genuinely the
- * owner deleting it, and the plan's existing handling for a missing event is
- * the right answer.
- */
+Follow a row's event onto the current target calendar when the owner has
+moved the target since the row was written.
+
+`run.googleEvents` is listed once per run, from `run.calendarId`, before any
+health system is touched -- so a row whose `calendar_id` is stale is invisible to
+`eventByKey` no matter what the plan does with it: its event id was never
+valid anywhere but the calendar it was created on. Left alone, the plan sees
+"no matching event" and does the same thing it does for one the owner deleted
+by hand -- re-insert an upcoming appointment, or quietly ghost a past one with
+no Google write -- which duplicates every tracked appointment onto the new
+calendar and strands the original, still looking live, on the old one.
+
+Calling Google's `events.move` here, before the diff runs, turns a stale row
+back into an ordinary one: the moved event (same id, same
+`extendedProperties`, now on `run.calendarId`) is folded into this
+health system's event set below, so the rest of this run treats it exactly as if
+it had always lived there. A row whose event has *also* vanished from the old
+calendar (`moveEvent` -> `null`) is left untouched -- that is genuinely the
+owner deleting it, and the plan's existing handling for a missing event is
+the right answer.
+*/
 async function followCalendarMoves(
   run: RunContext,
   healthSystemId: string,
@@ -842,17 +842,17 @@ async function candidateFor(
 }
 
 /**
- * Rebuild a vanished appointment from `fhir_cache`.
- *
- * This is why every run writes its Encounters back: the organisation has stopped
- * returning the appointment, and the ghost still has to carry its original title
- * and address. References come from the cache too, with no upstream reads -- a
- * cancelled appointment is not worth spending the read budget on.
- *
- * The row's `encounter_id` is the blind the cache keys the Encounter by, so the
- * lookup needs no upstream id; the references inside the opened Encounter are
- * real ids, and `get` blinds them on the way in.
- */
+Rebuild a vanished appointment from `fhir_cache`.
+
+This is why every run writes its Encounters back: the organisation has stopped
+returning the appointment, and the ghost still has to carry its original title
+and address. References come from the cache too, with no upstream reads -- a
+cancelled appointment is not worth spending the read budget on.
+
+The row's `encounter_id` is the blind the cache keys the Encounter by, so the
+lookup needs no upstream id; the references inside the opened Encounter are
+real ids, and `get` blinds them on the way in.
+*/
 async function mappingFromCache(
   run: RunContext,
   target: SyncTarget,

@@ -136,10 +136,10 @@ function reset(): void {
 }
 
 /**
- * Switches between the brands search and manual entry. A full reset on the way
- * across, not just a mode flip -- a brand picked (or a URL typed) on one side
- * must not leak into a submit made from the other.
- */
+Switches between the brands search and manual entry. A full reset on the way
+across, not just a mode flip -- a brand picked (or a URL typed) on one side
+must not leak into a submit made from the other.
+*/
 function toggleMode(): void {
   mode.value = mode.value === "search" ? "manual" : "search";
   reset();
@@ -177,12 +177,12 @@ async function submitBrand(): Promise<void> {
 }
 
 /**
- * The manual path: no `brandId`, so the Worker runs SMART discovery against
- * `fhirBaseUrl` before writing the row (see `resolveEndpoint` in
- * worker/src/api/routes/health systems.ts) and 400s with `upstream_*` if the endpoint does
- * not answer like a FHIR server. That failure surfaces through `create.run` and
- * `errorMessage` exactly like any other -- there is nothing to pre-empt here.
- */
+The manual path: no `brandId`, so the Worker runs SMART discovery against
+`fhirBaseUrl` before writing the row (see `resolveEndpoint` in
+worker/src/api/routes/health systems.ts) and 400s with `upstream_*` if the endpoint does
+not answer like a FHIR server. That failure surfaces through `create.run` and
+`errorMessage` exactly like any other -- there is nothing to pre-empt here.
+*/
 async function submitManual(): Promise<void> {
   manualUrlTouched.value = true;
   if (!canSubmitManual.value) return;

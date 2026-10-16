@@ -115,13 +115,13 @@ function unescapeHtml(value: string): string {
 }
 
 /**
- * Where the hand-off page sends the browser.
- *
- * The decision is answered with a 200 and a meta refresh rather than a 302, because
- * the global CSP's `form-action 'self'` would have the browser block a redirect
- * that a form POST was answered with. Asserting on the page (and not on a
- * `location` header) is asserting on the behaviour that actually ships.
- */
+Where the hand-off page sends the browser.
+
+The decision is answered with a 200 and a meta refresh rather than a 302, because
+the global CSP's `form-action 'self'` would have the browser block a redirect
+that a form POST was answered with. Asserting on the page (and not on a
+`location` header) is asserting on the behaviour that actually ships.
+*/
 function handOffTarget(html: string): URL {
   const meta = /<meta http-equiv="refresh" content="0;url=([^"]+)">/u.exec(html);
   expect(meta, "decision did not answer with a hand-off page").not.toBeNull();
@@ -233,15 +233,20 @@ async function refresh(refreshToken: string, clientId: string): Promise<TokenRes
   return body;
 }
 
-/** Initialize a session and call one tool. Returns nothing; assert on the audit. */
-async function callOverBearer(token: string, tool: string): Promise<void> {
+/** Initialize a session and call `list_health_systems`. Returns nothing; assert on the audit. */
+async function callOverBearer(token: string): Promise<void> {
   const initialized = await rpc(token, INITIALIZE);
   expect(initialized.response.status).toBe(200);
   const sessionId = initialized.response.headers.get("mcp-session-id") ?? undefined;
   await rpc(token, { jsonrpc: "2.0", method: "notifications/initialized" }, sessionId);
   const called = await rpc(
     token,
-    { jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: tool, arguments: {} } },
+    {
+      jsonrpc: "2.0",
+      id: 7,
+      method: "tools/call",
+      params: { name: "list_health_systems", arguments: {} },
+    },
     sessionId,
   );
   const content =
@@ -285,16 +290,16 @@ const INITIALIZE = {
 };
 
 /**
- * One synthetic health system, so a tool call has something to return.
- *
- * Deliberately NOT a cached FHIR resource. The tool call below runs inside the
- * Durable Object, which sees the deployment's own `env`. The health system's name
- * is sealed (0007), so this works because the suite binds a generated `DATA_KEY`
- * into that env (see vitest.config.ts) and the seeding below goes through the
- * same env; `list_health_systems` is still the cheapest tool that exercises the
- * whole path. The cached-resource read path is covered in `tools.test.ts`, which
- * builds its own env and its own key.
- */
+One synthetic health system, so a tool call has something to return.
+
+Deliberately NOT a cached FHIR resource. The tool call below runs inside the
+Durable Object, which sees the deployment's own `env`. The health system's name
+is sealed (0007), so this works because the suite binds a generated `DATA_KEY`
+into that env (see vitest.config.ts) and the seeding below goes through the
+same env; `list_health_systems` is still the cheapest tool that exercises the
+whole path. The cached-resource read path is covered in `tools.test.ts`, which
+builds its own env and its own key.
+*/
 beforeAll(async () => {
   await repos().healthSystems.create({
     vendor: "epic",
@@ -496,7 +501,7 @@ describe("a real MCP session over the issued bearer", () => {
     expect(second.access_token ?? "").not.toBe("");
     expect(second.access_token).not.toBe(first.access_token);
 
-    await callOverBearer(second.access_token ?? "", "list_health_systems");
+    await callOverBearer(second.access_token ?? "");
 
     const rows = await repos().mcpAudit.listRecent(50);
     const row = rows.find(
@@ -546,12 +551,12 @@ describe("a real MCP session over the issued bearer", () => {
     await env.OAUTH_KV.put(grantKey, JSON.stringify(grantRecord));
 
     // The now-unbound access token still authenticates a real MCP call.
-    await callOverBearer(accessToken, "list_health_systems");
+    await callOverBearer(accessToken);
 
     // Refreshing the now-unbound grant still mints a working, bound replacement.
     const refreshed = await refresh(tokens.refresh_token ?? "", approved.clientId);
     expect(refreshed.access_token ?? "").not.toBe("");
-    await callOverBearer(refreshed.access_token ?? "", "list_health_systems");
+    await callOverBearer(refreshed.access_token ?? "");
   });
 
   it("accepts a 0.x grant bound to the MCP URL, the shape claude.ai's grant has", async () => {
@@ -575,9 +580,9 @@ describe("a real MCP session over the issued bearer", () => {
     expect(grantRecord).not.toBeNull();
     await env.OAUTH_KV.put(grantKey, JSON.stringify({ ...grantRecord, resource: `${ORIGIN}/mcp` }));
 
-    await callOverBearer(accessToken, "list_health_systems");
+    await callOverBearer(accessToken);
     const refreshed = await refresh(tokens.refresh_token ?? "", approved.clientId);
-    await callOverBearer(refreshed.access_token ?? "", "list_health_systems");
+    await callOverBearer(refreshed.access_token ?? "");
   });
 });
 

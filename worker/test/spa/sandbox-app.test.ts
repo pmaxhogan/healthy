@@ -29,19 +29,19 @@ const TOOL_MESSAGE = {
 };
 
 /**
- * happy-dom has no `ResizeObserver` at all, which SandboxApp.vue already
- * tolerates (it skips observing rather than throwing) -- exercising the
- * `resize` message it posts needs a real, if fake, implementation whose
- * callback the test can trigger itself, the same way the real browser would
- * once the observed element's box actually changed size.
- *
- * CodeMirror's own `EditorView` (inside `JsonEditor`) constructs a couple of
- * `ResizeObserver`s of its own the moment a global constructor exists to call,
- * entirely unrelated to the one SandboxApp.vue sets up on its own root -- so
- * `instances` is not "the" observer, and a test finds the right one by the
- * element it is watching (`observerFor`), the same way the browser would
- * dispatch a real resize to whichever observer registered for that element.
- */
+happy-dom has no `ResizeObserver` at all, which SandboxApp.vue already
+tolerates (it skips observing rather than throwing) -- exercising the
+`resize` message it posts needs a real, if fake, implementation whose
+callback the test can trigger itself, the same way the real browser would
+once the observed element's box actually changed size.
+
+CodeMirror's own `EditorView` (inside `JsonEditor`) constructs a couple of
+`ResizeObserver`s of its own the moment a global constructor exists to call,
+entirely unrelated to the one SandboxApp.vue sets up on its own root -- so
+`instances` is not "the" observer, and a test finds the right one by the
+element it is watching (`observerFor`), the same way the browser would
+dispatch a real resize to whichever observer registered for that element.
+*/
 class FakeResizeObserver {
   static readonly instances: FakeResizeObserver[] = [];
   readonly callback: ResizeObserverCallback;

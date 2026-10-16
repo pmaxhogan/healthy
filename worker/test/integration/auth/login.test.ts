@@ -38,24 +38,24 @@ const overrides: Partial<Env> = {
 const TEST_ENV = { ...env, ...overrides } as unknown as Env;
 
 /**
- * A distinct client IP per test.
- *
- * The rate limiter buckets by `cf-connecting-ip`, and the D1 row it writes
- * survives from one test in this file to the next -- so without this, a test that
- * spends its window would poison every test after it. Each test therefore gets its
- * own bucket, and the one test that exercises the limit still makes all of its
- * attempts from a single address.
- */
+A distinct client IP per test.
+
+The rate limiter buckets by `cf-connecting-ip`, and the D1 row it writes
+survives from one test in this file to the next -- so without this, a test that
+spends its window would poison every test after it. Each test therefore gets its
+own bucket, and the one test that exercises the limit still makes all of its
+attempts from a single address.
+*/
 const client = { ip: "", counter: 0 };
 
 /**
- * A second env whose PASSWORD_HASH names a cost the deployed runtime refuses.
- *
- * Built by rewriting the cost in a real envelope, so the salt and digest are
- * genuine and only the number is wrong -- which is exactly the shape the minting
- * script produced before 2026-09-22. Top-level `await`, like the overrides above:
- * a `describe` callback is not async.
- */
+A second env whose PASSWORD_HASH names a cost the deployed runtime refuses.
+
+Built by rewriting the cost in a real envelope, so the salt and digest are
+genuine and only the number is wrong -- which is exactly the shape the minting
+script produced before 2026-09-22. Top-level `await`, like the overrides above:
+a `describe` callback is not async.
+*/
 const atTheFloor = await hashPassword(PASSWORD, MIN_PBKDF2_ITERATIONS);
 const OVER_CAP_ENV = {
   ...env,
@@ -84,8 +84,12 @@ function loginBody(password = PASSWORD): FormData {
 }
 
 /** A same-origin form POST: `Origin` is what a browser sends, and it is the CSRF proof. */
-function formPost(password = PASSWORD, path = "/auth/login"): Promise<Response> {
-  return call(path, { method: "POST", headers: { origin: ORIGIN }, body: loginBody(password) });
+function formPost(password = PASSWORD): Promise<Response> {
+  return call("/auth/login", {
+    method: "POST",
+    headers: { origin: ORIGIN },
+    body: loginBody(password),
+  });
 }
 
 /** The `login_attempts` key for this test's client, computed by production code. */

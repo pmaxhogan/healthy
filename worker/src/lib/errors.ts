@@ -1,7 +1,7 @@
 /**
- * Application error taxonomy. Codes are stable strings that end up in run logs,
- * audit rows and API error bodies; messages never contain clinical content.
- */
+Application error taxonomy. Codes are stable strings that end up in run logs,
+audit rows and API error bodies; messages never contain clinical content.
+*/
 
 export type ErrorCode =
   | "bad_request"

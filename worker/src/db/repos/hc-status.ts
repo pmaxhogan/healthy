@@ -1,11 +1,11 @@
 /**
- * Read-only views of a phone's bookkeeping for the Phone page: `hc_sync_state`
- * (per record type) and `hc_ingest_log` (per batch).
- *
- * Everything here is in the clear by design -- permission states, instants,
- * counts, stable error codes -- so nothing is opened and nothing is written. The
- * writers are the ingest route and the runner.
- */
+Read-only views of a phone's bookkeeping for the Phone page: `hc_sync_state`
+(per record type) and `hc_ingest_log` (per batch).
+
+Everything here is in the clear by design -- permission states, instants,
+counts, stable error codes -- so nothing is opened and nothing is written. The
+writers are the ingest route and the runner.
+*/
 
 import { newestRuns } from "../../hc/upload-runs.ts";
 import { all } from "../client.ts";
@@ -69,15 +69,15 @@ const RUN_LOG_COLUMNS = `rowid, received_at, upserts, deletes, rejected,
        run_trigger, run_started_ms, prev_run_started_ms, prev_run_end`;
 
 /**
- * The statements `recentRuns` reads the log with: a device's batches, newest
- * first, a page at a time -- the first page, and the page after a row. Both
- * walk `hc_ingest_log_received` (device, then arrival; the rowid breaks a tie
- * and is the last column of every index), so a page costs its own rows and no
- * more, however long the log is. Exported so the plan can be asserted.
- *
- * Bound: the device and the page size; `RUN_LOG_NEXT_SQL` takes, between
- * them, the `received_at` and the rowid of the last row already read.
- */
+The statements `recentRuns` reads the log with: a device's batches, newest
+first, a page at a time -- the first page, and the page after a row. Both
+walk `hc_ingest_log_received` (device, then arrival; the rowid breaks a tie
+and is the last column of every index), so a page costs its own rows and no
+more, however long the log is. Exported so the plan can be asserted.
+
+Bound: the device and the page size; `RUN_LOG_NEXT_SQL` takes, between
+them, the `received_at` and the rowid of the last row already read.
+*/
 export const RUN_LOG_FIRST_SQL = `SELECT ${RUN_LOG_COLUMNS}
   FROM hc_ingest_log WHERE device_id = ?
  ORDER BY received_at DESC, rowid DESC LIMIT ?`;
@@ -139,12 +139,12 @@ export function makeHcStatusRepo(ctx: Ctx) {
     },
 
     /**
-     * Record count and permission tallies for every device that has reported, by
-     * device id. `backfilled` counts granted types only, so it is a part of
-     * `granted`: a type the phone may not read has no backfill to finish. The
-     * exercise-route pseudo-type older app builds reported is not a record type
-     * (`syncRows` leaves it out too) and would never finish one either.
-     */
+    Record count and permission tallies for every device that has reported, by
+    device id. `backfilled` counts granted types only, so it is a part of
+    `granted`: a type the phone may not read has no backfill to finish. The
+    exercise-route pseudo-type older app builds reported is not a record type
+    (`syncRows` leaves it out too) and would never finish one either.
+    */
     async totalsByDevice(): Promise<Map<string, DeviceTotals>> {
       const rows = await all<TotalsDbRow>(
         ctx.db.prepare(
@@ -184,10 +184,10 @@ export function makeHcStatusRepo(ctx: Ctx) {
     },
 
     /**
-     * The newest batches first. Counts, sizes and a stable code: no record, id or
-     * origin. `statuses` narrows it to batches in one of those states, so the page
-     * can show what was applied while everything newer is still waiting.
-     */
+    The newest batches first. Counts, sizes and a stable code: no record, id or
+    origin. `statuses` narrows it to batches in one of those states, so the page
+    can show what was applied while everything newer is still waiting.
+    */
     async ingestLog(
       deviceId: string,
       limit: number,
@@ -228,23 +228,23 @@ export function makeHcStatusRepo(ctx: Ctx) {
     },
 
     /**
-     * The newest `limit` sync runs a device has uploaded in, newest first: its
-     * log rows grouped by the run they say they belong to
-     * (worker/src/hc/upload-runs.ts). Counts, instants and stable codes.
-     *
-     * Nothing in the log is indexed by run, and reading all of it to group it
-     * would cost more with every day the phone syncs. So the log is read from
-     * its newest row backwards, a page at a time, only until the runs asked
-     * for are known to be whole: a run is whole once a row of an OLDER run has
-     * been read behind it (one more run than was asked for), or the log has
-     * ended. A row limit alone would cut the oldest run it reached in two and
-     * report the half; this reads past the cut instead. Pages double, so a
-     * run of thousands of batches (a backfill) is a handful of round trips.
-     *
-     * What that rests on: a phone runs one sync at a time, so the batches of a
-     * run arrive together, and none of them lies further back in the log than
-     * the first row read of the run before it.
-     */
+    The newest `limit` sync runs a device has uploaded in, newest first: its
+    log rows grouped by the run they say they belong to
+    (worker/src/hc/upload-runs.ts). Counts, instants and stable codes.
+
+    Nothing in the log is indexed by run, and reading all of it to group it
+    would cost more with every day the phone syncs. So the log is read from
+    its newest row backwards, a page at a time, only until the runs asked
+    for are known to be whole: a run is whole once a row of an OLDER run has
+    been read behind it (one more run than was asked for), or the log has
+    ended. A row limit alone would cut the oldest run it reached in two and
+    report the half; this reads past the cut instead. Pages double, so a
+    run of thousands of batches (a backfill) is a handful of round trips.
+
+    What that rests on: a phone runs one sync at a time, so the batches of a
+    run arrive together, and none of them lies further back in the log than
+    the first row read of the run before it.
+    */
     async recentRuns(deviceId: string, limit: number): Promise<UploadRun[]> {
       const rows: RunLogRow[] = [];
       let size = Math.max(RUN_PAGE_ROWS, 4 * limit);
@@ -275,14 +275,14 @@ export function makeHcStatusRepo(ctx: Ctx) {
     },
 
     /**
-     * What became of a device's batches, as counts: how many are in each state,
-     * how many were applied since `recentSince` (Unix seconds), when the last one
-     * was, and the median apply time of the newest `sample` applied batches.
-     *
-     * Two queries, both inside the device's own range of the log (one small row
-     * per batch, no payload): a pass that counts, and a walk back from the newest
-     * batch that stops at `sample` applied ones. Neither touches the store.
-     */
+    What became of a device's batches, as counts: how many are in each state,
+    how many were applied since `recentSince` (Unix seconds), when the last one
+    was, and the median apply time of the newest `sample` applied batches.
+
+    Two queries, both inside the device's own range of the log (one small row
+    per batch, no payload): a pass that counts, and a walk back from the newest
+    batch that stops at `sample` applied ones. Neither touches the store.
+    */
     async ingestSummary(
       deviceId: string,
       recentSince: number,

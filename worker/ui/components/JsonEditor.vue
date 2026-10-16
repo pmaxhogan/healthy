@@ -41,13 +41,13 @@ const emit = defineEmits<{
   "update:modelValue": [value: string];
   run: [];
   /**
-   * Whether the completion popup is open (or about to be, mid-query --
-   * `completionStatus` is treated as "open" the moment it is not `null`, so
-   * the reserved space below appears before the list itself renders, not
-   * after). SandboxApp.vue turns this into extra room in what it reports
-   * as its own height, since the popup renders outside normal document flow
-   * and would otherwise not be accounted for.
-   */
+  Whether the completion popup is open (or about to be, mid-query --
+  `completionStatus` is treated as "open" the moment it is not `null`, so
+  the reserved space below appears before the list itself renders, not
+  after). SandboxApp.vue turns this into extra room in what it reports
+  as its own height, since the popup renders outside normal document flow
+  and would otherwise not be accounted for.
+  */
   "completion-open": [open: boolean];
 }>();
 
@@ -127,8 +127,8 @@ watch(
 
 watch(
   () => props.schema,
-  (schema) => {
-    schemaBox.value = schema ?? null;
+  (schema = null) => {
+    schemaBox.value = schema;
     if (editor.value !== null) forceLinting(editor.value);
   },
 );

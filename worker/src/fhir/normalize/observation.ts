@@ -24,13 +24,13 @@ const VALUE_CHOICE_RAW: readonly (readonly string[])[] = [
 ];
 
 /**
- * For the MCP policy's `field` rule engine (`worker/src/policy/aliases.ts`): every
- * rename this module performs between the raw resource and the normalized
- * item, so a rule written in either vocabulary strips both. The component
- * entry is separate from the top-level one because alias matching is
- * root-anchored -- `components[].value` is not "components" plus "value"
- * composed, it is its own prefix all the way down.
- */
+For the MCP policy's `field` rule engine (`worker/src/policy/aliases.ts`): every
+rename this module performs between the raw resource and the normalized
+item, so a rule written in either vocabulary strips both. The component
+entry is separate from the top-level one because alias matching is
+root-anchored -- `components[].value` is not "components" plus "value"
+composed, it is its own prefix all the way down.
+*/
 export const FIELD_ALIASES: readonly FieldAlias[] = [
   { normalized: ["value"], raw: VALUE_CHOICE_RAW },
   {

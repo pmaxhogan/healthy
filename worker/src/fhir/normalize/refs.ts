@@ -17,10 +17,10 @@ export interface RefResolver {
 }
 
 /**
- * `reference` may be a relative local ref ("Practitioner/123"), an absolute
- * URL (an Epic FHIR base plus the same path), or carry a version history
- * segment. All three should key to the same "ResourceType/id" pair.
- */
+`reference` may be a relative local ref ("Practitioner/123"), an absolute
+URL (an Epic FHIR base plus the same path), or carry a version history
+segment. All three should key to the same "ResourceType/id" pair.
+*/
 function referenceKey(ref: fhir4.Reference | undefined): string | undefined {
   const reference = ref?.reference;
   if (!reference) {

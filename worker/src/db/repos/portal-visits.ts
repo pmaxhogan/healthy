@@ -1,41 +1,41 @@
 /**
- * `portal_visits`: the portal pass's own copy of the upcoming visits it saw.
- *
- * The calendar is not something the MCP can read, and Epic's patient FHIR view
- * never returns an Encounter before the visit happens -- so without this table a
- * question about what is coming up has no answer outside the owner's calendar.
- * The portal pass writes every visit `LoadUpcoming` returned, every run; the MCP
- * (`worker/src/mcp/appointment-items.ts`) reads them back.
- *
- * Nothing about the visit is stored in the clear:
- *
- *   - `csn` is `blindCsn(...)`, a keyed HMAC of the health system and the
- *     portal's visit number (`worker/src/db/blind.ts`). Still the primary key and
- *     still an exact match, but a snapshot no longer carries the portal's own
- *     identifiers, and the same visit listed by two organisations' portals
- *     blinds to two unrelated values.
- *   - `payload_enc` is the whole parsed visit, sealed against
- *     `portal_visits.payload_enc.<healthSystemId>:<csn>` with the stored (blinded)
- *     `csn` -- the composite row id, because the primary key is composite. The
- *     real visit number and start time are only in here.
- *   - `content_hash` is a keyed digest of the plaintext, for the same reason
- *     `fhir_cache` keeps one: sealing is randomised, so it is the only way to tell
- *     an unchanged visit from an updated one without re-sealing every row every
- *     hour. Keyed, because a plain sha256 of a guessable visit is a confirmation
- *     oracle.
- *   - There is no start column (0009 dropped it): the visit's start is in the
- *     payload, and every reader here already opens the payload.
- *   - `expires_at` is coarsened to a `EXPIRY_BUCKET_SECONDS` boundary. It is a
- *     year after the visit, so to the second it *was* the visit's start time;
- *     rounded up to a 30-day boundary it only drives the purge, which does not
- *     mind running a few weeks late.
- *
- * The "missing" rule is the calendar's ghost rule, restated for a table: a visit
- * the portal stops returning while it is still ahead is marked `missing` (as far
- * as anyone can tell, it was cancelled); one that stops being returned after its
- * start time is simply over and is left exactly as it was. Deciding that needs the
- * start of each visit that was *not* returned, so exactly those rows are opened.
- */
+`portal_visits`: the portal pass's own copy of the upcoming visits it saw.
+
+The calendar is not something the MCP can read, and Epic's patient FHIR view
+never returns an Encounter before the visit happens -- so without this table a
+question about what is coming up has no answer outside the owner's calendar.
+The portal pass writes every visit `LoadUpcoming` returned, every run; the MCP
+(`worker/src/mcp/appointment-items.ts`) reads them back.
+
+Nothing about the visit is stored in the clear:
+
+  - `csn` is `blindCsn(...)`, a keyed HMAC of the health system and the
+    portal's visit number (`worker/src/db/blind.ts`). Still the primary key and
+    still an exact match, but a snapshot no longer carries the portal's own
+    identifiers, and the same visit listed by two organisations' portals
+    blinds to two unrelated values.
+  - `payload_enc` is the whole parsed visit, sealed against
+    `portal_visits.payload_enc.<healthSystemId>:<csn>` with the stored (blinded)
+    `csn` -- the composite row id, because the primary key is composite. The
+    real visit number and start time are only in here.
+  - `content_hash` is a keyed digest of the plaintext, for the same reason
+    `fhir_cache` keeps one: sealing is randomised, so it is the only way to tell
+    an unchanged visit from an updated one without re-sealing every row every
+    hour. Keyed, because a plain sha256 of a guessable visit is a confirmation
+    oracle.
+  - There is no start column (0009 dropped it): the visit's start is in the
+    payload, and every reader here already opens the payload.
+  - `expires_at` is coarsened to a `EXPIRY_BUCKET_SECONDS` boundary. It is a
+    year after the visit, so to the second it *was* the visit's start time;
+    rounded up to a 30-day boundary it only drives the purge, which does not
+    mind running a few weeks late.
+
+The "missing" rule is the calendar's ghost rule, restated for a table: a visit
+the portal stops returning while it is still ahead is marked `missing` (as far
+as anyone can tell, it was cancelled); one that stops being returned after its
+start time is simply over and is left exactly as it was. Deciding that needs the
+start of each visit that was *not* returned, so exactly those rows are opened.
+*/
 
 import { blindCsn, blinderFor } from "../blind.ts";
 import { BATCH_CHUNK, all, batch, chunk, run } from "../client.ts";
@@ -50,10 +50,10 @@ import type { PortalVisitRow, PortalVisitState } from "../rows.ts";
 const PORTAL_VISIT_RETENTION_SECONDS = 365 * 24 * 3600;
 
 /**
- * The granularity `expires_at` is rounded up to. Thirty days: coarse enough that
- * the column no longer dates the visit, fine enough that the purge still runs
- * within a month of when it would have.
- */
+The granularity `expires_at` is rounded up to. Thirty days: coarse enough that
+the column no longer dates the visit, fine enough that the purge still runs
+within a month of when it would have.
+*/
 export const EXPIRY_BUCKET_SECONDS = 30 * 24 * 3600;
 
 /** The AAD for one stored visit, by the id the row is stored under. */
@@ -95,11 +95,11 @@ export interface RecordVisitsReport {
 
 export interface RecordVisitsOptions {
   /**
-   * False when the caller knows this list is not everything `LoadUpcoming`
-   * would have returned, so absence from it proves nothing and no row is
-   * marked missing. The portal pass always passes `true`: the parse itself
-   * never truncates, so every call it makes has the whole answer.
-   */
+  False when the caller knows this list is not everything `LoadUpcoming`
+  would have returned, so absence from it proves nothing and no row is
+  marked missing. The portal pass always passes `true`: the parse itself
+  never truncates, so every call it makes has the whole answer.
+  */
   complete: boolean;
 }
 
@@ -141,10 +141,10 @@ export function makePortalVisitsRepo(ctx: Ctx) {
   };
 
   /**
-   * The stored numbers of the rows whose visit is still ahead. Only the rows that
-   * went quiet are opened: their start decides between "cancelled" and "over",
-   * and it is nowhere but in the payload.
-   */
+  The stored numbers of the rows whose visit is still ahead. Only the rows that
+  went quiet are opened: their start decides between "cancelled" and "over",
+  and it is nowhere but in the payload.
+  */
   const stillAhead = async (
     rows: readonly Pick<PortalVisitRow, "health_system_id" | "csn" | "payload_enc">[],
     now: number,
@@ -159,12 +159,12 @@ export function makePortalVisitsRepo(ctx: Ctx) {
 
   return {
     /**
-     * Store every visit one `LoadUpcoming` returned, and mark the future ones it
-     * stopped returning as missing.
-     *
-     * A visit that is back after being missing is `active` again. An unchanged
-     * visit only has its timestamps moved.
-     */
+    Store every visit one `LoadUpcoming` returned, and mark the future ones it
+    stopped returning as missing.
+
+    A visit that is back after being missing is `active` again. An unchanged
+    visit only has its timestamps moved.
+    */
     async record(
       healthSystemId: string,
       visits: readonly PortalVisit[],
@@ -277,10 +277,10 @@ export function makePortalVisitsRepo(ctx: Ctx) {
     },
 
     /**
-     * Every live visit of every health system but one: what the portal pass compares a
-     * health system's visits against to find the ones another organisation's record
-     * already covers (`worker/src/sync/portal-dedupe.ts`).
-     */
+    Every live visit of every health system but one: what the portal pass compares a
+    health system's visits against to find the ones another organisation's record
+    already covers (`worker/src/sync/portal-dedupe.ts`).
+    */
     async listExcept(healthSystemId: string): Promise<StoredPortalVisit[]> {
       const rows = await all<PortalVisitRow>(
         ctx.db

@@ -17,40 +17,40 @@ export interface Env {
   /** Primary datastore: health systems, connections, FHIR cache, audit, run log. */
   DB: D1Database;
   /**
-   * Token and grant storage for @cloudflare/workers-oauth-provider. The
-   * binding name is fixed by that library and cannot be changed.
-   */
+  Token and grant storage for @cloudflare/workers-oauth-provider. The
+  binding name is fixed by that library and cannot be changed.
+  */
   OAUTH_KV: KVNamespace;
   /** The built Vue SPA, served only to requests that clear both auth gates. */
   ASSETS: Fetcher;
   /** SQLite-backed Durable Object hosting the MCP session. */
   HEALTHY_MCP: DurableObjectNamespace;
   /**
-   * One object per health system, driving a manual full refresh across as many alarm
-   * invocations as it takes. See `worker/src/sync/runner.ts` for why a request's
-   * `waitUntil` cannot do this job.
-   */
+  One object per health system, driving a manual full refresh across as many alarm
+  invocations as it takes. See `worker/src/sync/runner.ts` for why a request's
+  `waitUntil` cannot do this job.
+  */
   FULL_REFRESH: DurableObjectNamespace<FullRefreshRunner>;
   /**
-   * One object per health system, driving a patient-portal sign-in across as many
-   * ten-second alarm invocations as the emailed code takes to arrive, and the
-   * portal sync that follows one. See `worker/src/sync/portal-runner.ts` for why a
-   * request's `waitUntil` cannot wait for an email.
-   */
+  One object per health system, driving a patient-portal sign-in across as many
+  ten-second alarm invocations as the emailed code takes to arrive, and the
+  portal sync that follows one. See `worker/src/sync/portal-runner.ts` for why a
+  request's `waitUntil` cannot wait for an email.
+  */
   PORTAL_SIGNIN: DurableObjectNamespace<PortalSignInRunner>;
   /**
-   * One object per paired phone, applying the Health Connect batches the ingest
-   * route queued, in order, across as many alarm invocations as they take. See
-   * `worker/src/hc/runner.ts`.
-   */
+  One object per paired phone, applying the Health Connect batches the ingest
+  route queued, in order, across as many alarm invocations as they take. See
+  `worker/src/hc/runner.ts`.
+  */
   HC_INGEST: DurableObjectNamespace<HcIngestRunner>;
 
   // --- Var (wrangler.jsonc) ------------------------------------------------
   /**
-   * "true" only under `wrangler dev` and in the integration tests, where there
-   * is no Cloudflare Access in front of the Worker. It relaxes the Access JWT
-   * check -- and nothing else -- so the password gate still applies.
-   */
+  "true" only under `wrangler dev` and in the integration tests, where there
+  is no Cloudflare Access in front of the Worker. It relaxes the Access JWT
+  check -- and nothing else -- so the password gate still applies.
+  */
   DEV_MODE: string;
   /** Local development only: the loopback origin `wrangler dev` serves on. See `lib/dev-origin.ts`. */
   DEV_ORIGIN?: string;
@@ -77,9 +77,9 @@ export interface Env {
   /** The ModMed certified FHIR API app's client id. ModMed has no sandbox, so there is one. */
   MODMED_CLIENT_ID?: string;
   /**
-   * base64 of 32 random bytes: the HMAC key per-organisation Epic client secrets
-   * are derived from. Never rotate it -- see `db/org-secret.ts`.
-   */
+  base64 of 32 random bytes: the HMAC key per-organisation Epic client secrets
+  are derived from. Never rotate it -- see `db/org-secret.ts`.
+  */
   EPIC_ORG_SECRET_KEY?: string;
   /** Trello REST credentials and the two list ids used for re-auth cards. */
   TRELLO_KEY?: string;

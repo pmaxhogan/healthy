@@ -1,36 +1,36 @@
 /**
- * `sync_health_systems`: the one tool on this server that acts.
- *
- * Every other tool reads what the last sync cached. This one asks the sync
- * engine for a run now: the ordinary sync, a full refresh, or the
- * patient-portal pass, for the health systems the caller names. It answers at
- * once -- the run happens afterwards, on a Durable Object alarm -- with one row
- * per health system saying what was started, what was not, and why.
- *
- * The caller is a language model, so the tool is built to be hard to misuse:
- *
- *  - **Nothing is implied.** `kind` has no default, so the expensive full
- *    refresh is never what a bare call means, and the target is either named
- *    health systems or a literal `all: true`, never "everything, since you did
- *    not say".
- *  - **Every request is judged before anything starts** by
- *    `worker/src/mcp/sync-request.ts`: is there anything to sync, is a health
- *    system rate limiting this app, is a run already in flight, is the data
- *    already fresh, and has this been asked for too recently or too often.
- *  - **The cooldown is durable and atomic.** It is a row in `mcp_sync_requests`
- *    claimed by one SQL statement, so it holds across sessions and two calls
- *    arriving together cannot both win.
- *  - **It cannot sign in to a patient portal.** See `sync-request.ts` and
- *    `worker/src/sync/runner.ts`.
- *  - **`dryRun` shows the verdict and starts nothing**, so an assistant can
- *    look before it asks.
- *
- * A row carries this app's own health system id and display name (as every
- * tool's rows do), fixed vocabulary and instants. No URL, login, token, portal
- * identifier or upstream message is read here, so none can be answered or
- * logged. The log line per health system is an id, the kind and two stable
- * codes.
- */
+`sync_health_systems`: the one tool on this server that acts.
+
+Every other tool reads what the last sync cached. This one asks the sync
+engine for a run now: the ordinary sync, a full refresh, or the
+patient-portal pass, for the health systems the caller names. It answers at
+once -- the run happens afterwards, on a Durable Object alarm -- with one row
+per health system saying what was started, what was not, and why.
+
+The caller is a language model, so the tool is built to be hard to misuse:
+
+ - **Nothing is implied.** `kind` has no default, so the expensive full
+   refresh is never what a bare call means, and the target is either named
+   health systems or a literal `all: true`, never "everything, since you did
+   not say".
+ - **Every request is judged before anything starts** by
+   `worker/src/mcp/sync-request.ts`: is there anything to sync, is a health
+   system rate limiting this app, is a run already in flight, is the data
+   already fresh, and has this been asked for too recently or too often.
+ - **The cooldown is durable and atomic.** It is a row in `mcp_sync_requests`
+   claimed by one SQL statement, so it holds across sessions and two calls
+   arriving together cannot both win.
+ - **It cannot sign in to a patient portal.** See `sync-request.ts` and
+   `worker/src/sync/runner.ts`.
+ - **`dryRun` shows the verdict and starts nothing**, so an assistant can
+   look before it asks.
+
+A row carries this app's own health system id and display name (as every
+tool's rows do), fixed vocabulary and instants. No URL, login, token, portal
+identifier or upstream message is read here, so none can be answered or
+logged. The log line per health system is an id, the kind and two stable
+codes.
+*/
 
 import { z } from "zod";
 
@@ -193,11 +193,11 @@ async function gatherFacts(
 }
 
 /**
- * Take the cooldown slot for every row that is ready.
- *
- * A row that loses the slot here was beaten to it by a call that arrived at
- * the same moment, which is the case the single-statement claim exists for.
- */
+Take the cooldown slot for every row that is ready.
+
+A row that loses the slot here was beaten to it by a call that arrived at
+the same moment, which is the case the single-statement claim exists for.
+*/
 async function claimReady(
   deps: ToolDeps,
   kind: McpSyncKind,
@@ -232,15 +232,15 @@ function markFailed(deps: ToolDeps, rows: readonly Row[]): void {
 }
 
 /**
- * Queue the runs for the rows that hold a slot.
- *
- * A full refresh is one job per health system, as the admin button queues it.
- * The other two kinds are ONE calendar run over every claimed health system:
- * the run decides between two organisations' copies of one visit, which it can
- * only do when it sees them together. A slot stays taken when its start fails
- * or finds a run already queued; the caller waits out the cooldown, which is
- * the cautious reading of "something is wrong or already happening".
- */
+Queue the runs for the rows that hold a slot.
+
+A full refresh is one job per health system, as the admin button queues it.
+The other two kinds are ONE calendar run over every claimed health system:
+the run decides between two organisations' copies of one visit, which it can
+only do when it sees them together. A slot stays taken when its start fails
+or finds a run already queued; the caller waits out the cooldown, which is
+the cautious reading of "something is wrong or already happening".
+*/
 async function startClaimed(
   deps: ToolDeps,
   kind: McpSyncKind,

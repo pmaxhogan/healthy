@@ -8,11 +8,11 @@
 // just the symbols actually used from it.
 
 /**
- * True if every code point in `value` is a plain, visible-or-space ASCII
- * character -- i.e. none of the C0 controls (0x00-0x1F) or DEL (0x7F). Written
- * as a codepoint scan rather than a `[\x00-\x1F\x7F]` regex, which eslint's
- * `no-control-regex` rejects outright.
- */
+True if every code point in `value` is a plain, visible-or-space ASCII
+character -- i.e. none of the C0 controls (0x00-0x1F) or DEL (0x7F). Written
+as a codepoint scan rather than a `[\x00-\x1F\x7F]` regex, which eslint's
+`no-control-regex` rejects outright.
+*/
 function hasNoControlCharacters(value: string): boolean {
   for (const char of value) {
     const codePoint = char.codePointAt(0) ?? 0;

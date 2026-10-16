@@ -15,12 +15,12 @@ export function parseIso(iso: string | null | undefined): Date | null {
 }
 
 /**
- * "just now", "12 min ago", "in 3 h", "5 d ago".
- *
- * Deliberately not `Intl.RelativeTimeFormat`: the unit thresholds below are the
- * ones this dashboard wants (minutes up to an hour, hours up to two days), and
- * the short forms line up in a table where "in 3 hours" would not.
- */
+"just now", "12 min ago", "in 3 h", "5 d ago".
+
+Deliberately not `Intl.RelativeTimeFormat`: the unit thresholds below are the
+ones this dashboard wants (minutes up to an hour, hours up to two days), and
+the short forms line up in a table where "in 3 hours" would not.
+*/
 export function relativeTime(iso: string | null | undefined, now: number = Date.now()): string {
   const date = parseIso(iso);
   if (!date) return "never";
@@ -53,17 +53,17 @@ interface TokenFacts {
 }
 
 /**
- * What to say about a stored access token: "expires in 43 min", "renews when
- * needed · renewed 52 min ago", "expired 3 d ago", or "—" when there is none.
- *
- * An access token that has lapsed is not a fault. It is renewed lazily, by the
- * next run that needs one, from the refresh token; a vendor whose access tokens
- * live a few minutes therefore has a lapsed one for most of every hour while
- * the connection is perfectly healthy. So a lapsed token only reads as
- * "expired" where it will not be renewed without the owner (`needs_reauth`),
- * and it is never styled as an error anywhere: the status pill and the error
- * code are what say a connection is in trouble.
- */
+What to say about a stored access token: "expires in 43 min", "renews when
+needed · renewed 52 min ago", "expired 3 d ago", or "—" when there is none.
+
+An access token that has lapsed is not a fault. It is renewed lazily, by the
+next run that needs one, from the refresh token; a vendor whose access tokens
+live a few minutes therefore has a lapsed one for most of every hour while
+the connection is perfectly healthy. So a lapsed token only reads as
+"expired" where it will not be renewed without the owner (`needs_reauth`),
+and it is never styled as an error anywhere: the status pill and the error
+code are what say a connection is in trouble.
+*/
 export function tokenSummary(
   token: TokenFacts | null | undefined,
   now: number = Date.now(),
@@ -112,12 +112,12 @@ export function formatDuration(ms: number): string {
 }
 
 /**
- * Masks an account label for display: `o…r@example.test`.
- *
- * The Worker already masks what it sends, so this is belt-and-braces for
- * anything that arrives unmasked -- and it means a screenshot of this UI never
- * carries a whole address.
- */
+Masks an account label for display: `o…r@example.test`.
+
+The Worker already masks what it sends, so this is belt-and-braces for
+anything that arrives unmasked -- and it means a screenshot of this UI never
+carries a whole address.
+*/
 export function maskAccount(label: string | null): string {
   if (!label) return "—";
   const at = label.lastIndexOf("@");
@@ -130,15 +130,15 @@ export function maskAccount(label: string | null): string {
 }
 
 /**
- * Masks a calendar id for display when it looks like an email address.
- *
- * A primary Google calendar's id *is* the account's address, so without this
- * the same address that `maskAccount` hides under "Account" reappears in plain
- * text a few lines down as "Calendar" -- on the same screen. An id that is not
- * an address (a real calendar id, "primary", a human-chosen name) is shown
- * unchanged: `maskAccount` mangles non-address input (see its own tests), and
- * there is nothing sensitive in a calendar id that is not the owner's email.
- */
+Masks a calendar id for display when it looks like an email address.
+
+A primary Google calendar's id *is* the account's address, so without this
+the same address that `maskAccount` hides under "Account" reappears in plain
+text a few lines down as "Calendar" -- on the same screen. An id that is not
+an address (a real calendar id, "primary", a human-chosen name) is shown
+unchanged: `maskAccount` mangles non-address input (see its own tests), and
+there is nothing sensitive in a calendar id that is not the owner's email.
+*/
 export function maskCalendarId(id: string): string {
   return id.includes("@") ? maskAccount(id) : id;
 }
@@ -151,9 +151,9 @@ export function humanizeCode(code: string | null): string {
 const BYTE_UNITS = ["KB", "MB", "GB"] as const;
 
 /**
- * "412 B" / "3.1 KB" / "11.4 MB" / "2.3 GB" -- the size of one MCP tool call's
- * JSON, or of a phone's queued uploads. Decimal units, one decimal place.
- */
+"412 B" / "3.1 KB" / "11.4 MB" / "2.3 GB" -- the size of one MCP tool call's
+JSON, or of a phone's queued uploads. Decimal units, one decimal place.
+*/
 export function formatBytes(bytes: number): string {
   if (bytes < 1000) return `${String(bytes)} B`;
   let value = bytes / 1000;

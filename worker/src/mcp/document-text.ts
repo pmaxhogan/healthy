@@ -1,18 +1,18 @@
 /**
- * Turning a document attachment into text a model can read.
- *
- * Pure functions, no bindings, no I/O -- which is why they live here rather than
- * in `binary.ts`: this half is exercised by the plain-Node unit suite, and the
- * half that talks to a health system is not. That includes classifying and
- * matching a `get_document_text` id argument: deciding what an id string names,
- * and which of a `DocumentReference`'s attachments a Binary reference points at,
- * is ordinary string and structure matching over data the caller already has --
- * only the two cache/repo lookups that use the result belong in `binary.ts`.
- *
- * Deliberately narrow. `text/plain` passes through, HTML and RTF are flattened,
- * and everything else is refused. Handing a model the base64 of a PDF does not
- * produce a summary of the PDF; it produces a confident summary of nothing.
- */
+Turning a document attachment into text a model can read.
+
+Pure functions, no bindings, no I/O -- which is why they live here rather than
+in `binary.ts`: this half is exercised by the plain-Node unit suite, and the
+half that talks to a health system is not. That includes classifying and
+matching a `get_document_text` id argument: deciding what an id string names,
+and which of a `DocumentReference`'s attachments a Binary reference points at,
+is ordinary string and structure matching over data the caller already has --
+only the two cache/repo lookups that use the result belong in `binary.ts`.
+
+Deliberately narrow. `text/plain` passes through, HTML and RTF are flattened,
+and everything else is refused. Handing a model the base64 of a PDF does not
+produce a summary of the PDF; it produces a confident summary of nothing.
+*/
 
 import type * as fhir4 from "fhir/r4";
 
@@ -27,14 +27,14 @@ export function decodeBase64Utf8(data: string): string {
 const DOCUMENT_REFERENCE_PREFIX = "DocumentReference/";
 
 /**
- * `Binary/<id>` out of a relative reference or an absolute URL.
- *
- * Used two ways: parsing the `id` argument `get_document_text` was called with,
- * and parsing an `attachment.url` out of a cached `DocumentReference` to see
- * which Binary it names -- the same extraction, because a model copies the
- * latter straight out of `attachments[].url` in `get_documents`' answer and hands
- * it back as the former.
- */
+`Binary/<id>` out of a relative reference or an absolute URL.
+
+Used two ways: parsing the `id` argument `get_document_text` was called with,
+and parsing an `attachment.url` out of a cached `DocumentReference` to see
+which Binary it names -- the same extraction, because a model copies the
+latter straight out of `attachments[].url` in `get_documents`' answer and hands
+it back as the former.
+*/
 export function binaryIdFromUrl(url: string | undefined): string | undefined {
   if (url === undefined) return undefined;
   const match = /(?:^|\/)Binary\/([^/?#]+)/u.exec(url);
@@ -48,21 +48,21 @@ export type ParsedDocumentId =
   | { kind: "bare"; id: string };
 
 /**
- * Classify a `get_document_text` id argument.
- *
- * A model naturally copies a document's `attachments[].url` (a Binary reference)
- * rather than its `id` (the DocumentReference), so both are accepted:
- *
- *  - `Binary/<id>`, or an absolute URL ending in `/Binary/<id>` -> `"binary"`.
- *  - `DocumentReference/<id>` -> `"documentReference"`, prefix stripped.
- *  - anything else -> `"bare"`.
- *
- * A bare id is ambiguous on purpose: every existing caller passes a bare
- * DocumentReference id, but the id of a `Binary` is just as plausibly bare. This
- * function only classifies the string; `binary.ts` is what tries a `"bare"` id as
- * a DocumentReference id first (preserving every existing caller) and falls back
- * to treating it as a Binary id only when that lookup misses.
- */
+Classify a `get_document_text` id argument.
+
+A model naturally copies a document's `attachments[].url` (a Binary reference)
+rather than its `id` (the DocumentReference), so both are accepted:
+
+ - `Binary/<id>`, or an absolute URL ending in `/Binary/<id>` -> `"binary"`.
+ - `DocumentReference/<id>` -> `"documentReference"`, prefix stripped.
+ - anything else -> `"bare"`.
+
+A bare id is ambiguous on purpose: every existing caller passes a bare
+DocumentReference id, but the id of a `Binary` is just as plausibly bare. This
+function only classifies the string; `binary.ts` is what tries a `"bare"` id as
+a DocumentReference id first (preserving every existing caller) and falls back
+to treating it as a Binary id only when that lookup misses.
+*/
 export function parseDocumentTextId(rawId: string): ParsedDocumentId {
   const binaryId = binaryIdFromUrl(rawId);
   if (binaryId !== undefined) return { kind: "binary", id: binaryId };
@@ -107,15 +107,15 @@ export function pickAttachment(document: fhir4.DocumentReference): DocumentAttac
 }
 
 /**
- * The one attachment a Binary reference names, when it names a convertible one.
- *
- * Unlike `pickAttachment`'s "first one that will do", a caller who named a
- * specific Binary gets that attachment or nothing -- never a different one that
- * happens to convert. Checking `isConvertible` here, before any Binary is
- * fetched, is what keeps a request for a document's PDF attachment from spending
- * a metered fetch only to be told `unsupported_document` afterwards: the
- * DocumentReference already says what the attachment's type is.
- */
+The one attachment a Binary reference names, when it names a convertible one.
+
+Unlike `pickAttachment`'s "first one that will do", a caller who named a
+specific Binary gets that attachment or nothing -- never a different one that
+happens to convert. Checking `isConvertible` here, before any Binary is
+fetched, is what keeps a request for a document's PDF attachment from spending
+a metered fetch only to be told `unsupported_document` afterwards: the
+DocumentReference already says what the attachment's type is.
+*/
 export function attachmentForBinary(
   document: fhir4.DocumentReference,
   binaryId: string,
@@ -142,12 +142,12 @@ const ENTITIES: readonly [RegExp, string][] = [
 ];
 
 /**
- * Collapse runs of spaces and blank lines without eating paragraph breaks.
- *
- * Spaces only, never tabs: a tab is the one horizontal character a clinical note
- * uses structurally (RTF `\tab` in a tabulated result), and collapsing it into a
- * space turns a small table into a run-on line.
- */
+Collapse runs of spaces and blank lines without eating paragraph breaks.
+
+Spaces only, never tabs: a tab is the one horizontal character a clinical note
+uses structurally (RTF `\tab` in a tabulated result), and collapsing it into a
+space turns a small table into a run-on line.
+*/
 function tidy(value: string): string {
   // Line by line rather than with a whitespace-around-newline regex: `trim()` says
   // exactly what is wanted at the ends of a line, and it cannot be read as
@@ -162,12 +162,12 @@ function tidy(value: string): string {
 }
 
 /**
- * Remove every tag, repeating until nothing changes.
- *
- * One pass is not enough: removing the inner tag of `<scr<b>ipt>` joins the
- * pieces either side into a new `<script>`. Every pass that changes the text
- * shortens it, so the loop ends, and ordinary markup settles in one or two.
- */
+Remove every tag, repeating until nothing changes.
+
+One pass is not enough: removing the inner tag of `<scr<b>ipt>` joins the
+pieces either side into a new `<script>`. Every pass that changes the text
+shortens it, so the loop ends, and ordinary markup settles in one or two.
+*/
 function stripTags(html: string): string {
   let previous: string;
   let text = html;
@@ -179,12 +179,12 @@ function stripTags(html: string): string {
 }
 
 /**
- * Flatten HTML to readable text: block ends become newlines, tags go.
- *
- * A closing script or style tag may carry whitespace or junk before its `>`
- * (`</script >`, `</script foo>`), and browsers still honour it, so the close
- * patterns accept anything up to the `>` rather than only the bare form.
- */
+Flatten HTML to readable text: block ends become newlines, tags go.
+
+A closing script or style tag may carry whitespace or junk before its `>`
+(`</script >`, `</script foo>`), and browsers still honour it, so the close
+patterns accept anything up to the `>` rather than only the bare form.
+*/
 export function htmlToText(html: string): string {
   let text = stripTags(
     html
@@ -202,26 +202,26 @@ export function htmlToText(html: string): string {
 }
 
 /**
- * Groups whose contents are metadata, not text.
- *
- * `\*` marks a destination an unknowing reader may skip, but the tables RTF has
- * always had are not marked that way, so they are named. The match is lazy and
- * stops at the first `}`, which leaves a stray brace behind on a nested group --
- * harmless, because the brace strip below removes it, and the words inside are
- * gone either way.
- */
+Groups whose contents are metadata, not text.
+
+`\*` marks a destination an unknowing reader may skip, but the tables RTF has
+always had are not marked that way, so they are named. The match is lazy and
+stops at the first `}`, which leaves a stray brace behind on a nested group --
+harmless, because the brace strip below removes it, and the words inside are
+gone either way.
+*/
 const RTF_DESTINATIONS =
   /\{\\(?:\*|fonttbl|colortbl|stylesheet|info|pict|listtable|listoverridetable|rsidtbl|generator|themedata|latentstyles|datastore|xmlnstbl)[\s\S]*?\}/giu;
 
 /**
- * Flatten RTF to readable text.
- *
- * Best effort, and it says so: destination groups (font tables, stylesheets,
- * embedded objects) are dropped whole, paragraph and tab controls become
- * whitespace, `\'hh` escapes are decoded as Latin-1, and every other control word
- * is discarded. Enough for the progress notes that actually arrive; not an RTF
- * parser.
- */
+Flatten RTF to readable text.
+
+Best effort, and it says so: destination groups (font tables, stylesheets,
+embedded objects) are dropped whole, paragraph and tab controls become
+whitespace, `\'hh` escapes are decoded as Latin-1, and every other control word
+is discarded. Enough for the progress notes that actually arrive; not an RTF
+parser.
+*/
 export function rtfToText(rtf: string): string {
   const text = rtf
     .replaceAll(RTF_DESTINATIONS, " ")
@@ -239,12 +239,12 @@ export function rtfToText(rtf: string): string {
 }
 
 /**
- * Convert a decoded body according to its media type.
- *
- * Returns null when the type is one this server will not turn into text, which is
- * the caller's cue to answer `unsupported_document`. An empty content type is
- * treated as plain text: some organisations omit it on a narrative attachment.
- */
+Convert a decoded body according to its media type.
+
+Returns null when the type is one this server will not turn into text, which is
+the caller's cue to answer `unsupported_document`. An empty content type is
+treated as plain text: some organisations omit it on a narrative attachment.
+*/
 export function convertDocument(contentType: string, body: string): string | null {
   const type = contentType.toLowerCase();
   if (type.includes("html") || type.includes("xhtml")) return htmlToText(body);

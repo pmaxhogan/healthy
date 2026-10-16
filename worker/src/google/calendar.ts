@@ -50,9 +50,9 @@ const JSON_CONTENT_TYPE = "application/json";
 const PAGE_SIZE = "250";
 
 /**
- * `reason` values Google uses for quota exhaustion on a 403. These are
- * transient: the same request succeeds later.
- */
+`reason` values Google uses for quota exhaustion on a 403. These are
+transient: the same request succeeds later.
+*/
 const QUOTA_REASONS = new Set([
   "rateLimitExceeded",
   "userRateLimitExceeded",
@@ -65,9 +65,9 @@ const GONE_STATUSES = new Set([404, 410]);
 
 export interface CalendarClientOptions {
   /**
-   * Returns a usable access token. `forceRefresh` is passed when a 401 proved
-   * the cached one is dead, so the implementation must bypass its own cache.
-   */
+  Returns a usable access token. `forceRefresh` is passed when a 401 proved
+  the cached one is dead, so the implementation must bypass its own cache.
+  */
   getAccessToken: (opts?: { forceRefresh?: boolean }) => Promise<string>;
   fetchImpl?: typeof fetch;
   logger?: Logger;
@@ -95,32 +95,32 @@ export interface CalendarClient {
     body: Partial<CalendarEventBody>,
   ): Promise<EventRecord | null>;
   /**
-   * Move a tracked event to a different calendar, keeping its event id and
-   * everything else about it -- including `extendedProperties`, so the moved
-   * event is still ours by the `healthy=1` invariant on the calendar it lands
-   * on. An event id is only ever valid on the calendar it was created on, so
-   * this is what a sync target change has to do instead of a plain patch, which
-   * would 404 against the new calendar. `null` when the event is gone from the
-   * source calendar too -- genuinely deleted, not merely relocated.
-   */
+  Move a tracked event to a different calendar, keeping its event id and
+  everything else about it -- including `extendedProperties`, so the moved
+  event is still ours by the `healthy=1` invariant on the calendar it lands
+  on. An event id is only ever valid on the calendar it was created on, so
+  this is what a sync target change has to do instead of a plain patch, which
+  would 404 against the new calendar. `null` when the event is gone from the
+  source calendar too -- genuinely deleted, not merely relocated.
+  */
   moveEvent(
     sourceCalendarId: string,
     eventId: string,
     destinationCalendarId: string,
   ): Promise<EventRecord | null>;
   /**
-   * Admin cleanup, plus exactly one sync path. Vanished and cancelled
-   * appointments are ghosted (title prefix + transparent + grey), never
-   * deleted, so that a cancelled visit stays visible in the owner's history.
-   *
-   * The one exception is a *duplicate*: a portal event for a visit that a
-   * higher-precedence copy (another organisation's own record, or a FHIR
-   * Encounter) already has an event for. That visit is not cancelled -- it is
-   * on the calendar, once -- so a grey "Cancelled:" twin beside it would be
-   * wrong, and the portal pass deletes it instead. It deletes only an event it
-   * has just seen carrying `extendedProperties.private.healthy = "1"` and the
-   * row's own key. See `removeDuplicates` in `worker/src/sync/portal-sync.ts`.
-   */
+  Admin cleanup, plus exactly one sync path. Vanished and cancelled
+  appointments are ghosted (title prefix + transparent + grey), never
+  deleted, so that a cancelled visit stays visible in the owner's history.
+
+  The one exception is a *duplicate*: a portal event for a visit that a
+  higher-precedence copy (another organisation's own record, or a FHIR
+  Encounter) already has an event for. That visit is not cancelled -- it is
+  on the calendar, once -- so a grey "Cancelled:" twin beside it would be
+  wrong, and the portal pass deletes it instead. It deletes only an event it
+  has just seen carrying `extendedProperties.private.healthy = "1"` and the
+  row's own key. See `removeDuplicates` in `worker/src/sync/portal-sync.ts`.
+  */
   deleteEvent(calendarId: string, eventId: string): Promise<boolean>;
 }
 
@@ -153,10 +153,10 @@ function asString(value: unknown): string | null {
 }
 
 /**
- * True when a 403 body says "you are going too fast" rather than "you may not
- * do this". `RESOURCE_EXHAUSTED` is the newer google.rpc spelling of the same
- * thing and appears alongside, or instead of, the legacy `reason`.
- */
+True when a 403 body says "you are going too fast" rather than "you may not
+do this". `RESOURCE_EXHAUSTED` is the newer google.rpc spelling of the same
+thing and appears alongside, or instead of, the legacy `reason`.
+*/
 function isQuotaError(body: string): boolean {
   let parsed: GoogleErrorBody;
   try {
@@ -174,11 +174,11 @@ function isQuotaError(body: string): boolean {
 }
 
 /**
- * Translate a throw from `retriedFetch` into this app's taxonomy.
- *
- * Returns `null` -- the "it is simply not there" answer -- only for a 404/410 on
- * a call that asked for it. Every other outcome throws.
- */
+Translate a throw from `retriedFetch` into this app's taxonomy.
+
+Returns `null` -- the "it is simply not there" answer -- only for a 404/410 on
+a call that asked for it. Every other outcome throws.
+*/
 function transportFailure(error: unknown, method: string, gone: boolean): null {
   if (error instanceof TransientError) {
     // retriedFetch already exhausted its own retries for 429/5xx and network
@@ -258,21 +258,21 @@ function toEventRecord(value: unknown): EventRecord | null {
 }
 
 /**
- * Build the `events.insert` / `events.patch` body for a mapped appointment.
- *
- * Three fields are not configurable and are the app's contract:
- *   - `visibility: "private"` -- these are medical appointments, and the owner's
- *     calendar may be shared with free/busy or full detail.
- *   - `reminders.useDefault: true` -- the owner's calendar defaults win; this
- *     app never invents notification timings.
- *   - `extendedProperties.private.healthy: "1"` -- the invariant that makes an
- *     event ours. Without it the sync can neither find nor touch the event.
- *
- * `description` defaults to the model's own, which is Healthy's block alone, as
- * plain text. Every sync write passes it through `mergeDescription` instead --
- * an insert with no current description, a patch with the event's -- so a block
- * carrying a link is written as HTML and the owner's text above the rule survives.
- */
+Build the `events.insert` / `events.patch` body for a mapped appointment.
+
+Three fields are not configurable and are the app's contract:
+  - `visibility: "private"` -- these are medical appointments, and the owner's
+    calendar may be shared with free/busy or full detail.
+  - `reminders.useDefault: true` -- the owner's calendar defaults win; this
+    app never invents notification timings.
+  - `extendedProperties.private.healthy: "1"` -- the invariant that makes an
+    event ours. Without it the sync can neither find nor touch the event.
+
+`description` defaults to the model's own, which is Healthy's block alone, as
+plain text. Every sync write passes it through `mergeDescription` instead --
+an insert with no current description, a patch with the event's -- so a block
+carrying a link is written as HTML and the owner's text above the rule survives.
+*/
 export function buildEventBody(
   model: CalendarEventModel,
   description: string = model.description,
@@ -353,9 +353,9 @@ export function createCalendarClient(options: CalendarClientOptions): CalendarCl
   };
 
   /**
-   * One authorized JSON call. Resolves to the parsed body, or null when the
-   * event is gone (404/410 with `gone`) or the response had no body (204).
-   */
+  One authorized JSON call. Resolves to the parsed body, or null when the
+  event is gone (404/410 with `gone`) or the response had no body (204).
+  */
   const request = async (method: string, url: string, init: CallOptions = {}): Promise<unknown> => {
     let forceRefresh = false;
     let refreshed = false;
@@ -406,15 +406,15 @@ export function createCalendarClient(options: CalendarClientOptions): CalendarCl
   };
 
   /**
-   * Follow `nextPageToken` until Google stops sending one. No page ceiling: the
-   * owner's calendar is whatever size it is. The one thing that stops this early
-   * is Google handing back a token it already gave us -- a genuine upstream bug,
-   * not a large calendar -- which is reported loudly rather than looped on.
-   *
-   * There is deliberately no page or byte bound for a fresh token served forever
-   * either: see the matching note on `paginate` in `worker/src/ehr/epic/fhir-client.ts`
-   * (security review L2, the no-cap rule in CLAUDE.md, the CPU limit as backstop).
-   */
+  Follow `nextPageToken` until Google stops sending one. No page ceiling: the
+  owner's calendar is whatever size it is. The one thing that stops this early
+  is Google handing back a token it already gave us -- a genuine upstream bug,
+  not a large calendar -- which is reported loudly rather than looped on.
+
+  There is deliberately no page or byte bound for a fresh token served forever
+  either: see the matching note on `paginate` in `worker/src/ehr/epic/fhir-client.ts`
+  (security review L2, the no-cap rule in CLAUDE.md, the CPU limit as backstop).
+  */
   const listAll = async (
     build: (pageToken: string | null) => string,
     label: string,

@@ -1,25 +1,25 @@
 /**
- * The SMART-on-FHIR machinery every vendor adapter shares: discovery, the
- * CapabilityStatement index, the standalone patient launch URL and the token
- * endpoint. A vendor adapter (`epic/index.ts`, `modmed-fhir/index.ts`) is this
- * plus the handful of things that vendor does differently, passed as options.
- *
- * Behaviour that holds for every vendor:
- *
- *  - `aud` is passed through untouched. A server that checks it compares the
- *    string, and normalising a trailing slash here would produce a redirect that
- *    fails with no error anywhere the owner can see.
- *  - Client authentication follows discovery: HTTP Basic over
- *    `urlencode(id):urlencode(secret)` when it is offered or the list is unknown,
- *    `client_secret_post` only when discovery explicitly omits Basic.
- *  - The token endpoint is called with a single attempt, deliberately. An
- *    authorization code is single-use, so replaying it cannot help, and a failed
- *    refresh is re-driven by the next scheduled run. 429 and 5xx are reported as
- *    `upstream_unavailable` with the server's `Retry-After` attached.
- *  - `invalid_grant` on refresh is the one error that means "the owner must
- *    reconnect": the refresh token expired, the app was revoked in the portal, or
- *    a password reset invalidated it. It maps to `needs_reauth`.
- */
+The SMART-on-FHIR machinery every vendor adapter shares: discovery, the
+CapabilityStatement index, the standalone patient launch URL and the token
+endpoint. A vendor adapter (`epic/index.ts`, `modmed-fhir/index.ts`) is this
+plus the handful of things that vendor does differently, passed as options.
+
+Behaviour that holds for every vendor:
+
+ - `aud` is passed through untouched. A server that checks it compares the
+   string, and normalising a trailing slash here would produce a redirect that
+   fails with no error anywhere the owner can see.
+ - Client authentication follows discovery: HTTP Basic over
+   `urlencode(id):urlencode(secret)` when it is offered or the list is unknown,
+   `client_secret_post` only when discovery explicitly omits Basic.
+ - The token endpoint is called with a single attempt, deliberately. An
+   authorization code is single-use, so replaying it cannot help, and a failed
+   refresh is re-driven by the next scheduled run. 429 and 5xx are reported as
+   `upstream_unavailable` with the server's `Retry-After` attached.
+ - `invalid_grant` on refresh is the one error that means "the owner must
+   reconnect": the refresh token expired, the app was revoked in the portal, or
+   a password reset invalidated it. It maps to `needs_reauth`.
+*/
 
 import { isRecord } from "../fhir/bundle.ts";
 import { AppError } from "../lib/errors.ts";
@@ -55,12 +55,12 @@ const FORM_MEDIA_TYPE = "application/x-www-form-urlencoded";
 const TOKEN_TIMEOUT_MS = 20_000;
 
 /**
- * The one OAuth error code that means the grant itself is gone.
- *
- * Deliberately just this one. `invalid_client` and `unauthorized_client` are
- * misconfigured credentials; telling the owner to reconnect would send them
- * round a loop that cannot fix it.
- */
+The one OAuth error code that means the grant itself is gone.
+
+Deliberately just this one. `invalid_client` and `unauthorized_client` are
+misconfigured credentials; telling the owner to reconnect would send them
+round a loop that cannot fix it.
+*/
 const REAUTH_OAUTH_ERRORS: ReadonlySet<string> = new Set(["invalid_grant"]);
 
 function stringOf(source: Record<string, unknown>, key: string): string | null {
@@ -90,16 +90,16 @@ function namesOf(value: unknown, key: string): string[] {
 }
 
 /**
- * True when a discovered endpoint is an absolute `https:` URL.
- *
- * The token endpoint receives the client secret, the authorization code and the
- * PKCE verifier; the authorize endpoint receives the owner's browser. Both come
- * out of a document fetched from the organisation, so a tampered or simply
- * misconfigured one pointing at `http:` would put all of that on the wire in
- * clear. The API layer already requires `https:` on the FHIR base a health system is
- * created with; this is the same rule one layer in, where the values are not the
- * owner's to vouch for.
- */
+True when a discovered endpoint is an absolute `https:` URL.
+
+The token endpoint receives the client secret, the authorization code and the
+PKCE verifier; the authorize endpoint receives the owner's browser. Both come
+out of a document fetched from the organisation, so a tampered or simply
+misconfigured one pointing at `http:` would put all of that on the wire in
+clear. The API layer already requires `https:` on the FHIR base a health system is
+created with; this is the same rule one layer in, where the values are not the
+owner's to vouch for.
+*/
 function isHttpsUrl(value: string): boolean {
   try {
     return new URL(value).protocol === "https:";
@@ -138,11 +138,11 @@ export function parseSmartConfiguration(body: unknown): SmartConfig {
 }
 
 /**
- * Flatten a CapabilityStatement into `resourceType -> {interactions, params}`.
- *
- * Only the two lists the sync engine consults are kept: a full
- * CapabilityStatement can be megabytes, and this one gets cached in D1.
- */
+Flatten a CapabilityStatement into `resourceType -> {interactions, params}`.
+
+Only the two lists the sync engine consults are kept: a full
+CapabilityStatement can be megabytes, and this one gets cached in D1.
+*/
 export function indexCapabilities(body: unknown): CapabilityIndex {
   if (!isRecord(body)) return { fhirVersion: null, resources: {} };
   const resources = new Map<string, CapabilityResource>();
@@ -232,10 +232,10 @@ type TokenGrant = "authorization_code" | "refresh_token";
 export interface SmartAdapterOptions {
   vendor: Vendor;
   /**
-   * The scope strings to request for a set of resource types. Vendors differ on
-   * what an unregistered scope does -- dropped silently, or the whole request
-   * refused -- so each states its own.
-   */
+  The scope strings to request for a set of resource types. Vendors differ on
+  what an unregistered scope does -- dropped silently, or the whole request
+  refused -- so each states its own.
+  */
   scopesFor: (resourceTypes: readonly string[]) => string[];
   /** See `EhrAdapter.refreshSkewMs`. Defaults to five minutes. */
   refreshSkewMs?: number;
@@ -399,19 +399,19 @@ export function createSmartAdapter(options: SmartAdapterOptions, deps: AdapterDe
 }
 
 /**
- * Map a token-endpoint failure onto the error taxonomy.
- *
- * | status        | body `error`      | result                |
- * | ------------- | ----------------- | --------------------- |
- * | 429, 5xx      | any               | upstream_unavailable  |
- * | 400, 401      | invalid_grant     | needs_reauth          |
- * | 401, 403      | anything else     | upstream_auth         |
- * | other 4xx     | any               | upstream_error        |
- *
- * `invalid_client` deliberately does not map to `needs_reauth`: that is a
- * misconfigured client secret, and telling the owner to reconnect would send
- * them round a loop that cannot fix it.
- */
+Map a token-endpoint failure onto the error taxonomy.
+
+| status        | body `error`      | result                |
+| ------------- | ----------------- | --------------------- |
+| 429, 5xx      | any               | upstream_unavailable  |
+| 400, 401      | invalid_grant     | needs_reauth          |
+| 401, 403      | anything else     | upstream_auth         |
+| other 4xx     | any               | upstream_error        |
+
+`invalid_client` deliberately does not map to `needs_reauth`: that is a
+misconfigured client secret, and telling the owner to reconnect would send
+them round a loop that cannot fix it.
+*/
 function tokenError(
   response: Response,
   body: unknown,

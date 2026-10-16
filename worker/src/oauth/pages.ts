@@ -1,21 +1,21 @@
 /**
- * The HTML the OAuth routes render when a flow cannot continue.
- *
- * These are not API responses. Every route under `/oauth` is reached by a
- * top-level browser navigation -- the owner clicking "connect", or an authorization server
- * redirecting back -- so the only useful answer to a failure is a page that says
- * what happened and offers a link that fixes it. A JSON body here would be a raw
- * `{"error":...}` rendered as text in the address bar.
- *
- * Two rules the copy follows:
- *
- *  - **Never name the organisation.** A health system's display name is user data and the
- *    logs must not carry it; a page that an authorization server's error redirect can cause is
- *    not a place to start making exceptions. The pages say "this connection".
- *  - **Never quote the authorization server's own error text.** `error_description` comes from
- *    a third party and lands in a document; it is reported as a stable code and
- *    nothing else.
- */
+The HTML the OAuth routes render when a flow cannot continue.
+
+These are not API responses. Every route under `/oauth` is reached by a
+top-level browser navigation -- the owner clicking "connect", or an authorization server
+redirecting back -- so the only useful answer to a failure is a page that says
+what happened and offers a link that fixes it. A JSON body here would be a raw
+`{"error":...}` rendered as text in the address bar.
+
+Two rules the copy follows:
+
+ - **Never name the organisation.** A health system's display name is user data and the
+   logs must not carry it; a page that an authorization server's error redirect can cause is
+   not a place to start making exceptions. The pages say "this connection".
+ - **Never quote the authorization server's own error text.** `error_description` comes from
+   a third party and lands in a document; it is reported as a stable code and
+   nothing else.
+*/
 
 import { escapeHtml, htmlPage, htmlResponse } from "../public/html.ts";
 
@@ -54,13 +54,13 @@ export function oauthPage(options: OAuthPageOptions): Response {
 }
 
 /**
- * The page for a state that did not validate.
- *
- * One page for every reason -- unknown, already redeemed, expired, wrong kind --
- * because the caller cannot be told which without telling an attacker the same
- * thing. 400, because the request is malformed, not because the owner is
- * unauthenticated: they cleared both gates to get here.
- */
+The page for a state that did not validate.
+
+One page for every reason -- unknown, already redeemed, expired, wrong kind --
+because the caller cannot be told which without telling an attacker the same
+thing. 400, because the request is malformed, not because the owner is
+unauthenticated: they cleared both gates to get here.
+*/
 export function invalidStatePage(nonce: string): Response {
   return oauthPage({
     nonce,

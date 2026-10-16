@@ -1,14 +1,14 @@
 /**
- * PKCE (RFC 7636) and the OAuth `state` nonce.
- *
- * Epic advertises S256 only -- `plain` is never offered and must never be sent.
- * The verifier is 64 characters, comfortably inside RFC 7636's 43..128 range,
- * drawn from a 64-character subset of the unreserved alphabet so that masking a
- * random byte with 63 is uniform and needs no rejection sampling.
- *
- * Nothing in here touches the environment: `crypto` is the Web Crypto global,
- * which both workerd and Node 26 provide.
- */
+PKCE (RFC 7636) and the OAuth `state` nonce.
+
+Epic advertises S256 only -- `plain` is never offered and must never be sent.
+The verifier is 64 characters, comfortably inside RFC 7636's 43..128 range,
+drawn from a 64-character subset of the unreserved alphabet so that masking a
+random byte with 63 is uniform and needs no rejection sampling.
+
+Nothing in here touches the environment: `crypto` is the Web Crypto global,
+which both workerd and Node 26 provide.
+*/
 
 /** 64 unreserved characters (RFC 3986 `unreserved` minus `_` and `~`). */
 const VERIFIER_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-.";

@@ -1,86 +1,86 @@
 /**
- * `hc_aggregate`'s arithmetic: calendar buckets in a named zone, filled from
- * the store's rollups, with the question of "whose numbers" answered out loud.
- *
- * Several apps write the same thing to one Health Connect store -- a phone and
- * a watch both count steps -- so adding every record up counts a walk twice.
- * `origin_mode` says what to do about it:
- *
- *  - `hc_priority` (the default). For the types Health Connect itself
- *    aggregates, the phone uploads the platform's own priority-merged hourly
- *    figure as `Agg.<Metric>` records, and a bucket is answered with them (row
- *    `method: "platform"`) when the platform has a figure for EVERY hour of
- *    the bucket in which something was recorded: the platform's number, not an
- *    imitation of its merge. A bucket it has only some of those hours for is
- *    composed hour by hour, the platform's figure where there is one and the
- *    fallback elsewhere (`"platform_and_max_origin"`,
- *    `"platform_and_all_origins"`), which is what makes a day the sum of its
- *    hours whatever the platform is missing. Where there is none the answer
- *    falls back, and says so. How depends on what the type is:
- *
- *      - a COUNTER (steps, distance, energy, floors: a sensor's running count)
- *        is decided HOUR BY HOUR: in each UTC hour one origin is taken and the
- *        others' records of that hour are counted as duplicates dropped
- *        (`"max_origin"`). An origin that recorded something in or around the
- *        hour itself is preferred to one that only has a share of a record
- *        longer than an hour there (a day's total written as one record);
- *        among those preferred the largest total wins. The hour is the unit
- *        whatever the bucket size, and the hours are then summed upward, so a
- *        month is the sum of its days and of its hours, and an app that
- *        recorded the first half of a month does not erase the app that
- *        recorded the second. Only records in an hour the chosen origin also
- *        recorded in are ever "dropped";
- *      - a session (sleep, exercise) is answered from the stored session
- *        summaries, grouped by the session rules (`"merged_sessions"`): two
- *        apps writing the same workout are one, two different workouts are
- *        two;
- *      - anything else -- a measurement (heart rate, a weight), or an entry a
- *        person logs (a drink, a meal) -- is every origin merged
- *        (`"all_origins"`), since two readings are two readings.
- *  - `origin:<package>`: that app's records alone (`"origin"`).
- *  - `all_separately`: one row per bucket per origin, nothing merged.
- *
- * ### Which bucket a record counts in
- *
- * A record counts in the bucket its START falls in. Two exceptions:
- *
- *  - A running count's interval record (`isSpreadType`: steps, distance,
- *    energy, floors, elevation, wheelchair pushes) that runs past the end of
- *    its bucket is DIVIDED: each bucket gets the share of its value that the
- *    time it spends there is of its length, which is how Health Connect's own
- *    aggregation divides one. So a day's total written as one record is a
- *    twenty-fourth in each hour, not all of it at midnight. Only `sum` and
- *    `duration` are divided; `records`, `n`, `mean`, `min`, `max`, `first` and
- *    `last` stay with the bucket the record starts in. What a bucket's total
- *    owes to records longer than an hour is said on the row (`longRecordSum`).
- *    A record longer than two days is not divided at all.
- *  - A night of sleep counts in the bucket it ENDED in -- the day you woke up
- *    -- which is the date `sleep_sessions` and `daily_summary` give it
- *    (`bucketing` on the result says which rule applied). For that reason
- *    sleep is never answered from the platform's hourly figure, which would
- *    split a night at midnight.
- *
- * The stored rollups hold every record whole, where it starts, and list the
- * ones that run past their hour (`BucketRollup.crossing`); the dividing is
- * done here, from those lists, so no chunk is opened for it.
- *
- * Sleep has two lengths: `duration` is time ASLEEP (what Health Connect calls
- * a night's duration) and `in_bed` is the session from start to end.
- *
- * Artefact rules (`worker/src/hc/rules.ts`) are applied to the types that have
- * one -- implausible heart-rate and speed samples, a weight typed into a
- * profile screen -- unless `excludeArtefacts` is false, and every row says how
- * many values that removed (`artefactsExcluded`). The weight rule needs the
- * Height records beside the weights; when the caller may not read those, the
- * rule is not applied and the result says so (`rulesNotApplied`).
- *
- * Total calories are never gap-filled unless `bmr_fill` asks: the platform
- * pads the hours nothing recorded with basal metabolic rate, which turns "no
- * data" into a plausible number. With `bmr_fill` the padding is done here,
- * visibly, as `bmrFillKcal` on each row.
- *
- * Pure but for the reads it is handed.
- */
+`hc_aggregate`'s arithmetic: calendar buckets in a named zone, filled from
+the store's rollups, with the question of "whose numbers" answered out loud.
+
+Several apps write the same thing to one Health Connect store -- a phone and
+a watch both count steps -- so adding every record up counts a walk twice.
+`origin_mode` says what to do about it:
+
+ - `hc_priority` (the default). For the types Health Connect itself
+   aggregates, the phone uploads the platform's own priority-merged hourly
+   figure as `Agg.<Metric>` records, and a bucket is answered with them (row
+   `method: "platform"`) when the platform has a figure for EVERY hour of
+   the bucket in which something was recorded: the platform's number, not an
+   imitation of its merge. A bucket it has only some of those hours for is
+   composed hour by hour, the platform's figure where there is one and the
+   fallback elsewhere (`"platform_and_max_origin"`,
+   `"platform_and_all_origins"`), which is what makes a day the sum of its
+   hours whatever the platform is missing. Where there is none the answer
+   falls back, and says so. How depends on what the type is:
+
+     - a COUNTER (steps, distance, energy, floors: a sensor's running count)
+       is decided HOUR BY HOUR: in each UTC hour one origin is taken and the
+       others' records of that hour are counted as duplicates dropped
+       (`"max_origin"`). An origin that recorded something in or around the
+       hour itself is preferred to one that only has a share of a record
+       longer than an hour there (a day's total written as one record);
+       among those preferred the largest total wins. The hour is the unit
+       whatever the bucket size, and the hours are then summed upward, so a
+       month is the sum of its days and of its hours, and an app that
+       recorded the first half of a month does not erase the app that
+       recorded the second. Only records in an hour the chosen origin also
+       recorded in are ever "dropped";
+     - a session (sleep, exercise) is answered from the stored session
+       summaries, grouped by the session rules (`"merged_sessions"`): two
+       apps writing the same workout are one, two different workouts are
+       two;
+     - anything else -- a measurement (heart rate, a weight), or an entry a
+       person logs (a drink, a meal) -- is every origin merged
+       (`"all_origins"`), since two readings are two readings.
+ - `origin:<package>`: that app's records alone (`"origin"`).
+ - `all_separately`: one row per bucket per origin, nothing merged.
+
+### Which bucket a record counts in
+
+A record counts in the bucket its START falls in. Two exceptions:
+
+ - A running count's interval record (`isSpreadType`: steps, distance,
+   energy, floors, elevation, wheelchair pushes) that runs past the end of
+   its bucket is DIVIDED: each bucket gets the share of its value that the
+   time it spends there is of its length, which is how Health Connect's own
+   aggregation divides one. So a day's total written as one record is a
+   twenty-fourth in each hour, not all of it at midnight. Only `sum` and
+   `duration` are divided; `records`, `n`, `mean`, `min`, `max`, `first` and
+   `last` stay with the bucket the record starts in. What a bucket's total
+   owes to records longer than an hour is said on the row (`longRecordSum`).
+   A record longer than two days is not divided at all.
+ - A night of sleep counts in the bucket it ENDED in -- the day you woke up
+   -- which is the date `sleep_sessions` and `daily_summary` give it
+   (`bucketing` on the result says which rule applied). For that reason
+   sleep is never answered from the platform's hourly figure, which would
+   split a night at midnight.
+
+The stored rollups hold every record whole, where it starts, and list the
+ones that run past their hour (`BucketRollup.crossing`); the dividing is
+done here, from those lists, so no chunk is opened for it.
+
+Sleep has two lengths: `duration` is time ASLEEP (what Health Connect calls
+a night's duration) and `in_bed` is the session from start to end.
+
+Artefact rules (`worker/src/hc/rules.ts`) are applied to the types that have
+one -- implausible heart-rate and speed samples, a weight typed into a
+profile screen -- unless `excludeArtefacts` is false, and every row says how
+many values that removed (`artefactsExcluded`). The weight rule needs the
+Height records beside the weights; when the caller may not read those, the
+rule is not applied and the result says so (`rulesNotApplied`).
+
+Total calories are never gap-filled unless `bmr_fill` asks: the platform
+pads the hours nothing recorded with basal metabolic rate, which turns "no
+data" into a plausible number. With `bmr_fill` the padding is done here,
+visibly, as `bmrFillKcal` on each row.
+
+Pure but for the reads it is handed.
+*/
 
 import { calendarBuckets } from "../../hc/rollup/day.ts";
 import {
@@ -128,15 +128,15 @@ const TYPE_HEIGHT = "Height";
 const DURATION_TYPES: ReadonlySet<string> = new Set([TYPE_EXERCISE, TYPE_SLEEP]);
 
 /**
- * Types a person logs entry by entry. Their values add up, but two apps'
- * entries are two entries: a drink logged in one app and a coffee in another
- * are not one drink counted twice.
- */
+Types a person logs entry by entry. Their values add up, but two apps'
+entries are two entries: a drink logged in one app and a coffee in another
+are not one drink counted twice.
+*/
 const ENTRY_TYPES: ReadonlySet<string> = new Set(["Hydration", "Nutrition"]);
 
 /**
- * Types whose values add up over time. Everything else is a measurement.
- */
+Types whose values add up over time. Everything else is a measurement.
+*/
 const CUMULATIVE_TYPES: ReadonlySet<string> = new Set([
   ...PLATFORM_AGGREGATED_TYPES,
   "TotalCaloriesBurned",
@@ -154,9 +154,9 @@ function isCumulative(type: string): boolean {
 }
 
 /**
- * True for a sensor's running count: the cumulative types where two origins
- * recording the same hour is the same activity counted twice.
- */
+True for a sensor's running count: the cumulative types where two origins
+recording the same hour is the same activity counted twice.
+*/
 export function isCounter(type: string): boolean {
   return CUMULATIVE_TYPES.has(type) && !DURATION_TYPES.has(type) && !ENTRY_TYPES.has(type);
 }
@@ -216,36 +216,36 @@ export interface AggregateRow {
   origins: string[];
   records?: number | null;
   /**
-   * How long the bucket's records ran. For sleep, time ASLEEP; the session
-   * from start to end is `inBedMs`.
-   */
+  How long the bucket's records ran. For sleep, time ASLEEP; the session
+  from start to end is `inBedMs`.
+  */
   durationMs?: number | null;
   /** Sleep only, with the `in_bed` metric: the nights' length from start to end. */
   inBedMs?: number | null;
   /**
-   * The key under `values` that holds the type's headline figure (`count` for
-   * steps, `energy` for calories, `bpm` for heart rate), so that a caller can
-   * read `.values[.field]` without knowing each type's name for it. Absent
-   * for a type without fields (sleep, exercise).
-   */
+  The key under `values` that holds the type's headline figure (`count` for
+  steps, `energy` for calories, `bpm` for heart rate), so that a caller can
+  read `.values[.field]` without knowing each type's name for it. Absent
+  for a type without fields (sleep, exercise).
+  */
   field?: string;
   /** Per field of the type, the metrics asked for. */
   values: Record<string, Partial<Record<FieldMetric, number | null>>>;
   /**
-   * Records left out of this bucket as another origin's copy: a counter's
-   * records in an hour a larger origin also recorded, or a session that
-   * overlaps one already counted.
-   */
+  Records left out of this bucket as another origin's copy: a counter's
+  records in an hour a larger origin also recorded, or a session that
+  overlaps one already counted.
+  */
   duplicatesDropped?: number;
   /** Values an artefact rule took out of this bucket's numbers. Absent when none. */
   artefactsExcluded?: number;
   /**
-   * Of the bucket's total (the `sum` of the type's first field), what comes
-   * from records longer than an hour, divided evenly over their length: a
-   * figure written for a long stretch -- a day's total as one record, often
-   * an estimate of basal energy -- and not something measured in the bucket.
-   * Absent when there is none.
-   */
+  Of the bucket's total (the `sum` of the type's first field), what comes
+  from records longer than an hour, divided evenly over their length: a
+  figure written for a long stretch -- a day's total as one record, often
+  an estimate of basal energy -- and not something measured in the bucket.
+  Absent when there is none.
+  */
   longRecordSum?: number;
   /** kcal added by `bmr_fill` for the part of the bucket nothing recorded. */
   bmrFillKcal?: number;
@@ -268,17 +268,17 @@ export interface AggregateRequest {
   /** kcal/day to pad unrecorded time with, `TotalCaloriesBurned` only; null for no fill. */
   bmrKcalPerDay: number | null;
   /**
-   * False keeps every value, artefacts included. Omitted or true applies the
-   * artefact rule of a type that has one, and counts what it removed.
-   */
+  False keeps every value, artefacts included. Omitted or true applies the
+  artefact rule of a type that has one, and counts what it removed.
+  */
   excludeArtefacts?: boolean | undefined;
   /**
-   * Whether the exposure policy lets this call read a record type. Asked
-   * before another type is read as context for a rule (Height for the weight
-   * rule) or a flag derived from one is used (left-running, off heart rate
-   * and steps). Omitted: no context type is readable, so no such rule is
-   * applied -- the safe answer for a caller that has not asked the policy.
-   */
+  Whether the exposure policy lets this call read a record type. Asked
+  before another type is read as context for a rule (Height for the weight
+  rule) or a flag derived from one is used (left-running, off heart rate
+  and steps). Omitted: no context type is readable, so no such rule is
+  applied -- the safe answer for a caller that has not asked the policy.
+  */
   allowed?: ((type: string) => boolean) | undefined;
 }
 
@@ -341,21 +341,21 @@ const hourOf = (ms: number): number => Math.floor(ms / HOUR_MS);
 // ---------------------------------------------------------------------------
 
 /**
- * One part of an answer. A part read from the store (`share: false`), or the
- * share of a record that falls in one stretch between two boundaries (`share:
- * true`: no record of its own, only `rollup.spread`).
- */
+One part of an answer. A part read from the store (`share: false`), or the
+share of a record that falls in one stretch between two boundaries (`share:
+true`: no record of its own, only `rollup.spread`).
+*/
 interface Piece extends StatsPart {
   /**
-   * False for what a record longer than an hour contributes -- its share of an
-   * hour, or a part that holds nothing but such records: see `chooseByHour`.
-   */
+  False for what a record longer than an hour contributes -- its share of an
+  hour, or a part that holds nothing but such records: see `chooseByHour`.
+  */
   fine: boolean;
   share: boolean;
   /**
-   * The UTC hours the piece has data in. Null for a day rollup written before
-   * rollups said: it has to be read hour by hour to find out.
-   */
+  The UTC hours the piece has data in. Null for a day rollup written before
+  rollups said: it has to be read hour by hour to find out.
+  */
   hours: readonly number[] | null;
 }
 
@@ -407,10 +407,10 @@ function wholeRecord(part: StatsPart, length: number): CrossingRecord {
 }
 
 /**
- * The shares of one record inside `window`: one piece per stretch between two
- * boundaries (bucket edges and UTC hours), each holding the part of the
- * record's value that the stretch is of its length.
- */
+The shares of one record inside `window`: one piece per stretch between two
+boundaries (bucket edges and UTC hours), each holding the part of the
+record's value that the stretch is of its length.
+*/
 function sharesOf(
   boundaries: readonly number[],
   record: CrossingRecord,
@@ -441,9 +441,9 @@ function sharesOf(
 }
 
 /**
- * One part of a running count as pieces: itself, less the records that run
- * past their bucket, and those records' shares inside `window`.
- */
+One part of a running count as pieces: itself, less the records that run
+past their bucket, and those records' shares inside `window`.
+*/
 function dividePart(
   boundaries: readonly number[],
   part: StatsPart,
@@ -486,9 +486,9 @@ function holdsData(rollup: BucketRollup): boolean {
 }
 
 /**
- * A figure that was put together from shares, without the last digits a
- * floating-point sum of thirds leaves behind: twelve significant digits.
- */
+A figure that was put together from shares, without the last digits a
+floating-point sum of thirds leaves behind: twelve significant digits.
+*/
 function tidy(value: number): number {
   return Number(value.toPrecision(12));
 }
@@ -530,10 +530,10 @@ function primaryField(type: string): string | undefined {
 }
 
 /**
- * What an origin's hour weighs when choosing between origins: the sum of the
- * type's primary field (steps counted, metres, kcal) with the shares of
- * divided records in it, or its record count for a type without one.
- */
+What an origin's hour weighs when choosing between origins: the sum of the
+type's primary field (steps counted, metres, kcal) with the shares of
+divided records in it, or its record count for a type without one.
+*/
 function weight(type: string, rollup: BucketRollup): number {
   const primary = primaryField(type);
   if (primary === undefined) return rollup.records;
@@ -573,10 +573,10 @@ function fieldValues(
 }
 
 /**
- * What a metric is in a bucket nothing was recorded in. A zero is only honest
- * for the metrics that count: an empty bucket has no mean, and no lowest or
- * highest value.
- */
+What a metric is in a bucket nothing was recorded in. A zero is only honest
+for the metrics that count: an empty bucket has no mean, and no lowest or
+highest value.
+*/
 function emptyMetric(metric: FieldMetric, fill: "zero" | "null"): number | null {
   return fill === "zero" && (metric === "sum" || metric === "n") ? 0 : null;
 }
@@ -590,9 +590,9 @@ interface RowInput {
   /** Sleep only: the nights' length from start to end. */
   inBedMs?: number;
   /**
-   * The origins whose excluded artefacts this row answers for. Omitted: every
-   * origin's in the bucket.
-   */
+  The origins whose excluded artefacts this row answers for. Omitted: every
+  origin's in the bucket.
+  */
   excludedFor?: readonly string[];
 }
 
@@ -600,9 +600,9 @@ interface RowInput {
 interface PartOptions {
   origins?: readonly string[];
   /**
-   * Read hour by hour inside this window (no day rollup), so that each part
-   * can be told apart by its UTC hour.
-   */
+  Read hour by hour inside this window (no day rollup), so that each part
+  can be told apart by its UTC hour.
+  */
   window?: Range;
 }
 
@@ -713,10 +713,10 @@ function seriesCleaner(type: string): PartCleaner | undefined {
 }
 
 /**
- * The artefact rule this call applies to its type, if any. The weight rule
- * needs the Height records around the range, and is only built when the call
- * may read them; when it may not, the rule is recorded as not applied.
- */
+The artefact rule this call applies to its type, if any. The weight rule
+needs the Height records around the range, and is only built when the call
+may read them; when it may not, the rule is recorded as not applied.
+*/
 async function cleanerFor(
   reads: HcReads,
   request: AggregateRequest,
@@ -812,13 +812,13 @@ async function startRun(reads: HcReads, request: AggregateRequest): Promise<Run>
 }
 
 /**
- * The shares, inside `window`, of the records that started BEFORE it and run
- * into it. They are found in the hour rollups of the two days before the
- * window: no record older than that is divided (`SPREAD_MAX_MS`). Hour
- * rollups and never day rollups, whatever the range is answered from: whether
- * a day rollup is current was asked about the range, not about the days
- * before it, and an hour rollup always is.
- */
+The shares, inside `window`, of the records that started BEFORE it and run
+into it. They are found in the hour rollups of the two days before the
+window: no record older than that is divided (`SPREAD_MAX_MS`). Hour
+rollups and never day rollups, whatever the range is answered from: whether
+a day rollup is current was asked about the range, not about the days
+before it, and an hour rollup always is.
+*/
 async function sharesFromBefore(
   run: Run,
   type: string,
@@ -854,10 +854,10 @@ async function sharesFromBefore(
 }
 
 /**
- * One type's parts as pieces. For a running count, the records that run past
- * their bucket are divided among the buckets they span, the ones that started
- * before the range included: see the module comment.
- */
+One type's parts as pieces. For a running count, the records that run past
+their bucket are divided among the buckets they span, the ones that started
+before the range included: see the module comment.
+*/
 async function readPieces(run: Run, type: string, options: PartOptions = {}): Promise<Piece[]> {
   const parts = await run.parts(type, options);
   if (!isSpreadType(type)) return parts.map((part) => wholePiece(part));
@@ -914,22 +914,22 @@ async function aggregateSeparately(run: Run): Promise<void> {
 }
 
 /**
- * A counter's pieces with one origin chosen per UTC hour: `kept` is the chosen
- * origin's pieces, `dropped` everyone else's in an hour that origin has
- * anything in.
- *
- * An origin with something of its own in the hour -- a record no longer than
- * an hour, or a share of one -- is preferred to an origin that has only the
- * share of a longer record there. A day's total written as one record says
- * nothing about any one hour, and letting its share stand beside (or instead
- * of) a tracker that measured the hour would count the same energy twice, or
- * swap a measurement for an average. It is still what the hour gets when
- * nobody measured it. Among the origins preferred, the largest total wins;
- * ties go to the lower origin name, so the choice is the same everywhere.
- *
- * Every piece must lie inside one UTC hour (an hour rollup, a raw record, or
- * a share).
- */
+A counter's pieces with one origin chosen per UTC hour: `kept` is the chosen
+origin's pieces, `dropped` everyone else's in an hour that origin has
+anything in.
+
+An origin with something of its own in the hour -- a record no longer than
+an hour, or a share of one -- is preferred to an origin that has only the
+share of a longer record there. A day's total written as one record says
+nothing about any one hour, and letting its share stand beside (or instead
+of) a tracker that measured the hour would count the same energy twice, or
+swap a measurement for an average. It is still what the hour gets when
+nobody measured it. Among the origins preferred, the largest total wins;
+ties go to the lower origin name, so the choice is the same everywhere.
+
+Every piece must lie inside one UTC hour (an hour rollup, a raw record, or
+a share).
+*/
 function chooseByHour(type: string, pieces: readonly Piece[]): { kept: Piece[]; dropped: Piece[] } {
   const hours = new Map<number, Map<string, Piece[]>>();
   for (const piece of inOrder(pieces)) {
@@ -997,17 +997,17 @@ function within(ranges: readonly Range[], ms: number): boolean {
 }
 
 /**
- * The days of a coarse read that have to be opened hour by hour before an
- * origin can be chosen per hour.
- *
- * A day only one origin has anything in holds no choice, and its day rollup
- * is final -- which is what keeps a multi-year answer on day rollups. A day
- * two origins have something in is opened; a share of a record that started
- * on another day counts as its origin being there. In a zone whose days do
- * not begin on a UTC hour, a UTC hour can straddle two days, so one day cannot
- * be judged alone: there, every day is opened as soon as the range holds two
- * origins at all.
- */
+The days of a coarse read that have to be opened hour by hour before an
+origin can be chosen per hour.
+
+A day only one origin has anything in holds no choice, and its day rollup
+is final -- which is what keeps a multi-year answer on day rollups. A day
+two origins have something in is opened; a share of a record that started
+on another day counts as its origin being there. In a zone whose days do
+not begin on a UTC hour, a UTC hour can straddle two days, so one day cannot
+be judged alone: there, every day is opened as soon as the range holds two
+origins at all.
+*/
 function daysToOpen(pieces: readonly Piece[]): Range[] {
   const days = new Map<number, { endMs: number; origins: Set<string> }>();
   const everyOrigin = new Set<string>();
@@ -1052,9 +1052,9 @@ interface BucketChoice {
 }
 
 /**
- * A counter under `hc_priority` without the platform's figure, for the whole
- * range: one origin per UTC hour, summed into buckets. See the module comment.
- */
+A counter under `hc_priority` without the platform's figure, for the whole
+range: one origin per UTC hour, summed into buckets. See the module comment.
+*/
 async function hourlyFallback(
   run: Run,
   coarse: readonly Piece[],
@@ -1123,10 +1123,10 @@ function allOriginsInput(
 }
 
 /**
- * The platform's hourly aggregate as a rollup of the type it stands for: its
- * one `value` is the type's primary field's sum, or a session type's duration.
- * The hourly figures are added as they were uploaded, unrounded.
- */
+The platform's hourly aggregate as a rollup of the type it stands for: its
+one `value` is the type's primary field's sum, or a session type's duration.
+The hourly figures are added as they were uploaded, unrounded.
+*/
 function fromPlatform(type: string, hours: readonly BucketRollup[]): BucketRollup {
   const merged = mergeRollups(hours);
   const value = merged.fields.value;
@@ -1143,27 +1143,27 @@ function platformCanAnswer(metrics: readonly Metric[]): boolean {
 }
 
 /**
- * True when every hour of the range falls wholly inside one bucket, so an
- * hourly platform figure is never split between two.
- */
+True when every hour of the range falls wholly inside one bucket, so an
+hourly platform figure is never split between two.
+*/
 function hourAligned(range: Range, spans: readonly ClippedSpan[]): boolean {
   return range.startMs % HOUR_MS === 0 && spans.every((span) => span.fromMs % HOUR_MS === 0);
 }
 
 /**
- * The buckets the platform has a figure in but does not cover: some hour in
- * which the type itself has data -- a record, or a share of one -- has no
- * hourly figure from the platform.
- *
- * Judged hour by hour, never by the first and last hour the platform has. Its
- * hours can have holes anywhere: the day a phone was paired, a day still being
- * backfilled, an hour whose total was lost. Taking the platform's number alone
- * for such a bucket reports a short day and calls it the platform's.
- *
- * It costs nothing to ask: a rollup says which hours its records start in
- * (`BucketRollup.hours`), a day rollup included. One written before rollups
- * said is taken as not covered, and so is read hour by hour.
- */
+The buckets the platform has a figure in but does not cover: some hour in
+which the type itself has data -- a record, or a share of one -- has no
+hourly figure from the platform.
+
+Judged hour by hour, never by the first and last hour the platform has. Its
+hours can have holes anywhere: the day a phone was paired, a day still being
+backfilled, an hour whose total was lost. Taking the platform's number alone
+for such a bucket reports a short day and calls it the platform's.
+
+It costs nothing to ask: a rollup says which hours its records start in
+(`BucketRollup.hours`), a day rollup included. One written before rollups
+said is taken as not covered, and so is read hour by hour.
+*/
 function partlyCovered(
   run: Run,
   platform: readonly StatsPart[],
@@ -1184,11 +1184,11 @@ function partlyCovered(
 }
 
 /**
- * The buckets the platform covers only partly, each composed hour by hour: the
- * platform's figure in the hours it has one, the fallback in the others. Read
- * a run of adjacent buckets at a time, so a long stretch of them is two reads
- * and not two per bucket.
- */
+The buckets the platform covers only partly, each composed hour by hour: the
+platform's figure in the hours it has one, the fallback in the others. Read
+a run of adjacent buckets at a time, so a long stretch of them is two reads
+and not two per bucket.
+*/
 async function composeMixed(
   run: Run,
   platformType: string,
@@ -1199,7 +1199,7 @@ async function composeMixed(
   const windows = mergedRanges(
     listOf(buckets).flatMap((index) => {
       const span = run.spans[index];
-      return span === undefined ? [] : [{ startMs: span.fromMs, endMs: span.toMs }];
+      return span === undefined ? [] : { startMs: span.fromMs, endMs: span.toMs };
     }),
   );
   const platform = new Map<number, Map<number, StatsPart[]>>();
@@ -1227,9 +1227,9 @@ async function composeMixed(
 }
 
 /**
- * One bucket the platform covers only partly: its figure for the hours it has
- * one in, and for the others what the fallback chose.
- */
+One bucket the platform covers only partly: its figure for the hours it has
+one in, and for the others what the fallback chose.
+*/
 function mixedInput(
   type: string,
   span: ClippedSpan,
@@ -1370,9 +1370,9 @@ function sessionAnchor(type: string, session: Spanned): number {
 }
 
 /**
- * What a session counts for as `duration`: a night's time asleep, a workout's
- * length. `spanMs` is the session from start to end.
- */
+What a session counts for as `duration`: a night's time asleep, a workout's
+length. `spanMs` is the session from start to end.
+*/
 function sessionDuration(type: string, session: SessionSpan, spanMs: number): number {
   return type === TYPE_SLEEP ? (session.asleepMs ?? spanMs) : spanMs;
 }
@@ -1460,9 +1460,9 @@ function sessionsMerged(run: Run, sessions: readonly Session[]): Map<number, Ses
 }
 
 /**
- * Exercise time per bucket from the platform's hourly figure, where the phone
- * uploaded one. Sleep is never asked for: see the module comment.
- */
+Exercise time per bucket from the platform's hourly figure, where the phone
+uploaded one. Sleep is never asked for: see the module comment.
+*/
 async function platformDurations(run: Run): Promise<Grouped> {
   const { type, metrics } = run.request;
   const platformType = type === TYPE_EXERCISE ? platformAggregateType(type) : null;
@@ -1474,11 +1474,11 @@ async function platformDurations(run: Run): Promise<Grouped> {
 }
 
 /**
- * True when the platform's hours in a bucket span every stretch filed there:
- * it has a figure for each hour a stretch has time in. Where its rollup does
- * not say which hours it has (one written before rollups did), by the first
- * and last instants each side holds.
- */
+True when the platform's hours in a bucket span every stretch filed there:
+it has a figure for each hour a stretch has time in. Where its rollup does
+not say which hours it has (one written before rollups did), by the first
+and last instants each side holds.
+*/
 function platformSpans(platform: BucketRollup, stored: SessionBucket): boolean {
   if (platform.hours !== undefined) {
     const have = new Set(platform.hours);
@@ -1493,10 +1493,10 @@ function platformSpans(platform: BucketRollup, stored: SessionBucket): boolean {
 }
 
 /**
- * A session type under `hc_priority`: how many stretches from the stored
- * summaries, and how long from the platform's figure where its hours span
- * every stretch of the bucket, else from the stretches themselves.
- */
+A session type under `hc_priority`: how many stretches from the stored
+summaries, and how long from the platform's figure where its hours span
+every stretch of the bucket, else from the stretches themselves.
+*/
 async function aggregateSessionsByPriority(run: Run, sessions: readonly Session[]): Promise<void> {
   const { type } = run.request;
   const merged = sessionsMerged(run, sessions);
@@ -1593,11 +1593,11 @@ export async function aggregate(
 }
 
 /**
- * Pad each bucket's unrecorded time with basal metabolic rate. The recorded
- * time is the total length of the bucket's interval records -- of a record
- * that runs past the bucket, the part inside it -- so a bucket a tracker
- * covered completely gains nothing.
- */
+Pad each bucket's unrecorded time with basal metabolic rate. The recorded
+time is the total length of the bucket's interval records -- of a record
+that runs past the bucket, the part inside it -- so a bucket a tracker
+covered completely gains nothing.
+*/
 function applyBmrFill(
   rows: AggregateRow[],
   recordedMs: readonly number[],

@@ -106,14 +106,14 @@ watch(selectedName, sendCurrentTool);
 const runFlow = { awaitingScroll: false };
 
 /**
- * Runs one tool call on the frame's behalf and posts the answer back.
- *
- * `name` is checked against the current selection again once the call
- * settles, and a stale answer is dropped rather than delivered: the frame
- * resets to a new tool's schema the moment the owner switches, and a response
- * for the tool they switched away from has nowhere correct to land there
- * any more.
- */
+Runs one tool call on the frame's behalf and posts the answer back.
+
+`name` is checked against the current selection again once the call
+settles, and a stale answer is dropped rather than delivered: the frame
+resets to a new tool's schema the moment the owner switches, and a response
+for the tool they switched away from has nowhere correct to land there
+any more.
+*/
 async function handleRun(name: string, args: Record<string, unknown>): Promise<void> {
   const isStillSelected = (): boolean => name === selectedName.value;
   try {
@@ -147,16 +147,16 @@ async function handleRun(name: string, args: Record<string, unknown>): Promise<v
 }
 
 /**
- * The identity check that stands in for an origin check.
- *
- * An opaque-origin frame's `event.origin` is the literal string `"null"` on
- * every message it sends, which cannot distinguish this frame's messages from
- * any other opaque-origin frame's -- so this compares `event.source` (the
- * actual window that called `postMessage`) against this frame's own
- * `contentWindow` instead. `sonarjs/post-message`'s "verify the origin" advice
- * assumes origin comparison is possible; here it is not, and this is the
- * correct replacement for it.
- */
+The identity check that stands in for an origin check.
+
+An opaque-origin frame's `event.origin` is the literal string `"null"` on
+every message it sends, which cannot distinguish this frame's messages from
+any other opaque-origin frame's -- so this compares `event.source` (the
+actual window that called `postMessage`) against this frame's own
+`contentWindow` instead. `sonarjs/post-message`'s "verify the origin" advice
+assumes origin comparison is possible; here it is not, and this is the
+correct replacement for it.
+*/
 function isFromOurFrame(event: MessageEvent): boolean {
   // eslint-disable-next-line sonarjs/different-types-comparison -- MessageEventSource and Window overlap at runtime (a WindowProxy is both); this is exactly the comparison that matters here.
   return event.source === frameEl.value?.contentWindow;

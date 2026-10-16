@@ -128,11 +128,11 @@ const relabel = (sealed: string, version: string): string =>
   `${version}:${sealed.slice(sealed.indexOf(":") + 1)}`;
 
 /**
- * A value sealed the way every seal before L1 was: under the bare AAD, with no
- * version bound in. Built by hand so the test does not depend on `seal` still
- * knowing how.
- */
-async function legacySeal(plaintext: string, aad: string, padded: boolean): Promise<string> {
+A value sealed the way every seal before L1 was: under the bare AAD, with no
+version bound in. Built by hand so the test does not depend on `seal` still
+knowing how.
+*/
+async function legacySeal(plaintext: string, padded: boolean): Promise<string> {
   const key = await crypto.subtle.importKey(
     "raw",
     Buffer.from(KEY, "base64"),
@@ -149,7 +149,7 @@ async function legacySeal(plaintext: string, aad: string, padded: boolean): Prom
   }
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(aad) },
+    { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(AAD) },
     key,
     body,
   );
@@ -174,14 +174,12 @@ describe("the envelope version is authenticated (security review L1)", () => {
   });
 
   it("still opens v1 and v2 values sealed before the version was bound", async () => {
-    expect(await open(KEY, await legacySeal("legacy-plain", AAD, false), AAD)).toBe("legacy-plain");
-    expect(await open(KEY, await legacySeal("legacy-padded", AAD, true), AAD)).toBe(
-      "legacy-padded",
-    );
+    expect(await open(KEY, await legacySeal("legacy-plain", false), AAD)).toBe("legacy-plain");
+    expect(await open(KEY, await legacySeal("legacy-padded", true), AAD)).toBe("legacy-padded");
   });
 
   it("keeps the cell binding for legacy values: the wrong AAD still fails", async () => {
-    const legacy = await legacySeal("legacy", AAD, true);
+    const legacy = await legacySeal("legacy", true);
 
     await expect(
       open(KEY, legacy, aadFor("connections", "access_token_enc", "c2")),

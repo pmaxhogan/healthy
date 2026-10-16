@@ -55,12 +55,12 @@ function counts(run: RunDto): string {
 }
 
 /**
- * A one-line index into the JSON below: "Warnings: 4119, 4101 · Errors: needs_reauth".
- *
- * The codes are stable identifiers, not content -- an Epic OperationOutcome code,
- * an `AppError` code -- so showing them here is privacy-safe, and it is the only
- * way to see which codes came back without reading the raw dump line by line.
- */
+A one-line index into the JSON below: "Warnings: 4119, 4101 · Errors: needs_reauth".
+
+The codes are stable identifiers, not content -- an Epic OperationOutcome code,
+an `AppError` code -- so showing them here is privacy-safe, and it is the only
+way to see which codes came back without reading the raw dump line by line.
+*/
 function codesLine(summary: RunSummaryDto): string | null {
   const errors = [...summary.errors, ...summary.portalErrors];
   const parts = [

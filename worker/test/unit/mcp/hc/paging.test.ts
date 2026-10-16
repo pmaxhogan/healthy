@@ -52,12 +52,12 @@ const call = (name: string, args: Record<string, unknown>): Promise<ToolAnswer> 
 const envelope = (answer: ToolAnswer): Record<string, unknown> =>
   JSON.parse(answer.text) as Record<string, unknown>;
 
-/** Every page of a call, following the cursor to the end. */
-async function pages(name: string, args: Record<string, unknown>): Promise<ToolAnswer[]> {
+/** Every page of an `hc_records` call, following the cursor to the end. */
+async function pages(args: Record<string, unknown>): Promise<ToolAnswer[]> {
   const out: ToolAnswer[] = [];
   let cursor: unknown;
   for (let guard = 0; guard < 2000; guard += 1) {
-    const page = await call(name, { ...args, ...(cursor !== undefined && { cursor }) });
+    const page = await call("hc_records", { ...args, ...(cursor !== undefined && { cursor }) });
     expect(page.isError, page.text).toBe(false);
     out.push(page);
     cursor = envelope(page).cursor;
@@ -71,11 +71,11 @@ async function pages(name: string, args: Record<string, unknown>): Promise<ToolA
 const SECOND_PHONE = "dev_second_phone";
 
 /**
- * Sleep-like records around a six-hour range starting at 06:00: two that began
- * before it and reach into it, one that ended before it (and must never
- * appear), runs of records at the same instant on two phones, and one that
- * starts in the range and runs past its end.
- */
+Sleep-like records around a six-hour range starting at 06:00: two that began
+before it and reach into it, one that ended before it (and must never
+appear), runs of records at the same instant on two phones, and one that
+starts in the range and runs past its end.
+*/
 function spillingRecords(): { first: HcRecord[]; second: HcRecord[] } {
   const session = (id: string, startMs: number, endMs: number, origin?: string): HcRecord =>
     interval(
@@ -142,7 +142,7 @@ describe("hc_records, paged against single", () => {
   ])("gives the same rows %s in pages of %i", async (order, limit) => {
     const args = { ...RANGE, order };
     const whole = await call("hc_records", { ...args, max_bytes: 10_000_000 });
-    const paged = await pages("hc_records", { ...args, limit });
+    const paged = await pages({ ...args, limit });
 
     expect(paged.flatMap((page) => page.items)).toStrictEqual(whole.items);
     expect(paged).toHaveLength(Math.ceil(40 / limit));
@@ -155,7 +155,7 @@ describe("hc_records, paged against single", () => {
 
   it("gives the same rows when the byte budget cuts the pages", async () => {
     const whole = await call("hc_records", { ...RANGE, max_bytes: 10_000_000 });
-    const paged = await pages("hc_records", { ...RANGE, max_bytes: 700 });
+    const paged = await pages({ ...RANGE, max_bytes: 700 });
 
     expect(paged.length).toBeGreaterThan(5);
     expect(paged.flatMap((page) => page.items)).toStrictEqual(whole.items);
@@ -193,7 +193,7 @@ describe("hc_records, paged against single", () => {
       },
     ]);
     const whole = await call("hc_records", { ...RANGE, max_bytes: 10_000_000 });
-    const paged = await pages("hc_records", { ...RANGE, limit: 7 });
+    const paged = await pages({ ...RANGE, limit: 7 });
 
     expect(whole.items[0]).not.toHaveProperty("start");
     expect(paged.flatMap((page) => page.items)).toStrictEqual(whole.items);
@@ -203,7 +203,7 @@ describe("hc_records, paged against single", () => {
   it("pages a projected answer by offset, and counts the rows `jq` emitted", async () => {
     const args = { ...RANGE, jq: ".[] | .id" };
     const whole = await call("hc_records", { ...args, max_bytes: 10_000_000 });
-    const paged = await pages("hc_records", { ...args, limit: 9 });
+    const paged = await pages({ ...args, limit: 9 });
 
     expect(paged.flatMap((page) => page.items)).toStrictEqual(whole.items);
     expect(paged.every((page) => envelope(page).matched === 40)).toBe(true);

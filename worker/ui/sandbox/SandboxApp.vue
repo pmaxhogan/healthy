@@ -186,9 +186,9 @@ function parsedArgsOrEmpty(): Record<string, unknown> {
 }
 
 /**
- * The tool's properties not already present in the arguments, required ones
- * first, for the "insert a field" dropdown below the editor.
- */
+The tool's properties not already present in the arguments, required ones
+first, for the "insert a field" dropdown below the editor.
+*/
 const insertableProperties = computed<{ key: string; required: boolean }[]>(() => {
   if (tool.value === null) return [];
   const properties = schemaProperties(tool.value.inputSchema);
@@ -201,12 +201,12 @@ const insertableProperties = computed<{ key: string; required: boolean }[]>(() =
 });
 
 /**
- * Inserts one property, pre-filled with a placeholder value for its type, and
- * re-renders the whole document from the parsed result. That loses the
- * cursor position and the undo step a targeted insert into the view would
- * have kept -- acceptable here, since this is a one-off "give me a starting
- * point" action, not something done mid-edit.
- */
+Inserts one property, pre-filled with a placeholder value for its type, and
+re-renders the whole document from the parsed result. That loses the
+cursor position and the undo step a targeted insert into the view would
+have kept -- acceptable here, since this is a one-off "give me a starting
+point" action, not something done mid-edit.
+*/
 function insertField(key: string): void {
   if (tool.value === null) return;
   const properties = schemaProperties(tool.value.inputSchema);

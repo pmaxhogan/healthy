@@ -1,21 +1,21 @@
 /**
- * D1, counted: what a slice of the ingest runner really asked of the database.
- *
- * The runner's budget is an estimate kept by the code that issues statements
- * (worker/src/hc/store/budget.ts). This is the measurement beside it: every
- * call that leaves the runner for D1 -- a `db.batch`, or one statement run by
- * itself -- is one round trip, and D1 says of each statement how long its SQL
- * took and how many rows it read and wrote. Together with the slice's wall
- * clock that tells the three costs of a slice apart: the network (round trips),
- * the database (SQL time, rows), and this code's own work.
- *
- * It wraps the binding and changes nothing about what is sent: the same
- * statements, in the same calls, in the same order. Only the two members the
- * store uses are wrapped (`prepare`, `batch`); the rest pass straight through.
- *
- * Numbers only. Nothing of a statement's text, its parameters or its rows is
- * kept.
- */
+D1, counted: what a slice of the ingest runner really asked of the database.
+
+The runner's budget is an estimate kept by the code that issues statements
+(worker/src/hc/store/budget.ts). This is the measurement beside it: every
+call that leaves the runner for D1 -- a `db.batch`, or one statement run by
+itself -- is one round trip, and D1 says of each statement how long its SQL
+took and how many rows it read and wrote. Together with the slice's wall
+clock that tells the three costs of a slice apart: the network (round trips),
+the database (SQL time, rows), and this code's own work.
+
+It wraps the binding and changes nothing about what is sent: the same
+statements, in the same calls, in the same order. Only the two members the
+store uses are wrapped (`prepare`, `batch`); the rest pass straight through.
+
+Numbers only. Nothing of a statement's text, its parameters or its rows is
+kept.
+*/
 
 import type { Meter } from "./budget.ts";
 
@@ -49,9 +49,9 @@ async function counted<T>(meter: Meter, statements: number, call: () => Promise<
 }
 
 /**
- * A prepared statement that counts itself when it is run alone. `inner` is the
- * real one, which is what a `db.batch` has to be given.
- */
+A prepared statement that counts itself when it is run alone. `inner` is the
+real one, which is what a `db.batch` has to be given.
+*/
 class CountedStatement {
   private readonly meter: Meter;
   readonly inner: D1PreparedStatement;

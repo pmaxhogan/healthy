@@ -32,9 +32,9 @@ export function jsonResponse(
 }
 
 /**
- * `responder` is called with each request and its zero-based index, so a test
- * can answer differently on the first and second attempt.
- */
+`responder` is called with each request and its zero-based index, so a test
+can answer differently on the first and second attempt.
+*/
 export function recordingFetch(responder: (call: RecordedCall, index: number) => Response): {
   fetchImpl: typeof fetch;
   calls: RecordedCall[];
@@ -55,11 +55,11 @@ export function recordingFetch(responder: (call: RecordedCall, index: number) =>
 }
 
 /**
- * Await a call that must reject with an `AppError`, and hand the error back so
- * the test can assert on `code`, `status` and `retryAfterMs`. Anything else --
- * resolving, or throwing something other than an `AppError` -- fails the test
- * here rather than at a confusing assertion further down.
- */
+Await a call that must reject with an `AppError`, and hand the error back so
+the test can assert on `code`, `status` and `retryAfterMs`. Anything else --
+resolving, or throwing something other than an `AppError` -- fails the test
+here rather than at a confusing assertion further down.
+*/
 export async function appErrorFrom(promise: Promise<unknown>): Promise<AppError> {
   try {
     await promise;

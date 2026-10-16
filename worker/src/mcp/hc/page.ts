@@ -1,39 +1,39 @@
 /**
- * The byte budget's cursor.
- *
- * A Health Connect tool answers with at most `max_bytes` of rows (25 kB unless
- * the caller says otherwise) and, when that cut something off, a `cursor`.
- * The cursor is stateless: nothing is stored between the two calls. It holds
- *
- *  - `q`: a digest of the tool name and every argument that decides WHICH rows
- *    the answer has and in what order, followed (after a `.`) by a stamp of
- *    the store as it stood when the cursor was issued ({@link storeStamp}).
- *    A cursor passed back with a different question is refused
- *    (`invalid_cursor`); one passed back after the phone's data changed is
- *    refused too, as `cursor_expired` -- a continuation recomputes the answer
- *    and skips what was already sent, so over a store that moved in between
- *    it would silently skip or repeat rows.
- *  - `o`: how many rows of this call's array to skip.
- *  - `a`, `hc_records` only: the start time of the next row, so the
- *    continuation reads the store from there and not from the beginning. `o`
- *    is then the number of rows already returned that share that start time,
- *    and `e` the number returned before them, which the continuation never
- *    reads again but still counts in `total`.
- *  - `u`, `data_quality` only: where the page being continued STOPPED reading.
- *    That tool walks a long range a window at a time and stops when a page is
- *    full, so a page is the findings of `[a, u)`. A cursor cut inside those
- *    rows carries both and `o` rows to skip, and the continuation reads
- *    exactly that stretch again; a cursor issued after the last row of a page
- *    carries only `a` (the old `u`) and starts a fresh page there.
- *
- * `limit` and `max_bytes` are not part of the digest: they decide how much of
- * the sequence one call carries, not what the sequence is, so a caller may
- * change either between pages.
- *
- * The encoding is base64url of JSON. It is not a secret and not signed: a
- * caller who edits one gets a different page of rows the same call could have
- * returned anyway.
- */
+The byte budget's cursor.
+
+A Health Connect tool answers with at most `max_bytes` of rows (25 kB unless
+the caller says otherwise) and, when that cut something off, a `cursor`.
+The cursor is stateless: nothing is stored between the two calls. It holds
+
+ - `q`: a digest of the tool name and every argument that decides WHICH rows
+   the answer has and in what order, followed (after a `.`) by a stamp of
+   the store as it stood when the cursor was issued ({@link storeStamp}).
+   A cursor passed back with a different question is refused
+   (`invalid_cursor`); one passed back after the phone's data changed is
+   refused too, as `cursor_expired` -- a continuation recomputes the answer
+   and skips what was already sent, so over a store that moved in between
+   it would silently skip or repeat rows.
+ - `o`: how many rows of this call's array to skip.
+ - `a`, `hc_records` only: the start time of the next row, so the
+   continuation reads the store from there and not from the beginning. `o`
+   is then the number of rows already returned that share that start time,
+   and `e` the number returned before them, which the continuation never
+   reads again but still counts in `total`.
+ - `u`, `data_quality` only: where the page being continued STOPPED reading.
+   That tool walks a long range a window at a time and stops when a page is
+   full, so a page is the findings of `[a, u)`. A cursor cut inside those
+   rows carries both and `o` rows to skip, and the continuation reads
+   exactly that stretch again; a cursor issued after the last row of a page
+   carries only `a` (the old `u`) and starts a fresh page there.
+
+`limit` and `max_bytes` are not part of the digest: they decide how much of
+the sequence one call carries, not what the sequence is, so a caller may
+change either between pages.
+
+The encoding is base64url of JSON. It is not a secret and not signed: a
+caller who edits one gets a different page of rows the same call could have
+returned anyway.
+*/
 
 import { sha256Hex } from "../../sync/hash.ts";
 
@@ -83,11 +83,11 @@ export async function cursorDigest(tool: string, args: Record<string, unknown>):
 }
 
 /**
- * A stamp of the store for the phones a call reads: it changes whenever an
- * upload arrives, is applied, is set aside, or a rollup is rebuilt. Built
- * from bookkeeping only -- instants and counts -- and hashed, so the cursor
- * that carries it says nothing about the phone.
- */
+A stamp of the store for the phones a call reads: it changes whenever an
+upload arrives, is applied, is set aside, or a rollup is rebuilt. Built
+from bookkeeping only -- instants and counts -- and hashed, so the cursor
+that carries it says nothing about the phone.
+*/
 async function storeStamp(
   reads: HcReads,
   devices: readonly { id: string; lastUploadAt: number | null }[],
@@ -186,9 +186,9 @@ function decode(cursor: string): { q: string; position: OpenedCursor } | null {
 }
 
 /**
- * Open the caller's cursor. No cursor is the start; null means it is not a
- * cursor this tool issued for these arguments.
- */
+Open the caller's cursor. No cursor is the start; null means it is not a
+cursor this tool issued for these arguments.
+*/
 export function readCursor(cursor: string | undefined, digest: string): OpenedCursor | null {
   if (cursor === undefined) return START;
   const decoded = decode(cursor);
@@ -207,11 +207,11 @@ export type OpenedPage =
   | { ok: false; errorCode: "invalid_cursor" | "cursor_expired" };
 
 /**
- * Open `args.cursor` against the question AND the store: the same question
- * over a store that has changed since the cursor was issued is
- * `cursor_expired`, so a caller restarts instead of reading pages that no
- * longer line up.
- */
+Open `args.cursor` against the question AND the store: the same question
+over a store that has changed since the cursor was issued is
+`cursor_expired`, so a caller restarts instead of reading pages that no
+longer line up.
+*/
 export async function openStampedPage(
   reads: HcReads,
   devices: readonly { id: string; lastUploadAt: number | null }[],

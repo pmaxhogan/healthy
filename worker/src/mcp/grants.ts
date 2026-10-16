@@ -1,19 +1,19 @@
 /**
- * Listing and revoking MCP grants, for the admin API.
- *
- * A grant is the thing that matters operationally: it is what a client holds, it
- * is what survives a token expiring, and revoking it is the one action that takes
- * a connector's access away immediately. The admin UI's "MCP" page is built on
- * these two functions:
- *
- *   GET    /api/mcp/grants       -> listGrants(env)
- *   DELETE /api/mcp/grants/:id   -> revokeGrant(env, id)
- *
- * Grants live in `OAUTH_KV`, not in D1, so they are read through the OAuth
- * library's helpers rather than a repo. `lastUsedAt` is the exception: the library
- * does not record it, so it is derived from the `mcp_audit` table, which is the
- * only place that knows a grant was actually used.
- */
+Listing and revoking MCP grants, for the admin API.
+
+A grant is the thing that matters operationally: it is what a client holds, it
+is what survives a token expiring, and revoking it is the one action that takes
+a connector's access away immediately. The admin UI's "MCP" page is built on
+these two functions:
+
+  GET    /api/mcp/grants       -> listGrants(env)
+  DELETE /api/mcp/grants/:id   -> revokeGrant(env, id)
+
+Grants live in `OAUTH_KV`, not in D1, so they are read through the OAuth
+library's helpers rather than a repo. `lastUsedAt` is the exception: the library
+does not record it, so it is derived from the `mcp_audit` table, which is the
+only place that knows a grant was actually used.
+*/
 
 import { reposFor } from "../db/index.ts";
 import { toIso } from "../lib/time.ts";
@@ -28,12 +28,12 @@ import type { McpGrantDto } from "@shared/types.ts";
 const PAGE_SIZE = 100;
 
 /**
- * Audit rows scanned to date a grant's last use.
- *
- * Bounded deliberately: this is a display field on an admin page, and a grant that
- * has not been used in the last few hundred calls is one whose exact last-use time
- * nobody is making a decision on.
- */
+Audit rows scanned to date a grant's last use.
+
+Bounded deliberately: this is a display field on an admin page, and a grant that
+has not been used in the last few hundred calls is one whose exact last-use time
+nobody is making a decision on.
+*/
 const AUDIT_SCAN = 500;
 
 /** Every grant the owner has issued, newest first. */
@@ -64,12 +64,12 @@ async function lastUsedByGrant(env: Env): Promise<Map<string, number>> {
 }
 
 /**
- * The grants, ready for the admin API to serialise.
- *
- * The client's display name comes from its registration, which is a client-supplied
- * string: the SPA must render it as text, never as markup. Nothing here trusts it
- * beyond passing it along.
- */
+The grants, ready for the admin API to serialise.
+
+The client's display name comes from its registration, which is a client-supplied
+string: the SPA must render it as text, never as markup. Nothing here trusts it
+beyond passing it along.
+*/
 export async function listGrants(env: Env): Promise<McpGrantDto[]> {
   const helpers = oauthHelpers(env);
   const [grants, lastUsed] = await Promise.all([allGrants(helpers), lastUsedByGrant(env)]);
@@ -100,12 +100,12 @@ export async function listGrants(env: Env): Promise<McpGrantDto[]> {
 }
 
 /**
- * Revoke one grant. False when there was no such grant to revoke.
- *
- * The existence check is what lets the admin API answer 404 rather than a silent
- * 204 for an id that was already gone -- the library's `revokeGrant` is idempotent
- * and does not say which it was.
- */
+Revoke one grant. False when there was no such grant to revoke.
+
+The existence check is what lets the admin API answer 404 rather than a silent
+204 for an id that was already gone -- the library's `revokeGrant` is idempotent
+and does not say which it was.
+*/
 export async function revokeGrant(env: Env, grantId: string): Promise<boolean> {
   const helpers = oauthHelpers(env);
   const grants = await allGrants(helpers);

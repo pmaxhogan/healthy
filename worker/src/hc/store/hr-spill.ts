@@ -1,33 +1,33 @@
 /**
- * Heart-rate spill for a page of chunk writes, read once.
- *
- * The per-minute row of an hour H is built from the hour's own chunk plus the
- * records of earlier chunks of the same origin that reach into H
- * (worker/src/hc/rollup/hr-minute.ts, rule 1; `HR_SPILL_SQL` for exactly which
- * those are). Applying a batch used to ask D1 that question once per chunk
- * written -- a round trip each, and a heart-rate batch is nothing but
- * consecutive hours, so each answer was mostly the chunk written one step
- * before.
- *
- * This asks for every chunk of a page at once, before any of them is written,
- * and then keeps the answers true as the page is worked through:
- *
- *   snapshot   what the table held for each hour when the page began
- *   written    every heart-rate chunk the page has built since, as it will be
- *
- * The spill into H is the snapshot's chunks, less any the page has since
- * rewritten, plus the rewritten ones that reach into H as they now are. That
- * is, statement for statement, what `HR_SPILL_SQL` would return if every write
- * of the page so far had been committed -- which is what it was run against
- * when each chunk was committed by itself. `reaches` is that statement's WHERE
- * clause in this language, and a test holds the two to the same answer.
- *
- * The view is good for one page and for the writes it is told of. A chunk
- * written that it never hears about would make it wrong, so the one function
- * that writes chunks (`rewriteChunk`, worker/src/hc/apply.ts) reports to it
- * every time, changed or not; and a chunk it was not asked to read ahead is
- * simply not `covered`, and is read from the table the old way.
- */
+Heart-rate spill for a page of chunk writes, read once.
+
+The per-minute row of an hour H is built from the hour's own chunk plus the
+records of earlier chunks of the same origin that reach into H
+(worker/src/hc/rollup/hr-minute.ts, rule 1; `HR_SPILL_SQL` for exactly which
+those are). Applying a batch used to ask D1 that question once per chunk
+written -- a round trip each, and a heart-rate batch is nothing but
+consecutive hours, so each answer was mostly the chunk written one step
+before.
+
+This asks for every chunk of a page at once, before any of them is written,
+and then keeps the answers true as the page is worked through:
+
+  snapshot   what the table held for each hour when the page began
+  written    every heart-rate chunk the page has built since, as it will be
+
+The spill into H is the snapshot's chunks, less any the page has since
+rewritten, plus the rewritten ones that reach into H as they now are. That
+is, statement for statement, what `HR_SPILL_SQL` would return if every write
+of the page so far had been committed -- which is what it was run against
+when each chunk was committed by itself. `reaches` is that statement's WHERE
+clause in this language, and a test holds the two to the same answer.
+
+The view is good for one page and for the writes it is told of. A chunk
+written that it never hears about would make it wrong, so the one function
+that writes chunks (`rewriteChunk`, worker/src/hc/apply.ts) reports to it
+every time, changed or not; and a chunk it was not asked to read ahead is
+simply not `covered`, and is read from the table the old way.
+*/
 
 import { hrSpillChunks } from "./chunks.ts";
 import { HOUR_MS, TYPE_HEART_RATE, chunkExtent, keyId, listOf, sortedBy } from "./keys.ts";
@@ -46,14 +46,14 @@ interface Reaching {
 }
 
 /**
- * Whether a chunk filed under `hourUtc`, whose last record ends at `maxEndMs`,
- * can hold a heart-rate sample timed in the hour `into`. `HR_SPILL_SQL`, as a
- * predicate:
- *
- *   - any earlier chunk that runs PAST the start of `into`; or
- *   - the chunk of the hour just before, ending exactly ON it (a sample is an
- *     instant, and one stamped on the boundary belongs to the later hour).
- */
+Whether a chunk filed under `hourUtc`, whose last record ends at `maxEndMs`,
+can hold a heart-rate sample timed in the hour `into`. `HR_SPILL_SQL`, as a
+predicate:
+
+  - any earlier chunk that runs PAST the start of `into`; or
+  - the chunk of the hour just before, ending exactly ON it (a sample is an
+    instant, and one stamped on the boundary belongs to the later hour).
+*/
 export function reaches(hourUtc: number, maxEndMs: number, into: number): boolean {
   if (hourUtc >= into) return false;
   const boundary = into * HOUR_MS;
@@ -62,10 +62,10 @@ export function reaches(hourUtc: number, maxEndMs: number, into: number): boolea
 
 export class HrSpillView {
   /**
-   * Read the spill into each of `keys` (heart-rate chunks; others are passed
-   * over) in one round trip. Nothing the page will write may be waiting in a
-   * buffer when this is called: the answers are the table's.
-   */
+  Read the spill into each of `keys` (heart-rate chunks; others are passed
+  over) in one round trip. Nothing the page will write may be waiting in a
+  buffer when this is called: the answers are the table's.
+  */
   static async load(
     ctx: Ctx,
     deviceId: string,
@@ -111,12 +111,12 @@ export class HrSpillView {
   }
 
   /**
-   * The records of earlier chunks that reach into the hour of `key`, as the
-   * table will hold them once everything the page has built is committed.
-   *
-   * In a fixed order -- the chunk ending on the boundary, then the others by
-   * how far they run -- so the same store always gives the same row.
-   */
+  The records of earlier chunks that reach into the hour of `key`, as the
+  table will hold them once everything the page has built is committed.
+
+  In a fixed order -- the chunk ending on the boundary, then the others by
+  how far they run -- so the same store always gives the same row.
+  */
   into(key: ChunkKey): HcRecord[] {
     const reaching = new Map(this.snapshot.get(keyId(key)));
     for (const [id, chunk] of this.written) {

@@ -1,43 +1,43 @@
 /**
- * A small RFC 6265 cookie jar.
- *
- * The portal is a server-rendered application behind a session cookie, so the
- * scrape needs a jar. It does not need a general-purpose one: no third-party
- * rules, no public-suffix list, no SameSite (nothing here is a browser
- * navigation). What it does need to get right is the handful of rules that are
- * security-relevant or that break a login when they are wrong:
- *
- *  - **Domain rejection (§5.3 step 6).** A `Domain=` attribute that does not
- *    domain-match the host that sent it is refused. Without this, one redirect
- *    hop through a vanity host could plant a cookie that this jar would then
- *    send to a different host -- the jar would become the confused deputy.
- *  - **Public-suffix rejection (§5.3 step 5).** A `Domain=` that names a public
- *    suffix is refused too. `a.b.example.co.uk` domain-matches `co.uk`, so the
- *    rule above alone would let a response set a cookie for every `*.co.uk`
- *    host. `site.ts` holds the small eTLD+1 heuristic that answers it -- not a
- *    real public-suffix list, which a Worker has no room for, and this jar only
- *    ever talks to one known portal.
- *  - **Host-only vs domain cookies (§5.3 step 7).** No `Domain` attribute means
- *    the cookie goes back only to that exact host.
- *  - **Default path (§5.1.4).** The directory of the request path, not "/".
- *    A deployment mounted under a prefix sets cookies scoped to that prefix.
- *  - **`Secure`.** Never sent over plain http, whatever the jar holds.
- *  - **`Max-Age` beats `Expires` (§5.3 step 3)**, and a non-positive `Max-Age`
- *    deletes the cookie immediately.
- *  - **Send order (§5.4).** Longer paths first, then oldest first. Some
- *    applications read the first of two same-named cookies.
- *
- * **Session cookies are persisted.** A cookie with no expiry is, by the letter
- * of the spec, discarded when the "session" ends -- but the whole point of
- * sealing this jar into D1 is that the *next* scheduled run inherits a working
- * session and does not have to ask the owner for an emailed code. So a session
- * cookie survives serialisation here, and `isSessionAlive()` on the client is
- * what deals with the case where the server forgot about it. That is a
- * deliberate deviation, not an oversight.
- *
- * Nothing in this module logs. A cookie value is a credential; the jar's own
- * failures are returned as booleans and the caller decides what to say.
- */
+A small RFC 6265 cookie jar.
+
+The portal is a server-rendered application behind a session cookie, so the
+scrape needs a jar. It does not need a general-purpose one: no third-party
+rules, no public-suffix list, no SameSite (nothing here is a browser
+navigation). What it does need to get right is the handful of rules that are
+security-relevant or that break a login when they are wrong:
+
+ - **Domain rejection (§5.3 step 6).** A `Domain=` attribute that does not
+   domain-match the host that sent it is refused. Without this, one redirect
+   hop through a vanity host could plant a cookie that this jar would then
+   send to a different host -- the jar would become the confused deputy.
+ - **Public-suffix rejection (§5.3 step 5).** A `Domain=` that names a public
+   suffix is refused too. `a.b.example.co.uk` domain-matches `co.uk`, so the
+   rule above alone would let a response set a cookie for every `*.co.uk`
+   host. `site.ts` holds the small eTLD+1 heuristic that answers it -- not a
+   real public-suffix list, which a Worker has no room for, and this jar only
+   ever talks to one known portal.
+ - **Host-only vs domain cookies (§5.3 step 7).** No `Domain` attribute means
+   the cookie goes back only to that exact host.
+ - **Default path (§5.1.4).** The directory of the request path, not "/".
+   A deployment mounted under a prefix sets cookies scoped to that prefix.
+ - **`Secure`.** Never sent over plain http, whatever the jar holds.
+ - **`Max-Age` beats `Expires` (§5.3 step 3)**, and a non-positive `Max-Age`
+   deletes the cookie immediately.
+ - **Send order (§5.4).** Longer paths first, then oldest first. Some
+   applications read the first of two same-named cookies.
+
+**Session cookies are persisted.** A cookie with no expiry is, by the letter
+of the spec, discarded when the "session" ends -- but the whole point of
+sealing this jar into D1 is that the *next* scheduled run inherits a working
+session and does not have to ask the owner for an emailed code. So a session
+cookie survives serialisation here, and `isSessionAlive()` on the client is
+what deals with the case where the server forgot about it. That is a
+deliberate deviation, not an oversight.
+
+Nothing in this module logs. A cookie value is a credential; the jar's own
+failures are returned as booleans and the caller decides what to say.
+*/
 
 import { isPublicSuffix } from "./site.ts";
 
@@ -62,19 +62,19 @@ export interface CookieJarState {
   v: 1;
   cookies: StoredCookie[];
   /**
-   * Non-cookie scraps a login flavour has to carry between invocations.
-   *
-   * The sign-in is spread across invocations by design: the password POST happens
-   * in one, and the emailed code is submitted in another with a brand-new client,
-   * so the sealed jar is the *only* thing the second one inherits. A flavour whose
-   * verify call needs more than a cookie -- the OpenID one needs the correlation
-   * id it generated and the user id the login answered with -- has nowhere else to
-   * put them.
-   *
-   * Never sent in a `Cookie` header, and treated as exactly as sensitive as a
-   * cookie value, because it is sealed in the same column. `v` stays 1: an older
-   * reader ignores an unknown field and a newer reader tolerates its absence.
-   */
+  Non-cookie scraps a login flavour has to carry between invocations.
+
+  The sign-in is spread across invocations by design: the password POST happens
+  in one, and the emailed code is submitted in another with a brand-new client,
+  so the sealed jar is the *only* thing the second one inherits. A flavour whose
+  verify call needs more than a cookie -- the OpenID one needs the correlation
+  id it generated and the user id the login answered with -- has nowhere else to
+  put them.
+
+  Never sent in a `Cookie` header, and treated as exactly as sensitive as a
+  cookie value, because it is sealed in the same column. `v` stays 1: an older
+  reader ignores an unknown field and a newer reader tolerates its absence.
+  */
   extras?: Record<string, string>;
 }
 
@@ -100,14 +100,14 @@ function parseNameValue(pair: string): { name: string; value: string } | null {
 }
 
 /**
- * §5.1.3 plus §5.3 step 5: a domain must be a label-boundary suffix of the host,
- * and must not be a public suffix.
- *
- * The public-suffix half is the one RFC 6265 rule this module's header always
- * claimed to care about and did not implement: `a.b.example.co.uk` *does* end in
- * `.co.uk`, so without it a portal response could set a cookie the jar would then
- * send to every unrelated host under that suffix.
- */
+§5.1.3 plus §5.3 step 5: a domain must be a label-boundary suffix of the host,
+and must not be a public suffix.
+
+The public-suffix half is the one RFC 6265 rule this module's header always
+claimed to care about and did not implement: `a.b.example.co.uk` *does* end in
+`.co.uk`, so without it a portal response could set a cookie the jar would then
+send to every unrelated host under that suffix.
+*/
 export function domainMatches(host: string, domain: string): boolean {
   if (host === domain) return true;
   if (!host.endsWith(`.${domain}`)) return false;
@@ -168,13 +168,13 @@ function isStoredCookie(value: unknown): value is StoredCookie {
 
 export class CookieJar {
   /**
-   * Rebuild a jar from what `serialise()` wrote.
-   *
-   * Tolerant by design: a jar is a cache, and the only cost of an unreadable one
-   * is a fresh sign-in. Malformed entries are dropped and unparseable JSON
-   * yields an empty jar rather than an exception the caller would have to
-   * distinguish from a real failure.
-   */
+  Rebuild a jar from what `serialise()` wrote.
+
+  Tolerant by design: a jar is a cache, and the only cost of an unreadable one
+  is a fresh sign-in. Malformed entries are dropped and unparseable JSON
+  yields an empty jar rather than an exception the caller would have to
+  distinguish from a real failure.
+  */
   static deserialise(json: string, options: CookieJarOptions = {}): CookieJar {
     const jar = new CookieJar(options);
     let parsed: unknown;
@@ -282,11 +282,11 @@ export class CookieJar {
   }
 
   /**
-   * The value of the cookie of this name that would be sent to `url`, or null.
-   *
-   * For a cookie a portal's *script* reads back -- the trust-this-device token
-   * is one -- where the request has to carry the value in its body as well.
-   */
+  The value of the cookie of this name that would be sent to `url`, or null.
+
+  For a cookie a portal's *script* reads back -- the trust-this-device token
+  is one -- where the request has to carry the value in its body as well.
+  */
   valueOf(url: string, name: string): string | null {
     return this.matching(url).find((cookie) => cookie.name === name)?.value ?? null;
   }
@@ -297,14 +297,14 @@ export class CookieJar {
   }
 
   /**
-   * Store every `Set-Cookie` on a response.
-   *
-   * `getSetCookie()` rather than `get("set-cookie")`: several cookies arrive as
-   * several headers, and `get` joins them with ", " -- which is unsplittable,
-   * because an `Expires` date contains a comma too. Both workerd and Node 18.14+
-   * implement `getSetCookie`; the fallback is a single header, which is the
-   * common case anyway.
-   */
+  Store every `Set-Cookie` on a response.
+
+  `getSetCookie()` rather than `get("set-cookie")`: several cookies arrive as
+  several headers, and `get` joins them with ", " -- which is unsplittable,
+  because an `Expires` date contains a comma too. Both workerd and Node 18.14+
+  implement `getSetCookie`; the fallback is a single header, which is the
+  common case anyway.
+  */
   setFromResponse(url: string, response: Response): number {
     const headers: string[] =
       typeof response.headers.getSetCookie === "function"
@@ -318,11 +318,11 @@ export class CookieJar {
   }
 
   /**
-   * Store one `Set-Cookie` header value.
-   *
-   * Returns false when the cookie was refused (unparseable, or a `Domain` the
-   * sending host has no business setting) or when it was a deletion.
-   */
+  Store one `Set-Cookie` header value.
+
+  Returns false when the cookie was refused (unparseable, or a `Domain` the
+  sending host has no business setting) or when it was a deletion.
+  */
   setCookie(url: string, header: string): boolean {
     let requestUrl: URL;
     try {
@@ -374,11 +374,11 @@ export class CookieJar {
   }
 
   /**
-   * The `Cookie` header value for `url`, or null when nothing matches.
-   *
-   * Null rather than an empty string: an empty `Cookie` header is a distinct
-   * request shape, and this scrape is trying not to have a distinct shape.
-   */
+  The `Cookie` header value for `url`, or null when nothing matches.
+
+  Null rather than an empty string: an empty `Cookie` header is a distinct
+  request shape, and this scrape is trying not to have a distinct shape.
+  */
   getCookieHeader(url: string): string | null {
     const matching = this.matching(url);
     if (matching.length === 0) return null;

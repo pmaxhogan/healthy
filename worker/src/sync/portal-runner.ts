@@ -1,53 +1,53 @@
 /**
- * The Durable Object that signs in to a patient portal while the owner watches.
- *
- * ### Why an alarm loop and not `waitUntil`
- *
- * A portal sign-in usually needs a code the portal emails, so it is not a request
- * that can be awaited: the code arrives seconds to minutes later, in
- * `mail_inbox`, via the inbound email handler. Work handed to a request's
- * `ctx.waitUntil` is cancelled about thirty seconds after the response is
- * written -- mid-`await`, with the invocation still reported as `ok` -- so a
- * sign-in started that way would silently stop in the middle, having already
- * spent an attempt and asked the portal for a code nobody will ever submit.
- *
- * So `POST /api/health-systems/:id/portal/sign-in` stores a job here and answers 202.
- * Each alarm invocation does **one** step -- log in, or look once for the code --
- * and re-arms ten seconds later while there is more to do. No invocation ever
- * sleeps, every one gets a fresh deadline, and the job is durable, so a step that
- * dies is a failed job rather than a lost one.
- *
- * ### One object per health system, and three storage keys
- *
- * The object is addressed by health system id, so two health systems sign in
- * independently and pressing the button twice for one of them is a no-op rather
- * than two interleaved sign-ins that would burn the daily attempt budget between
- * them.
- *
- *   - `job` is the work in flight, and is deleted the moment it ends.
- *   - `phase` is what the admin UI polls, and **outlives** the job: after a
- *     sign-in the owner is still looking at the card, and "it failed, with this
- *     code" has to survive long enough to be read.
- *   - `signin_lock` is the gate **every** sign-in takes, including the hourly
- *     cron's inline one, which used to be outside all of this. See
- *     `portal-gate.ts` for why that mattered and why the lock lives here.
- *
- * Only a real sign-in moves `phase`. A manual portal sync whose session is
- * already alive does not touch it -- its progress is a `run_log` row, which is
- * what the Runs page is for. A manual sync that *does* have to sign in first moves
- * the phase exactly as the button would, because that is what is happening.
- *
- * ### Nothing here ever rethrows
- *
- * `runner.ts` deliberately lets a storage throw propagate so the platform retries
- * the chunk; that is safe because a refresh chunk is idempotent. A login is not:
- * a retried alarm would spend a second attempt against the portal's lockout
- * counter for the same button press. So every step is wrapped, and any throw
- * becomes `phase: "failed"` with a stable code and a job that is over.
- *
- * Stored state is a health system id, a step name, counts and stable codes. Never the
- * emailed code, never a credential, never anything from the portal's HTML.
- */
+The Durable Object that signs in to a patient portal while the owner watches.
+
+### Why an alarm loop and not `waitUntil`
+
+A portal sign-in usually needs a code the portal emails, so it is not a request
+that can be awaited: the code arrives seconds to minutes later, in
+`mail_inbox`, via the inbound email handler. Work handed to a request's
+`ctx.waitUntil` is cancelled about thirty seconds after the response is
+written -- mid-`await`, with the invocation still reported as `ok` -- so a
+sign-in started that way would silently stop in the middle, having already
+spent an attempt and asked the portal for a code nobody will ever submit.
+
+So `POST /api/health-systems/:id/portal/sign-in` stores a job here and answers 202.
+Each alarm invocation does **one** step -- log in, or look once for the code --
+and re-arms ten seconds later while there is more to do. No invocation ever
+sleeps, every one gets a fresh deadline, and the job is durable, so a step that
+dies is a failed job rather than a lost one.
+
+### One object per health system, and three storage keys
+
+The object is addressed by health system id, so two health systems sign in
+independently and pressing the button twice for one of them is a no-op rather
+than two interleaved sign-ins that would burn the daily attempt budget between
+them.
+
+  - `job` is the work in flight, and is deleted the moment it ends.
+  - `phase` is what the admin UI polls, and **outlives** the job: after a
+    sign-in the owner is still looking at the card, and "it failed, with this
+    code" has to survive long enough to be read.
+  - `signin_lock` is the gate **every** sign-in takes, including the hourly
+    cron's inline one, which used to be outside all of this. See
+    `portal-gate.ts` for why that mattered and why the lock lives here.
+
+Only a real sign-in moves `phase`. A manual portal sync whose session is
+already alive does not touch it -- its progress is a `run_log` row, which is
+what the Runs page is for. A manual sync that *does* have to sign in first moves
+the phase exactly as the button would, because that is what is happening.
+
+### Nothing here ever rethrows
+
+`runner.ts` deliberately lets a storage throw propagate so the platform retries
+the chunk; that is safe because a refresh chunk is idempotent. A login is not:
+a retried alarm would spend a second attempt against the portal's lockout
+counter for the same button press. So every step is wrapped, and any throw
+becomes `phase: "failed"` with a stable code and a job that is over.
+
+Stored state is a health system id, a step name, counts and stable codes. Never the
+emailed code, never a credential, never anything from the portal's HTML.
+*/
 
 import { DurableObject } from "cloudflare:workers";
 
@@ -85,13 +85,13 @@ const PHASE_KEY = "phase";
 const LOCK_KEY = "signin_lock";
 
 /**
- * When a held gate is treated as abandoned.
- *
- * The same figure as `JOB_STALE_SECONDS` on purpose: a gate is held either by a
- * job in this object (which expires on the same clock) or by a cron pass whose
- * longest possible sign-in is the same four-minute code wait plus a sync. It
- * exists only so a driver that died cannot wedge a health system for ever.
- */
+When a held gate is treated as abandoned.
+
+The same figure as `JOB_STALE_SECONDS` on purpose: a gate is held either by a
+job in this object (which expires on the same clock) or by a cron pass whose
+longest possible sign-in is the same four-minute code wait plus a sync. It
+exists only so a driver that died cannot wedge a health system for ever.
+*/
 const LOCK_STALE_SECONDS = 15 * 60;
 
 /** Who holds the gate, and since when. */
@@ -105,12 +105,12 @@ interface SignInLock {
 const MAX_POLLS = Math.ceil(OTP_WAIT_SECONDS / OTP_POLL_SECONDS);
 
 /**
- * When a stored job is treated as abandoned rather than as one in flight.
- *
- * Generously longer than the longest real job (a four-minute code wait plus a
- * sync), and it exists only so that a job whose alarm somehow never fired cannot
- * make the button answer `started: false` for ever.
- */
+When a stored job is treated as abandoned rather than as one in flight.
+
+Generously longer than the longest real job (a four-minute code wait plus a
+sync), and it exists only so that a job whose alarm somehow never fired cannot
+make the button answer `started: false` for ever.
+*/
 const JOB_STALE_SECONDS = 15 * 60;
 
 /** What the phase reads before anything has ever run. */
@@ -147,12 +147,12 @@ export interface PortalJobStarted {
 
 export class PortalSignInRunner extends DurableObject<Env> {
   /**
-   * Take the gate, or report that someone else has it.
-   *
-   * A Durable Object is single-threaded per id, so the read-then-write below is
-   * atomic with respect to every other caller for this health system -- which is the
-   * whole reason the lock lives here rather than in D1.
-   */
+  Take the gate, or report that someone else has it.
+
+  A Durable Object is single-threaded per id, so the read-then-write below is
+  atomic with respect to every other caller for this health system -- which is the
+  whole reason the lock lives here rather than in D1.
+  */
   private async takeLock(holder: string): Promise<boolean> {
     const existing = await this.ctx.storage.get<SignInLock>(LOCK_KEY);
     if (existing !== undefined && nowSeconds() - existing.heldAt < LOCK_STALE_SECONDS) {
@@ -314,13 +314,13 @@ export class PortalSignInRunner extends DurableObject<Env> {
   }
 
   /**
-   * Queue a job for this object's health system and return.
-   *
-   * A storage write and an alarm, so the route can await it and still answer 202
-   * well inside any deadline. The daily attempt budget is checked by the route --
-   * which has somewhere to report a 429 -- and again by the first step, because a
-   * job can sit in storage while another run spends the last attempt.
-   */
+  Queue a job for this object's health system and return.
+
+  A storage write and an alarm, so the route can await it and still answer 202
+  well inside any deadline. The daily attempt budget is checked by the route --
+  which has somewhere to report a 429 -- and again by the first step, because a
+  job can sit in storage while another run spends the last attempt.
+  */
   async start(healthSystemId: string, kind: PortalJobKind): Promise<PortalJobStarted> {
     const existing = await this.ctx.storage.get<PortalJob>(JOB_KEY);
     if (existing !== undefined && nowSeconds() - existing.startedAt < JOB_STALE_SECONDS) {
@@ -398,13 +398,13 @@ export async function startPortalSignIn(
 }
 
 /**
- * Queue a portal sync for one health system.
- *
- * Not `afterResponse`: a portal sync may have to re-establish the session, which
- * is minutes of waiting for an emailed code, and a request's `waitUntil` is
- * cancelled long before that. The job signs in through the same alarm loop the
- * button uses and then runs a portal-only calendar run.
- */
+Queue a portal sync for one health system.
+
+Not `afterResponse`: a portal sync may have to re-establish the session, which
+is minutes of waiting for an emailed code, and a request's `waitUntil` is
+cancelled long before that. The job signs in through the same alarm loop the
+button uses and then runs a portal-only calendar run.
+*/
 export async function startPortalSync(
   ctx: Ctx,
   options: { healthSystemId: string },

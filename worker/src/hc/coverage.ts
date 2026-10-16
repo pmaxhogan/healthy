@@ -1,36 +1,36 @@
 /**
- * Health Connect coverage: a paired phone's record types, in the vocabulary of
- * the MCP `coverage[]` array.
- *
- * Pure: a device row and its `hc_sync_state` rows in, `CoverageEntry[]` out, so
- * the staleness boundary can be tested without a database.
- *
- * A phone is a source, not a health system, so its entries are keyed
- * `healthSystemId: "device:<id>"` and `resourceType: "hc:<Type>"`. That is what
- * lets the exposure policy's deny-list treat them exactly like FHIR pairs.
- *
- * There are TWO mappings here, for two readers who need different things:
- *
- *  - {@link adminDeviceCoverage}, for the owner's Phone page. The owner manages
- *    what the companion app may read there, so it tells the whole truth about
- *    every type the phone has reported, the state of its permission included.
- *  - {@link mcpDeviceCoverage}, for everything an MCP client sees. A client is
- *    told about data, not about permissions: a type is there when the store
- *    holds a record of it and absent when it holds none, whatever the phone
- *    said about being allowed to read it. See that function.
- *
- * Admin status, in the order the checks run:
- *
- *   1. `unsupported` -- the phone says the type is not permitted (the owner
- *      refused it) or not available (the installed Health Connect lacks it). The
- *      notice says which. Not a failure of anything.
- *   2. `never`       -- the phone has not reported the type (no row, or a row
- *      whose permission is still `unknown`), or has never uploaded at all.
- *   3. `stale`       -- the device is revoked, or its last upload is older than
- *      {@link HC_STALE_AFTER_SECONDS}.
- *   4. `ok`          -- everything else, including a granted type with no
- *      records: that is "permitted, no data", and `recordCount: 0` says so.
- */
+Health Connect coverage: a paired phone's record types, in the vocabulary of
+the MCP `coverage[]` array.
+
+Pure: a device row and its `hc_sync_state` rows in, `CoverageEntry[]` out, so
+the staleness boundary can be tested without a database.
+
+A phone is a source, not a health system, so its entries are keyed
+`healthSystemId: "device:<id>"` and `resourceType: "hc:<Type>"`. That is what
+lets the exposure policy's deny-list treat them exactly like FHIR pairs.
+
+There are TWO mappings here, for two readers who need different things:
+
+ - {@link adminDeviceCoverage}, for the owner's Phone page. The owner manages
+   what the companion app may read there, so it tells the whole truth about
+   every type the phone has reported, the state of its permission included.
+ - {@link mcpDeviceCoverage}, for everything an MCP client sees. A client is
+   told about data, not about permissions: a type is there when the store
+   holds a record of it and absent when it holds none, whatever the phone
+   said about being allowed to read it. See that function.
+
+Admin status, in the order the checks run:
+
+  1. `unsupported` -- the phone says the type is not permitted (the owner
+     refused it) or not available (the installed Health Connect lacks it). The
+     notice says which. Not a failure of anything.
+  2. `never`       -- the phone has not reported the type (no row, or a row
+     whose permission is still `unknown`), or has never uploaded at all.
+  3. `stale`       -- the device is revoked, or its last upload is older than
+     {@link HC_STALE_AFTER_SECONDS}.
+  4. `ok`          -- everything else, including a granted type with no
+     records: that is "permitted, no data", and `recordCount: 0` says so.
+*/
 
 import { toIso } from "../lib/time.ts";
 
@@ -38,24 +38,24 @@ import type { CoverageEntry } from "../mcp/coverage.ts";
 import type { ExplainedSyncWarning } from "../sync/sync-state-codes.ts";
 
 /**
- * How long a device may go without uploading before it is `stale`. The phone
- * syncs every 15 minutes, so six hours is many missed cycles: a phone that is
- * off, out of reach of a network, or has lost its permission to run in the
- * background. Exactly this long is still fresh; one second more is stale.
- */
+How long a device may go without uploading before it is `stale`. The phone
+syncs every 15 minutes, so six hours is many missed cycles: a phone that is
+off, out of reach of a network, or has lost its permission to run in the
+background. Exactly this long is still fresh; one second more is stale.
+*/
 export const HC_STALE_AFTER_SECONDS = 6 * 60 * 60;
 
 /**
- * How long after its last upload a phone's data is called late to an MCP
- * client: every Health Connect answer then carries a warning saying how old
- * the newest upload is. One hour is four of the phone's fifteen-minute cycles
- * missed, which is already hours of heart rate and steps an answer does not
- * have. Exactly this long is still on time.
- *
- * This is a note on an answer and nothing else. `stale` -- the coverage
- * status, the device status and what the Phone page shows -- stays at
- * {@link HC_STALE_AFTER_SECONDS}, and nothing here raises an alert.
- */
+How long after its last upload a phone's data is called late to an MCP
+client: every Health Connect answer then carries a warning saying how old
+the newest upload is. One hour is four of the phone's fifteen-minute cycles
+missed, which is already hours of heart rate and steps an answer does not
+have. Exactly this long is still on time.
+
+This is a note on an answer and nothing else. `stale` -- the coverage
+status, the device status and what the Phone page shows -- stays at
+{@link HC_STALE_AFTER_SECONDS}, and nothing here raises an alert.
+*/
 export const HC_UPLOAD_LATE_AFTER_SECONDS = 60 * 60;
 
 /** The `coverage[].healthSystemId` of a device. */
@@ -99,17 +99,17 @@ export interface DeviceCoverageInput {
   /** Unix seconds. */
   now: number;
   /**
-   * Record types to report even when the phone has sent no row for them, as
-   * `never`. Rows for other types are reported too.
-   */
+  Record types to report even when the phone has sent no row for them, as
+  `never`. Rows for other types are reported too.
+  */
   expectedTypes?: readonly string[];
 }
 
 /**
- * Seconds since `instant`, never negative. The two clocks are not ordered: an
- * upload can be stamped a moment after the instant an answer calls "now", and
- * an age of minus one hour is not something to hand anybody.
- */
+Seconds since `instant`, never negative. The two clocks are not ordered: an
+upload can be stamped a moment after the instant an answer calls "now", and
+an age of minus one hour is not something to hand anybody.
+*/
 function ageSeconds(now: number, instant: number): number {
   return Math.max(0, now - instant);
 }
@@ -120,21 +120,21 @@ export function ageHours(now: number, instant: number): number {
 }
 
 /**
- * Hours since `instant` to one decimal, never negative: what a client is told
- * of an upload's age. A floored hour hides up to an hour of missing data, at
- * exactly the ages where the difference matters.
- * {@link ageHours} stays whole: it is what `stale:...:<n>h` has always carried.
- */
+Hours since `instant` to one decimal, never negative: what a client is told
+of an upload's age. A floored hour hides up to an hour of missing data, at
+exactly the ages where the difference matters.
+{@link ageHours} stays whole: it is what `stale:...:<n>h` has always carried.
+*/
 export function hoursSince(now: number, instant: number): number {
   return Math.round(ageSeconds(now, instant) / 360) / 10;
 }
 
 /**
- * The age of a phone's last upload in hours, to one decimal, when it is late
- * enough to say so on an answer ({@link HC_UPLOAD_LATE_AFTER_SECONDS}); null
- * for a phone that is on time, has never uploaded, or is revoked -- a revoked
- * phone will not upload again, and its types already read `stale`.
- */
+The age of a phone's last upload in hours, to one decimal, when it is late
+enough to say so on an answer ({@link HC_UPLOAD_LATE_AFTER_SECONDS}); null
+for a phone that is on time, has never uploaded, or is revoked -- a revoked
+phone will not upload again, and its types already read `stale`.
+*/
 export function uploadLateHours(device: DeviceTimes, now: number): number | null {
   if (device.revokedAt !== null || device.lastUploadAt === null) return null;
   return ageSeconds(now, device.lastUploadAt) > HC_UPLOAD_LATE_AFTER_SECONDS
@@ -218,10 +218,10 @@ function sortedTypes(types: Iterable<string>): string[] {
 }
 
 /**
- * The Phone page's coverage: one entry per reported record type (plus any
- * `expectedTypes` the phone has not reported), permission states and all.
- * Never shown to an MCP client; see {@link mcpDeviceCoverage}.
- */
+The Phone page's coverage: one entry per reported record type (plus any
+`expectedTypes` the phone has not reported), permission states and all.
+Never shown to an MCP client; see {@link mcpDeviceCoverage}.
+*/
 export function adminDeviceCoverage(input: DeviceCoverageInput): CoverageEntry[] {
   const byType = new Map<string, CoverageSyncRow>();
   for (const row of input.rows) byType.set(row.recordType, row);
@@ -235,33 +235,33 @@ export interface McpCoverageInput {
   /** Unix seconds. */
   now: number;
   /**
-   * Record types the caller asked for by name. Each is reported even when the
-   * store holds nothing of it, as an empty `ok` entry (`recordCount: 0`).
-   */
+  Record types the caller asked for by name. Each is reported even when the
+  store holds nothing of it, as an empty `ok` entry (`recordCount: 0`).
+  */
   namedTypes?: readonly string[];
 }
 
 /**
- * What an MCP client is told a phone holds: one entry per record type the
- * store has at least one record of, and nothing else.
- *
- * The rule is about stored records and nothing but. A type with none is
- * simply not there -- it makes no difference whether the phone was allowed to
- * read it, refused, cannot offer it, or never mentioned it: the owner does not
- * have that data, by design as often as not, and a client told "not
- * permitted" goes on to tell the owner to grant something that does not
- * exist. The first record stored makes the type appear, with no list to
- * update: this reads `recordCount`, which the store recounts from its chunks.
- *
- * A type that HAS records reads as its data, `ok` or `stale` by when the phone
- * last uploaded. That stays true after its permission is taken away: the
- * records are still here, and once uploads stop arriving the phone goes
- * stale like any other that has stopped.
- *
- * A type the caller named gets an entry either way, so a question about it is
- * answered rather than ignored: `ok` with `recordCount: 0`, the same for every
- * reason there might be nothing.
- */
+What an MCP client is told a phone holds: one entry per record type the
+store has at least one record of, and nothing else.
+
+The rule is about stored records and nothing but. A type with none is
+simply not there -- it makes no difference whether the phone was allowed to
+read it, refused, cannot offer it, or never mentioned it: the owner does not
+have that data, by design as often as not, and a client told "not
+permitted" goes on to tell the owner to grant something that does not
+exist. The first record stored makes the type appear, with no list to
+update: this reads `recordCount`, which the store recounts from its chunks.
+
+A type that HAS records reads as its data, `ok` or `stale` by when the phone
+last uploaded. That stays true after its permission is taken away: the
+records are still here, and once uploads stop arriving the phone goes
+stale like any other that has stopped.
+
+A type the caller named gets an entry either way, so a question about it is
+answered rather than ignored: `ok` with `recordCount: 0`, the same for every
+reason there might be nothing.
+*/
 export function mcpDeviceCoverage(input: McpCoverageInput): CoverageEntry[] {
   const { device, now } = input;
   const byType = new Map<string, CoverageSyncRow>();

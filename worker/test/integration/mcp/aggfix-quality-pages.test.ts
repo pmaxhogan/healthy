@@ -51,10 +51,10 @@ const iso = (ms: number): string => new Date(ms).toISOString();
 const seeded = { source: "" };
 
 /**
- * Something to find every few weeks, for three and a half years: a session
- * nobody stopped (four hours, nothing measured during it), and a
- * blood-pressure reading a second app wrote again.
- */
+Something to find every few weeks, for three and a half years: a session
+nobody stopped (four hours, nothing measured during it), and a
+blood-pressure reading a second app wrote again.
+*/
 function history(): HcRecord[] {
   const records: HcRecord[] = [];
   for (let day = 5; day < HISTORY_DAYS; day += 47) {

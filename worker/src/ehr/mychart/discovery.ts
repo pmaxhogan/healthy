@@ -1,33 +1,33 @@
 /**
- * Find out where a portal actually lives, and which shape its login form is.
- *
- * Deployments of the same product are mounted under a vanity prefix, a generic
- * prefix, or nothing at all; some hostnames are aliases that redirect -- with a
- * `Location` header, or with a `<meta refresh>`, or with a one-line
- * `window.location` -- to a different host entirely. And the login form's
- * username field was renamed between releases, so the field name has to be read
- * rather than assumed.
- *
- * Three hard rules:
- *
- *  - **Credentials are never sent from this module.** Every probe is an
- *    unauthenticated GET of the login page. Whatever a wrong guess reaches, it
- *    reaches without a password.
- *  - **No cookie jar.** A probe against the wrong mount (or a redirect chain
- *    through an alias) must not be able to plant a cookie that a later
- *    authenticated session would carry.
- *  - **The origin this reports is https, and on the site the owner pasted.**
- *    What comes out of here becomes `portal_accounts.base_url`, which is where
- *    the owner's portal password is POSTed from then on -- so the chain is not
- *    allowed to relocate it (`portalFetch` refuses an off-site or non-https hop)
- *    and the landed origin is re-checked here before it is reported. The owner
- *    then confirms that origin before any credential is sealed against it; see
- *    `worker/src/api/routes/portal.ts`.
- *
- * The mount is taken from where the probe *landed*, not from the candidate that
- * was tried: a root-mounted probe that gets redirected to a prefix has, in one
- * request, discovered the prefix. That is why the candidate list can be short.
- */
+Find out where a portal actually lives, and which shape its login form is.
+
+Deployments of the same product are mounted under a vanity prefix, a generic
+prefix, or nothing at all; some hostnames are aliases that redirect -- with a
+`Location` header, or with a `<meta refresh>`, or with a one-line
+`window.location` -- to a different host entirely. And the login form's
+username field was renamed between releases, so the field name has to be read
+rather than assumed.
+
+Three hard rules:
+
+ - **Credentials are never sent from this module.** Every probe is an
+   unauthenticated GET of the login page. Whatever a wrong guess reaches, it
+   reaches without a password.
+ - **No cookie jar.** A probe against the wrong mount (or a redirect chain
+   through an alias) must not be able to plant a cookie that a later
+   authenticated session would carry.
+ - **The origin this reports is https, and on the site the owner pasted.**
+   What comes out of here becomes `portal_accounts.base_url`, which is where
+   the owner's portal password is POSTed from then on -- so the chain is not
+   allowed to relocate it (`portalFetch` refuses an off-site or non-https hop)
+   and the landed origin is re-checked here before it is reported. The owner
+   then confirms that origin before any credential is sealed against it; see
+   `worker/src/api/routes/portal.ts`.
+
+The mount is taken from where the probe *landed*, not from the candidate that
+was tried: a root-mounted probe that gets redirected to a prefix has, in one
+request, discovered the prefix. That is why the candidate list can be short.
+*/
 
 import { AppError } from "../../lib/errors.ts";
 
@@ -62,30 +62,30 @@ export interface PortalEndpoint {
   /** The hidden field the login POST has to echo back. */
   antiforgeryFieldName: string;
   /**
-   * Which login application drives this deployment. **Absent means `classic`.**
-   *
-   * Optional rather than required so that a caller which stored only the origin
-   * and the mount -- everything written before this field existed -- still
-   * type-checks and still signs in the way it always did. Discovery always sets
-   * it, so an account rediscovered after this landed carries the real answer.
-   */
+  Which login application drives this deployment. **Absent means `classic`.**
+
+  Optional rather than required so that a caller which stored only the origin
+  and the mount -- everything written before this field existed -- still
+  type-checks and still signs in the way it always did. Discovery always sets
+  it, so an account rediscovered after this landed carries the real answer.
+  */
   flavor?: PortalFlavor | undefined;
   /**
-   * `custom_oidc` only: the origin serving the login shell and its JSON API.
-   *
-   * Discovered, as the origin the login probe's redirect chain landed on. Usually
-   * the same origin as `baseUrl`; a deployment that federates across hosts is why
-   * it is recorded separately.
-   */
+  `custom_oidc` only: the origin serving the login shell and its JSON API.
+
+  Discovered, as the origin the login probe's redirect chain landed on. Usually
+  the same origin as `baseUrl`; a deployment that federates across hosts is why
+  it is recorded separately.
+  */
   authBaseUrl?: string | undefined;
   /**
-   * `custom_oidc` only: the path prefix the login shell's JSON API is mounted at.
-   *
-   * **Not reliably discoverable, and never defaulted.** The real value names the
-   * organisation, so it can have no fallback in source: discovery makes one
-   * bounded attempt to read it off the handoff stub, and where that finds nothing
-   * the caller supplies it (`PortalAdapterDeps.custom.apiBasePath`).
-   */
+  `custom_oidc` only: the path prefix the login shell's JSON API is mounted at.
+
+  **Not reliably discoverable, and never defaulted.** The real value names the
+  organisation, so it can have no fallback in source: discovery makes one
+  bounded attempt to read it off the handoff stub, and where that finds nothing
+  the caller supplies it (`PortalAdapterDeps.custom.apiBasePath`).
+  */
   apiBasePath?: string | undefined;
 }
 
@@ -98,10 +98,10 @@ export interface DiscoveryDeps {
 }
 
 /**
- * The mount candidates to try, in order: the owner's hint, then the generic
- * prefixes. Deduplicated after normalisation, so a hint of `MyChart` and a hint
- * of `/MyChart/` cost the same one probe.
- */
+The mount candidates to try, in order: the owner's hint, then the generic
+prefixes. Deduplicated after normalisation, so a hint of `MyChart` and a hint
+of `/MyChart/` cost the same one probe.
+*/
 export function candidateMounts(mountHint?: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -117,25 +117,25 @@ export function candidateMounts(mountHint?: string): string[] {
 }
 
 /**
- * The mount implied by the URL a login-page probe landed on.
- *
- * `https://host/x/Authentication/Login` means the app is mounted at `/x/`. A
- * landing URL that is not a login page at all falls back to the candidate that
- * was tried, because there is nothing better to infer from.
- */
+The mount implied by the URL a login-page probe landed on.
+
+`https://host/x/Authentication/Login` means the app is mounted at `/x/`. A
+landing URL that is not a login page at all falls back to the candidate that
+was tried, because there is nothing better to infer from.
+*/
 export function mountFromLandedUrl(landedUrl: string, fallback: string): string {
   return mountBefore(landedUrl, [PATHS.login, PATHS.openId], fallback);
 }
 
 /**
- * The mount implied by a landing URL, given the mount-relative paths it could be.
- *
- * `markers` is tried in order and the first one found in the path wins, so
- * `.../x/Authentication/Login` and `.../x/OpenId?op=...` both yield `/x/`. The
- * second case is the whole reason this is a list: a `custom_oidc` deployment
- * redirects the login page to the handoff stub, and the mount then has to be read
- * out of *that* URL because the login path is no longer in it.
- */
+The mount implied by a landing URL, given the mount-relative paths it could be.
+
+`markers` is tried in order and the first one found in the path wins, so
+`.../x/Authentication/Login` and `.../x/OpenId?op=...` both yield `/x/`. The
+second case is the whole reason this is a list: a `custom_oidc` deployment
+redirects the login page to the handoff stub, and the mount then has to be read
+out of *that* URL because the login path is no longer in it.
+*/
 function mountBefore(landedUrl: string, markers: readonly string[], fallback: string): string {
   let path: string;
   try {
@@ -160,20 +160,20 @@ function usernameFieldOf(fields: ReadonlyMap<string, string>): UsernameField | n
 }
 
 /**
- * True when a landed page is a classic login form this client can drive: a
- * password field, a recognised username field, and an antiforgery token to
- * echo back.
- *
- * Passed as a `recognizeLanding` hook next to `isOpenIdHandoff`, for the same
- * reason that one is: a classic login page can carry a body-level redirect of
- * its own that must not be followed once the page is already known to be the
- * login form -- most notably a clickjacking guard's `else` branch, an
- * unconditional `top.location = "..."` that `bodyRedirectTarget` never reads
- * as a redirect in the first place (see `SCRIPT_ASSIGN` in `html.ts`), but
- * also anything else on the page that merely looks like a same-origin
- * `location.replace`. Exported so `client.ts` can pass the same test on its
- * own page fetches, which land on this exact page mid-session.
- */
+True when a landed page is a classic login form this client can drive: a
+password field, a recognised username field, and an antiforgery token to
+echo back.
+
+Passed as a `recognizeLanding` hook next to `isOpenIdHandoff`, for the same
+reason that one is: a classic login page can carry a body-level redirect of
+its own that must not be followed once the page is already known to be the
+login form -- most notably a clickjacking guard's `else` branch, an
+unconditional `top.location = "..."` that `bodyRedirectTarget` never reads
+as a redirect in the first place (see `SCRIPT_ASSIGN` in `html.ts`), but
+also anything else on the page that merely looks like a same-origin
+`location.replace`. Exported so `client.ts` can pass the same test on its
+own page fetches, which land on this exact page mid-session.
+*/
 export function isLoginPage(landed: { body: string }): boolean {
   const fields = inputFields(landed.body);
   const hasCredentialFields = fields.has(FIELDS.password) && usernameFieldOf(fields) !== null;
@@ -259,18 +259,18 @@ async function probe(mount: string, baseUrl: string, deps: DiscoveryDeps): Promi
 }
 
 /**
- * Probe `baseUrl` until a login page answers, and report how to drive it.
- *
- * Throws a stable code, never a message with the host in it:
- *   - `portal_bot_blocked`  a WAF or challenge page answered (from `portalFetch`)
- *   - `portal_unreachable`  nothing answered
- *   - `portal_parse_failed` something answered, but no candidate was a login page
- *
- * A `portal_bot_blocked` or `portal_unreachable` from any single candidate ends
- * the whole discovery rather than moving on: both mean the host is not going to
- * talk to us, and hammering the remaining mounts after a bot block is the one
- * thing most likely to make it permanent.
- */
+Probe `baseUrl` until a login page answers, and report how to drive it.
+
+Throws a stable code, never a message with the host in it:
+  - `portal_bot_blocked`  a WAF or challenge page answered (from `portalFetch`)
+  - `portal_unreachable`  nothing answered
+  - `portal_parse_failed` something answered, but no candidate was a login page
+
+A `portal_bot_blocked` or `portal_unreachable` from any single candidate ends
+the whole discovery rather than moving on: both mean the host is not going to
+talk to us, and hammering the remaining mounts after a bot block is the one
+thing most likely to make it permanent.
+*/
 export async function discoverPortal(
   baseUrl: string,
   deps: DiscoveryDeps,

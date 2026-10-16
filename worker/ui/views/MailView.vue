@@ -32,14 +32,14 @@ const pendingVerification = computed(() =>
 );
 
 /**
- * Defense in depth for `pendingVerification.pendingUrl`: a URL out of an
- * email body is untrusted input all the way to the browser, so this template
- * never renders an `<a href>` from it without checking the scheme here too --
- * even though the Worker's classify.ts already refuses to extract, seal or
- * return anything but a real `https://…google.com` link in the first place.
- * A `javascript:` or `data:` URL fails `new URL()`'s protocol check and is
- * simply not linked.
- */
+Defense in depth for `pendingVerification.pendingUrl`: a URL out of an
+email body is untrusted input all the way to the browser, so this template
+never renders an `<a href>` from it without checking the scheme here too --
+even though the Worker's classify.ts already refuses to extract, seal or
+return anything but a real `https://…google.com` link in the first place.
+A `javascript:` or `data:` URL fails `new URL()`'s protocol check and is
+simply not linked.
+*/
 function isSafeHttpsUrl(url: string | null): boolean {
   if (!url) return false;
   try {

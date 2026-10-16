@@ -1,85 +1,85 @@
 /**
- * Alerts -- a connection to renew, a sync that keeps failing, a phone's uploads
- * set aside: the D1 row, the Trello card, and the promise that neither can
- * break a sync.
- *
- * Two guarantees this module exists to make.
- *
- * **Nothing here ever throws into the sync.** A broken Trello token, a missing
- * list id, a 500 from Trello: all of it is caught and logged. An appointment sync
- * that fails because the *alert* about a previous failure failed would be the
- * worst possible failure mode, so every entry point is wrapped.
- *
- * **The row is the truth, the card is a convenience.** The `alerts` table's
- * partial unique index is what stops the hourly sync opening a new card every
- * hour a connection stays broken, so the row is written first and the card only
- * when the row was newly created. If Trello is unconfigured the row still lands
- * and the admin UI still shows the alert. A card that could not be created is
- * tried again by whatever next reports the same condition, and
- * `sweepReconnectAlerts` is what reports a condition nothing else will.
- *
- * ### Two kinds of broken, and one open alert per subject
- *
- * `reconnect` is "the owner has to act now": a refresh token was rejected, a
- * portal sign-in failed and the scheduled sync has stopped trying. It is opened
- * the moment that happens.
- *
- * `sync_failing` is everything else that stops a sync while the connection is
- * still authorised -- a token endpoint answering 500, a search that fails, a
- * page that stops parsing, a calendar that refuses writes. One of those is a
- * blip and says nothing; the same pass failing `FAILING_AFTER_ATTEMPTS` times
- * running, over at least `FAILING_MIN_SPAN_SECONDS`, is a fault the owner should
- * hear about. The streak is counted in `sync_failures`, per subject and per
- * pass, and the alert completes itself when the pass next works.
- *
- * A subject has at most one open alert, of either kind (the index is on the
- * subject alone). A failing sync does not stack on an open reconnect card: the
- * reconnect is the fix, and the card already says so. The other way round, a
- * reconnect *replaces* an open `sync_failing` alert, because a card saying
- * "nothing needs reconnecting" has just stopped being true. Each kind is closed
- * only by its own success signal: a token refresh that works closes a
- * `reconnect` alert and leaves a `sync_failing` one alone, since a good token
- * is exactly the state in which a sync can still be failing.
- *
- * ### Where the line is
- *
- * Not everything that goes wrong is a broken sync, and a card for a state that
- * is fine teaches the owner to ignore cards:
- *
- *  - a resource type the health system does not offer is `unsupported`, and a
- *    document type past the vendor's daily cap is deferred: neither is a failure;
- *  - a refresh in which some resource types fail and most succeed is recorded
- *    per type (`fhir_sync_state`, and so the MCP's `coverage`) and raises
- *    nothing, because one type failing at one vendor every time is a known
- *    nuisance. A refresh counts as failed when it threw, or when more of the
- *    types it attempted failed than succeeded (`full-refresh.ts`);
- *  - one visit's details page or one attachment failing is recorded on that
- *    item, not on the portal;
- *  - `needs_reauth` and `not_connected` are never counted here: the first has
- *    its reconnect card, the second is a choice;
- *  - a run that never happened (a rate-limit backoff) is not an attempt.
- *
- * And on the other side of it, things that are counted though nothing answered
- * with an error:
- *
- *  - a portal whose session has died while the scheduled run is holding back
- *    from signing in on its own (`portal_signin_deferred`, or a sign-in already
- *    in flight) is a portal that did not sync. Each of those waits ends by
- *    itself, but three runs of it is hours without the portal, and the owner
- *    can end it with "Sign in now";
- *  - a call to Google Calendar that fails anywhere in a run counts once, against
- *    Google, and not against the health system whose pass it happened in
- *    (`google-watch.ts`);
- *  - a run that throws before it reaches any subject (unreadable settings, a
- *    database error) counts against the sync itself (`noteRunOutcome`).
- *
- * An attempt is any run, the owner's "Sync now" included, which is why the
- * threshold is a count *and* a span of time.
- *
- * Log lines carry subjects (`health_system:<id>`, `portal:<id>`, `google`) and error
- * codes. Never a health system display name -- that names a real health system -- and
- * never a card body, which contains one.
- */
+Alerts -- a connection to renew, a sync that keeps failing, a phone's uploads
+set aside: the D1 row, the Trello card, and the promise that neither can
+break a sync.
+
+Two guarantees this module exists to make.
+
+**Nothing here ever throws into the sync.** A broken Trello token, a missing
+list id, a 500 from Trello: all of it is caught and logged. An appointment sync
+that fails because the *alert* about a previous failure failed would be the
+worst possible failure mode, so every entry point is wrapped.
+
+**The row is the truth, the card is a convenience.** The `alerts` table's
+partial unique index is what stops the hourly sync opening a new card every
+hour a connection stays broken, so the row is written first and the card only
+when the row was newly created. If Trello is unconfigured the row still lands
+and the admin UI still shows the alert. A card that could not be created is
+tried again by whatever next reports the same condition, and
+`sweepReconnectAlerts` is what reports a condition nothing else will.
+
+### Two kinds of broken, and one open alert per subject
+
+`reconnect` is "the owner has to act now": a refresh token was rejected, a
+portal sign-in failed and the scheduled sync has stopped trying. It is opened
+the moment that happens.
+
+`sync_failing` is everything else that stops a sync while the connection is
+still authorised -- a token endpoint answering 500, a search that fails, a
+page that stops parsing, a calendar that refuses writes. One of those is a
+blip and says nothing; the same pass failing `FAILING_AFTER_ATTEMPTS` times
+running, over at least `FAILING_MIN_SPAN_SECONDS`, is a fault the owner should
+hear about. The streak is counted in `sync_failures`, per subject and per
+pass, and the alert completes itself when the pass next works.
+
+A subject has at most one open alert, of either kind (the index is on the
+subject alone). A failing sync does not stack on an open reconnect card: the
+reconnect is the fix, and the card already says so. The other way round, a
+reconnect *replaces* an open `sync_failing` alert, because a card saying
+"nothing needs reconnecting" has just stopped being true. Each kind is closed
+only by its own success signal: a token refresh that works closes a
+`reconnect` alert and leaves a `sync_failing` one alone, since a good token
+is exactly the state in which a sync can still be failing.
+
+### Where the line is
+
+Not everything that goes wrong is a broken sync, and a card for a state that
+is fine teaches the owner to ignore cards:
+
+ - a resource type the health system does not offer is `unsupported`, and a
+   document type past the vendor's daily cap is deferred: neither is a failure;
+ - a refresh in which some resource types fail and most succeed is recorded
+   per type (`fhir_sync_state`, and so the MCP's `coverage`) and raises
+   nothing, because one type failing at one vendor every time is a known
+   nuisance. A refresh counts as failed when it threw, or when more of the
+   types it attempted failed than succeeded (`full-refresh.ts`);
+ - one visit's details page or one attachment failing is recorded on that
+   item, not on the portal;
+ - `needs_reauth` and `not_connected` are never counted here: the first has
+   its reconnect card, the second is a choice;
+ - a run that never happened (a rate-limit backoff) is not an attempt.
+
+And on the other side of it, things that are counted though nothing answered
+with an error:
+
+ - a portal whose session has died while the scheduled run is holding back
+   from signing in on its own (`portal_signin_deferred`, or a sign-in already
+   in flight) is a portal that did not sync. Each of those waits ends by
+   itself, but three runs of it is hours without the portal, and the owner
+   can end it with "Sign in now";
+ - a call to Google Calendar that fails anywhere in a run counts once, against
+   Google, and not against the health system whose pass it happened in
+   (`google-watch.ts`);
+ - a run that throws before it reaches any subject (unreadable settings, a
+   database error) counts against the sync itself (`noteRunOutcome`).
+
+An attempt is any run, the owner's "Sync now" included, which is why the
+threshold is a count *and* a span of time.
+
+Log lines carry subjects (`health_system:<id>`, `portal:<id>`, `google`) and error
+codes. Never a health system display name -- that names a real health system -- and
+never a card body, which contains one.
+*/
 
 import { buildParkedCard } from "../alerts/parked.ts";
 import { buildReconnectCard } from "../alerts/reconnect.ts";
@@ -104,25 +104,25 @@ import type { Repos } from "../db/index.ts";
 import type { AlertRow, SyncFailureRow } from "../db/rows.ts";
 
 /**
- * Who an alert is about: the Google account, one health system's FHIR connection,
- * or one health system's patient-portal session.
- *
- * The portal is a separate subject from the FHIR connection for the same health system,
- * and that is load-bearing. They break independently and are fixed differently --
- * one is an OAuth reconnect, the other is a password and an emailed code -- so one
- * subject for both would mean a dead portal session silently closing the card
- * about a dead FHIR grant, or the reverse.
- */
+Who an alert is about: the Google account, one health system's FHIR connection,
+or one health system's patient-portal session.
+
+The portal is a separate subject from the FHIR connection for the same health system,
+and that is load-bearing. They break independently and are fixed differently --
+one is an OAuth reconnect, the other is a password and an emailed code -- so one
+subject for both would mean a dead portal session silently closing the card
+about a dead FHIR grant, or the reverse.
+*/
 export type AlertSubject = "google" | { healthSystemId: string; portal?: true };
 
 /** The label Trello cards use for the calendar account. Not a health system. */
 const GOOGLE_SUBJECT_NAME = "Google";
 
 /**
- * Who a failing sync is about: any of the above, or the run itself when it
- * stopped before reaching one. The run is never something to reconnect, so it
- * is not an `AlertSubject`.
- */
+Who a failing sync is about: any of the above, or the run itself when it
+stopped before reaching one. The run is never something to reconnect, so it
+is not an `AlertSubject`.
+*/
 type FailingSubject = AlertSubject | "run";
 
 /** `alerts.subject` for a subject. */
@@ -135,11 +135,11 @@ function subjectKey(subject: FailingSubject): string {
 }
 
 /**
- * Build the Trello client, or null when the secrets are not all present.
- *
- * All four are required together: a key with no list id cannot create a card, so
- * a partial configuration is the same as none.
- */
+Build the Trello client, or null when the secrets are not all present.
+
+All four are required together: a key with no list id cannot create a card, so
+a partial configuration is the same as none.
+*/
 function trelloFor(ctx: Ctx, trelloFetch: typeof fetch): TrelloAlerts | null {
   const { TRELLO_KEY, TRELLO_TOKEN, TRELLO_MUST_LIST_ID, TRELLO_DONE_LIST_ID } = ctx.env;
   if (
@@ -163,14 +163,14 @@ function trelloFor(ctx: Ctx, trelloFetch: typeof fetch): TrelloAlerts | null {
 }
 
 /**
- * The link the card tells the owner to open.
- *
- * Epic reconnects are per-connection, so the path carries the connection id.
- * Google has exactly one account, so it goes straight to the start of the
- * consent flow. A portal reconnect is neither, and goes to the Health systems page.
- * The origin is this app's own public domain, which is not personal data;
- * `deps.origin` overrides it for a local run or a test.
- */
+The link the card tells the owner to open.
+
+Epic reconnects are per-connection, so the path carries the connection id.
+Google has exactly one account, so it goes straight to the start of the
+consent flow. A portal reconnect is neither, and goes to the Health systems page.
+The origin is this app's own public domain, which is not personal data;
+`deps.origin` overrides it for a local run or a test.
+*/
 function reconnectUrl(origin: string, subject: AlertSubject, connectionId: string | null): string {
   if (subject === "google") return `${origin}/oauth/google/start`;
   // A portal session is not an OAuth grant: there is no consent screen to send the
@@ -184,12 +184,12 @@ function reconnectUrl(origin: string, subject: AlertSubject, connectionId: strin
 }
 
 /**
- * Portal sign-in failures the stored password has nothing to do with.
- *
- * For these the fix is "Sign in now" and nothing else, and the card says so
- * (`portal_signin` in `reconnect.ts`). Any other code keeps the card that asks
- * for the password again, which is the safe reading of a code nobody listed.
- */
+Portal sign-in failures the stored password has nothing to do with.
+
+For these the fix is "Sign in now" and nothing else, and the card says so
+(`portal_signin` in `reconnect.ts`). Any other code keeps the card that asks
+for the password again, which is the safe reading of a code nobody listed.
+*/
 const PORTAL_RETRY_CODES: ReadonlySet<string> = new Set([
   "portal_2fa_required",
   "portal_2fa_rejected",
@@ -231,11 +231,11 @@ interface CardContent {
 }
 
 /**
- * Make sure a Trello card tracks an alert row. Throws; the caller catches.
- *
- * False when no card was created: the row already has one, or Trello is not
- * configured. The row has landed either way, which is the half that matters.
- */
+Make sure a Trello card tracks an alert row. Throws; the caller catches.
+
+False when no card was created: the row already has one, or Trello is not
+configured. The row has landed either way, which is the half that matters.
+*/
 async function attachCard(
   ctx: Ctx,
   repos: Repos,
@@ -258,11 +258,11 @@ async function attachCard(
 }
 
 /**
- * Close whatever alert a subject has open and complete its card. Throws.
- *
- * The row first: a card that could not be moved is a stale card, and a row left
- * open is an alert that never ends.
- */
+Close whatever alert a subject has open and complete its card. Throws.
+
+The row first: a card that could not be moved is a stale card, and a row left
+open is an alert that never ends.
+*/
 async function closeOpenAlert(ctx: Ctx, repos: Repos, deps: SyncDeps, key: string): Promise<void> {
   const resolved = await repos.alerts.resolve(key);
   const cardId = resolved?.trello_card_id ?? null;
@@ -274,13 +274,13 @@ async function closeOpenAlert(ctx: Ctx, repos: Repos, deps: SyncDeps, key: strin
 }
 
 /**
- * Open (or re-find) the reconnect alert for a subject, and make sure a Trello
- * card tracks it.
- *
- * Idempotent: called on every failed refresh, it creates one row and one card
- * however many times the connection fails. An open `sync_failing` alert for the
- * same subject is closed first and replaced -- see the module comment.
- */
+Open (or re-find) the reconnect alert for a subject, and make sure a Trello
+card tracks it.
+
+Idempotent: called on every failed refresh, it creates one row and one card
+however many times the connection fails. An open `sync_failing` alert for the
+same subject is closed first and replaced -- see the module comment.
+*/
 export async function openReconnectAlert(
   ctx: Ctx,
   subject: AlertSubject,
@@ -328,13 +328,13 @@ export async function openReconnectAlert(
 }
 
 /**
- * Close the open reconnect alert for a subject and complete its Trello card.
- *
- * Called after every successful token refresh and every successful health system
- * sync, which is what makes the card's "this completes itself" promise true. A
- * subject with nothing open is one SELECT and no writes. A `sync_failing` alert
- * is not this function's to close: see the module comment.
- */
+Close the open reconnect alert for a subject and complete its Trello card.
+
+Called after every successful token refresh and every successful health system
+sync, which is what makes the card's "this completes itself" promise true. A
+subject with nothing open is one SELECT and no writes. A `sync_failing` alert
+is not this function's to close: see the module comment.
+*/
 export async function resolveReconnectAlert(
   ctx: Ctx,
   subject: AlertSubject,
@@ -359,23 +359,23 @@ export async function resolveReconnectAlert(
 export const FAILING_AFTER_ATTEMPTS = 3;
 
 /**
- * How long those attempts must span, as well.
- *
- * The count alone can be reached inside one bad quarter of an hour: the
- * four-hourly cron runs a calendar sync sixteen minutes after the hourly one,
- * and the owner pressing "Sync now" three times is three attempts. An hour and
- * a half is past two hourly runs and short of three, so on the hourly schedule
- * the alert opens on the third run that fails and no sooner.
- */
+How long those attempts must span, as well.
+
+The count alone can be reached inside one bad quarter of an hour: the
+four-hourly cron runs a calendar sync sixteen minutes after the hourly one,
+and the owner pressing "Sync now" three times is three attempts. An hour and
+a half is past two hourly runs and short of three, so on the hourly schedule
+the alert opens on the third run that fails and no sooner.
+*/
 export const FAILING_MIN_SPAN_SECONDS = 90 * 60;
 
 /** Which pass of a subject an outcome is for. `sync_failures.check_name`. */
 export type SyncCheck = SyncFailureRow["check_name"];
 
 /**
- * Codes that are not a failing sync. See "Where the line is" in the module
- * comment.
- */
+Codes that are not a failing sync. See "Where the line is" in the module
+comment.
+*/
 const NOT_COUNTED: ReadonlySet<string> = new Set(["needs_reauth", "not_connected"]);
 
 /** True once a streak is long enough, in attempts and in time, to be told. */
@@ -400,14 +400,14 @@ function failingKindOf(subject: FailingSubject): "google" | "health_system" | "p
 }
 
 /**
- * One pass of one subject failed: count it, and open the alert once it has
- * failed enough times running.
- *
- * Called once per attempt, where the failure is caught. Idempotent past the
- * threshold in the way `openReconnectAlert` is: one row and one card however
- * long the streak grows, and nothing at all while a reconnect alert is open
- * for the same subject. Never throws.
- */
+One pass of one subject failed: count it, and open the alert once it has
+failed enough times running.
+
+Called once per attempt, where the failure is caught. Idempotent past the
+threshold in the way `openReconnectAlert` is: one row and one card however
+long the streak grows, and nothing at all while a reconnect alert is open
+for the same subject. Never throws.
+*/
 export async function noteSyncFailure(
   ctx: Ctx,
   subject: FailingSubject,
@@ -454,12 +454,12 @@ export async function noteSyncFailure(
 }
 
 /**
- * One pass of one subject worked: end its streak, and close the subject's
- * `sync_failing` alert unless another of its passes is still failing.
- *
- * Called after every pass that works. With nothing failing that is one DELETE
- * that matches nothing and one SELECT. Never throws.
- */
+One pass of one subject worked: end its streak, and close the subject's
+`sync_failing` alert unless another of its passes is still failing.
+
+Called after every pass that works. With nothing failing that is one DELETE
+that matches nothing and one SELECT. Never throws.
+*/
 export async function noteSyncOk(
   ctx: Ctx,
   subject: FailingSubject,
@@ -481,17 +481,17 @@ export async function noteSyncOk(
 }
 
 /**
- * A whole run is over: say whether it stopped before finishing.
- *
- * Every failure a run meets inside one subject's pass is caught there and
- * counted against that subject. What is left is the run itself throwing --
- * settings that will not parse, a database error while listing what to sync --
- * which `record` catches and puts on the summary with no health system id.
- * Nothing above would ever count that, and it stops every subject at once, so
- * it has a subject of its own.
- *
- * `errors` is the run summary's list. Never throws.
- */
+A whole run is over: say whether it stopped before finishing.
+
+Every failure a run meets inside one subject's pass is caught there and
+counted against that subject. What is left is the run itself throwing --
+settings that will not parse, a database error while listing what to sync --
+which `record` catches and puts on the summary with no health system id.
+Nothing above would ever count that, and it stops every subject at once, so
+it has a subject of its own.
+
+`errors` is the run summary's list. Never throws.
+*/
 export async function noteRunOutcome(
   ctx: Ctx,
   check: SyncCheck,
@@ -504,9 +504,9 @@ export async function noteRunOutcome(
 }
 
 /**
- * A subject is no longer synced at all (switched off, disconnected): forget its
- * streaks and close its `sync_failing` alert, which nothing would ever resolve.
- */
+A subject is no longer synced at all (switched off, disconnected): forget its
+streaks and close its `sync_failing` alert, which nothing would ever resolve.
+*/
 async function dropSyncFailing(ctx: Ctx, subject: AlertSubject, deps: SyncDeps): Promise<void> {
   const key = subjectKey(subject);
   try {
@@ -524,21 +524,21 @@ async function dropSyncFailing(ctx: Ctx, subject: AlertSubject, deps: SyncDeps):
 const SWEEP_REASON = "needs_reauth";
 
 /**
- * Make sure everything that is waiting for the owner has its alert, and that
- * nothing switched off still has one for failing.
- *
- * The scheduled sync stops trying a connection or a portal account the moment
- * it is marked `needs_reauth`, so the code that marks it is the only code that
- * ever reports it -- once. If the card could not be created just then (Trello
- * was down), or the failure was one that deliberately waits (a first missed
- * verification code), or the account was already parked before alerts covered
- * its failure, nothing would ever raise it again. This is what does: it runs
- * after every scheduled sync and asks, for each thing in that state, for its
- * alert. `openReconnectAlert` is idempotent, so a subject that already has its
- * row and card costs one SELECT.
- *
- * Never throws.
- */
+Make sure everything that is waiting for the owner has its alert, and that
+nothing switched off still has one for failing.
+
+The scheduled sync stops trying a connection or a portal account the moment
+it is marked `needs_reauth`, so the code that marks it is the only code that
+ever reports it -- once. If the card could not be created just then (Trello
+was down), or the failure was one that deliberately waits (a first missed
+verification code), or the account was already parked before alerts covered
+its failure, nothing would ever raise it again. This is what does: it runs
+after every scheduled sync and asks, for each thing in that state, for its
+alert. `openReconnectAlert` is idempotent, so a subject that already has its
+row and card costs one SELECT.
+
+Never throws.
+*/
 export async function sweepReconnectAlerts(ctx: Ctx, deps: SyncDeps = {}): Promise<void> {
   try {
     const repos = makeRepos(ctx);
@@ -584,15 +584,15 @@ export async function sweepReconnectAlerts(ctx: Ctx, deps: SyncDeps = {}): Promi
 const UNNAMED_DEVICE = "a phone";
 
 /**
- * Open (or re-find) the alert for a device with uploads set aside, and make
- * sure a Trello card tracks it.
- *
- * One alert per device, however many batches are parked: called for every
- * batch that is set aside, it creates one row and one card, and an alert that
- * is already open with its card is left exactly as it is. The card carries the
- * count and the error code as they were when it was opened; the Phone page has
- * the current ones.
- */
+Open (or re-find) the alert for a device with uploads set aside, and make
+sure a Trello card tracks it.
+
+One alert per device, however many batches are parked: called for every
+batch that is set aside, it creates one row and one card, and an alert that
+is already open with its card is left exactly as it is. The card carries the
+count and the error code as they were when it was opened; the Phone page has
+the current ones.
+*/
 export async function openParkedAlert(
   ctx: Ctx,
   deviceId: string,
@@ -637,10 +637,10 @@ export async function openParkedAlert(
 }
 
 /**
- * Close a device's alert and complete its card, once it has nothing set aside
- * any more: its parked batches were queued again and applied, or it was wiped.
- * Called after every applied batch; with no alert open that is one SELECT.
- */
+Close a device's alert and complete its card, once it has nothing set aside
+any more: its parked batches were queued again and applied, or it was wiped.
+Called after every applied batch; with no alert open that is one SELECT.
+*/
 export async function resolveParkedAlert(
   ctx: Ctx,
   deviceId: string,

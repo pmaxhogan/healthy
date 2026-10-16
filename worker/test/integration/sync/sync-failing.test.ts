@@ -67,9 +67,9 @@ interface Harness {
 }
 
 /**
- * Two connected health systems, Google and Trello. A's access token is inside
- * the refresh skew, so every run of A starts at its token endpoint.
- */
+Two connected health systems, Google and Trello. A's access token is inside
+the refresh skew, so every run of A starts at its token endpoint.
+*/
 async function setup(): Promise<Harness> {
   const time = clock();
   const { log, lines } = recordingLog();

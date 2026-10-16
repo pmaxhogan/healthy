@@ -1,25 +1,25 @@
 /**
- * Reading the cache and normalizing it: the step every clinical tool shares.
- *
- * A tool describes *what* it wants -- one or more resource types, the date field
- * that kind of resource is filtered and ordered by, and any predicate of its own
- * -- and this module does the rest: pick the health systems, resolve each health system's
- * references, normalize, window, merge across health systems, order newest first.
- *
- * Two invariants it maintains that the layers above depend on:
- *
- *  - Each item carries `health_system` (the display name, which is what a model should
- *    say back to a human) and `healthSystemId` (the id, which is what the policy layer
- *    and the audit row key off). Nothing downstream has to look a health system up.
- *  - The normalized item and the raw resource behind it stay index-aligned, so
- *    `applyPolicy` dropping one drops the other.
- *
- * Nothing here talks to a health system. Every reading tool but
- * `get_document_text` reads only what a sync already cached, which is why they
- * are all fast and none of them can be made to spend an organisation's API
- * quota. (`sync_health_systems` is the tool that can, and it does not come
- * through here: see `tools/sync.ts`.)
- */
+Reading the cache and normalizing it: the step every clinical tool shares.
+
+A tool describes *what* it wants -- one or more resource types, the date field
+that kind of resource is filtered and ordered by, and any predicate of its own
+-- and this module does the rest: pick the health systems, resolve each health system's
+references, normalize, window, merge across health systems, order newest first.
+
+Two invariants it maintains that the layers above depend on:
+
+ - Each item carries `health_system` (the display name, which is what a model should
+   say back to a human) and `healthSystemId` (the id, which is what the policy layer
+   and the audit row key off). Nothing downstream has to look a health system up.
+ - The normalized item and the raw resource behind it stay index-aligned, so
+   `applyPolicy` dropping one drops the other.
+
+Nothing here talks to a health system. Every reading tool but
+`get_document_text` reads only what a sync already cached, which is why they
+are all fast and none of them can be made to spend an organisation's API
+quota. (`sync_health_systems` is the tool that can, and it does not come
+through here: see `tools/sync.ts`.)
+*/
 
 import { mapResolver, normalizeResource } from "../fhir/normalize/index.ts";
 import { isHealthSystemDenied } from "../policy/rules.ts";
@@ -52,25 +52,25 @@ export interface CollectSpec {
   /** The date this kind of item is windowed and ordered by. */
   dateOf?: ((item: NormalizedResource) => string | undefined) | undefined;
   /**
-   * A predicate of the tool's own: category, status, code match.
-   *
-   * It gets the raw resource as well as the normalized item, because the codes a
-   * caller filters on (`laboratory`, a LOINC number) survive normalization only
-   * as a display string -- `codeText` prefers `text` and then `display`, so the
-   * machine-readable code is only in the resource.
-   */
+  A predicate of the tool's own: category, status, code match.
+
+  It gets the raw resource as well as the normalized item, because the codes a
+  caller filters on (`laboratory`, a LOINC number) survive normalization only
+  as a display string -- `codeText` prefers `text` and then `display`, so the
+  machine-readable code is only in the resource.
+  */
   keep?: ((item: NormalizedResource, resource: fhir4.FhirResource) => boolean) | undefined;
   /** Rewrite the normalized item before it is tagged (appointments do this). */
   project?: ((item: NormalizedResource) => TaggedItem) | undefined;
 }
 
 /**
- * Build a spec for one resource type with the narrowed item type in hand.
- *
- * Without this every `dateOf` and `keep` in the tool layer would have to
- * re-narrow the `NormalizedResource` union by hand, which is noise that hides
- * what the predicate actually says.
- */
+Build a spec for one resource type with the narrowed item type in hand.
+
+Without this every `dateOf` and `keep` in the tool layer would have to
+re-narrow the `NormalizedResource` union by hand, which is noise that hides
+what the predicate actually says.
+*/
 export function spec<K extends NormalizedResource["resourceType"]>(
   resourceType: K,
   options: {
@@ -113,29 +113,29 @@ export interface Collected {
   /** Empty unless `raw` was asked for. Index-aligned with `items`. */
   rawItems: RawEntry[];
   /**
-   * The raw resource behind every item, whether or not `raw` was asked for.
-   * Index-aligned with `items`. For the exposure policy to judge by (which type
-   * a rendered name points at) -- never returned unless `raw` is.
-   */
+  The raw resource behind every item, whether or not `raw` was asked for.
+  Index-aligned with `items`. For the exposure policy to judge by (which type
+  a rendered name points at) -- never returned unless `raw` is.
+  */
   sources: RawEntry[];
   /** The health systems actually read from, by id. For the audit row. */
   healthSystemIds: string[];
   /**
-   * Per (health system, resource type) freshness for every type this call's
-   * specs covered -- see `worker/src/mcp/coverage.ts`. What lets a caller (or
-   * `respond`) tell an empty `items` apart from a sync gap.
-   */
+  Per (health system, resource type) freshness for every type this call's
+  specs covered -- see `worker/src/mcp/coverage.ts`. What lets a caller (or
+  `respond`) tell an empty `items` apart from a sync gap.
+  */
   coverage: CoverageEntry[];
 }
 
 /**
- * Pick the health systems a call applies to.
- *
- * A denied health system is removed first and can never be named back in: the
- * `health_systems` argument narrows the allowed set, it does not choose from the full
- * one. An argument that matches nothing yields no health systems -- and so an empty
- * answer -- rather than silently falling back to all of them.
- */
+Pick the health systems a call applies to.
+
+A denied health system is removed first and can never be named back in: the
+`health_systems` argument narrows the allowed set, it does not choose from the full
+one. An argument that matches nothing yields no health systems -- and so an empty
+answer -- rather than silently falling back to all of them.
+*/
 export function selectHealthSystems(
   all: readonly HealthSystemInfo[],
   rules: PolicyRules,
@@ -154,12 +154,12 @@ export function selectHealthSystems(
 }
 
 /**
- * The health systems a `health_system` rule denies to this caller.
- *
- * Never read from for an answer. `collectAppointments` uses them only to
- * recognise a denied organisation's visit when an allowed organisation's portal
- * lists a copy of it, so the copy can be dropped too (security review M1).
- */
+The health systems a `health_system` rule denies to this caller.
+
+Never read from for an answer. `collectAppointments` uses them only to
+recognise a denied organisation's visit when an allowed organisation's portal
+lists a copy of it, so the copy can be dropped too (security review M1).
+*/
 export function deniedHealthSystems(
   all: readonly HealthSystemInfo[],
   rules: PolicyRules,
@@ -168,14 +168,14 @@ export function deniedHealthSystems(
 }
 
 /**
- * A caller's `limit`, made safe to slice with -- or `undefined` for "no limit
- * at all", which is what an absent `limit` means.
- *
- * There is no ceiling: a tool answers everything it found unless the caller
- * asked to see less of it. An explicit `limit` is still floored at 1 and
- * truncated to an integer, because "give me the top -5" and "the top 3.7" are
- * not requests `respond()`'s `slice` can act on.
- */
+A caller's `limit`, made safe to slice with -- or `undefined` for "no limit
+at all", which is what an absent `limit` means.
+
+There is no ceiling: a tool answers everything it found unless the caller
+asked to see less of it. An explicit `limit` is still floored at 1 and
+truncated to an integer, because "give me the top -5" and "the top 3.7" are
+not requests `respond()`'s `slice` can act on.
+*/
 export function effectiveLimit(limit: number | undefined): number | undefined {
   return limit === undefined ? undefined : Math.max(1, Math.trunc(limit));
 }
@@ -207,11 +207,11 @@ function orderOf(current: CollectSpec, item: NormalizedResource): number {
 }
 
 /**
- * Whether an item's date falls inside the caller's window.
- *
- * An item with no usable date cannot be shown to be inside a window, so a windowed
- * call excludes it rather than guessing. An unwindowed call keeps everything.
- */
+Whether an item's date falls inside the caller's window.
+
+An item with no usable date cannot be shown to be inside a window, so a windowed
+call excludes it rather than guessing. An unwindowed call keeps everything.
+*/
 function inWindow(order: number, after: number | undefined, before: number | undefined): boolean {
   return order === NO_DATE
     ? after === undefined && before === undefined
@@ -219,13 +219,13 @@ function inWindow(order: number, after: number | undefined, before: number | und
 }
 
 /**
- * Whether one ISO date falls inside a caller's `from`/`to` window, by exactly the
- * rules `collect` applies: a bare `to` date covers that whole day, and an item
- * with no usable date is only kept when there is no window at all.
- *
- * For items that do not come out of the FHIR cache (the portal's visits) but
- * must be windowed as if they did.
- */
+Whether one ISO date falls inside a caller's `from`/`to` window, by exactly the
+rules `collect` applies: a bare `to` date covers that whole day, and an item
+with no usable date is only kept when there is no window at all.
+
+For items that do not come out of the FHIR cache (the portal's visits) but
+must be windowed as if they did.
+*/
 export function withinWindow(
   date: string | undefined,
   from: string | undefined,
@@ -263,12 +263,12 @@ function entriesFor(
 }
 
 /**
- * Read, normalize, filter and merge.
- *
- * Ordering is newest-first on the spec's own date, with items that have no date
- * last. That is the order a model wants for "what happened recently" and it is
- * stable across health systems, which the cache's per-health system ordering is not.
- */
+Read, normalize, filter and merge.
+
+Ordering is newest-first on the spec's own date, with items that have no date
+last. That is the order a model wants for "what happened recently" and it is
+stable across health systems, which the cache's per-health system ordering is not.
+*/
 export async function collect(
   deps: ToolDeps,
   healthSystems: readonly HealthSystemInfo[],

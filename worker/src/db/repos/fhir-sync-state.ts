@@ -1,14 +1,14 @@
 /**
- * Per (health system, resource type) health of the daily full refresh.
- *
- * Kept separate from `run_log` because the useful question is not "how did last
- * night go" but "which resource types has this org never returned anything for" --
- * that is what tells the owner a scope is missing or an org does not support a
- * type, and it has to survive every subsequent successful run.
- *
- * `warnings_json` holds OperationOutcome codes with counts, never their text: the
- * text can quote the request, and the request carries a patient id.
- */
+Per (health system, resource type) health of the daily full refresh.
+
+Kept separate from `run_log` because the useful question is not "how did last
+night go" but "which resource types has this org never returned anything for" --
+that is what tells the owner a scope is missing or an org does not support a
+type, and it has to survive every subsequent successful run.
+
+`warnings_json` holds OperationOutcome codes with counts, never their text: the
+text can quote the request, and the request carries a patient id.
+*/
 
 import { all, one, run } from "../client.ts";
 import { parseJsonColumn, syncWarningsSchema } from "../schemas.ts";

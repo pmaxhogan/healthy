@@ -1,59 +1,59 @@
 /**
- * Applying queued Health Connect batches to the store, one bounded slice at a
- * time. `runHcSlice` is the whole of what the ingest runner's alarm does
- * (worker/src/hc/runner.ts); it is a plain function of a `Ctx` so the tests
- * drive it without a Durable Object.
- *
- * ### One slice
- *
- * Take the device's oldest queued batch -- strictly oldest, because a delete
- * that follows an upsert has to land after it -- and work through it in three
- * phases: its deletes, its upserts one destination chunk at a time, then the
- * bookkeeping that closes it. When the queue is empty, rebuild what the
- * batches marked (worker/src/hc/store/rebuild.ts), and -- once, with nothing
- * else left -- walk the stored platform totals for stale hours
- * (worker/src/hc/store/platform-stale.ts). Stop when the budget is spent and
- * say whether anything is left.
- *
- * ### Why a slice that dies is simply run again
- *
- * A batch is far larger than one invocation's D1 budget, so it spans slices,
- * and any of them may be cut off. Nothing here needs that not to happen:
- *
- *   - Each chunk is written with its hour rollup, its heart-rate minutes, its
- *     index rows, its dirty marks and the marks of the platform totals it made
- *     stale in ONE `db.batch`, which D1 runs as a
- *     transaction. A chunk and the index never disagree. (The mark of a day
- *     this batch has already marked is not written again: see `BatchRun`.)
- *     Several chunks share one `db.batch` where they can (`Buffered`): a
- *     round trip to D1 costs far more than the statements in it, and a batch
- *     of sparse records is one chunk a record. The cursor moves past a chunk
- *     only when the transaction holding it has committed.
- *   - A write is by record id and keeps the copy with the greater
- *     `lastModified`, so applying the same records again changes nothing; and
- *     an unchanged chunk is recognised by its digest and not rewritten.
- *   - The batch is deleted from the queue last. Until then it is the truth
- *     about what still has to happen.
- *
- * The cursor (which batch, which phase, how far) only saves re-reading chunks
- * that are already right. It is kept by the caller between slices; a lost or
- * stale cursor means the batch is replayed from its start, to the same result.
- *
- * ### Failing, and not failing
- *
- * A batch that cannot be read -- not gzip, not JSON, not a batch, sealed with
- * another key, a part missing -- will not become readable by waiting, so it is
- * marked `failed` with a stable code and parked: one bad batch must not hold up
- * everything the phone sends after it. Anything else (D1 unavailable, a
- * timeout) is thrown to the caller, which retries -- and counts the attempt
- * before each slice (`beginAttempt`). A batch that keeps making slices throw is given up on
- * after `MAX_BATCH_FAILURES` of them and parked as failed too: the queue is
- * strictly ordered, so a failure this code wrongly takes for a passing one
- * would otherwise hold every later batch for ever.
- *
- * Logs carry this app's device id, batch ids, counts, durations and error
- * codes. Never a record id, a value or an origin app's package name.
- */
+Applying queued Health Connect batches to the store, one bounded slice at a
+time. `runHcSlice` is the whole of what the ingest runner's alarm does
+(worker/src/hc/runner.ts); it is a plain function of a `Ctx` so the tests
+drive it without a Durable Object.
+
+### One slice
+
+Take the device's oldest queued batch -- strictly oldest, because a delete
+that follows an upsert has to land after it -- and work through it in three
+phases: its deletes, its upserts one destination chunk at a time, then the
+bookkeeping that closes it. When the queue is empty, rebuild what the
+batches marked (worker/src/hc/store/rebuild.ts), and -- once, with nothing
+else left -- walk the stored platform totals for stale hours
+(worker/src/hc/store/platform-stale.ts). Stop when the budget is spent and
+say whether anything is left.
+
+### Why a slice that dies is simply run again
+
+A batch is far larger than one invocation's D1 budget, so it spans slices,
+and any of them may be cut off. Nothing here needs that not to happen:
+
+  - Each chunk is written with its hour rollup, its heart-rate minutes, its
+    index rows, its dirty marks and the marks of the platform totals it made
+    stale in ONE `db.batch`, which D1 runs as a
+    transaction. A chunk and the index never disagree. (The mark of a day
+    this batch has already marked is not written again: see `BatchRun`.)
+    Several chunks share one `db.batch` where they can (`Buffered`): a
+    round trip to D1 costs far more than the statements in it, and a batch
+    of sparse records is one chunk a record. The cursor moves past a chunk
+    only when the transaction holding it has committed.
+  - A write is by record id and keeps the copy with the greater
+    `lastModified`, so applying the same records again changes nothing; and
+    an unchanged chunk is recognised by its digest and not rewritten.
+  - The batch is deleted from the queue last. Until then it is the truth
+    about what still has to happen.
+
+The cursor (which batch, which phase, how far) only saves re-reading chunks
+that are already right. It is kept by the caller between slices; a lost or
+stale cursor means the batch is replayed from its start, to the same result.
+
+### Failing, and not failing
+
+A batch that cannot be read -- not gzip, not JSON, not a batch, sealed with
+another key, a part missing -- will not become readable by waiting, so it is
+marked `failed` with a stable code and parked: one bad batch must not hold up
+everything the phone sends after it. Anything else (D1 unavailable, a
+timeout) is thrown to the caller, which retries -- and counts the attempt
+before each slice (`beginAttempt`). A batch that keeps making slices throw is given up on
+after `MAX_BATCH_FAILURES` of them and parked as failed too: the queue is
+strictly ordered, so a failure this code wrongly takes for a passing one
+would otherwise hold every later batch for ever.
+
+Logs carry this app's device id, batch ids, counts, durations and error
+codes. Never a record id, a value or an origin app's package name.
+*/
 
 import { blindHcOrigin, blindHcRecordId, blinderFor } from "../db/blind.ts";
 import { batch as runBatch, one, chunk as pages } from "../db/client.ts";
@@ -157,16 +157,16 @@ interface ApplyCursor {
 export interface HcRunnerState {
   cursor: ApplyCursor | null;
   /**
-   * The digest of the zone every day rollup is known to be built for, or null
-   * when that has to be checked against the table.
-   */
+  The digest of the zone every day rollup is known to be built for, or null
+  when that has to be checked against the table.
+  */
   tzDigest: string | null;
   /**
-   * The `SCAN_REVISION` of the one-off scan of the stored platform totals that
-   * is known to be finished for this device (worker/src/hc/store/platform-stale.ts),
-   * so an idle slice does not ask the table again. Absent, or an older
-   * revision: ask.
-   */
+  The `SCAN_REVISION` of the one-off scan of the stored platform totals that
+  is known to be finished for this device (worker/src/hc/store/platform-stale.ts),
+  so an idle slice does not ask the table again. Absent, or an older
+  revision: ask.
+  */
   platformScanned?: number;
 }
 
@@ -193,13 +193,13 @@ type ApplyFailureCode =
   | "apply_gave_up";
 
 /**
- * How many slices in a row may throw on the same head batch before it is
- * set aside as failed. With the runner's backoff (five seconds, doubling) the
- * eight attempts span about ten minutes, which outlasts a passing D1 error but
- * not a bug: a failure this code does not recognise as permanent must not
- * block a device's queue, which is strictly ordered, for ever. Giving up loses
- * nothing: the batch is parked, not deleted, and can be queued again.
- */
+How many slices in a row may throw on the same head batch before it is
+set aside as failed. With the runner's backoff (five seconds, doubling) the
+eight attempts span about ten minutes, which outlasts a passing D1 error but
+not a bug: a failure this code does not recognise as permanent must not
+block a device's queue, which is strictly ordered, for ever. Giving up loses
+nothing: the batch is parked, not deleted, and can be queued again.
+*/
 export const MAX_BATCH_FAILURES = 8;
 
 /** How long an `applied` row of `hc_ingest_log` is kept, and rows deleted per statement. */
@@ -207,12 +207,12 @@ const LOG_RETENTION_SECONDS = 30 * 86_400;
 const LOG_PRUNE_SLICE = 500;
 
 /**
- * The longest stretch of one record that is used to find the sleep nights and
- * exercise sessions depending on it. A record claiming to run for months is
- * stored whole like any other, but it must not mark every stored night and
- * session for rebuilding each time it is touched; what lies beyond this much
- * of it keeps its summary until its own data changes.
- */
+The longest stretch of one record that is used to find the sleep nights and
+exercise sessions depending on it. A record claiming to run for months is
+stored whole like any other, but it must not mark every stored night and
+session for rebuilding each time it is touched; what lies beyond this much
+of it keeps its summary until its own data changes.
+*/
 const DEPENDANT_SPAN_MAX_MS = 48 * HOUR_MS;
 
 /** Deletes looked up per query, and upsert groups per index lookup. */
@@ -223,59 +223,59 @@ const READ_AHEAD = GROUP_PAGE;
 /** Records whose index rows one lookup page fetches before a page is cut. */
 const GROUP_PAGE_RECORDS = 3000;
 /**
- * Statements one chunk rewrite may issue, as an upper estimate: the read, the
- * chunk and its rollup, the heart-rate spill read and row, the index rows, the
- * marks, and two statements marking the summaries that depend on it.
- */
+Statements one chunk rewrite may issue, as an upper estimate: the read, the
+chunk and its rollup, the heart-rate spill read and row, the index rows, the
+marks, and two statements marking the summaries that depend on it.
+*/
 const CHUNK_COST = 10;
 /** Head of queue, zone, status, and the closing statements of a batch. */
 const BATCH_OVERHEAD = 8;
 /**
- * Statements one `db.batch` of chunk writes carries before it is sent. The
- * limit is checked between chunks, never inside one: a chunk's statements are
- * one transaction whatever their number, so a chunk with more than this many
- * (one that outgrew a row) is sent alone.
- */
+Statements one `db.batch` of chunk writes carries before it is sent. The
+limit is checked between chunks, never inside one: a chunk's statements are
+one transaction whatever their number, so a chunk with more than this many
+(one that outgrew a row) is sent alone.
+*/
 const COMMIT_STATEMENTS = 50;
 /**
- * Sealed text one `db.batch` of chunk writes carries before it is sent, in
- * characters: about a mebibyte. An hour of heart rate is tens of kilobytes and
- * an hour with a route in it far more, and a request to D1 has a size. Checked
- * between chunks like the statements, so a chunk larger than this is sent
- * alone; and a commit D1 will not take is split all the same (`flush`).
- */
+Sealed text one `db.batch` of chunk writes carries before it is sent, in
+characters: about a mebibyte. An hour of heart rate is tens of kilobytes and
+an hour with a route in it far more, and a request to D1 has a size. Checked
+between chunks like the statements, so a chunk larger than this is sent
+alone; and a commit D1 will not take is split all the same (`flush`).
+*/
 const COMMIT_BYTES = 1_048_576;
 
 /**
- * Chunk writes built and not yet sent: the statements of one `db.batch`.
- *
- * In production every `db.batch` is a network round trip from the runner to
- * D1, and it costs about the same whether it carries one chunk or twenty. So
- * the units of a page (a group of upserts, a slot of deletes) are collected
- * here and committed together -- still one transaction, only a larger one.
- *
- * Three rules keep that equal to committing each unit by itself:
- *
- *   - Nothing is built from the database while a write it would read is still
- *     in here. `makeRoom` sends the buffer first when a unit touches a chunk a
- *     buffered unit also touches (a record moving between two groups of one
- *     page). The one other thing a unit reads that another may have written is
- *     heart-rate spill -- the minute row of an hour is built from the hours
- *     before it -- and that is answered from what was read before the page
- *     began and what the page has built since (`HrSpillView`), never from the
- *     table while a heart-rate chunk is waiting in here (`spillInto`).
- *   - What a unit counts -- the cursor's offset, `applied`, `removed` -- is
- *     counted by `settle`, which runs only after the commit. A slice that
- *     stops, or dies, never carries a cursor past work that is not durable.
- *   - The buffer is sent before a slice yields, at the end of every page, and
- *     before a batch is closed or set aside. A buffer that is lost instead (a
- *     slice that threw) is work the cursor never counted: it is done again.
- *
- * The units keep their edges in here, because sharing a commit is only ever a
- * saving. A `db.batch` D1 will not take -- the chunks of a page can be large,
- * and a request has a size -- is sent again a unit at a time, which is exactly
- * what was done before any of this (`flush`).
- */
+Chunk writes built and not yet sent: the statements of one `db.batch`.
+
+In production every `db.batch` is a network round trip from the runner to
+D1, and it costs about the same whether it carries one chunk or twenty. So
+the units of a page (a group of upserts, a slot of deletes) are collected
+here and committed together -- still one transaction, only a larger one.
+
+Three rules keep that equal to committing each unit by itself:
+
+  - Nothing is built from the database while a write it would read is still
+    in here. `makeRoom` sends the buffer first when a unit touches a chunk a
+    buffered unit also touches (a record moving between two groups of one
+    page). The one other thing a unit reads that another may have written is
+    heart-rate spill -- the minute row of an hour is built from the hours
+    before it -- and that is answered from what was read before the page
+    began and what the page has built since (`HrSpillView`), never from the
+    table while a heart-rate chunk is waiting in here (`spillInto`).
+  - What a unit counts -- the cursor's offset, `applied`, `removed` -- is
+    counted by `settle`, which runs only after the commit. A slice that
+    stops, or dies, never carries a cursor past work that is not durable.
+  - The buffer is sent before a slice yields, at the end of every page, and
+    before a batch is closed or set aside. A buffer that is lost instead (a
+    slice that threw) is work the cursor never counted: it is done again.
+
+The units keep their edges in here, because sharing a commit is only ever a
+saving. A `db.batch` D1 will not take -- the chunks of a page can be large,
+and a request has a size -- is sent again a unit at a time, which is exactly
+what was done before any of this (`flush`).
+*/
 interface Buffered {
   /** The units, in the order they were built. */
   units: BufferedUnit[];
@@ -323,31 +323,31 @@ interface BatchRun {
   /** The alert channel's seam: see `runHcSlice`. */
   deps: SyncDeps | undefined;
   /**
-   * Where the batch stands in the order of arrival (its queue sequence number,
-   * and the queue row's `received_at`, unix seconds), and the ids it deletes:
-   * what its tombstones are stamped with, and what decides whether one of its
-   * upserts brings a tombstoned id back (worker/src/hc/store/record-index.ts).
-   */
+  Where the batch stands in the order of arrival (its queue sequence number,
+  and the queue row's `received_at`, unix seconds), and the ids it deletes:
+  what its tombstones are stamped with, and what decides whether one of its
+  upserts brings a tombstoned id back (worker/src/hc/store/record-index.ts).
+  */
   arrival: BatchArrival;
   /**
-   * The hours whose platform total the batch itself carries, by
-   * `platformHourKey`: `Head.carried`. Taking a record out of one of those
-   * hours leaves its total as fresh as the batch, so the hour is not marked
-   * stale (worker/src/hc/store/platform-stale.ts).
-   */
+  The hours whose platform total the batch itself carries, by
+  `platformHourKey`: `Head.carried`. Taking a record out of one of those
+  hours leaves its total as fresh as the batch, so the hour is not marked
+  stale (worker/src/hc/store/platform-stale.ts).
+  */
   carried: ReadonlySet<string>;
   /**
-   * The `day` marks this batch is known to have written, by key: `Head.marked`.
-   * A day is two dozen chunks, and each of them would write the same mark.
-   *
-   * Leaving one out is safe because nothing can have cleared it in between.
-   * Marks are cleared only by the rebuild, and the rebuild runs only when no
-   * batch is part way through: after a batch has been applied, or with the
-   * queue empty (`workSlice`). The set lives no longer than the batch is the
-   * head -- it hangs off the parsed head, which is dropped when the batch is
-   * applied, set aside, or a slice throws -- and a slice that starts without
-   * it simply writes the marks again.
-   */
+  The `day` marks this batch is known to have written, by key: `Head.marked`.
+  A day is two dozen chunks, and each of them would write the same mark.
+
+  Leaving one out is safe because nothing can have cleared it in between.
+  Marks are cleared only by the rebuild, and the rebuild runs only when no
+  batch is part way through: after a batch has been applied, or with the
+  queue empty (`workSlice`). The set lives no longer than the batch is the
+  head -- it hangs off the parsed head, which is dropped when the batch is
+  applied, set aside, or a slice throws -- and a slice that starts without
+  it simply writes the marks again.
+  */
   marked: Set<string>;
   /** Day marks in the statements of the unit now being built: the buffer's once it is queued. */
   pending: string[];
@@ -358,9 +358,9 @@ interface BatchRun {
   /** Every chunk in a commit of its own, spill read from the table: `SliceBudget.perChunk`. */
   perChunk: boolean;
   /**
-   * Heart-rate spill read ahead for the page now being worked on, kept true as
-   * its chunks are built; null between pages, and always when `perChunk`.
-   */
+  Heart-rate spill read ahead for the page now being worked on, kept true as
+  its chunks are built; null between pages, and always when `perChunk`.
+  */
   spill: HrSpillView | null;
 }
 
@@ -383,9 +383,9 @@ function unique<T>(values: readonly T[]): T[] {
 // ---------------------------------------------------------------------------
 
 /**
- * What a change to a chunk marks for rebuilding: the day rollups of its hour, the later heart-rate hours a series ran into, and the
- * summary of each touched sleep or exercise session.
- */
+What a change to a chunk marks for rebuilding: the day rollups of its hour, the later heart-rate hours a series ran into, and the
+summary of each touched sleep or exercise session.
+*/
 async function marksFor(
   job: BatchRun,
   key: ChunkKey,
@@ -417,10 +417,10 @@ async function marksFor(
 }
 
 /**
- * Statements marking the stored nights and sessions whose summaries read the
- * touched records: heart rate that arrives after its night did, a second
- * exercise session that turns out to overlap the first.
- */
+Statements marking the stored nights and sessions whose summaries read the
+touched records: heart rate that arrives after its night did, a second
+exercise session that turns out to overlap the first.
+*/
 function dependantStatements(
   job: BatchRun,
   type: string,
@@ -445,11 +445,11 @@ function dependantStatements(
 }
 
 /**
- * The marks of the platform totals that taking `leaving` -- old copies of
- * records of a totalled type -- out of their hours made stale: every hour each
- * copy covered, less the hours whose total the batch carries itself. See
- * worker/src/hc/store/platform-stale.ts.
- */
+The marks of the platform totals that taking `leaving` -- old copies of
+records of a totalled type -- out of their hours made stale: every hour each
+copy covered, less the hours whose total the batch carries itself. See
+worker/src/hc/store/platform-stale.ts.
+*/
 function staleTotalStatements(
   job: BatchRun,
   type: string,
@@ -468,10 +468,10 @@ function staleTotalStatements(
 }
 
 /**
- * The statements that clear the stale marks of the hours whose platform
- * totals `records` (accepted `Agg.<Metric>` upserts) are. Any other record is
- * passed over.
- */
+The statements that clear the stale marks of the hours whose platform
+totals `records` (accepted `Agg.<Metric>` upserts) are. Any other record is
+passed over.
+*/
 function freshTotalStatements(job: BatchRun, records: readonly HcRecord[]): D1PreparedStatement[] {
   const byType = new Map<string, number[]>();
   for (const record of records) {
@@ -494,15 +494,15 @@ function clearsOf(job: BatchRun, byType: ReadonlyMap<string, number[]>): D1Prepa
 }
 
 /**
- * The statements that take the chunk at `key` from `before` to `records`, and
- * keep what depends on it in step. `touched` is every record version that was
- * added, replaced or removed -- old copies and new -- which is what decides
- * which days, sessions and heart-rate hours have to be rebuilt. `leaving` is
- * the old copies alone: the records deleted from the chunk, moved out of it,
- * or replaced in it, whose hours' platform totals counted them.
- *
- * Empty when the chunk would not change.
- */
+The statements that take the chunk at `key` from `before` to `records`, and
+keep what depends on it in step. `touched` is every record version that was
+added, replaced or removed -- old copies and new -- which is what decides
+which days, sessions and heart-rate hours have to be rebuilt. `leaving` is
+the old copies alone: the records deleted from the chunk, moved out of it,
+or replaced in it, whose hours' platform totals counted them.
+
+Empty when the chunk would not change.
+*/
 async function rewriteChunk(
   job: BatchRun,
   key: ChunkKey,
@@ -541,16 +541,16 @@ async function rewriteChunk(
 }
 
 /**
- * The records of earlier heart-rate chunks that reach into the hour of `key`,
- * as they will be once everything built so far is committed.
- *
- * From the page's view when the hour was read ahead. Otherwise from the table
- * -- and the table is only the truth about earlier hours when no heart-rate
- * chunk is waiting in the buffer, so the buffer is sent first. That is all
- * that happens when chunks do not share commits (`perChunk`): there is no
- * view, the buffer never holds more than the unit before, and every hour is
- * read as it always was.
- */
+The records of earlier heart-rate chunks that reach into the hour of `key`,
+as they will be once everything built so far is committed.
+
+From the page's view when the hour was read ahead. Otherwise from the table
+-- and the table is only the truth about earlier hours when no heart-rate
+chunk is waiting in the buffer, so the buffer is sent first. That is all
+that happens when chunks do not share commits (`perChunk`): there is no
+view, the buffer never holds more than the unit before, and every hour is
+read as it always was.
+*/
 async function spillInto(job: BatchRun, key: ChunkKey): Promise<HcRecord[]> {
   const { ctx, deviceId, meter, spill } = job;
   if (spill?.covers(key) === true) return spill.into(key);
@@ -559,10 +559,10 @@ async function spillInto(job: BatchRun, key: ChunkKey): Promise<HcRecord[]> {
 }
 
 /**
- * Read ahead the heart-rate spill of a page that is about to build `keys`, so
- * that its chunks can share commits: see `HrSpillView`. A no-op without heart
- * rate among them, and when chunks do not share commits.
- */
+Read ahead the heart-rate spill of a page that is about to build `keys`, so
+that its chunks can share commits: see `HrSpillView`. A no-op without heart
+rate among them, and when chunks do not share commits.
+*/
 async function readSpillAhead(job: BatchRun, keys: readonly ChunkKey[]): Promise<void> {
   job.spill = null;
   if (job.perChunk || keys.every((key) => key.type !== TYPE_HEART_RATE)) return;
@@ -578,22 +578,22 @@ function settled(job: BatchRun, unit: BufferedUnit): void {
 }
 
 /**
- * Commit everything buffered, in one transaction, and only then count it.
- *
- * If D1 will not take the units together, they are committed one at a time, in
- * order, each counted as it lands: what applying a batch did before units
- * shared a commit. A request can be refused for its size alone, and a refusal
- * that came back every time would otherwise fail the slice identically until
- * the batch was given up on. An error from a unit's own commit is thrown, as
- * it always was.
- *
- * Sending them again is safe whatever became of the first attempt. A `db.batch`
- * is one transaction, so either none of it was applied, or all of it was and
- * only the reply was lost -- and every statement here writes what a row is to
- * be, not a change to it, so writing it twice leaves what writing it once
- * does. The counts do not depend on which: a unit's `settle` adds what was
- * worked out when the unit was built, once, after the commit that covers it.
- */
+Commit everything buffered, in one transaction, and only then count it.
+
+If D1 will not take the units together, they are committed one at a time, in
+order, each counted as it lands: what applying a batch did before units
+shared a commit. A request can be refused for its size alone, and a refusal
+that came back every time would otherwise fail the slice identically until
+the batch was given up on. An error from a unit's own commit is thrown, as
+it always was.
+
+Sending them again is safe whatever became of the first attempt. A `db.batch`
+is one transaction, so either none of it was applied, or all of it was and
+only the reply was lost -- and every statement here writes what a row is to
+be, not a change to it, so writing it twice leaves what writing it once
+does. The counts do not depend on which: a unit's `settle` adds what was
+worked out when the unit was built, once, after the commit that covers it.
+*/
 async function flush(job: BatchRun): Promise<void> {
   const { units } = job.buffer;
   if (units.length === 0) return;
@@ -625,9 +625,9 @@ async function flush(job: BatchRun): Promise<void> {
 }
 
 /**
- * Send the buffer first if building a unit over `touching` would read
- * something a buffered write is about to change: see `Buffered`.
- */
+Send the buffer first if building a unit over `touching` would read
+something a buffered write is about to change: see `Buffered`.
+*/
 async function makeRoom(job: BatchRun, touching: readonly ChunkKey[]): Promise<void> {
   const { buffer } = job;
   // With every chunk in a commit of its own, there is never room to share.
@@ -644,10 +644,10 @@ interface Unit {
 }
 
 /**
- * Queue a unit's statements to be committed with its neighbours'. The buffer
- * is sent first when the unit would take it past `COMMIT_STATEMENTS` or
- * `COMMIT_BYTES`, so a `db.batch` is cut between units and never inside one.
- */
+Queue a unit's statements to be committed with its neighbours'. The buffer
+is sent first when the unit would take it past `COMMIT_STATEMENTS` or
+`COMMIT_BYTES`, so a `db.batch` is cut between units and never inside one.
+*/
 async function defer(job: BatchRun, unit: Unit): Promise<void> {
   const queued = job.buffer.statements;
   const bytes = job.pendingBytes;
@@ -669,15 +669,15 @@ async function defer(job: BatchRun, unit: Unit): Promise<void> {
 }
 
 /**
- * Chunks read ahead of the groups that need them, a page in one statement, so
- * that applying a page is not a read per chunk.
- *
- * A chunk is only ever taken from here while it is `fresh`: read, and not
- * written since. One group's transaction can rewrite a chunk a later group of
- * the same page also needs -- a record that moved hours leaves the chunk it
- * was in -- so everything a transaction may have touched is forgotten, and is
- * read again by whoever asks next.
- */
+Chunks read ahead of the groups that need them, a page in one statement, so
+that applying a page is not a read per chunk.
+
+A chunk is only ever taken from here while it is `fresh`: read, and not
+written since. One group's transaction can rewrite a chunk a later group of
+the same page also needs -- a record that moved hours leaves the chunk it
+was in -- so everything a transaction may have touched is forgotten, and is
+read again by whoever asks next.
+*/
 class HeldChunks {
   private readonly chunks = new Map<string, StoredChunk>();
   private readonly fresh = new Set<string>();
@@ -744,10 +744,10 @@ interface DeleteSlot {
 }
 
 /**
- * A page's live ids by the chunk that holds them. An id already tombstoned (by
- * an earlier batch, or by this page on a slice that was cut off) is done, and
- * one the index has never seen has no chunk.
- */
+A page's live ids by the chunk that holds them. An id already tombstoned (by
+an earlier batch, or by this page on a slice that was cut off) is done, and
+one the index has never seen has no chunk.
+*/
 function slotsOf(
   blinds: ReadonlyMap<string, string>,
   index: ReadonlyMap<string, IndexEntry>,
@@ -765,10 +765,10 @@ function slotsOf(
 }
 
 /**
- * Take one chunk's deleted records out and tombstone their ids, in one
- * transaction (shared with its neighbours: see `Buffered`). `stored` is the
- * chunk as it is now, if there is one.
- */
+Take one chunk's deleted records out and tombstone their ids, in one
+transaction (shared with its neighbours: see `Buffered`). `stored` is the
+chunk as it is now, if there is one.
+*/
 async function deleteSlot(
   job: BatchRun,
   slot: DeleteSlot,
@@ -809,10 +809,10 @@ async function deleteSlot(
 }
 
 /**
- * Apply one page of deletes. False when the budget ran out part way: the page
- * is looked up again on the next slice, and what is already tombstoned is
- * skipped.
- */
+Apply one page of deletes. False when the budget ran out part way: the page
+is looked up again on the next slice, and what is already tombstoned is
+skipped.
+*/
 async function deletePage(job: BatchRun, page: readonly string[]): Promise<boolean> {
   const { ctx, deviceId, meter } = job;
   const blinds = await blindIds(job, page);
@@ -917,9 +917,9 @@ interface GroupJob {
   group: UpsertGroup;
   key: ChunkKey;
   /**
-   * True when a record of the group brings its tombstoned id back to life: the
-   * record written again, in a batch that arrived after the one that deleted it.
-   */
+  True when a record of the group brings its tombstoned id back to life: the
+  record written again, in a batch that arrived after the one that deleted it.
+  */
   revives: (record: HcRecord) => boolean;
   /** The index entry of a record of the group, if it has one. */
   entryOf: (record: HcRecord) => IndexEntry | undefined;
@@ -944,10 +944,10 @@ function heldCopy(
 }
 
 /**
- * Which of a group's records go into its chunk, and which stored copies in
- * other chunks they displace (an edit moved the record's start hour, or its
- * type or origin).
- */
+Which of a group's records go into its chunk, and which stored copies in
+other chunks they displace (an edit moved the record's start hour, or its
+type or origin).
+*/
 function planGroup(
   work: GroupJob,
   chunks: ReadonlyMap<string, StoredChunk>,
@@ -974,12 +974,12 @@ function planGroup(
 }
 
 /**
- * The statements that take displaced copies out of the chunks they are
- * leaving. They are run in the same transaction as the destination's write and
- * the index rows that follow the record there: a record that moves is in one
- * chunk before and one chunk after, and never in neither or both -- whatever
- * fails, and whatever becomes of the batch afterwards.
- */
+The statements that take displaced copies out of the chunks they are
+leaving. They are run in the same transaction as the destination's write and
+the index rows that follow the record there: a record that moves is in one
+chunk before and one chunk after, and never in neither or both -- whatever
+fails, and whatever becomes of the batch afterwards.
+*/
 async function sourceStatements(
   job: BatchRun,
   chunks: ReadonlyMap<string, StoredChunk>,
@@ -1012,9 +1012,9 @@ function chunksOf(work: GroupJob): ChunkKey[] {
 }
 
 /**
- * Apply one group: its chunk, the chunks its records left, and the index, in
- * one transaction (shared with its neighbours: see `Buffered`).
- */
+Apply one group: its chunk, the chunks its records left, and the index, in
+one transaction (shared with its neighbours: see `Buffered`).
+*/
 async function applyGroup(job: BatchRun, work: GroupJob, held: HeldChunks): Promise<void> {
   const { ctx, deviceId, cursor, meter } = job;
   const { group, key } = work;
@@ -1155,11 +1155,11 @@ interface Head {
 }
 
 /**
- * Where a caller that lives across slices (the runner's Durable Object
- * instance) keeps the parsed head batch, so the next slice does not open,
- * decompress, validate and regroup the same megabytes again. Memory only, and
- * only a saving: a slice given no cache, or an empty one, reads the queue.
- */
+Where a caller that lives across slices (the runner's Durable Object
+instance) keeps the parsed head batch, so the next slice does not open,
+decompress, validate and regroup the same megabytes again. Memory only, and
+only a saving: a slice given no cache, or an empty one, reads the queue.
+*/
 export interface HeadCache {
   head: Head | null;
   /** When the last slice this cache saw ended, epoch ms: for the log line's `idleMs`. */
@@ -1180,16 +1180,16 @@ async function headBatchId(ctx: Ctx, deviceId: string): Promise<string | null> {
 }
 
 /**
- * Set aside a batch that cannot be applied: record why, and park it so the
- * batches behind it are not held up.
- *
- * Parked, never deleted. The phone was told the batch was accepted and has
- * moved on, so the queued body is the only copy of its records; it stays in
- * `hc_ingest_queue` until the cause is fixed and the batch is queued again
- * (`unpark`), or the device is wiped. Applying it late is safe: an upsert only
- * replaces an older `lastModified`, and an id deleted by a batch that arrived
- * after this one stays deleted.
- */
+Set aside a batch that cannot be applied: record why, and park it so the
+batches behind it are not held up.
+
+Parked, never deleted. The phone was told the batch was accepted and has
+moved on, so the queued body is the only copy of its records; it stays in
+`hc_ingest_queue` until the cause is fixed and the batch is queued again
+(`unpark`), or the device is wiped. Applying it late is safe: an upsert only
+replaces an older `lastModified`, and an id deleted by a batch that arrived
+after this one stays deleted.
+*/
 async function failBatch(
   ctx: Ctx,
   deviceId: string,
@@ -1216,9 +1216,9 @@ async function failBatch(
 }
 
 /**
- * The oldest queued batch, read and parsed. `null` when the queue is empty;
- * `"failed"` when the head could not be read and has been parked as failed.
- */
+The oldest queued batch, read and parsed. `null` when the queue is empty;
+`"failed"` when the head could not be read and has been parked as failed.
+*/
 async function readHead(
   ctx: Ctx,
   deviceId: string,
@@ -1293,18 +1293,18 @@ async function openHead(
 }
 
 /**
- * Close a batch: counts, arrival times and the phone's report, the log's word
- * that it is applied, and the batch out of the queue -- in ONE `db.batch`, so
- * one transaction. Returns how many marks are now waiting to be rebuilt, read
- * in the same transaction.
- *
- * The order of what is durable is what matters here, and the transaction keeps
- * it: every chunk of the batch was committed before this (the buffer is sent
- * first), and the queued body -- the only copy of what the phone sent -- is
- * deleted in the very transaction that records the batch as applied. There is
- * no moment at which the body is gone and the log does not say why, and a
- * slice that dies before or during this runs the batch again from the queue.
- */
+Close a batch: counts, arrival times and the phone's report, the log's word
+that it is applied, and the batch out of the queue -- in ONE `db.batch`, so
+one transaction. Returns how many marks are now waiting to be rebuilt, read
+in the same transaction.
+
+The order of what is durable is what matters here, and the transaction keeps
+it: every chunk of the batch was committed before this (the buffer is sent
+first), and the queued body -- the only copy of what the phone sent -- is
+deleted in the very transaction that records the batch as applied. There is
+no moment at which the body is gone and the log does not say why, and a
+slice that dies before or during this runs the batch again from the queue.
+*/
 async function finishBatch(job: BatchRun, head: Head): Promise<number> {
   const { ctx, deviceId, cursor } = job;
   const { queued, batch } = head;
@@ -1354,17 +1354,17 @@ interface Closed {
   /** Marks waiting to be rebuilt when it closed, or null when that was not read. */
   backlog: number | null;
   /**
-   * What the batch cost: its whole time, over however many slices, and the
-   * statements of the slice that closed it. What the rebuild's share after it
-   * is measured against (`rebuildAllowance`).
-   */
+  What the batch cost: its whole time, over however many slices, and the
+  statements of the slice that closed it. What the rebuild's share after it
+  is measured against (`rebuildAllowance`).
+  */
   cost: BatchCost;
 }
 
 /**
- * Work on the head batch until it is done or the budget is. Returns the cursor
- * to carry to the next slice, or how the batch left the head of the queue.
- */
+Work on the head batch until it is done or the budget is. Returns the cursor
+to carry to the next slice, or how the batch left the head of the queue.
+*/
 async function applyHead(
   ctx: Ctx,
   deviceId: string,
@@ -1475,14 +1475,14 @@ function yielded(cursor: ApplyCursor, meter: Meter, startedMs: number): ApplyCur
 }
 
 /**
- * Delete a slice of the device's old `applied` rows from `hc_ingest_log`. True
- * when there may be more.
- *
- * The log is bookkeeping, and its second job -- recognising a batch id the
- * phone sends again -- only has to cover the phone's own retries, which are
- * over in hours. `failed` rows are kept: they are the record of data that did
- * not make it into the store.
- */
+Delete a slice of the device's old `applied` rows from `hc_ingest_log`. True
+when there may be more.
+
+The log is bookkeeping, and its second job -- recognising a batch id the
+phone sends again -- only has to cover the phone's own retries, which are
+over in hours. `failed` rows are kept: they are the record of data that did
+not make it into the store.
+*/
 async function pruneLog(ctx: Ctx, deviceId: string, meter: Meter): Promise<boolean> {
   meter.spend();
   const result = await ctx.db
@@ -1497,12 +1497,12 @@ async function pruneLog(ctx: Ctx, deviceId: string, meter: Meter): Promise<boole
 }
 
 /**
- * One budgeted slice of a device's Health Connect work: queued batches first,
- * oldest first, then the rebuild of what they marked, then housekeeping.
- *
- * `deps` is the test seam of the alert raised when a batch is set aside (its
- * Trello transport and origin); production passes none.
- */
+One budgeted slice of a device's Health Connect work: queued batches first,
+oldest first, then the rebuild of what they marked, then housekeeping.
+
+`deps` is the test seam of the alert raised when a batch is set aside (its
+Trello transport and origin); production passes none.
+*/
 export async function runHcSlice(
   ctx: Ctx,
   deviceId: string,
@@ -1564,32 +1564,32 @@ interface SliceTally {
 }
 
 /**
- * The rebuild's share of a slice while batches are still arriving.
- *
- * The rebuild proper runs when the queue is empty, and during a backfill of
- * hours it never is: every rollup and summary would wait for the last batch.
- * So each applied batch is followed by a fraction of a slice on the dirty
- * list. The fraction follows the list: a fifth of a slice when there is next
- * to nothing waiting -- about 130 statements, a handful of nights and sessions
- * or a month of days -- rising in a straight line to half a slice once
- * `REBUILD_BACKLOG_FULL` marks or more are, so a backfill that marks faster
- * than a fifth can rebuild is answered with more, and the list stops growing
- * rather than waiting for the queue to empty.
- *
- * It is a bound in both directions. The queue cannot be starved, because the
- * share is never more than half and is only taken once per batch that was
- * applied; and the list cannot be ignored, because every applied batch takes
- * at least the fifth.
- *
- * The fraction is of the work, measured against the batch just applied, and
- * not of a slice: see `rebuildAllowance`.
- *
- * Whatever is taken above the fifth comes out of what the slice has not yet
- * spent (`unspent`, a fraction of its budget): a batch that ends a slice
- * already at its budget is followed by the fifth and no more, as it always
- * was, so the larger share never moves a slice any closer to D1's own limit
- * on queries.
- */
+The rebuild's share of a slice while batches are still arriving.
+
+The rebuild proper runs when the queue is empty, and during a backfill of
+hours it never is: every rollup and summary would wait for the last batch.
+So each applied batch is followed by a fraction of a slice on the dirty
+list. The fraction follows the list: a fifth of a slice when there is next
+to nothing waiting -- about 130 statements, a handful of nights and sessions
+or a month of days -- rising in a straight line to half a slice once
+`REBUILD_BACKLOG_FULL` marks or more are, so a backfill that marks faster
+than a fifth can rebuild is answered with more, and the list stops growing
+rather than waiting for the queue to empty.
+
+It is a bound in both directions. The queue cannot be starved, because the
+share is never more than half and is only taken once per batch that was
+applied; and the list cannot be ignored, because every applied batch takes
+at least the fifth.
+
+The fraction is of the work, measured against the batch just applied, and
+not of a slice: see `rebuildAllowance`.
+
+Whatever is taken above the fifth comes out of what the slice has not yet
+spent (`unspent`, a fraction of its budget): a batch that ends a slice
+already at its budget is followed by the fifth and no more, as it always
+was, so the larger share never moves a slice any closer to D1's own limit
+on queries.
+*/
 const REBUILD_SHARE_MIN = 0.2;
 const REBUILD_SHARE_MAX = 0.5;
 /** Marks waiting at which the share is at its largest; the count stops there. */
@@ -1611,30 +1611,30 @@ export interface BatchCost {
 }
 
 /**
- * The least a share is allowed, whatever the batch before it cost: statements
- * for two marks, and an eighth of the time the share would have of a whole
- * slice. A batch that cost nothing (every record already stored) is still
- * followed by a little rebuilding, and a first unit may always start besides.
- */
+The least a share is allowed, whatever the batch before it cost: statements
+for two marks, and an eighth of the time the share would have of a whole
+slice. A batch that cost nothing (every record already stored) is still
+followed by a little rebuilding, and a first unit may always start besides.
+*/
 const SHARE_FLOOR_STATEMENTS = 32;
 const SHARE_FLOOR_DIVISOR = 8;
 
 /**
- * What the rebuild may spend after one batch.
- *
- * `fraction` is the rebuild's share of the WORK, not of a slice: a share of a
- * fifth means one part rebuilding to four parts applying, so the rebuild after
- * a batch is allowed a quarter of what that batch cost -- in statements and in
- * time -- and with a share of a half, as much again as the batch.
- *
- * It used to be allowed that fraction of a whole slice after every batch. That
- * is the same thing when a batch fills a slice, and nothing like it when a
- * phone sends batches a slice holds five of: each two-second batch was then
- * followed by up to four seconds of rebuilding (a fifth of the slice's twenty),
- * and with a list long enough to fill every share the rebuild was taking two
- * thirds of the runner while the queue stood at its limit. The old allowance is
- * kept as the ceiling, so a share is never more than it was.
- */
+What the rebuild may spend after one batch.
+
+`fraction` is the rebuild's share of the WORK, not of a slice: a share of a
+fifth means one part rebuilding to four parts applying, so the rebuild after
+a batch is allowed a quarter of what that batch cost -- in statements and in
+time -- and with a share of a half, as much again as the batch.
+
+It used to be allowed that fraction of a whole slice after every batch. That
+is the same thing when a batch fills a slice, and nothing like it when a
+phone sends batches a slice holds five of: each two-second batch was then
+followed by up to four seconds of rebuilding (a fifth of the slice's twenty),
+and with a list long enough to fill every share the rebuild was taking two
+thirds of the runner while the queue stood at its limit. The old allowance is
+kept as the ceiling, so a share is never more than it was.
+*/
 export function rebuildAllowance(
   fraction: number,
   batch: BatchCost,
@@ -1679,10 +1679,10 @@ async function rebuildWithin(run: SliceRun, part: Meter): Promise<boolean> {
 }
 
 /**
- * The rebuild's share after a batch has left the head: see `REBUILD_SHARE_MIN`.
- * Marks are settled exactly as in the rebuild proper: a row written, then its
- * mark cleared, in one transaction.
- */
+The rebuild's share after a batch has left the head: see `REBUILD_SHARE_MIN`.
+Marks are settled exactly as in the rebuild proper: a row written, then its
+mark cleared, in one transaction.
+*/
 async function shareAfter(run: SliceRun, closed: Closed): Promise<void> {
   const { ctx, deviceId, meter } = run;
   if (closed.applied) run.tally.applied += 1;
@@ -1762,10 +1762,10 @@ async function workSlice(
 }
 
 /**
- * The one-off scan of the stored platform totals, last of all: only once
- * nothing is queued, nothing is marked for rebuilding and the log is pruned.
- * True when it has more to walk.
- */
+The one-off scan of the stored platform totals, last of all: only once
+nothing is queued, nothing is marked for rebuilding and the log is pruned.
+True when it has more to walk.
+*/
 async function scanWithin(run: SliceRun): Promise<boolean> {
   if (run.platformScanned) return false;
   const more = await scanPlatformTotals(run.ctx, run.deviceId, run.meter);
@@ -1780,10 +1780,10 @@ async function backlogNow(ctx: Ctx, deviceId: string, meter: Meter): Promise<num
 }
 
 /**
- * What the slices now being attempted are working on, and how many have been
- * started on it without one finishing. `batchId` is the head of the queue, or
- * null when nothing is queued and the work is the rebuild.
- */
+What the slices now being attempted are working on, and how many have been
+started on it without one finishing. `batchId` is the head of the queue, or
+null when nothing is queued and the work is the rebuild.
+*/
 export interface HeadFailures {
   batchId: string | null;
   failures: number;
@@ -1792,23 +1792,23 @@ export interface HeadFailures {
 export const NO_HEAD_FAILURES: HeadFailures = { batchId: null, failures: 0 };
 
 /**
- * Count a slice that is about to start, and give up on what it is working on
- * when `MAX_BATCH_FAILURES` slices have already been started on it without one
- * finishing.
- *
- * The caller persists the returned count BEFORE it runs the slice and clears
- * it when the slice returns. So a slice that throws is counted, and so is one
- * that never comes back at all -- an invocation killed for CPU or memory, which
- * no `catch` sees. Either way the same batch at the head of a strictly ordered
- * queue would otherwise be tried for ever with every later batch behind it.
- *
- * `runHcSlice` already sets aside what it knows can never be applied; this is
- * for what it does not know. At the limit the head batch is parked as `failed`
- * with `apply_gave_up` -- kept, loudly, and out of the way. With nothing
- * queued, the work is the rebuild and it is the mark at the head of the dirty
- * list that is parked. The count starts from nothing after either, so a batch
- * that is queued again gets its full number of attempts.
- */
+Count a slice that is about to start, and give up on what it is working on
+when `MAX_BATCH_FAILURES` slices have already been started on it without one
+finishing.
+
+The caller persists the returned count BEFORE it runs the slice and clears
+it when the slice returns. So a slice that throws is counted, and so is one
+that never comes back at all -- an invocation killed for CPU or memory, which
+no `catch` sees. Either way the same batch at the head of a strictly ordered
+queue would otherwise be tried for ever with every later batch behind it.
+
+`runHcSlice` already sets aside what it knows can never be applied; this is
+for what it does not know. At the limit the head batch is parked as `failed`
+with `apply_gave_up` -- kept, loudly, and out of the way. With nothing
+queued, the work is the rebuild and it is the mark at the head of the dirty
+list that is parked. The count starts from nothing after either, so a batch
+that is queued again gets its full number of attempts.
+*/
 export async function beginAttempt(
   ctx: Ctx,
   deviceId: string,

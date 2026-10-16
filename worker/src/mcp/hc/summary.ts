@@ -1,14 +1,14 @@
 /**
- * The Health Connect lines of `get_health_summary`: for each paired phone,
- * when it last uploaded, its newest blood-pressure reading and last night's
- * sleep. Enough to tell a model the phone data exists and is current, and
- * which tool to call for more; never a second copy of those tools.
- *
- * Phone data stays separate from the health systems' records: these are items
- * of their own (`kind: "phone"`), tagged `device:<id>` and `hc:<Type>` so the
- * exposure policy reaches them like any other, and nothing here is merged into
- * the FHIR sections.
- */
+The Health Connect lines of `get_health_summary`: for each paired phone,
+when it last uploaded, its newest blood-pressure reading and last night's
+sleep. Enough to tell a model the phone data exists and is current, and
+which tool to call for more; never a second copy of those tools.
+
+Phone data stays separate from the health systems' records: these are items
+of their own (`kind: "phone"`), tagged `device:<id>` and `hc:<Type>` so the
+exposure policy reaches them like any other, and nothing here is merged into
+the FHIR sections.
+*/
 
 import { deviceStatus, hoursSince } from "../../hc/coverage.ts";
 import { dedupeBloodPressure } from "../../hc/rules.ts";
@@ -36,10 +36,10 @@ const TYPE_BLOOD_PRESSURE = "BloodPressure";
 const TYPE_SLEEP = "SleepSession";
 
 /**
- * "Last night" is looked for among the sleep that ended within this long
- * before now: the stretch that ended on the latest local date, and the longest
- * of those when several ended that day.
- */
+"Last night" is looked for among the sleep that ended within this long
+before now: the stretch that ended on the latest local date, and the longest
+of those when several ended that day.
+*/
 const LAST_NIGHT_WINDOW_MS = 36 * HOUR_MS;
 
 export interface PhoneSummary {

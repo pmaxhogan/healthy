@@ -44,18 +44,18 @@ const TOOLS: McpToolSchemaDto[] = [
 ];
 
 /**
- * Everything one test needs reset per run, held in one object rather than
- * several top-level `let`s that `beforeEach`/`afterEach` would have to
- * reassign (this project's tests use a holder for exactly that reason; see
- * worker/test/unit/mcp/tools.test.ts's own comment on the same pattern).
- *
- * `mounted` matters beyond tidiness: `onMounted` adds a real
- * `window.addEventListener("message", ...)`, and happy-dom's `window` is
- * shared across the tests in this file -- an un-unmounted wrapper from an
- * earlier test keeps answering `sendFromFrame` calls in every test after it,
- * which is indistinguishable from a real bug until it silently inflates the
- * call count of a later test's assertions.
- */
+Everything one test needs reset per run, held in one object rather than
+several top-level `let`s that `beforeEach`/`afterEach` would have to
+reassign (this project's tests use a holder for exactly that reason; see
+worker/test/unit/mcp/tools.test.ts's own comment on the same pattern).
+
+`mounted` matters beyond tidiness: `onMounted` adds a real
+`window.addEventListener("message", ...)`, and happy-dom's `window` is
+shared across the tests in this file -- an un-unmounted wrapper from an
+earlier test keeps answering `sendFromFrame` calls in every test after it,
+which is indistinguishable from a real bug until it silently inflates the
+call count of a later test's assertions.
+*/
 const world: {
   contentWindow: { postMessage: ReturnType<typeof vi.fn> };
   originalDescriptor: PropertyDescriptor | undefined;

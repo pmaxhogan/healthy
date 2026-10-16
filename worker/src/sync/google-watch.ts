@@ -1,20 +1,20 @@
 /**
- * Knowing, at the end of a run, whether Google Calendar was what failed.
- *
- * The calendar is written from inside each health system's pass, so a write
- * Google refuses surfaces as *that health system's* pass throwing. Counted
- * there, a calendar that has gone read-only would be reported as every health
- * system failing at once, on cards that each say nothing needs reconnecting,
- * while Google's own streak was cleared every hour by a listing that still
- * works. So the client a run uses is wrapped here: every call that throws is
- * remembered, and the error itself is marked, which lets the code that catches
- * it say whose failure it is (`isCalendarFault`) and lets the run report on
- * Google once, at its end (`failure`).
- *
- * A call that fails here has already been through the client's own retries, so
- * one failure is as settled as that call is going to get in this run. Codes
- * only: nothing from a response is kept.
- */
+Knowing, at the end of a run, whether Google Calendar was what failed.
+
+The calendar is written from inside each health system's pass, so a write
+Google refuses surfaces as *that health system's* pass throwing. Counted
+there, a calendar that has gone read-only would be reported as every health
+system failing at once, on cards that each say nothing needs reconnecting,
+while Google's own streak was cleared every hour by a listing that still
+works. So the client a run uses is wrapped here: every call that throws is
+remembered, and the error itself is marked, which lets the code that catches
+it say whose failure it is (`isCalendarFault`) and lets the run report on
+Google once, at its end (`failure`).
+
+A call that fails here has already been through the client's own retries, so
+one failure is as settled as that call is going to get in this run. Codes
+only: nothing from a response is kept.
+*/
 
 import type { CalendarClient } from "../google/calendar.ts";
 

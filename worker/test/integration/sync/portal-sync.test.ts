@@ -114,9 +114,9 @@ function calendarKeys(fix: Fixture): string[] {
   return [...fix.upstreams.calendar.byKey().keys()];
 }
 
-/** An Encounter at `start`, optionally publishing the portal's CSN. */
-function appointment(id: string, start: string, csn?: string): fhir4.Encounter {
-  const base = encounter({ id, start, visitType: "Office Visit" });
+/** Encounter `enc-1` at `start`, optionally publishing the portal's CSN. */
+function appointment(start: string, csn?: string): fhir4.Encounter {
+  const base = encounter({ id: "enc-1", start, visitType: "Office Visit" });
   return csn === undefined
     ? base
     : { ...base, identifier: [{ type: { text: "CSN" }, value: csn }] };
@@ -349,7 +349,7 @@ describe("portal visits on the calendar", () => {
 describe("portal visits that FHIR also knows about", () => {
   it("skips a portal visit the FHIR pass calendared at the same time", async () => {
     const fix = await fixture({ portal: { visits: [portalVisit({ csn: "csn-1", start: SOON })] } });
-    withEncounters(fix, [appointment("enc-1", SOON)]);
+    withEncounters(fix, [appointment(SOON)]);
 
     const summary = await portalRun(fix, false);
 
@@ -395,7 +395,7 @@ describe("portal visits that FHIR also knows about", () => {
 
     // The Encounter appears, publishing the same CSN but a minute out: the CSN is
     // what matches, which is the point of preferring it over the clock.
-    withEncounters(fix, [appointment("enc-1", "2026-06-20T14:31:00+00:00", "csn-1")]);
+    withEncounters(fix, [appointment("2026-06-20T14:31:00+00:00", "csn-1")]);
     const summary = await portalRun(fix, false);
 
     // One event, still the one the portal created.
@@ -527,7 +527,7 @@ describe("an Encounter adopts a portal row only on identity", () => {
     await portalRun(fix);
     expect(fix.upstreams.calendar.inserts).toBe(1);
 
-    withEncounters(fix, [appointment("enc-1", "2026-06-20T14:31:00+00:00")]);
+    withEncounters(fix, [appointment("2026-06-20T14:31:00+00:00")]);
     withPractitioners(fix);
     const summary = await portalRun(fix, false);
 
@@ -566,7 +566,7 @@ describe("portal visits stored for the MCP", () => {
         ],
       },
     });
-    withEncounters(fix, [appointment("enc-1", SOON)]);
+    withEncounters(fix, [appointment(SOON)]);
 
     await portalRun(fix, false);
 
@@ -635,12 +635,12 @@ async function secondOrganisation(
 }
 
 /**
- * The owning organisation's own event for the visit, as its portal pass would
- * have written it. Health system B has no portal account in these tests, so nothing
- * touches it -- which is what lets a test prove the delete aimed at A's copy only.
- */
-async function ownersEvent(fix: Fixture, owner: SeededHealthSystem, csn: string): Promise<string> {
-  const key = await sk(`${owner.healthSystemId}:csn:${csn}`);
+The owning organisation's own event for the visit, as its portal pass would
+have written it. Health system B has no portal account in these tests, so nothing
+touches it -- which is what lets a test prove the delete aimed at A's copy only.
+*/
+async function ownersEvent(fix: Fixture, owner: SeededHealthSystem): Promise<string> {
+  const key = await sk(`${owner.healthSystemId}:csn:csn-b-own`);
   fix.upstreams.calendar.plant({
     summary: "Follow-up · A. Example, MD",
     start: { dateTime: SOON },
@@ -694,7 +694,7 @@ describe("one visit, one event, across organisations", () => {
     const fix = await fixture({ portal: { visits: [shared()] } });
     const mine = await calendaredSecondHand(fix);
     const owner = await secondOrganisation(fix, [portalVisit({ csn: "csn-b-own", start: SOON })]);
-    const theirs = await ownersEvent(fix, owner, "csn-b-own");
+    const theirs = await ownersEvent(fix, owner);
 
     const summary = await portalRun(fix);
 
@@ -714,7 +714,7 @@ describe("one visit, one event, across organisations", () => {
     expect(fix.upstreams.calendar.byKey().get(mine)?.summary).toMatch(/^Cancelled: /u);
     fix.portal.visits = [shared()];
     const owner = await secondOrganisation(fix, [portalVisit({ csn: "csn-b-own", start: SOON })]);
-    const theirs = await ownersEvent(fix, owner, "csn-b-own");
+    const theirs = await ownersEvent(fix, owner);
 
     const summary = await portalRun(fix);
 
@@ -744,7 +744,7 @@ describe("one visit, one event, across organisations", () => {
     const fix = await fixture({ portal: { visits: [shared()] } });
     const mine = await calendaredSecondHand(fix);
     const owner = await secondOrganisation(fix, [portalVisit({ csn: "csn-b-own", start: SOON })]);
-    const theirs = await ownersEvent(fix, owner, "csn-b-own");
+    const theirs = await ownersEvent(fix, owner);
     await portalRun(fix);
     const inserts = fix.upstreams.calendar.inserts;
     const patches = fix.upstreams.calendar.patches;
@@ -788,7 +788,7 @@ describe("one visit, one event, across organisations", () => {
     const theirs = portalVisit({ csn: "csn-b-own", start: SOON });
     delete theirs.practitioner;
     const owner = await secondOrganisation(fix, [theirs]);
-    const theirsKey = await ownersEvent(fix, owner, "csn-b-own");
+    const theirsKey = await ownersEvent(fix, owner);
 
     const summary = await portalRun(fix);
 
@@ -1642,7 +1642,7 @@ describe("the owner's edits to a title", () => {
     const event = await eventOf(fix, "csn-1");
     event.summary = "Mine";
 
-    withEncounters(fix, [appointment("enc-1", "2026-06-20T14:31:00+00:00", "csn-1")]);
+    withEncounters(fix, [appointment("2026-06-20T14:31:00+00:00", "csn-1")]);
     await portalRun(fix, false);
 
     // Rekeyed and patched from the Encounter, and the owner's title is still there.
@@ -1778,7 +1778,7 @@ describe("a visit's details page", () => {
     fix.portal.details.set("csn-1", { waitlist: null, directions: "Suite 200." });
     // Stored by a first run, as the portal pass always has before the next FHIR pass.
     await portalRun(fix);
-    withEncounters(fix, [appointment("enc-1", "2026-06-20T14:31:00+00:00")]);
+    withEncounters(fix, [appointment("2026-06-20T14:31:00+00:00")]);
     withPractitioners(fix);
     await portalRun(fix, false);
 

@@ -1,32 +1,32 @@
 /**
- * Turn the portal's upcoming-visits JSON into something the calendar sync can map.
- *
- * Three things here are worth knowing before changing anything.
- *
- * **Field names are read from a candidate list, not assumed.** The research this
- * was built from documents what the payload *contains*, not what the keys are
- * called, so `wire.ts` lists the plausible names per field and the first one
- * present wins. A name that is missing degrades to an absent optional field.
- *
- * **Status comes from a priority order, not from a single flag.** The payload
- * sets several status booleans at once and they contradict each other; one of
- * them (`IsPastVisit`) is documented as simply always wrong. So the status is
- * the highest-priority flag that is true and nothing else, and `scheduled` is
- * the floor. `wire.ts` holds the order, which is the documented part.
- *
- * **A payload with rows but no parseable visit is a failure, not an empty day.**
- * If the candidate key lists ever stop matching -- a release renames things --
- * the honest answer is `portal_parse_failed`, not "you have no appointments",
- * because the second one silently ghosts every event on the owner's calendar.
- *
- * **Place is nested, and video is not a boolean.** A live capture corrected both
- * guesses: the department name, its address and its phone number are fields of a
- * `PrimaryDepartment` object rather than flat keys, the address inside it is
- * itself structured, and no `IsVideoVisit`-shaped flag exists at all -- a video
- * visit is one whose `Telemedicine` object is present or whose `TelehealthMode`
- * is above zero. The flat readers are kept as fallbacks for a deployment that
- * still answers the old way.
- */
+Turn the portal's upcoming-visits JSON into something the calendar sync can map.
+
+Three things here are worth knowing before changing anything.
+
+**Field names are read from a candidate list, not assumed.** The research this
+was built from documents what the payload *contains*, not what the keys are
+called, so `wire.ts` lists the plausible names per field and the first one
+present wins. A name that is missing degrades to an absent optional field.
+
+**Status comes from a priority order, not from a single flag.** The payload
+sets several status booleans at once and they contradict each other; one of
+them (`IsPastVisit`) is documented as simply always wrong. So the status is
+the highest-priority flag that is true and nothing else, and `scheduled` is
+the floor. `wire.ts` holds the order, which is the documented part.
+
+**A payload with rows but no parseable visit is a failure, not an empty day.**
+If the candidate key lists ever stop matching -- a release renames things --
+the honest answer is `portal_parse_failed`, not "you have no appointments",
+because the second one silently ghosts every event on the owner's calendar.
+
+**Place is nested, and video is not a boolean.** A live capture corrected both
+guesses: the department name, its address and its phone number are fields of a
+`PrimaryDepartment` object rather than flat keys, the address inside it is
+itself structured, and no `IsVideoVisit`-shaped flag exists at all -- a video
+visit is one whose `Telemedicine` object is present or whose `TelehealthMode`
+is above zero. The flat readers are kept as fallbacks for a deployment that
+still answers the old way.
+*/
 
 import { AppError } from "../../lib/errors.ts";
 import { cleanPhone } from "../../lib/text.ts";
@@ -74,30 +74,30 @@ export interface PortalVisit {
   isVideo: boolean;
   status: PortalVisitStatus;
   /**
-   * Set (to true) only when the payload says the visit belongs to another
-   * organisation than the portal listing it -- a shared-record copy. Absent means
-   * first-party, or unknown. See `external.ts`.
-   */
+  Set (to true) only when the payload says the visit belongs to another
+  organisation than the portal listing it -- a shared-record copy. Absent means
+  first-party, or unknown. See `external.ts`.
+  */
   external?: true;
   /**
-   * The portal's own ids for the visit's department and primary practitioner:
-   * opaque tokens, deterministic like `csn`. What the directions boilerplate rule
-   * counts distinct places and people by (`worker/src/sync/portal-directions.ts`).
-   */
+  The portal's own ids for the visit's department and primary practitioner:
+  opaque tokens, deterministic like `csn`. What the directions boilerplate rule
+  counts distinct places and people by (`worker/src/sync/portal-directions.ts`).
+  */
   departmentId?: string;
   practitionerId?: string;
   /**
-   * Read from the visits list itself. Absent: the payload did not carry the
-   * field at all; null: it says the thing does not apply to this visit. See
-   * `NormalizedAppointmentView`, which serves them.
-   */
+  Read from the visits list itself. Absent: the payload did not carry the
+  field at all; null: it says the thing does not apply to this visit. See
+  `NormalizedAppointmentView`, which serves them.
+  */
   confirmed?: boolean | null;
   getReady?: AppointmentGetReady | null;
   payment?: AppointmentPayment | null;
   /**
-   * Read from the visit's details page (`visit-details.ts`), by the portal pass
-   * after the list. Absent when that page has not been read.
-   */
+  Read from the visit's details page (`visit-details.ts`), by the portal pass
+  after the list. Absent when that page has not been read.
+  */
   waitlist?: AppointmentWaitlist | null;
   /** The department's directions, every paragraph, boilerplate included. */
   directions?: string;
@@ -111,12 +111,12 @@ export interface ParsedUpcoming {
 }
 
 /**
- * `/Date(1758000000000)/` or `/Date(1758000000000-0500)/` as a unix second.
- *
- * The number is always UTC milliseconds; the trailing offset is presentational
- * and is deliberately ignored, because the zone the visit should be *displayed*
- * in comes from the payload's own `TimeZone` field instead.
- */
+`/Date(1758000000000)/` or `/Date(1758000000000-0500)/` as a unix second.
+
+The number is always UTC milliseconds; the trailing offset is presentational
+and is deliberately ignored, because the zone the visit should be *displayed*
+in comes from the payload's own `TimeZone` field instead.
+*/
 const WCF_DATE = /^\/Date\((-?\d+)(?:[+-]\d{4})?\)\/$/u;
 
 export function parseWcfDate(value: unknown): number | null {
@@ -129,13 +129,13 @@ export function parseWcfDate(value: unknown): number | null {
 }
 
 /**
- * A record's fields as a Map.
- *
- * A Map rather than indexing the object: every lookup here is by a name from a
- * candidate list, and `record[name]` on untrusted JSON is both a prototype-
- * pollution read and a lint failure. `Object.entries` only ever yields own
- * enumerable keys, so the Map cannot contain anything inherited.
- */
+A record's fields as a Map.
+
+A Map rather than indexing the object: every lookup here is by a name from a
+candidate list, and `record[name]` on untrusted JSON is both a prototype-
+pollution read and a lint failure. `Object.entries` only ever yields own
+enumerable keys, so the Map cannot contain anything inherited.
+*/
 function fieldsOf(record: object): Map<string, unknown> {
   return new Map(Object.entries(record));
 }
@@ -161,13 +161,13 @@ function count(fields: ReadonlyMap<string, unknown>, keys: readonly string[]): n
 }
 
 /**
- * True when any candidate key is set.
- *
- * `1` and `"true"` count as true alongside `true`: the payload is generated from
- * a .NET model and a boolean has been seen serialised all three ways. An absent
- * key is false -- never a parse failure, because a status flag this client has
- * not heard of must not stop a visit being calendared.
- */
+True when any candidate key is set.
+
+`1` and `"true"` count as true alongside `true`: the payload is generated from
+a .NET model and a boolean has been seen serialised all three ways. An absent
+key is false -- never a parse failure, because a status flag this client has
+not heard of must not stop a visit being calendared.
+*/
 const TRUTHY: ReadonlySet<unknown> = new Set([true, 1, "true", "True"]);
 
 function flag(fields: ReadonlyMap<string, unknown>, keys: readonly string[]): boolean {
@@ -205,14 +205,14 @@ function lines(value: unknown): string[] {
 }
 
 /**
- * A structured address as one line, tolerantly.
- *
- * Accepts the three shapes the payload has been seen to use -- a plain string, an
- * array of lines, or an object of parts -- and assembles whichever parts are
- * present. Nothing is required: an object with only a city yields the city, and
- * an object with none of the candidate keys yields nothing rather than throwing.
- * The result is only ever written to a calendar event's location.
- */
+A structured address as one line, tolerantly.
+
+Accepts the three shapes the payload has been seen to use -- a plain string, an
+array of lines, or an object of parts -- and assembles whichever parts are
+present. Nothing is required: an object with only a city yields the city, and
+an object with none of the candidate keys yields nothing rather than throwing.
+The result is only ever written to a calendar event's location.
+*/
 export function formatAddress(value: unknown): string | undefined {
   const direct = lines(value);
   if (direct.length > 0) return direct.join(", ");
@@ -258,13 +258,13 @@ function firstPresent(fields: ReadonlyMap<string, unknown>, keys: readonly strin
 }
 
 /**
- * True when this visit is a video visit.
- *
- * Three signals, any of which is enough: a legacy boolean flag, a present (not
- * null) telemedicine object, or a non-zero telehealth mode. The second and third
- * are what a real payload carries; the first is the earlier guess, kept for a
- * deployment that renders it.
- */
+True when this visit is a video visit.
+
+Three signals, any of which is enough: a legacy boolean flag, a present (not
+null) telemedicine object, or a non-zero telehealth mode. The second and third
+are what a real payload carries; the first is the earlier guess, kept for a
+deployment that renders it.
+*/
 export function isVideoVisit(fields: ReadonlyMap<string, unknown>): boolean {
   if (flag(fields, VIDEO_KEYS) || nested(fields, TELEMEDICINE_OBJECT_KEYS) !== null) return true;
   return TELEHEALTH_MODE_KEYS.some((key) => {
@@ -386,13 +386,13 @@ const UNSET_FLAG: ReadonlyMap<boolean, false | null> = new Map([
 ]);
 
 /**
- * Whether the appointment is confirmed.
- *
- * `IsConfirmed` says yes or no; `ConfirmationStatus` says whether confirming
- * applies at all. A live capture showed `1` on confirmed visits and `3` on one
- * still waiting for a confirmation; `0` (or no status at all beside a false
- * flag) is read as "nothing to confirm", the null answer.
- */
+Whether the appointment is confirmed.
+
+`IsConfirmed` says yes or no; `ConfirmationStatus` says whether confirming
+applies at all. A live capture showed `1` on confirmed visits and `3` on one
+still waiting for a confirmation; `0` (or no status at all beside a false
+flag) is read as "nothing to confirm", the null answer.
+*/
 export function confirmedOf(fields: ReadonlyMap<string, unknown>): boolean | null | undefined {
   const flagged = bool(fields, VISIT_STATE_KEYS.confirmed);
   if (flagged === true) return true;
@@ -403,16 +403,16 @@ export function confirmedOf(fields: ReadonlyMap<string, unknown>): boolean | nul
 }
 
 /**
- * The pre-visit tasks ("Get ready", which the portal's model still calls
- * eCheck-in).
- *
- * Offered only when `IsEcheckInEnabled`; complete unless the portal says
- * `IsECheckInIncomplete` -- a visit with nothing left to do reads complete
- * however many steps it ever had, which is what "you're all set" means on the
- * page. The steps the nested `ECheckIn` still lists as required are the ones
- * outstanding: a live capture listed them on the unfinished visit and none on
- * the finished ones.
- */
+The pre-visit tasks ("Get ready", which the portal's model still calls
+eCheck-in).
+
+Offered only when `IsEcheckInEnabled`; complete unless the portal says
+`IsECheckInIncomplete` -- a visit with nothing left to do reads complete
+however many steps it ever had, which is what "you're all set" means on the
+page. The steps the nested `ECheckIn` still lists as required are the ones
+outstanding: a live capture listed them on the unfinished visit and none on
+the finished ones.
+*/
 export function getReadyOf(
   fields: ReadonlyMap<string, unknown>,
 ): AppointmentGetReady | null | undefined {
@@ -428,13 +428,13 @@ export function getReadyOf(
 }
 
 /**
- * The visit's copay or prepayment, from the nested `Copay` object.
- *
- * Amounts come from the `...RawData` numbers, never the formatted strings.
- * `amount` is what the owner would quote: what is due while unpaid, what was
- * paid once paid. Null when the object is null -- the portal has no payment for
- * this visit.
- */
+The visit's copay or prepayment, from the nested `Copay` object.
+
+Amounts come from the `...RawData` numbers, never the formatted strings.
+`amount` is what the owner would quote: what is due while unpaid, what was
+paid once paid. Null when the object is null -- the portal has no payment for
+this visit.
+*/
 export function paymentOf(
   fields: ReadonlyMap<string, unknown>,
 ): AppointmentPayment | null | undefined {
@@ -486,12 +486,12 @@ function firstInstant(fields: ReadonlyMap<string, unknown>): number | null {
 }
 
 /**
- * The instant in the clinic's zone, falling back to the requested one.
- *
- * A zone name the payload made up (or a typo) would otherwise throw and lose the
- * whole batch; the requested zone is always a real one, because the caller got
- * it from the settings row.
- */
+The instant in the clinic's zone, falling back to the requested one.
+
+A zone name the payload made up (or a typo) would otherwise throw and lose the
+whole batch; the requested zone is always a real one, because the caller got
+it from the settings row.
+*/
 function isoIn(seconds: number, timeZone: string, fallbackTimeZone: string): string {
   try {
     return toIsoInZone(seconds, timeZone);
@@ -501,13 +501,13 @@ function isoIn(seconds: number, timeZone: string, fallbackTimeZone: string): str
 }
 
 /**
- * Parse a `LoadUpcoming` body.
- *
- * `fallbackTimeZone` is the zone that was asked for, used for any row that does
- * not name its own. Throws `portal_parse_failed` when the body is not an object
- * with at least one of the documented buckets, or when it had rows and none of
- * them parsed -- see the module comment for why that is not an empty result.
- */
+Parse a `LoadUpcoming` body.
+
+`fallbackTimeZone` is the zone that was asked for, used for any row that does
+not name its own. Throws `portal_parse_failed` when the body is not an object
+with at least one of the documented buckets, or when it had rows and none of
+them parsed -- see the module comment for why that is not an empty result.
+*/
 export function parseUpcoming(payload: unknown, fallbackTimeZone: string): ParsedUpcoming {
   const buckets = objectBody(payload, "upcoming-visits");
   const present = VISIT_BUCKETS.filter((name) => Array.isArray(buckets.get(name)));
@@ -519,17 +519,17 @@ export function parseUpcoming(payload: unknown, fallbackTimeZone: string): Parse
 }
 
 /**
- * Parse a `LoadPast` body.
- *
- * Same rows, one level deeper: `LoadPast` groups by an opaque organisation token
- * because a chart account can be linked to several organisations, so the arrays
- * live at `List.<token>.List`. The tokens themselves are never named here -- they
- * identify organisations -- and are simply whatever own keys the object has.
- *
- * Throws `portal_parse_failed` on the same two conditions `parseUpcoming` does:
- * a body that is not the documented shape, and a body with rows where none of
- * them parsed.
- */
+Parse a `LoadPast` body.
+
+Same rows, one level deeper: `LoadPast` groups by an opaque organisation token
+because a chart account can be linked to several organisations, so the arrays
+live at `List.<token>.List`. The tokens themselves are never named here -- they
+identify organisations -- and are simply whatever own keys the object has.
+
+Throws `portal_parse_failed` on the same two conditions `parseUpcoming` does:
+a body that is not the documented shape, and a body with rows where none of
+them parsed.
+*/
 export function parsePast(payload: unknown, fallbackTimeZone: string): ParsedUpcoming {
   const body = objectBody(payload, "past-visits");
   const outer = body.get(PAST_BUCKET.outer);

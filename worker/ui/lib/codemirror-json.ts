@@ -87,11 +87,11 @@ const jsonTheme = EditorView.theme({
 });
 
 /**
- * Everything a read-only viewer and an editable editor agree on: line numbers,
- * the fold gutter, JSON syntax, the highlight style and the search panel, and
- * this theme. A caller adds editability (or its opposite) and a keymap of its
- * own on top.
- */
+Everything a read-only viewer and an editable editor agree on: line numbers,
+the fold gutter, JSON syntax, the highlight style and the search panel, and
+this theme. A caller adds editability (or its opposite) and a keymap of its
+own on top.
+*/
 export function jsonBaseExtensions(): Extension[] {
   return [
     lineNumbers(),

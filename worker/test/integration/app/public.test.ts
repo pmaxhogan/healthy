@@ -19,13 +19,13 @@ import type { Env } from "../../../src/env.ts";
 const ORIGIN = "https://healthy.example";
 
 /**
- * The real bindings plus the vars and secrets this test needs.
- *
- * No cast: `wrangler types` narrows `HEALTHY_MCP` to
- * `DurableObjectNamespace<HealthyMcp>`, which TypeScript 6 accepts where
- * worker/src/env.ts declares the unparameterised `DurableObjectNamespace`, so the
- * whole spread is checked against `Env`.
- */
+The real bindings plus the vars and secrets this test needs.
+
+No cast: `wrangler types` narrows `HEALTHY_MCP` to
+`DurableObjectNamespace<HealthyMcp>`, which TypeScript 6 accepts where
+worker/src/env.ts declares the unparameterised `DurableObjectNamespace`, so the
+whole spread is checked against `Env`.
+*/
 function testEnv(overrides: Partial<Env>): Env {
   return { ...env, ...overrides };
 }
@@ -33,9 +33,9 @@ function testEnv(overrides: Partial<Env>): Env {
 // No Cloudflare Access in front of a test runner; the password gate still applies.
 const TEST_ENV = testEnv({ DEV_MODE: "true" });
 
-async function get(path: string, init: RequestInit = {}): Promise<Response> {
+async function get(path: string): Promise<Response> {
   const ctx = createExecutionContext();
-  const response = await app.fetch(new Request(ORIGIN + path, init), TEST_ENV, ctx);
+  const response = await app.fetch(new Request(ORIGIN + path), TEST_ENV, ctx);
   await waitOnExecutionContext(ctx);
   return response;
 }

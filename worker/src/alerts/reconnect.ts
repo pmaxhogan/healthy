@@ -1,28 +1,28 @@
 /**
- * Builds the title and Markdown body for a Trello reconnect card.
- *
- * Pure formatting: no fetch, no D1, no Env. `healthSystemName` is user data --
- * the display name of a connected health system or "Google" -- and this
- * module only ever puts it into the returned strings; it never logs
- * anything itself.
- *
- * There is no timezone here on purpose. This module owns no settings access
- * (see the "pure module" note above), and the rest of the codebase never
- * lets a timestamp imply the owner's local timezone (see CLAUDE.md); the
- * occurrence time is rendered in UTC and labeled as such instead.
- */
+Builds the title and Markdown body for a Trello reconnect card.
+
+Pure formatting: no fetch, no D1, no Env. `healthSystemName` is user data --
+the display name of a connected health system or "Google" -- and this
+module only ever puts it into the returned strings; it never logs
+anything itself.
+
+There is no timezone here on purpose. This module owns no settings access
+(see the "pure module" note above), and the rest of the codebase never
+lets a timestamp imply the owner's local timezone (see CLAUDE.md); the
+occurrence time is rendered in UTC and labeled as such instead.
+*/
 
 /**
- * One kind per fix, because the steps are the card.
- *
- * `portal` is a portal the owner has to give something to again (the password,
- * or their confirmation of a new address). `portal_signin` is a portal whose
- * sign-in failed for a reason the stored password has nothing to do with -- the
- * emailed code never arrived, the portal was unreachable, a page stopped
- * parsing -- where the scheduled sync has stopped trying and pressing "Sign in
- * now" is the whole fix. Telling that owner to re-enter a password would be
- * telling them to fix the one thing that is not broken.
- */
+One kind per fix, because the steps are the card.
+
+`portal` is a portal the owner has to give something to again (the password,
+or their confirmation of a new address). `portal_signin` is a portal whose
+sign-in failed for a reason the stored password has nothing to do with -- the
+emailed code never arrived, the portal was unreachable, a page stopped
+parsing -- where the scheduled sync has stopped trying and pressing "Sign in
+now" is the whole fix. Telling that owner to re-enter a password would be
+telling them to fix the one thing that is not broken.
+*/
 type ReconnectKind = "epic" | "google" | "portal" | "portal_signin";
 
 export interface BuildReconnectCardInput {
@@ -44,14 +44,14 @@ const MAX_REASON_LENGTH = 160;
 const EPIC_CONSENT_NOTE =
   "\n\nIf the portal shows a consent screen, keep all data categories selected so the sync sees the whole record.";
 /**
- * The word the card adds to a portal subject's name.
- *
- * "Reconnect <name> patient portal to Healthy" rather than "Reconnect <name>
- * to Healthy", because the owner will eventually have a card of each kind for
- * the same health system and they are fixed in completely different places --
- * one is an OAuth consent screen, the other the portal login. Vendor-neutral:
- * the portal may be MyChart or ModMed.
- */
+The word the card adds to a portal subject's name.
+
+"Reconnect <name> patient portal to Healthy" rather than "Reconnect <name>
+to Healthy", because the owner will eventually have a card of each kind for
+the same health system and they are fixed in completely different places --
+one is an OAuth consent screen, the other the portal login. Vendor-neutral:
+the portal may be MyChart or ModMed.
+*/
 const PORTAL_LABEL = "patient portal";
 
 function clamp(text: string, max: number): string {
@@ -74,13 +74,13 @@ function subjectName(input: BuildReconnectCardInput): string {
 }
 
 /**
- * The steps, which differ by kind because the fix does.
- *
- * A portal session is not an OAuth grant: there is no consent screen and no
- * redirect, only the owner's own password and the code the portal emails. Telling
- * them to "click Reconnect" would send them looking for a button that is not
- * there.
- */
+The steps, which differ by kind because the fix does.
+
+A portal session is not an OAuth grant: there is no consent screen and no
+redirect, only the owner's own password and the code the portal emails. Telling
+them to "click Reconnect" would send them looking for a button that is not
+there.
+*/
 function stepsFor(input: BuildReconnectCardInput): string {
   const open = `1. Open ${input.reconnectUrl} (sign in with Cloudflare Access, then the Healthy password).`;
   if (input.kind === "portal_signin") {

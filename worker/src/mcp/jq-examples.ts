@@ -1,19 +1,19 @@
 /**
- * Worked `jq` examples, per tool, for each tool's `jq` argument description.
- *
- * One generic example on every tool taught a model nothing about the fields
- * that tool actually returns, so each tool names its own: real field names off
- * that tool's items (`worker/src/fhir/normalize/types.ts`, the projections in
- * `worker/src/mcp/**`), doing the things a caller most often wants of that tool.
- *
- * `satisfies Record<ToolName, ...>` makes a new tool without examples a compile
- * error, and `worker/test/unit/mcp/jq-examples.test.ts` runs every program here through
- * the real jq engine against the real tools over synthetic data, so an example
- * that stops compiling, or names a field an item no longer has, fails the build.
- *
- * Nothing here may name a real health system, practitioner or value from a
- * record: the strings are published in every client's tool list.
- */
+Worked `jq` examples, per tool, for each tool's `jq` argument description.
+
+One generic example on every tool taught a model nothing about the fields
+that tool actually returns, so each tool names its own: real field names off
+that tool's items (`worker/src/fhir/normalize/types.ts`, the projections in
+`worker/src/mcp/**`), doing the things a caller most often wants of that tool.
+
+`satisfies Record<ToolName, ...>` makes a new tool without examples a compile
+error, and `worker/test/unit/mcp/jq-examples.test.ts` runs every program here through
+the real jq engine against the real tools over synthetic data, so an example
+that stops compiling, or names a field an item no longer has, fails the build.
+
+Nothing here may name a real health system, practitioner or value from a
+record: the strings are published in every client's tool list.
+*/
 
 import type { ToolName } from "./tool-names.ts";
 

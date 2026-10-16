@@ -1,25 +1,25 @@
 /**
- * Find a ModMed patient portal at an origin, without signing in.
- *
- * One GET: the practice's own `auth/data/patient` document, which the portal's
- * app reads before it does anything else. A ModMed practice answers it with a
- * JSON object naming its Keycloak server, realm and client; anything else
- * (MyChart, a 404 page, a different product) does not, and discovery says so
- * with `portal_parse_failed` so the caller can try the next vendor.
- *
- * What is stored is the *identity provider* as well as the origin. The owner
- * confirms both before a password is ever sealed against them: the admin card
- * shows the provider's origin on the confirm line and the save echoes it back
- * (`worker/src/api/routes/portal.ts`), because that is where the password is
- * actually POSTed. The client re-reads the document on every sign-in and
- * refuses to send the password anywhere other than the identity provider
- * recorded here (`portal_origin_unconfirmed`), so a practice that moves its
- * sign-in elsewhere needs the owner to look again rather than silently
- * relocating the credential.
- *
- * Nothing here logs a host, a realm or a body. The document also carries the
- * practice's name and logo in its login hint; none of that is kept.
- */
+Find a ModMed patient portal at an origin, without signing in.
+
+One GET: the practice's own `auth/data/patient` document, which the portal's
+app reads before it does anything else. A ModMed practice answers it with a
+JSON object naming its Keycloak server, realm and client; anything else
+(MyChart, a 404 page, a different product) does not, and discovery says so
+with `portal_parse_failed` so the caller can try the next vendor.
+
+What is stored is the *identity provider* as well as the origin. The owner
+confirms both before a password is ever sealed against them: the admin card
+shows the provider's origin on the confirm line and the save echoes it back
+(`worker/src/api/routes/portal.ts`), because that is where the password is
+actually POSTed. The client re-reads the document on every sign-in and
+refuses to send the password anywhere other than the identity provider
+recorded here (`portal_origin_unconfirmed`), so a practice that moves its
+sign-in elsewhere needs the owner to look again rather than silently
+relocating the credential.
+
+Nothing here logs a host, a realm or a body. The document also carries the
+practice's name and logo in its login hint; none of that is kept.
+*/
 
 import { isHttpsUrl } from "@shared/url.ts";
 
@@ -76,10 +76,10 @@ function withoutTrailingSlashes(url: string): string {
 }
 
 /**
- * Validate the document. Null when it is not a ModMed patient sign-in document
- * at all, or one this client cannot drive (no SSO, a non-https identity
- * provider, or a stateful deployment).
- */
+Validate the document. Null when it is not a ModMed patient sign-in document
+at all, or one this client cannot drive (no SSO, a non-https identity
+provider, or a stateful deployment).
+*/
 function parseAuthData(body: unknown): AuthData | null {
   if (!isRecord(body) || body.ssoEnabled !== true) return null;
   const config = body.keycloakConfig;
@@ -151,11 +151,11 @@ export async function fetchAuthData(baseUrl: string, deps: ModMedDiscoveryDeps):
 }
 
 /**
- * Probe `baseUrl` (an origin) for a ModMed patient portal.
- *
- * Throws `portal_parse_failed` when it is not one, which is the caller's cue to
- * try another vendor.
- */
+Probe `baseUrl` (an origin) for a ModMed patient portal.
+
+Throws `portal_parse_failed` when it is not one, which is the caller's cue to
+try another vendor.
+*/
 export async function discoverModMed(
   baseUrl: string,
   deps: ModMedDiscoveryDeps,

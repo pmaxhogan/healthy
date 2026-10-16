@@ -175,10 +175,10 @@ const LOG_URL = "/api/phone/devices/dev-1/ingest-log";
 const SUMMARY_URL = "/api/phone/devices/dev-1/ingest-summary";
 
 /**
- * Every page a test mounted and has not left. A page that outlives its test keeps
- * its clock and its `visibilitychange` listener, and would answer the next
- * test's event with a fetch of its own.
- */
+Every page a test mounted and has not left. A page that outlives its test keeps
+its clock and its `visibilitychange` listener, and would answer the next
+test's event with a fetch of its own.
+*/
 const mounted = new Set<ReturnType<typeof mount>>();
 
 function leave(wrapper: ReturnType<typeof mount>): void {

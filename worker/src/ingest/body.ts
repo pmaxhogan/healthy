@@ -1,19 +1,19 @@
 /**
- * Reading an upload without trusting anything it says about its own size.
- *
- * Both limits are enforced on the bytes as they are read, never on a header:
- * `Content-Length` is a claim, and a gzip stream of a few kilobytes can expand
- * to gigabytes. Reading stops, and the stream is cancelled, the moment either
- * limit is passed.
- */
+Reading an upload without trusting anything it says about its own size.
+
+Both limits are enforced on the bytes as they are read, never on a header:
+`Content-Length` is a claim, and a gzip stream of a few kilobytes can expand
+to gigabytes. Reading stops, and the stream is cancelled, the moment either
+limit is passed.
+*/
 
 /** The largest compressed body the ingest route reads. */
 export const MAX_COMPRESSED_BYTES = 8 * 1024 * 1024;
 /**
- * The largest decompressed body it will expand one to. The compressed bytes,
- * the expanded bytes, the decoded string and the parsed tree are all alive at
- * once inside a 128 MB isolate, so this is set well under a quarter of that.
- */
+The largest decompressed body it will expand one to. The compressed bytes,
+the expanded bytes, the decoded string and the parsed tree are all alive at
+once inside a 128 MB isolate, so this is set well under a quarter of that.
+*/
 export const MAX_RAW_BYTES = 16 * 1024 * 1024;
 
 export type ReadResult =

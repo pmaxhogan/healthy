@@ -1,19 +1,19 @@
 /**
- * `hc_coverage` and `hc_sync_status`: what the paired phone has sent, and how
- * the pipeline that brings it here is doing.
- *
- * They are to phone data what `list_health_systems` and `get_sync_status` are
- * to the FHIR cache, and they go through `respond()` for the same reason: a
- * denied phone that still appears in a status listing has been announced, and
- * a denied record type whose row still says how many records there are has
- * leaked the shape of what the rule hides. So both list only the phones the
- * call may read (`beginHcCall`) and only the types coverage has an entry for,
- * which is the allowed ones; a count that sums over types sums over those.
- *
- * Neither reads a single measurement except `hc_coverage`'s `lastRecordFrom`,
- * which opens the one hour each type's newest record sits in to say which app
- * and which hardware wrote it.
- */
+`hc_coverage` and `hc_sync_status`: what the paired phone has sent, and how
+the pipeline that brings it here is doing.
+
+They are to phone data what `list_health_systems` and `get_sync_status` are
+to the FHIR cache, and they go through `respond()` for the same reason: a
+denied phone that still appears in a status listing has been announced, and
+a denied record type whose row still says how many records there are has
+leaked the shape of what the rule hides. So both list only the phones the
+call may read (`beginHcCall`) and only the types coverage has an entry for,
+which is the allowed ones; a count that sums over types sums over those.
+
+Neither reads a single measurement except `hc_coverage`'s `lastRecordFrom`,
+which opens the one hour each type's newest record sits in to say which app
+and which hardware wrote it.
+*/
 
 import { z } from "zod";
 
@@ -52,9 +52,9 @@ const DEFAULT_RECENT_BATCHES = 50;
 const DEFAULT_RECENT_UPLOADS = 20;
 
 /**
- * The one store warning this tool repeats. Queued and pending work is what its
- * rows are for; parked uploads are data that is missing, which deserves saying twice.
- */
+The one store warning this tool repeats. Queued and pending work is what its
+rows are for; parked uploads are data that is missing, which deserves saying twice.
+*/
 const PARKED_WARNING = "hc_batches_parked:";
 
 const TYPE_NAME = z.string().min(1);
@@ -104,34 +104,34 @@ const SYNC_SCHEMA = hcArgs("hc_sync_status", {
 });
 
 /**
- * A unix-second bookkeeping instant in the answer's zone, like every other
- * time these tools return; null when it never happened.
- */
+A unix-second bookkeeping instant in the answer's zone, like every other
+time these tools return; null when it never happened.
+*/
 function at(call: HcCall, seconds: number | null): string | null {
   return seconds === null ? null : call.clock.iso(seconds * SECOND_MS);
 }
 
 /**
- * A bookkeeping instant in UTC (`...Z`), for the one time here that is not a
- * moment in the owner's day: the phone walks its history back in UTC calendar
- * months, and a UTC month start written in a local zone reads as the evening
- * before.
- */
+A bookkeeping instant in UTC (`...Z`), for the one time here that is not a
+moment in the owner's day: the phone walks its history back in UTC calendar
+months, and a UTC month start written in a local zone reads as the evening
+before.
+*/
 function utcIso(ms: number | null): string | null {
   return ms === null ? null : new Date(ms).toISOString().replace(".000Z", "Z");
 }
 
 /**
- * Which app and hardware wrote a type's newest record. Null when there is none
- * to open.
- *
- * `lastMs` is where the newest record ENDS (`hc_sync_state.last_ms` is the
- * greatest end time the store holds), and a read window is half-open: an
- * interval or series record that ends exactly at `lastMs` has nothing in
- * `[lastMs, lastMs + 1)` and only an instantaneous one does. So the window
- * opens a millisecond earlier, which every record ending at `lastMs` reaches
- * into, and the newest is chosen by its end.
- */
+Which app and hardware wrote a type's newest record. Null when there is none
+to open.
+
+`lastMs` is where the newest record ENDS (`hc_sync_state.last_ms` is the
+greatest end time the store holds), and a read window is half-open: an
+interval or series record that ends exactly at `lastMs` has nothing in
+`[lastMs, lastMs + 1)` and only an instantaneous one does. So the window
+opens a millisecond earlier, which every record ending at `lastMs` reaches
+into, and the newest is chosen by its end.
+*/
 async function lastRecordFrom(
   deps: ToolDeps,
   device: HcDevice,
@@ -257,11 +257,11 @@ async function coverageItems(
 }
 
 /**
- * One sync run, as an answer shows it. `startedAt` is the phone's clock and
- * `receivedAt` this server's, both written in the answer's zone. How the run
- * ended is one of the phone's error codes, so it is worded as `mcpErrorCode`
- * words them, and the trigger is held to the same rule.
- */
+One sync run, as an answer shows it. `startedAt` is the phone's clock and
+`receivedAt` this server's, both written in the answer's zone. How the run
+ended is one of the phone's error codes, so it is worded as `mcpErrorCode`
+words them, and the trigger is held to the same rule.
+*/
 function uploadItem(call: HcCall, run: UploadRun): Record<string, unknown> {
   return {
     startedAt: call.clock.isoOrNull(run.startedMs),

@@ -1,18 +1,18 @@
 /**
- * `hr_series`, `hr_events` and `blood_pressure`.
- *
- * The two heart-rate tools answer from the per-minute rows (`../hc/heart.ts`)
- * and open raw chunks only for a sub-minute resolution or to take an
- * implausible reading out of a minute. `blood_pressure` reads the readings
- * themselves -- there are a handful a day -- and applies the duplicate and
- * sitting rules of `worker/src/hc/rules.ts` when it answers, never before.
- *
- * Two of them put a value on a row that was measured as another record type
- * -- an event's `context` comes from sleep and exercise sessions, a reading's
- * `pulse` from heart rate -- so every row goes out through `stripJoined`
- * (`../hc/policy.ts`), and the other type is not read at all when the policy
- * denies it.
- */
+`hr_series`, `hr_events` and `blood_pressure`.
+
+The two heart-rate tools answer from the per-minute rows (`../hc/heart.ts`)
+and open raw chunks only for a sub-minute resolution or to take an
+implausible reading out of a minute. `blood_pressure` reads the readings
+themselves -- there are a handful a day -- and applies the duplicate and
+sitting rules of `worker/src/hc/rules.ts` when it answers, never before.
+
+Two of them put a value on a row that was measured as another record type
+-- an event's `context` comes from sleep and exercise sessions, a reading's
+`pulse` from heart rate -- so every row goes out through `stripJoined`
+(`../hc/policy.ts`), and the other type is not read at all when the policy
+denies it.
+*/
 
 import { z } from "zod";
 
@@ -69,12 +69,12 @@ const DEFAULT_RESOLUTION = "1min";
 const DEFAULT_MAX_POINTS = 2000;
 
 /**
- * `hr_events` defaults: a rise of thirty beats a minute over the baseline of
- * the ten minutes before it, held for a minute. Standing up from rest is
- * commonly ten to twenty; thirty is the rise that is worth a look whatever
- * caused it. A slow climb never opens an event under these: at two beats a
- * minute the baseline of a ten-minute window climbs with it.
- */
+`hr_events` defaults: a rise of thirty beats a minute over the baseline of
+the ten minutes before it, held for a minute. Standing up from rest is
+commonly ten to twenty; thirty is the rise that is worth a look whatever
+caused it. A slow climb never opens an event under these: at two beats a
+minute the baseline of a ten-minute window climbs with it.
+*/
 const DEFAULT_MIN_DELTA_BPM = 30;
 const DEFAULT_WINDOW_S = 600;
 const DEFAULT_SUSTAIN_S = 60;
@@ -350,9 +350,9 @@ function textOf(value: unknown): string | null {
 }
 
 /**
- * The pulse a cuff took with a reading: the same app's heart rate in the same
- * minute. Empty, and nothing read, when the policy denies heart rate.
- */
+The pulse a cuff took with a reading: the same app's heart rate in the same
+minute. Empty, and nothing read, when the policy denies heart rate.
+*/
 async function pulses(
   deps: ToolDeps,
   call: HcCall,
@@ -429,7 +429,7 @@ async function pressureRows(
   const sessions = groupBloodPressureSessions(deduped.kept, query.windowMin);
   const rows = sessions.map((session) => {
     const readings = session.readings.map((record) => reading(record));
-    const withPulse = readings.flatMap((entry) => (entry.pulse === null ? [] : [entry.pulse]));
+    const withPulse = readings.flatMap((entry) => entry.pulse ?? []);
     return strip({
       kind: "session",
       ...tags,

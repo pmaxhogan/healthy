@@ -706,12 +706,12 @@ describe("Epic 4119, the filtered patient view", () => {
 });
 
 /**
- * Two health systems, sorted so "A" is attempted first.
- *
- * A's access token is already inside the five-minute refresh skew, so its very
- * first request goes through the refresh path -- which is what lets a test make
- * that refresh fail without touching anything B does.
- */
+Two health systems, sorted so "A" is attempted first.
+
+A's access token is already inside the five-minute refresh skew, so its very
+first request goes through the refresh path -- which is what lets a test make
+that refresh fail without touching anything B does.
+*/
 async function twoHealthSystems(options: { trello?: boolean } = {}) {
   const time = clock();
   const { log, lines } = recordingLog();

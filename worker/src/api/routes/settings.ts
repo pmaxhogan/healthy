@@ -1,15 +1,15 @@
 /**
- * `/api/settings` -- the `settings` table, as one object.
- *
- * `PUT` is a patch, not a replace: the body carries only the keys that changed and
- * `setSettings` validates all of them before writing any, so one bad field rejects
- * the whole payload rather than half-applying it.
- *
- * The timezone is the field with teeth. It has no default in source (a real one
- * would disclose where the owner lives), the sync's local-day window depends on
- * it, and `Intl` accepts some strings that are not zones -- so it is validated
- * against the runtime's own zone database in `schemas.ts` before it is stored.
- */
+`/api/settings` -- the `settings` table, as one object.
+
+`PUT` is a patch, not a replace: the body carries only the keys that changed and
+`setSettings` validates all of them before writing any, so one bad field rejects
+the whole payload rather than half-applying it.
+
+The timezone is the field with teeth. It has no default in source (a real one
+would disclose where the owner lives), the sync's local-day window depends on
+it, and `Intl` accepts some strings that are not zones -- so it is validated
+against the runtime's own zone database in `schemas.ts` before it is stored.
+*/
 
 import { Hono } from "hono";
 

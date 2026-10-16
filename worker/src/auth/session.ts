@@ -30,25 +30,25 @@ export const SESSION_COOKIE_NAME = "healthy_session";
 export const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 /**
- * Cookie attributes, all of them load-bearing:
- *   HttpOnly         -- script cannot read it, so an XSS cannot exfiltrate it
- *   Secure           -- never sent over plaintext
- *   SameSite=Lax     -- carried on top-level GET navigations only, which is what
- *                       the OAuth redirect back from a health system is; never on a
- *                       cross-site POST or subresource request. Strict was
- *                       tried first and dropped the cookie on every
- *                       /oauth/callback, bouncing each connect through the
- *                       password page (owner decision, 2026-09-22). Mutations
- *                       are still covered by the header + origin checks in
- *                       csrf.ts.
- *   Path=/           -- the whole admin surface is gated, so the whole origin
- */
+Cookie attributes, all of them load-bearing:
+  HttpOnly         -- script cannot read it, so an XSS cannot exfiltrate it
+  Secure           -- never sent over plaintext
+  SameSite=Lax     -- carried on top-level GET navigations only, which is what
+                      the OAuth redirect back from a health system is; never on a
+                      cross-site POST or subresource request. Strict was
+                      tried first and dropped the cookie on every
+                      /oauth/callback, bouncing each connect through the
+                      password page (owner decision, 2026-09-22). Mutations
+                      are still covered by the header + origin checks in
+                      csrf.ts.
+  Path=/           -- the whole admin surface is gated, so the whole origin
+*/
 const COOKIE_ATTRIBUTES = "HttpOnly; Secure; SameSite=Lax; Path=/";
 
 /**
- * The signed message. `healthy.` is a domain separator so a secret shared with
- * another project could not produce a valid token here.
- */
+The signed message. `healthy.` is a domain separator so a secret shared with
+another project could not produce a valid token here.
+*/
 function sessionMessage(env: SessionEnv, exp: number): string {
   return `healthy.${String(exp)}.${env.PASSWORD_HASH ?? ""}`;
 }
@@ -59,11 +59,11 @@ function secrets(env: SessionEnv): { secret: string } | null {
 }
 
 /**
- * The bare cookie value, `${exp}.${sig}`.
- *
- * Exported for the tests, which need to tamper with the halves independently.
- * Production code wants {@link issueSession}.
- */
+The bare cookie value, `${exp}.${sig}`.
+
+Exported for the tests, which need to tamper with the halves independently.
+Production code wants {@link issueSession}.
+*/
 export async function mintSessionToken(
   env: SessionEnv,
   nowMs: number = Date.now(),
@@ -87,10 +87,10 @@ export function clearSessionCookie(): string {
 }
 
 /**
- * True only for a cookie that is present, unexpired, and correctly signed under
- * the current pair of secrets. Every other case -- including secrets that are
- * not configured at all -- is false.
- */
+True only for a cookie that is present, unexpired, and correctly signed under
+the current pair of secrets. Every other case -- including secrets that are
+not configured at all -- is false.
+*/
 export async function verifySession(
   request: Request,
   env: SessionEnv,

@@ -1,11 +1,11 @@
 /**
- * What a paired phone looks like once its row is read.
- *
- * Types only, and deliberately not in the repo that produces them
- * (`worker/src/db/repos/devices.ts`): that module reaches `Env`, and with it
- * every Durable Object class, which the plain-Node unit project cannot load.
- * The API's DTO mapping is unit-tested there, so it takes its shapes from here.
- */
+What a paired phone looks like once its row is read.
+
+Types only, and deliberately not in the repo that produces them
+(`worker/src/db/repos/devices.ts`): that module reaches `Env`, and with it
+every Durable Object class, which the plain-Node unit project cannot load.
+The API's DTO mapping is unit-tested there, so it takes its shapes from here.
+*/
 
 export interface Device {
   id: string;

@@ -76,10 +76,10 @@ function row(csn: string, iso: string, type: string): Record<string, unknown> {
 }
 
 /**
- * A `LoadUpcoming` body spread across all three buckets and about seven months,
- * which is the shape the owner's live schedule has: something today, two in the
- * next few days' bucket, and four in the "later" list stretching into winter.
- */
+A `LoadUpcoming` body spread across all three buckets and about seven months,
+which is the shape the owner's live schedule has: something today, two in the
+next few days' bucket, and four in the "later" list stretching into winter.
+*/
 function sevenMonthPayload(): Record<string, unknown> {
   return {
     InProgressVisits: [row("csn-1", "2026-06-01T02:00:00Z", "Lab draw")],

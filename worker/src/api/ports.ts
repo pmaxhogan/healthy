@@ -1,25 +1,25 @@
 /**
- * The seams the admin API and the OAuth routes reach the outside world through.
- *
- * Everything in here is a *port*: an interface owned by the caller, with one
- * live implementation and a test override. There are two unrelated reasons for
- * that, and both matter.
- *
- * 1. **Testing.** `fetch` is a port, so an integration test can stand in for
- *    Epic's token endpoint, Google's, and Trello's without `vi.stubGlobal` --
- *    which is unreliable inside workerd, where the Worker and the test are
- *    different realms.
- *
- * 2. **A narrow contract across three authors.** The sync engine (`worker/src/sync/`)
- *    and the MCP grant store (`worker/src/mcp/grants.ts`) are written separately. The
- *    interfaces below are the only shapes /api depends on, so a change inside
- *    either module shows up here as one type error rather than as a dozen broken
- *    handlers -- and `setPorts` lets a test replace either without touching the
- *    real one.
- *
- * The live implementations are the defaults, so nothing has to be wired at
- * startup: `worker/src/index.ts` is untouched by this file.
- */
+The seams the admin API and the OAuth routes reach the outside world through.
+
+Everything in here is a *port*: an interface owned by the caller, with one
+live implementation and a test override. There are two unrelated reasons for
+that, and both matter.
+
+1. **Testing.** `fetch` is a port, so an integration test can stand in for
+   Epic's token endpoint, Google's, and Trello's without `vi.stubGlobal` --
+   which is unreliable inside workerd, where the Worker and the test are
+   different realms.
+
+2. **A narrow contract across three authors.** The sync engine (`worker/src/sync/`)
+   and the MCP grant store (`worker/src/mcp/grants.ts`) are written separately. The
+   interfaces below are the only shapes /api depends on, so a change inside
+   either module shows up here as one type error rather than as a dozen broken
+   handlers -- and `setPorts` lets a test replace either without touching the
+   real one.
+
+The live implementations are the defaults, so nothing has to be wired at
+startup: `worker/src/index.ts` is untouched by this file.
+*/
 
 import { createTrelloAlerts } from "../alerts/trello.ts";
 import { AppError } from "../lib/errors.ts";
@@ -45,19 +45,19 @@ import type { McpGrantDto, PortalSignInState } from "@shared/types.ts";
 type ReconnectSubject = "google" | { healthSystemId: string };
 
 /**
- * The sync engine's public surface, as the admin API uses it.
- *
- * The run entry points resolve with `unknown` on purpose. The engine reports a run
- * summary, and the API neither reads nor forwards it: a manual run is kicked off in
- * `waitUntil` and has not finished by the time the 202 is written. Typing the
- * return as `unknown` is what keeps this contract from having to track the
- * summary's shape, which belongs to `worker/src/sync/`.
- *
- * `startFullRefresh` is the one that is *not* fire-and-forget, and it is the one
- * port method whose answer the API reads. A refresh outlives a `waitUntil`, so it is
- * queued on a Durable Object instead; the call is a storage write, it is awaited,
- * and `started: false` means one was already running for that health system.
- */
+The sync engine's public surface, as the admin API uses it.
+
+The run entry points resolve with `unknown` on purpose. The engine reports a run
+summary, and the API neither reads nor forwards it: a manual run is kicked off in
+`waitUntil` and has not finished by the time the 202 is written. Typing the
+return as `unknown` is what keeps this contract from having to track the
+summary's shape, which belongs to `worker/src/sync/`.
+
+`startFullRefresh` is the one that is *not* fire-and-forget, and it is the one
+port method whose answer the API reads. A refresh outlives a `waitUntil`, so it is
+queued on a Durable Object instead; the call is a storage write, it is awaited,
+and `started: false` means one was already running for that health system.
+*/
 interface SyncPort {
   runCalendarSync(
     ctx: Ctx,
@@ -77,26 +77,26 @@ interface SyncPort {
 }
 
 /**
- * One MCP grant as the store hands it over.
- *
- * `id` is the only field required. Everything else is optional because the shape
- * ultimately comes from `@cloudflare/workers-oauth-provider`, which owns it and has
- * changed it between releases -- so the projection in `routes/mcp.ts` fills the gaps
- * rather than trusting them to be there. A full `McpGrantDto` satisfies this, which
- * is what the live implementation returns.
- */
+One MCP grant as the store hands it over.
+
+`id` is the only field required. Everything else is optional because the shape
+ultimately comes from `@cloudflare/workers-oauth-provider`, which owns it and has
+changed it between releases -- so the projection in `routes/mcp.ts` fills the gaps
+rather than trusting them to be there. A full `McpGrantDto` satisfies this, which
+is what the live implementation returns.
+*/
 export type GrantLike = { id: string } & Partial<Omit<McpGrantDto, "id">>;
 
 /**
- * The patient-portal runner, as the admin API uses it.
- *
- * All three methods reach the same per-health system Durable Object, and that is the
- * reason this is a port rather than a direct call: a sign-in waits for a code the
- * portal emails, so it cannot happen inside the request that asked for it, and a
- * test has to be able to stand in for the whole alarm loop rather than for a
- * transport. `started: false` from either starter means one was already in flight
- * for that health system -- still a 202, because what the owner asked for is happening.
- */
+The patient-portal runner, as the admin API uses it.
+
+All three methods reach the same per-health system Durable Object, and that is the
+reason this is a port rather than a direct call: a sign-in waits for a code the
+portal emails, so it cannot happen inside the request that asked for it, and a
+test has to be able to stand in for the whole alarm loop rather than for a
+transport. `started: false` from either starter means one was already in flight
+for that health system -- still a 202, because what the owner asked for is happening.
+*/
 interface PortalPort {
   startSignIn(ctx: Ctx, options: { healthSystemId: string }): Promise<{ started: boolean }>;
   startSync(ctx: Ctx, options: { healthSystemId: string }): Promise<{ started: boolean }>;
@@ -121,12 +121,12 @@ export interface Ports {
 }
 
 /**
- * The Trello client, from the four Worker secrets.
- *
- * Throws `not_connected` rather than `internal` when they are unset: a deployment
- * that has not configured Trello is a legitimate state (alerts are simply off),
- * and the UI shows the difference.
- */
+The Trello client, from the four Worker secrets.
+
+Throws `not_connected` rather than `internal` when they are unset: a deployment
+that has not configured Trello is a legitimate state (alerts are simply off),
+and the UI shows the difference.
+*/
 function liveTrello(env: Env, fetchImpl: typeof fetch): TrelloAlerts {
   const { TRELLO_KEY, TRELLO_TOKEN, TRELLO_MUST_LIST_ID, TRELLO_DONE_LIST_ID } = env;
   if (

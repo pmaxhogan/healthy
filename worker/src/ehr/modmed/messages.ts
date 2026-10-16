@@ -1,48 +1,48 @@
 /**
- * ModMed secure messages (the portal's "intramail") -> the shared portal message model.
- *
- * ### What is read, and what never is
- *
- * Two lists, each paged to the end: the inbox (`/ema/ws/v3/intramail/inbox`) and
- * the sent folder (`/ema/ws/v3/intramail/sent`). Each row is a whole message --
- * subject, author, body, attachments and, for the inbox, the owner's own
- * read/flag state -- so no per-message call is needed.
- *
- * Nothing that changes anything in the portal is ever called. The app marks a
- * message read with a separate `PUT .../intramail/{id}/recipient/{r}/flags`
- * when it is opened; reading the list does not, and neither does this. The
- * per-message detail GET is not used either, because the list already carries
- * every field it would add.
- *
- * ### Shape
- *
- * ModMed messages are not threaded by the API: each is its own row. Two things
- * can tie a reply to the message it answers, and `messagesOf` uses them in
- * this order:
- *
- *  1. `messageLinks`, when a row carries any: the ids it names are joined to it.
- *     (Empty on every row seen live, a reply included, so this is read
- *     defensively: a number, a string, or an object with an id field.)
- *  2. Otherwise the subject. The practice's answer comes back as
- *     `RE: <the owner's subject>`, so a row whose subject carries a reply or
- *     forward prefix is joined to the latest *earlier* message from the *other*
- *     folder with the same subject once prefixes are stripped, sent within
- *     `REPLY_WINDOW_DAYS` before it. Nothing else is joined: two unrelated
- *     messages that happen to share a subject stay two conversations.
- *
- * A conversation's stored identity is its subject and first message
- * (`worker/src/db/repos/portal-messages.ts`). That is as stable as the lists are:
- * if the owner's original ages out of the sent folder while the reply is still
- * in the inbox, the reply is no longer joined to it and is stored as a
- * conversation of its own -- the original stays stored under the old one. The
- * API offers nothing more permanent to key on, so this is a known limit, not a
- * silent loss: every message is still stored exactly once. Drafts are skipped: they are not messages
- * anyone sent. Recipients are never kept -- a patient recipient is the owner,
- * named in full -- except a staff group's name on a sent message, which is the
- * care team it went to.
- *
- * Logs carry counts only.
- */
+ModMed secure messages (the portal's "intramail") -> the shared portal message model.
+
+### What is read, and what never is
+
+Two lists, each paged to the end: the inbox (`/ema/ws/v3/intramail/inbox`) and
+the sent folder (`/ema/ws/v3/intramail/sent`). Each row is a whole message --
+subject, author, body, attachments and, for the inbox, the owner's own
+read/flag state -- so no per-message call is needed.
+
+Nothing that changes anything in the portal is ever called. The app marks a
+message read with a separate `PUT .../intramail/{id}/recipient/{r}/flags`
+when it is opened; reading the list does not, and neither does this. The
+per-message detail GET is not used either, because the list already carries
+every field it would add.
+
+### Shape
+
+ModMed messages are not threaded by the API: each is its own row. Two things
+can tie a reply to the message it answers, and `messagesOf` uses them in
+this order:
+
+ 1. `messageLinks`, when a row carries any: the ids it names are joined to it.
+    (Empty on every row seen live, a reply included, so this is read
+    defensively: a number, a string, or an object with an id field.)
+ 2. Otherwise the subject. The practice's answer comes back as
+    `RE: <the owner's subject>`, so a row whose subject carries a reply or
+    forward prefix is joined to the latest *earlier* message from the *other*
+    folder with the same subject once prefixes are stripped, sent within
+    `REPLY_WINDOW_DAYS` before it. Nothing else is joined: two unrelated
+    messages that happen to share a subject stay two conversations.
+
+A conversation's stored identity is its subject and first message
+(`worker/src/db/repos/portal-messages.ts`). That is as stable as the lists are:
+if the owner's original ages out of the sent folder while the reply is still
+in the inbox, the reply is no longer joined to it and is stored as a
+conversation of its own -- the original stays stored under the old one. The
+API offers nothing more permanent to key on, so this is a known limit, not a
+silent loss: every message is still stored exactly once. Drafts are skipped: they are not messages
+anyone sent. Recipients are never kept -- a patient recipient is the owner,
+named in full -- except a staff group's name on a sent message, which is the
+care team it went to.
+
+Logs carry counts only.
+*/
 
 import { messageText } from "../mychart/message-text.ts";
 
@@ -327,10 +327,10 @@ function linkedIndexes(
 }
 
 /**
- * Both folders' rows as conversations: replies joined to what they answer (see
- * the module comment), messages oldest first, conversations in the order they
- * started.
- */
+Both folders' rows as conversations: replies joined to what they answer (see
+the module comment), messages oldest first, conversations in the order they
+started.
+*/
 export function messagesOf(
   inboxRows: readonly unknown[],
   sentRows: readonly unknown[],
@@ -383,10 +383,10 @@ export function conversationKey(subject: string): string {
 }
 
 /**
- * One conversation from the one-message threads that make it up: messages
- * oldest first, the subject the opening message's, and the care team every
- * message named, in the order the conversation reached them.
- */
+One conversation from the one-message threads that make it up: messages
+oldest first, the subject the opening message's, and the care team every
+message named, in the order the conversation reached them.
+*/
 function mergeGroup(group: readonly PortalThread[]): PortalThread {
   const ordered = byFirstSent(group, (thread) => thread.messages[0]?.sent ?? "");
   const opening = ordered[0];

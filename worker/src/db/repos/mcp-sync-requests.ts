@@ -1,18 +1,18 @@
 /**
- * The cooldown an MCP client's sync requests are held to (`mcp_sync_requests`).
- *
- * One row per (health system, kind of sync), holding when a request was last
- * let through and how many were let through that UTC day. It is in D1 because
- * the limit has to hold across MCP sessions, Durable Object evictions and
- * deploys: a counter in memory would reset whenever a client reconnected, which
- * is exactly when a looping client would benefit.
- *
- * `claim` is a single statement, so two calls arriving together cannot both
- * read "nothing recent" and both go ahead: SQLite runs the upsert atomically,
- * its `WHERE` decides, and `changes` says which caller got the slot. The
- * numbers are the caller's (`worker/src/mcp/sync-request.ts`), not this
- * module's.
- */
+The cooldown an MCP client's sync requests are held to (`mcp_sync_requests`).
+
+One row per (health system, kind of sync), holding when a request was last
+let through and how many were let through that UTC day. It is in D1 because
+the limit has to hold across MCP sessions, Durable Object evictions and
+deploys: a counter in memory would reset whenever a client reconnected, which
+is exactly when a looping client would benefit.
+
+`claim` is a single statement, so two calls arriving together cannot both
+read "nothing recent" and both go ahead: SQLite runs the upsert atomically,
+its `WHERE` decides, and `changes` says which caller got the slot. The
+numbers are the caller's (`worker/src/mcp/sync-request.ts`), not this
+module's.
+*/
 
 import { utcDayNumber } from "../../lib/time.ts";
 import { all, run } from "../client.ts";
@@ -42,12 +42,12 @@ export function makeMcpSyncRequestsRepo(ctx: Ctx) {
     },
 
     /**
-     * Take the slot for one request, or change nothing.
-     *
-     * True means this caller may start the sync, and the row now says so. False
-     * means the pair is inside its cooldown or has spent its day: nothing was
-     * written, and the caller reads the row to say when it may ask again.
-     */
+    Take the slot for one request, or change nothing.
+
+    True means this caller may start the sync, and the row now says so. False
+    means the pair is inside its cooldown or has spent its day: nothing was
+    written, and the caller reads the row to say when it may ask again.
+    */
     async claim(
       healthSystemId: string,
       kind: McpSyncKind,

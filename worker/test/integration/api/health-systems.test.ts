@@ -514,7 +514,6 @@ describe("PATCH /api/health-systems/:id moving the endpoint", () => {
       vendor: "oracle-health",
     });
     const insecure = await owner().send("PATCH", `/api/health-systems/${id}`, {
-      // eslint-disable-next-line unicorn/prefer-https -- a non-https base is the input under test; the assertion is that it is refused.
       fhirBaseUrl: "http://fhir.example-practice.test/R4",
     });
 

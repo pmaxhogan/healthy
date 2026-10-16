@@ -1,19 +1,19 @@
 /**
- * The portal boundary, and the one door into this directory.
- *
- * `worker/src/ehr/adapter.ts` draws the same line for the FHIR side: the sync
- * engine is written against an interface and knows nothing about a vendor.
- * `PortalAdapter` is that idea for the scrape, and it exists for the same reason
- * -- another vendor's patient portal is a different set of paths and a different
- * login form, but it is the same three questions (where does it live, how do I
- * sign in, what is coming up), so a second implementation should be a second
- * file and one line in `PORTAL_ADAPTERS`.
- *
- * Adapters are pure, exactly as the FHIR ones are: they take a `fetchImpl`, a
- * `Logger` and a clock, and they never read `env`, touch D1, or persist
- * anything. The cookie jar is handed in by the caller and handed back for the
- * caller to seal, because the caller is the only layer with storage.
- */
+The portal boundary, and the one door into this directory.
+
+`worker/src/ehr/adapter.ts` draws the same line for the FHIR side: the sync
+engine is written against an interface and knows nothing about a vendor.
+`PortalAdapter` is that idea for the scrape, and it exists for the same reason
+-- another vendor's patient portal is a different set of paths and a different
+login form, but it is the same three questions (where does it live, how do I
+sign in, what is coming up), so a second implementation should be a second
+file and one line in `PORTAL_ADAPTERS`.
+
+Adapters are pure, exactly as the FHIR ones are: they take a `fetchImpl`, a
+`Logger` and a clock, and they never read `env`, touch D1, or persist
+anything. The cookie jar is handed in by the caller and handed back for the
+caller to seal, because the caller is the only layer with storage.
+*/
 
 import { AppError, isAppError } from "../../lib/errors.ts";
 import { createModMedAdapter, isModMedEndpoint } from "../modmed/index.ts";
@@ -48,10 +48,10 @@ export { CookieJar } from "./cookie-jar.ts";
 export type PortalVendor = "mychart" | "modmed";
 
 /**
- * Any vendor's stored discovery result. A ModMed one says so with
- * `portal: "modmed"`; a MyChart one predates the field and carries none, so
- * absent means MyChart.
- */
+Any vendor's stored discovery result. A ModMed one says so with
+`portal: "modmed"`; a MyChart one predates the field and carries none, so
+absent means MyChart.
+*/
 export type AnyPortalEndpoint = PortalEndpoint | ModMedEndpoint;
 
 /** Everything an adapter needs from the outside world. */
@@ -64,14 +64,14 @@ export interface PortalAdapterDeps {
   random?: (() => number) | undefined;
   maxRedirects?: number | undefined;
   /**
-   * The two values a `custom_oidc` deployment may need and discovery cannot
-   * always learn. Ignored entirely by the classic flavour.
-   *
-   * This is the escape hatch, not the intended path: the API base normally comes
-   * out of discovery and lands in the endpoint JSON, and the MFA contact normally
-   * comes out of the login response. Both are here because neither can have a
-   * default -- the real values name the organisation and the owner respectively.
-   */
+  The two values a `custom_oidc` deployment may need and discovery cannot
+  always learn. Ignored entirely by the classic flavour.
+
+  This is the escape hatch, not the intended path: the API base normally comes
+  out of discovery and lands in the endpoint JSON, and the MFA contact normally
+  comes out of the login response. Both are here because neither can have a
+  default -- the real values name the organisation and the owner respectively.
+  */
   custom?: PortalCustomSettings | undefined;
 }
 
@@ -85,19 +85,19 @@ export interface PortalDiscoveryInput {
 export interface PortalAdapter {
   readonly portal: PortalVendor;
   /**
-   * Probe, unauthenticated and without a cookie jar, for a login page.
-   *
-   * Throws `portal_parse_failed` when nothing recognisable answered, and
-   * `portal_bot_blocked` / `portal_unreachable` when the host will not talk.
-   */
+  Probe, unauthenticated and without a cookie jar, for a login page.
+
+  Throws `portal_parse_failed` when nothing recognisable answered, and
+  `portal_bot_blocked` / `portal_unreachable` when the host will not talk.
+  */
   discover(input: PortalDiscoveryInput, deps: PortalAdapterDeps): Promise<AnyPortalEndpoint>;
   /**
-   * A client pointed at one instance, sharing one jar.
-   *
-   * The jar is the caller's: load it from the sealed column before the call and
-   * seal whatever it holds afterwards, whether the call succeeded or not -- a
-   * failed sign-in still leaves cookies worth keeping.
-   */
+  A client pointed at one instance, sharing one jar.
+
+  The jar is the caller's: load it from the sealed column before the call and
+  seal whatever it holds afterwards, whether the call succeeded or not -- a
+  failed sign-in still leaves cookies worth keeping.
+  */
   client(endpoint: AnyPortalEndpoint, jar: CookieJar, deps: PortalAdapterDeps): PortalClient;
 }
 
@@ -139,11 +139,11 @@ export function createMyChartAdapter(): PortalAdapter {
 }
 
 /**
- * portal vendor -> adapter. The only place in the Worker that names one.
- *
- * Module-private on purpose: callers go through `portalAdapterFor`, so the
- * narrowing in `isPortalVendor` cannot be skipped.
- */
+portal vendor -> adapter. The only place in the Worker that names one.
+
+Module-private on purpose: callers go through `portalAdapterFor`, so the
+narrowing in `isPortalVendor` cannot be skipped.
+*/
 const PORTAL_ADAPTERS: Record<PortalVendor, PortalAdapterFactory> = {
   mychart: createMyChartAdapter,
   modmed: createModMedAdapter,
@@ -164,14 +164,14 @@ export function portalAdapterFor(vendor: string): PortalAdapter {
 }
 
 /**
- * The adapter every caller uses unless a test injects one: it works out the
- * vendor itself.
- *
- * Discovery asks ModMed first because ModMed's probe is one specific JSON
- * document that nothing else serves; when it is not there, MyChart's own
- * discovery runs and its answer (found, or the reason not) is the result.
- * A client is built by the vendor the stored endpoint names.
- */
+The adapter every caller uses unless a test injects one: it works out the
+vendor itself.
+
+Discovery asks ModMed first because ModMed's probe is one specific JSON
+document that nothing else serves; when it is not there, MyChart's own
+discovery runs and its answer (found, or the reason not) is the result.
+A client is built by the vendor the stored endpoint names.
+*/
 export function createPortalAdapter(): PortalAdapter {
   const modmed = createModMedAdapter();
   const mychart = createMyChartAdapter();

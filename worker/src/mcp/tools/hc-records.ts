@@ -1,34 +1,34 @@
 /**
- * `hc_records` and `hc_aggregate`: the two general doors onto phone data.
- *
- * `hc_records` is the raw one -- every stored record of one type with anything
- * in the range, as the phone serialised it. It opens only the hour chunks the
- * range touches, and a continued call (a `cursor`) opens only the hours from
- * the cursor on.
- *
- * `hc_aggregate` is the one to reach for first: calendar buckets in a named
- * zone, answered from the day and hour rollups wherever a bucket allows
- * (`../hc/parts.ts`), with duplicates between apps handled out loud
- * (`../hc/aggregate.ts`).
- *
- * Both take the record type from the caller, so both check it against the
- * exposure policy before reading (`typeAllowed`). A platform aggregate
- * (`Agg.Steps`) is checked as the type it is data of, and its rows are tagged
- * as that type: see `../hc/policy.ts`.
- *
- * Paging `hc_records`. Its rows are in a total order (start, phone, id), so a
- * continuation can resume by time instead of re-reading the range: the cursor
- * names the start of the next row, how many rows at that same instant have
- * gone out, and how many went out before them. Three things keep a paged read
- * identical to a single one:
- *
- *  - the continuation reads the ORIGINAL range, narrowed at one end only: a
- *    record that ended before the range began is not in it on any page;
- *  - the cursor is built from the rows actually sent (after the policy), and
- *    falls back to a plain offset when a rule has hidden the times it would
- *    anchor on;
- *  - `total` and `matched` count the whole answer on every page.
- */
+`hc_records` and `hc_aggregate`: the two general doors onto phone data.
+
+`hc_records` is the raw one -- every stored record of one type with anything
+in the range, as the phone serialised it. It opens only the hour chunks the
+range touches, and a continued call (a `cursor`) opens only the hours from
+the cursor on.
+
+`hc_aggregate` is the one to reach for first: calendar buckets in a named
+zone, answered from the day and hour rollups wherever a bucket allows
+(`../hc/parts.ts`), with duplicates between apps handled out loud
+(`../hc/aggregate.ts`).
+
+Both take the record type from the caller, so both check it against the
+exposure policy before reading (`typeAllowed`). A platform aggregate
+(`Agg.Steps`) is checked as the type it is data of, and its rows are tagged
+as that type: see `../hc/policy.ts`.
+
+Paging `hc_records`. Its rows are in a total order (start, phone, id), so a
+continuation can resume by time instead of re-reading the range: the cursor
+names the start of the next row, how many rows at that same instant have
+gone out, and how many went out before them. Three things keep a paged read
+identical to a single one:
+
+ - the continuation reads the ORIGINAL range, narrowed at one end only: a
+   record that ended before the range began is not in it on any page;
+ - the cursor is built from the rows actually sent (after the policy), and
+   falls back to a plain offset when a rule has hidden the times it would
+   anchor on;
+ - `total` and `matched` count the whole answer on every page.
+*/
 
 import { z } from "zod";
 
@@ -72,9 +72,9 @@ import type { Range } from "../hc/time.ts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 /**
- * A record type as the wire contract spells one (`RECORD_TYPE_PATTERN` in
- * `worker/src/hc/wire.ts`): what the phone may send is what a caller may ask for.
- */
+A record type as the wire contract spells one (`RECORD_TYPE_PATTERN` in
+`worker/src/hc/wire.ts`): what the phone may send is what a caller may ask for.
+*/
 const RECORD_TYPE = z
   .string()
   .regex(/^[A-Za-z][A-Za-z0-9_.:-]{0,63}$/u)
@@ -233,10 +233,10 @@ interface RecordsQuery {
 }
 
 /**
- * True when a record has anything in the range: the store reader's own rule,
- * repeated here because a continuation asks the reader for a narrower window
- * and must still judge each record by the ORIGINAL one.
- */
+True when a record has anything in the range: the store reader's own rule,
+repeated here because a continuation asks the reader for a narrower window
+and must still judge each record by the ORIGINAL one.
+*/
 function inRange(record: HcRecord, range: Range): boolean {
   const start = recordStartMs(record);
   return start < range.endMs && Math.max(recordEndMs(record), start + 1) > range.startMs;
@@ -287,11 +287,11 @@ function sentInstant(row: unknown): number | null {
 }
 
 /**
- * The cursor for "continue at row `next`" of the rows that were sent: that
- * row's start, the rows at the same instant already sent, and the rows before
- * those. When the row's time cannot be read back (a field rule hides it), a
- * plain offset into the whole answer instead, which re-reads the range.
- */
+The cursor for "continue at row `next`" of the rows that were sent: that
+row's start, the rows at the same instant already sent, and the rows before
+those. When the row's time cannot be read back (a field rule hides it), a
+plain offset into the whole answer instead, which re-reads the range.
+*/
 function resumeCursor(page: StampedPage, sent: readonly unknown[], next: number): string {
   const absolute = page.before + next;
   const anchorMs = sentInstant(sent.at(next));
@@ -395,11 +395,11 @@ async function aggregateDevice(
 }
 
 /**
- * The warnings `bmr_fill` earns before anything is read, and whether it
- * applies at all. The padding is folded into the bucket's total, where no
- * rule could pick it back out, so it is not computed at all when the policy
- * denies the basal-metabolic-rate type or hides its one field.
- */
+The warnings `bmr_fill` earns before anything is read, and whether it
+applies at all. The padding is folded into the bucket's total, where no
+rule could pick it back out, so it is not computed at all when the policy
+denies the basal-metabolic-rate type or hides its one field.
+*/
 function bmrFillPlan(
   call: HcCall,
   type: string,

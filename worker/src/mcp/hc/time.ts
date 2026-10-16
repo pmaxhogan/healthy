@@ -1,29 +1,29 @@
 /**
- * Times in and out of the Health Connect tools.
- *
- * In: `start` and `end` are either a calendar date (`2026-01-31`), meaning
- * that whole local day in the zone the call runs in, or an instant that says
- * its own offset (`2026-01-31T09:00:00-05:00`, `...Z`). A date-time with no
- * offset is refused: it could only be guessed at, and a guess that is an hour
- * out moves a night's sleep into the wrong day. Every range is half-open in
- * instants, `[start, end)` -- and what that means for `end` depends on how it
- * was written:
- *
- *  - an `end` given as an INSTANT is exclusive: the range stops just before it;
- *  - an `end` given as a calendar DATE is inclusive of that date: it stands for
- *    the whole local day, so the range runs to the midnight that ends it.
- *    `start: 2026-01-30, end: 2026-01-31` is two days, not one.
- *
- * Nothing in the tools may describe `end` as plainly "exclusive": a caller who
- * passes two dates gets both.
- *
- * Out: every instant is ISO-8601 carrying the zone's offset at that instant
- * (`2026-01-31T09:00:00-05:00`), so a string compares correctly within one
- * answer and reads as a wall-clock time.
- *
- * The zone is the owner's sealed `timezone` setting unless the caller passes
- * `tz`. No zone is named anywhere in this module.
- */
+Times in and out of the Health Connect tools.
+
+In: `start` and `end` are either a calendar date (`2026-01-31`), meaning
+that whole local day in the zone the call runs in, or an instant that says
+its own offset (`2026-01-31T09:00:00-05:00`, `...Z`). A date-time with no
+offset is refused: it could only be guessed at, and a guess that is an hour
+out moves a night's sleep into the wrong day. Every range is half-open in
+instants, `[start, end)` -- and what that means for `end` depends on how it
+was written:
+
+ - an `end` given as an INSTANT is exclusive: the range stops just before it;
+ - an `end` given as a calendar DATE is inclusive of that date: it stands for
+   the whole local day, so the range runs to the midnight that ends it.
+   `start: 2026-01-30, end: 2026-01-31` is two days, not one.
+
+Nothing in the tools may describe `end` as plainly "exclusive": a caller who
+passes two dates gets both.
+
+Out: every instant is ISO-8601 carrying the zone's offset at that instant
+(`2026-01-31T09:00:00-05:00`), so a string compares correctly within one
+answer and reads as a wall-clock time.
+
+The zone is the owner's sealed `timezone` setting unless the caller passes
+`tz`. No zone is named anywhere in this module.
+*/
 
 import { dayBoundsMs, localDay } from "../../hc/rollup/day.ts";
 import { toIsoInZone } from "../../lib/time.ts";
@@ -85,21 +85,21 @@ export function parseRange(input: RangeInput): Range {
 }
 
 /**
- * How long one zone-offset lookup is reused for. Every zone's offset is a
- * whole number of quarter hours and changes on a quarter-hour boundary, so
- * inside one quarter hour the offset is constant.
- */
+How long one zone-offset lookup is reused for. Every zone's offset is a
+whole number of quarter hours and changes on a quarter-hour boundary, so
+inside one quarter hour the offset is constant.
+*/
 const OFFSET_SLOT_MS = 15 * MINUTE_MS;
 
 const OFFSET_PATTERN = /([+-])(\d{2}):(\d{2})$/u;
 
 /**
- * Instants written in one zone.
- *
- * `Intl` is asked for an offset once per quarter hour and the rest is
- * arithmetic: a raw heart-rate answer formats tens of thousands of instants,
- * and one formatter call each would dominate the request.
- */
+Instants written in one zone.
+
+`Intl` is asked for an offset once per quarter hour and the rest is
+arithmetic: a raw heart-rate answer formats tens of thousands of instants,
+and one formatter call each would dominate the request.
+*/
 export interface ZoneClock {
   readonly timeZone: string;
   /** ISO-8601 with the zone's offset; milliseconds only when there are any. */

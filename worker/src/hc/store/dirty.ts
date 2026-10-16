@@ -1,40 +1,40 @@
 /**
- * `hc_dirty`: what the rebuild phase still has to recompute.
- *
- * Applying a batch only marks; the runner rebuilds once the queue is empty
- * (worker/src/hc/store/rebuild.ts), so a month of backfill rebuilds each day
- * once and not once per batch. A mark is written in the same `db.batch` as the
- * change that caused it and deleted in the same `db.batch` as the row it asked
- * for, so neither a lost mark nor a rebuilt-but-still-marked row can happen.
- *
- * One saving on the writing side: a `day` mark covers two dozen chunks, and a
- * batch that has already written one does not write it again for the next
- * chunk of the same day (worker/src/hc/apply.ts). That is the same guarantee,
- * not a weaker one: nothing clears a mark while the batch that wrote it is
- * still being applied, because the rebuild only ever runs between batches.
- *
- * Kinds, and what `key` is for each:
- *
- *   hr        `<originHash>|<hourUtc>`  a per-minute heart-rate row
- *   day       `d<utcDay>|<type>`        the day rollups of the local days that
- *                                       UTC day falls on, every origin (the day
- *                                       zero-padded: key order is time order)
- *   sleep     blinded record id         one sleep night summary
- *   exercise  blinded record id         one exercise session summary
- *
- * A `day` mark names a UTC day, not a calendar day: which calendar days an
- * instant belongs to depends on the configured zone, and the zone that counts
- * is the one in force when the day is rebuilt, not when the record arrived --
- * there may not even be one yet.
- *
- * ### Parked marks
- *
- * A mark whose row cannot be rebuilt -- the chunk it has to be built from will
- * not open -- is moved to the kind `parked:<kind>`: kept, skipped by the
- * rebuild, and counted apart (`storeBacklog`). One bad row must not be retried
- * for ever at the head of the list while every other mark waits behind it.
- * `unparkMarks` puts them back.
- */
+`hc_dirty`: what the rebuild phase still has to recompute.
+
+Applying a batch only marks; the runner rebuilds once the queue is empty
+(worker/src/hc/store/rebuild.ts), so a month of backfill rebuilds each day
+once and not once per batch. A mark is written in the same `db.batch` as the
+change that caused it and deleted in the same `db.batch` as the row it asked
+for, so neither a lost mark nor a rebuilt-but-still-marked row can happen.
+
+One saving on the writing side: a `day` mark covers two dozen chunks, and a
+batch that has already written one does not write it again for the next
+chunk of the same day (worker/src/hc/apply.ts). That is the same guarantee,
+not a weaker one: nothing clears a mark while the batch that wrote it is
+still being applied, because the rebuild only ever runs between batches.
+
+Kinds, and what `key` is for each:
+
+  hr        `<originHash>|<hourUtc>`  a per-minute heart-rate row
+  day       `d<utcDay>|<type>`        the day rollups of the local days that
+                                      UTC day falls on, every origin (the day
+                                      zero-padded: key order is time order)
+  sleep     blinded record id         one sleep night summary
+  exercise  blinded record id         one exercise session summary
+
+A `day` mark names a UTC day, not a calendar day: which calendar days an
+instant belongs to depends on the configured zone, and the zone that counts
+is the one in force when the day is rebuilt, not when the record arrived --
+there may not even be one yet.
+
+### Parked marks
+
+A mark whose row cannot be rebuilt -- the chunk it has to be built from will
+not open -- is moved to the kind `parked:<kind>`: kept, skipped by the
+rebuild, and counted apart (`storeBacklog`). One bad row must not be retried
+for ever at the head of the list while every other mark waits behind it.
+`unparkMarks` puts them back.
+*/
 
 import { batch, one, run } from "../../db/client.ts";
 
@@ -52,12 +52,12 @@ export interface DirtyRow {
 }
 
 /**
- * The order marks are rebuilt in. Heart-rate minutes first, because a night
- * and a session read them and there are few of them (only a series that runs
- * past its hour leaves one). Then nights and sessions, then days: the rebuild
- * also runs in a small share of each slice while a backfill is still arriving,
- * and what the owner looks at first should exist first.
- */
+The order marks are rebuilt in. Heart-rate minutes first, because a night
+and a session read them and there are few of them (only a series that runs
+past its hour leaves one). Then nights and sessions, then days: the rebuild
+also runs in a small share of each slice while a backfill is still arriving,
+and what the owner looks at first should exist first.
+*/
 const REBUILD_ORDER: readonly DirtyKind[] = ["hr", "sleep", "exercise", "day"];
 
 /** What a parked mark's kind starts with. See the module comment. */
@@ -67,12 +67,12 @@ export const PARKED_PREFIX = "parked:";
 const MARK_PAGE = 5000;
 
 /**
- * The longest a stored session is taken to run when looking for the sessions
- * a change could affect. It bounds two things that nothing else bounds: how
- * far back `markSessionsStatement` looks for a session still running at an
- * instant, and how much of a session claiming an absurd span the rebuild reads
- * context for. A real night or workout is a fraction of this.
- */
+The longest a stored session is taken to run when looking for the sessions
+a change could affect. It bounds two things that nothing else bounds: how
+far back `markSessionsStatement` looks for a session still running at an
+instant, and how much of a session claiming an absurd span the rebuild reads
+context for. A real night or workout is a fraction of this.
+*/
 export const MAX_SESSION_SPAN_MS = 48 * HOUR_MS;
 
 function markStatement(
@@ -91,9 +91,9 @@ function markStatement(
 }
 
 /**
- * The statements that mark everything in `marks`, a page of them each: a list
- * is as long as what one record touched, which nothing bounds.
- */
+The statements that mark everything in `marks`, a page of them each: a list
+is as long as what one record touched, which nothing bounds.
+*/
 export function markStatements(
   ctx: Ctx,
   deviceId: string,
@@ -138,17 +138,17 @@ export function markSessionsSql(kind: "sleep" | "exercise"): string {
 }
 
 /**
- * Mark every stored sleep night or exercise session that overlaps
- * `[startMs, endMs]`. What makes a summary follow data that arrives after its
- * session did: a night's heart rate uploaded in a later batch, a second
- * session that turns out to overlap the first.
- *
- * A session overlapping the window started before the window ends, and -- no
- * session being longer than `MAX_SESSION_SPAN_MS` for this purpose -- no
- * earlier than that long before it begins. Both bounds are on `start_ms`,
- * which is indexed, so this reads the sessions around the window and not every
- * session there has ever been.
- */
+Mark every stored sleep night or exercise session that overlaps
+`[startMs, endMs]`. What makes a summary follow data that arrives after its
+session did: a night's heart rate uploaded in a later batch, a second
+session that turns out to overlap the first.
+
+A session overlapping the window started before the window ends, and -- no
+session being longer than `MAX_SESSION_SPAN_MS` for this purpose -- no
+earlier than that long before it begins. Both bounds are on `start_ms`,
+which is indexed, so this reads the sessions around the window and not every
+session there has ever been.
+*/
 export function markSessionsStatement(
   ctx: Ctx,
   deviceId: string,
@@ -162,30 +162,30 @@ export function markSessionsStatement(
 }
 
 /**
- * The statement `nextDirty` runs for one kind, exported so its plan can be
- * asserted. Day marks are read backwards: their key begins with the hour, so
- * that is newest first -- yesterday before last year, during a backfill.
- */
+The statement `nextDirty` runs for one kind, exported so its plan can be
+asserted. Day marks are read backwards: their key begins with the hour, so
+that is newest first -- yesterday before last year, during a backfill.
+*/
 export function nextDirtySql(kind: string): string {
   const order = kind === "day" ? "key DESC" : "key";
   return `SELECT kind, key FROM hc_dirty WHERE device_id = ? AND kind = ? ORDER BY ${order} LIMIT ?`;
 }
 
 /**
- * The next marks to rebuild: a page of each kind, in rebuild order, the kinds
- * with none left out. One read along the primary key per kind -- never a sort
- * of the whole list, which after a backfill is long. Parked marks are not
- * returned.
- *
- * All four reads go to D1 as one `db.batch`: a round trip costs the same
- * whatever is in it, and asking kind by kind was up to four of them to learn
- * that only the last kind had anything. Four statements all the same, and the
- * meter is told of each: D1 counts them all.
- *
- * A caller that wants the strict order -- every mark of a kind before any of
- * the next -- takes the pages in order and asks again after one that came back
- * full (`limit` rows): that kind may have more.
- */
+The next marks to rebuild: a page of each kind, in rebuild order, the kinds
+with none left out. One read along the primary key per kind -- never a sort
+of the whole list, which after a backfill is long. Parked marks are not
+returned.
+
+All four reads go to D1 as one `db.batch`: a round trip costs the same
+whatever is in it, and asking kind by kind was up to four of them to learn
+that only the last kind had anything. Four statements all the same, and the
+meter is told of each: D1 counts them all.
+
+A caller that wants the strict order -- every mark of a kind before any of
+the next -- takes the pages in order and asks again after one that came back
+full (`limit` rows): that kind may have more.
+*/
 export async function nextDirty(
   ctx: Ctx,
   deviceId: string,
@@ -201,10 +201,10 @@ export async function nextDirty(
 }
 
 /**
- * The statement `dirtyBacklog` runs. Bound: the device, then the cap. The inner
- * LIMIT is what makes it cheap: it reads at most that many primary-key entries
- * however long the list is.
- */
+The statement `dirtyBacklog` runs. Bound: the device, then the cap. The inner
+LIMIT is what makes it cheap: it reads at most that many primary-key entries
+however long the list is.
+*/
 export const DIRTY_BACKLOG_SQL = `SELECT count(*) AS marks FROM (
     SELECT 1 FROM hc_dirty
      WHERE device_id = ? AND kind IN (${REBUILD_ORDER.map((kind) => `'${kind}'`).join(", ")})
@@ -216,10 +216,10 @@ export interface BacklogRow {
 }
 
 /**
- * The statement that counts the marks waiting to be rebuilt, no further than
- * `cap`, for a caller that runs it with other statements: the count a batch
- * leaves behind is read in the transaction that closes the batch.
- */
+The statement that counts the marks waiting to be rebuilt, no further than
+`cap`, for a caller that runs it with other statements: the count a batch
+leaves behind is read in the transaction that closes the batch.
+*/
 export function dirtyBacklogStatement(
   ctx: Ctx,
   deviceId: string,
@@ -229,10 +229,10 @@ export function dirtyBacklogStatement(
 }
 
 /**
- * How many marks are waiting to be rebuilt, counted no further than `cap`:
- * enough to tell a list that is keeping up from one that is not, without
- * reading all of a long one. Parked marks are not counted.
- */
+How many marks are waiting to be rebuilt, counted no further than `cap`:
+enough to tell a list that is keeping up from one that is not, without
+reading all of a long one. Parked marks are not counted.
+*/
 export async function dirtyBacklog(ctx: Ctx, deviceId: string, cap: number): Promise<number> {
   const row = await one<BacklogRow>(dirtyBacklogStatement(ctx, deviceId, cap));
   return row?.marks ?? 0;
@@ -256,9 +256,9 @@ export function parkMarkStatements(
 }
 
 /**
- * Put every parked mark of a device back in the list, to be tried again.
- * Returns how many. For after whatever made its source unreadable is fixed.
- */
+Put every parked mark of a device back in the list, to be tried again.
+Returns how many. For after whatever made its source unreadable is fixed.
+*/
 export async function unparkMarks(ctx: Ctx, deviceId: string): Promise<number> {
   const { changes } = await run(
     ctx.db

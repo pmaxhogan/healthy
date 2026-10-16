@@ -1,6 +1,6 @@
 /**
- * The small helpers the Health Connect summaries share. Pure.
- */
+The small helpers the Health Connect summaries share. Pure.
+*/
 
 /** A sorted copy of `items`; the input is not modified. */
 export function sortedBy<T>(items: readonly T[], compare: (left: T, right: T) => number): T[] {
@@ -9,14 +9,14 @@ export function sortedBy<T>(items: readonly T[], compare: (left: T, right: T) =>
 }
 
 /**
- * The `q` quantile (0 to 1) of `values` by linear interpolation between the
- * two nearest ranks: position `q * (n - 1)` in the sorted list. This is the
- * common spreadsheet method ("type 7", `PERCENTILE.INC`), chosen so a reader
- * can check a quartile by hand: for [10, 20, 30, 40, 50] the quartiles are 20
- * and 40, and for [10, 20, 30, 40] they are 17.5 and 32.5.
- *
- * Null for an empty list. The input is not modified.
- */
+The `q` quantile (0 to 1) of `values` by linear interpolation between the
+two nearest ranks: position `q * (n - 1)` in the sorted list. This is the
+common spreadsheet method ("type 7", `PERCENTILE.INC`), chosen so a reader
+can check a quartile by hand: for [10, 20, 30, 40, 50] the quartiles are 20
+and 40, and for [10, 20, 30, 40] they are 17.5 and 32.5.
+
+Null for an empty list. The input is not modified.
+*/
 export function quantile(values: readonly number[], q: number): number | null {
   return quantileOfSorted(
     sortedBy(values, (left, right) => left - right),

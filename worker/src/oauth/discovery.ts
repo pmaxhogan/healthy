@@ -1,18 +1,18 @@
 /**
- * A per-isolate cache of SMART discovery documents.
- *
- * `.well-known/smart-configuration` is fetched twice in one authorisation -- once
- * to build the authorize URL, once to find the token endpoint on the way back --
- * and those two requests are minutes apart in different invocations. An
- * organisation can move its endpoints without changing its FHIR base, so the
- * document is not a constant; but it changes on the order of an Epic upgrade, not
- * of a request.
- *
- * In-memory rather than D1, deliberately. The cost of a miss is one small GET, the
- * value is bounded and non-personal (two URLs and three capability lists), and
- * keeping it out of the database means no new column to seal and no new row to
- * invalidate. A cold isolate simply fetches it again.
- */
+A per-isolate cache of SMART discovery documents.
+
+`.well-known/smart-configuration` is fetched twice in one authorisation -- once
+to build the authorize URL, once to find the token endpoint on the way back --
+and those two requests are minutes apart in different invocations. An
+organisation can move its endpoints without changing its FHIR base, so the
+document is not a constant; but it changes on the order of an Epic upgrade, not
+of a request.
+
+In-memory rather than D1, deliberately. The cost of a miss is one small GET, the
+value is bounded and non-personal (two URLs and three capability lists), and
+keeping it out of the database means no new column to seal and no new row to
+invalidate. A cold isolate simply fetches it again.
+*/
 
 import { adapterFor } from "../ehr/registry.ts";
 import { AppError } from "../lib/errors.ts";
@@ -42,12 +42,12 @@ export interface DiscoverOptions {
 }
 
 /**
- * The discovery document for one FHIR base, cached.
- *
- * `fhirBaseUrl` is the cache key verbatim, with no normalisation: Epic matches the
- * `aud` parameter as a string, so a base URL with and without a trailing slash are
- * genuinely different configurations and must not share an entry.
- */
+The discovery document for one FHIR base, cached.
+
+`fhirBaseUrl` is the cache key verbatim, with no normalisation: Epic matches the
+`aud` parameter as a string, so a base URL with and without a trailing slash are
+genuinely different configurations and must not share an entry.
+*/
 export async function discoverCached(
   vendor: string,
   fhirBaseUrl: string,

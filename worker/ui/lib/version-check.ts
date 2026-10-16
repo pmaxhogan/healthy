@@ -69,12 +69,12 @@ async function liveEntry(): Promise<string | null> {
 }
 
 /**
- * Compare the running bundle with the live one, at most once a minute, and
- * offer a reload once if they differ. Never throws -- this runs from error
- * paths and event listeners, where a failure of its own would only add noise.
- *
- * Resolves with whether a newer build was found.
- */
+Compare the running bundle with the live one, at most once a minute, and
+offer a reload once if they differ. Never throws -- this runs from error
+paths and event listeners, where a failure of its own would only add noise.
+
+Resolves with whether a newer build was found.
+*/
 export async function checkForNewVersion(): Promise<boolean> {
   if (state.notified) return true;
   const running = entryOf(config.page());
@@ -100,9 +100,9 @@ export async function checkForNewVersion(): Promise<boolean> {
 }
 
 /**
- * Check whenever the owner comes back to the tab -- the moment a long-open page
- * is most likely to be stale.
- */
+Check whenever the owner comes back to the tab -- the moment a long-open page
+is most likely to be stale.
+*/
 export function watchForNewVersion(): void {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") void checkForNewVersion();
@@ -110,10 +110,10 @@ export function watchForNewVersion(): void {
 }
 
 /**
- * After a failed request: a 400 or a 404 from the API is what an old bundle
- * talking to a new Worker looks like (a field renamed, a route moved), so it is
- * worth one check. Anything else -- a 5xx, a network error -- is not.
- */
+After a failed request: a 400 or a 404 from the API is what an old bundle
+talking to a new Worker looks like (a field renamed, a route moved), so it is
+worth one check. Anything else -- a 5xx, a network error -- is not.
+*/
 export function checkAfterError(error: unknown): void {
   if (error instanceof ApiRequestError && (error.status === 400 || error.status === 404)) {
     void checkForNewVersion();

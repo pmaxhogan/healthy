@@ -1,11 +1,11 @@
 /**
- * The pure half of the Health Connect store: how records are keyed, grouped,
- * ordered and merged. No D1 and no `Env`, so all of it is unit-tested in plain
- * Node; the modules beside this one do the reading, sealing and writing.
- *
- * A record lives in exactly one chunk: (record type, origin app, the UTC hour
- * its START falls in). Everything here follows from that one rule.
- */
+The pure half of the Health Connect store: how records are keyed, grouped,
+ordered and merged. No D1 and no `Env`, so all of it is unit-tested in plain
+Node; the modules beside this one do the reading, sealing and writing.
+
+A record lives in exactly one chunk: (record type, origin app, the UTC hour
+its START falls in). Everything here follows from that one rule.
+*/
 
 import { recordEndMs, recordStartMs } from "../wire.ts";
 
@@ -31,10 +31,10 @@ export function hourOf(ms: number): number {
 }
 
 /**
- * One string per chunk key, for maps and for AADs. `:` cannot be the separator
- * a caller splits on (a record type may contain one), so nothing ever parses
- * this back: it is only compared.
- */
+One string per chunk key, for maps and for AADs. `:` cannot be the separator
+a caller splits on (a record type may contain one), so nothing ever parses
+this back: it is only compared.
+*/
 export function keyId(key: ChunkKey): string {
   return `${key.type}:${key.originHash}:${String(key.hourUtc)}`;
 }
@@ -54,9 +54,9 @@ export function compareText(left: string, right: string): number {
 }
 
 /**
- * An iterable as an array. `Iterator#toArray()` would say the same, but it is
- * ES2025 and the Worker compiles against the ES2022 lib.
- */
+An iterable as an array. `Iterator#toArray()` would say the same, but it is
+ES2025 and the Worker compiles against the ES2022 lib.
+*/
 export function listOf<T>(items: Iterable<T>): T[] {
   return [...items];
 }
@@ -68,11 +68,11 @@ export function sortedBy<T>(items: Iterable<T>, compare: (left: T, right: T) => 
 }
 
 /**
- * A chunk's records in their stored order: by start, then by id.
- *
- * The order is part of the payload, and the payload's digest is how an
- * unchanged chunk is recognised, so it must not depend on arrival order.
- */
+A chunk's records in their stored order: by start, then by id.
+
+The order is part of the payload, and the payload's digest is how an
+unchanged chunk is recognised, so it must not depend on arrival order.
+*/
 export function sortRecords(records: Iterable<HcRecord>): HcRecord[] {
   return sortedBy(
     records,
@@ -81,9 +81,9 @@ export function sortRecords(records: Iterable<HcRecord>): HcRecord[] {
 }
 
 /**
- * One copy per id: the one with the greater `lastModified`, and on a tie the
- * one that came later in the batch.
- */
+One copy per id: the one with the greater `lastModified`, and on a tie the
+one that came later in the batch.
+*/
 export function dedupeUpserts(records: readonly HcRecord[]): HcRecord[] {
   const byId = new Map<string, HcRecord>();
   for (const record of records) {
@@ -104,10 +104,10 @@ export interface UpsertGroup {
 }
 
 /**
- * A batch's upserts by destination chunk, in a fixed order (type, origin,
- * hour). The order is what makes a position in this list mean the same thing
- * on every slice that re-reads the batch: the apply cursor is an index into it.
- */
+A batch's upserts by destination chunk, in a fixed order (type, origin,
+hour). The order is what makes a position in this list mean the same thing
+on every slice that re-reads the batch: the apply cursor is an index into it.
+*/
 export function groupUpserts(records: readonly HcRecord[]): UpsertGroup[] {
   const groups = new Map<string, UpsertGroup>();
   for (const record of dedupeUpserts(records)) {
@@ -144,12 +144,12 @@ export interface MergeResult {
 }
 
 /**
- * Merge incoming records into a chunk.
- *
- * On an id collision the copy with the greater `lastModified` is kept; on a
- * tie the incoming one is, which makes a replayed batch a no-op rather than a
- * rejection. An incoming record that loses is simply not in `accepted`.
- */
+Merge incoming records into a chunk.
+
+On an id collision the copy with the greater `lastModified` is kept; on a
+tie the incoming one is, which makes a replayed batch a no-op rather than a
+rejection. An incoming record that loses is simply not in `accepted`.
+*/
 export function mergeIntoChunk(
   stored: readonly HcRecord[],
   incoming: readonly HcRecord[],
@@ -200,25 +200,25 @@ export function chunkExtent(records: readonly HcRecord[]): {
 }
 
 /**
- * True when a record has anything in the half-open window `[startMs, endMs)`.
- * An instantaneous record (or a zero-length interval) is in the window its one
- * instant is in.
- */
+True when a record has anything in the half-open window `[startMs, endMs)`.
+An instantaneous record (or a zero-length interval) is in the window its one
+instant is in.
+*/
 export function overlapsWindow(record: HcRecord, startMs: number, endMs: number): boolean {
   const start = recordStartMs(record);
   return start < endMs && Math.max(recordEndMs(record), start + 1) > startMs;
 }
 
 /**
- * Series records with only the samples timed inside their own interval, and
- * how many samples fell outside it.
- *
- * Nothing checks a sample's `t` against its record on the way in, and the
- * store keeps every sample as it arrived. But a per-minute row is filed by the
- * sample's own time, so a sample claiming an instant its record does not cover
- * would write a row for an hour the record has nothing to do with. The derived
- * rows therefore read through this; the raw chunk is never touched.
- */
+Series records with only the samples timed inside their own interval, and
+how many samples fell outside it.
+
+Nothing checks a sample's `t` against its record on the way in, and the
+store keeps every sample as it arrived. But a per-minute row is filed by the
+sample's own time, so a sample claiming an instant its record does not cover
+would write a row for an hour the record has nothing to do with. The derived
+rows therefore read through this; the raw chunk is never touched.
+*/
 export function samplesInInterval(records: readonly HcRecord[]): {
   records: HcRecord[];
   outOfInterval: number;
@@ -264,18 +264,18 @@ export function utcDayOf(hourUtc: number): number {
 }
 
 /**
- * A `day` mark: one record type in one UTC day, named by any hour of it. Which
- * local days that is -- two, in any zone off UTC -- is worked out when the mark
- * is rebuilt, in the zone configured then.
- *
- * A UTC day and not an hour: a backfill writes every hour of every day, and a
- * mark per hour would be two dozen rows for a day that is rebuilt once. The
- * list a long backfill leaves behind is one row per type and day.
- *
- * The day comes first and is zero-padded, so the primary key's own order is
- * time order: the rebuild takes the newest marks first by reading the key
- * backwards, with no sort.
- */
+A `day` mark: one record type in one UTC day, named by any hour of it. Which
+local days that is -- two, in any zone off UTC -- is worked out when the mark
+is rebuilt, in the zone configured then.
+
+A UTC day and not an hour: a backfill writes every hour of every day, and a
+mark per hour would be two dozen rows for a day that is rebuilt once. The
+list a long backfill leaves behind is one row per type and day.
+
+The day comes first and is zero-padded, so the primary key's own order is
+time order: the rebuild takes the newest marks first by reading the key
+backwards, with no sort.
+*/
 export function dayMarkKey(type: string, hourUtc: number): string {
   const day = String(utcDayOf(hourUtc)).padStart(DAY_KEY_DIGITS, "0");
   return `${DAY_KEY_PREFIX}${day}${KEY_SEPARATOR}${type}`;
@@ -304,13 +304,13 @@ export interface DayRun {
 }
 
 /**
- * A page of `day` mark keys as the runs to rebuild: per type, consecutive UTC
- * days together, `maxDays` at most to a run, the newest run first.
- * `unreadable` are the keys that are not `day` marks at all.
- *
- * Runs, because neighbouring UTC days share a local day: rebuilt one mark at a
- * time, every local day of a backfill would be built twice.
- */
+A page of `day` mark keys as the runs to rebuild: per type, consecutive UTC
+days together, `maxDays` at most to a run, the newest run first.
+`unreadable` are the keys that are not `day` marks at all.
+
+Runs, because neighbouring UTC days share a local day: rebuilt one mark at a
+time, every local day of a backfill would be built twice.
+*/
 export function dayRuns(
   keys: readonly string[],
   maxDays: number,

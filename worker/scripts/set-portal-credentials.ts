@@ -167,14 +167,14 @@ async function readStdin(): Promise<string> {
 }
 
 /**
- * Split piped input into a username line and a password.
- *
- * Exactly two lines, in that order: `printf '%s\n%s\n' "$user" "$pass" | npm run
- * ...`. The password keeps whatever internal whitespace it has -- only the one
- * trailing newline a shell adds is stripped, because silently trimming a
- * password would mask a copy/paste mistake and produce a login failure the owner
- * could not explain.
- */
+Split piped input into a username line and a password.
+
+Exactly two lines, in that order: `printf '%s\n%s\n' "$user" "$pass" | npm run
+...`. The password keeps whatever internal whitespace it has -- only the one
+trailing newline a shell adds is stripped, because silently trimming a
+password would mask a copy/paste mistake and produce a login failure the owner
+could not explain.
+*/
 export function splitStdin(raw: string): { username: string; password: string } {
   const newline = raw.indexOf("\n");
   if (newline === -1) {
@@ -216,13 +216,13 @@ function resolveDataKey(): string {
 }
 
 /**
- * Wrangler's own CLI entry point, resolved from this repo's `node_modules`.
- *
- * Invoked through Node directly rather than `npx ... { shell: true }`: the
- * `--command` argument is a whole SQL string with spaces and quotes in it, and
- * on Windows a shell re-splits it into several arguments. See the same comment
- * in `set-health_system-secret.ts`.
- */
+Wrangler's own CLI entry point, resolved from this repo's `node_modules`.
+
+Invoked through Node directly rather than `npx ... { shell: true }`: the
+`--command` argument is a whole SQL string with spaces and quotes in it, and
+on Windows a shell re-splits it into several arguments. See the same comment
+in `set-health_system-secret.ts`.
+*/
 const WRANGLER_BIN = path.join(
   path.dirname(createRequire(import.meta.url).resolve("wrangler/package.json")),
   "bin",
@@ -278,13 +278,13 @@ function healthSystemExists(id: string, target: Target): boolean {
 }
 
 /**
- * The AADs the three columns are sealed under.
- *
- * These must equal `aad(...)` in `worker/src/db/repos/portal-accounts.ts` byte for
- * byte, or a value this script writes is illegible to the Worker. See
- * `worker/test/unit/set-portal-credentials.test.ts` for the round trip that catches a
- * future divergence.
- */
+The AADs the three columns are sealed under.
+
+These must equal `aad(...)` in `worker/src/db/repos/portal-accounts.ts` byte for
+byte, or a value this script writes is illegible to the Worker. See
+`worker/test/unit/set-portal-credentials.test.ts` for the round trip that catches a
+future divergence.
+*/
 export function portalUsernameAad(healthSystemId: string): string {
   return aadFor("portal_accounts", "username_enc", healthSystemId);
 }
@@ -327,21 +327,21 @@ export async function sealPortalCredentials(
 }
 
 /**
- * Upsert the row, then read it back.
- *
- * An upsert rather than an update: a health system that has never had a portal
- * account has no `portal_accounts` row at all, and the repo's `ensure()` is not
- * reachable from a script. Storing credentials resets the session the same way
- * the repo does -- a new password invalidates whatever cookie jar was there.
- *
- * Success is confirmed with a SELECT rather than by trusting `meta.changes`: a
- * local D1 only ever reports `meta.duration` for a write, so checking that field
- * would make this refuse every local write it just made.
- *
- * Each optional sealed column is omitted from the statement entirely when null --
- * not set to SQL `NULL` -- so a run without its flag leaves an already-stored
- * value alone instead of wiping it on every credential rotation.
- */
+Upsert the row, then read it back.
+
+An upsert rather than an update: a health system that has never had a portal
+account has no `portal_accounts` row at all, and the repo's `ensure()` is not
+reachable from a script. Storing credentials resets the session the same way
+the repo does -- a new password invalidates whatever cookie jar was there.
+
+Success is confirmed with a SELECT rather than by trusting `meta.changes`: a
+local D1 only ever reports `meta.duration` for a write, so checking that field
+would make this refuse every local write it just made.
+
+Each optional sealed column is omitted from the statement entirely when null --
+not set to SQL `NULL` -- so a run without its flag leaves an already-stored
+value alone instead of wiping it on every credential rotation.
+*/
 function writeCredentials(
   id: string,
   sealed: { username: string; password: string },

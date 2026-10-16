@@ -42,8 +42,8 @@ const NOW_MS = NOW * 1000;
 /** The invented day: the UTC day that ends at the fake clock. */
 const DAY = NOW_MS - 24 * HOUR_MS;
 const at = (hour: number, minute = 0): number => DAY + hour * HOUR_MS + minute * MINUTE_MS;
-const date = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
-const RANGE = { start: date(DAY), end: date(DAY) };
+const DAY_DATE = new Date(DAY).toISOString().slice(0, 10);
+const RANGE = { start: DAY_DATE, end: DAY_DATE };
 
 /** One heart-rate sample a minute over `[fromMs, toMs)`, at `bpm(minute)`. */
 function pulse(id: string, fromMs: number, toMs: number, bpm: (minute: number) => number) {

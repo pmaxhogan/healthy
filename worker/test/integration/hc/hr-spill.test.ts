@@ -54,10 +54,10 @@ function series(id: string, startMs: number, endMs: number, extra: Partial<HcRec
 const at = (hours: number, minutes = 0): number => T + hours * HOUR_MS + minutes * MINUTE_MS;
 
 /**
- * Chunks that end every way the rule tells apart: inside their hour, exactly
- * on the next, a little past it, hours past it, and exactly on a boundary two
- * hours on -- for one origin, and a second origin that must stay out of it.
- */
+Chunks that end every way the rule tells apart: inside their hour, exactly
+on the next, a little past it, hours past it, and exactly on a boundary two
+hours on -- for one origin, and a second origin that must stay out of it.
+*/
 function shapes(): HcRecord[] {
   return [
     series("on-boundary", at(0, 10), at(1)),

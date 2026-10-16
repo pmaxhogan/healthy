@@ -1,14 +1,14 @@
 /**
- * One interface per table, matching the migrations under `worker/migrations/` column
- * for column.
- *
- * These are the *raw* row shapes: snake_case, unix seconds as numbers, NULLable
- * columns as `| null`, and `_enc` columns still sealed. Repos are what turn them
- * into something the rest of the Worker should see -- nothing outside
- * `worker/src/db/**` should ever hold a `*_enc` string.
- *
- * Kept free of Worker runtime types on purpose, so the unit tests can import it.
- */
+One interface per table, matching the migrations under `worker/migrations/` column
+for column.
+
+These are the *raw* row shapes: snake_case, unix seconds as numbers, NULLable
+columns as `| null`, and `_enc` columns still sealed. Repos are what turn them
+into something the rest of the Worker should see -- nothing outside
+`worker/src/db/**` should ever hold a `*_enc` string.
+
+Kept free of Worker runtime types on purpose, so the unit tests can import it.
+*/
 
 // The one type imported rather than restated: a portal session's state is the
 // same value in the column and in the DTO the admin UI reads, and two copies of
@@ -30,11 +30,11 @@ export type OAuthStateKind = "epic" | "google";
 /** 'otp' | 'forward_verify' | 'other' (CHECK-constrained). */
 export type MailKind = "otp" | "forward_verify" | "other";
 /**
- * Where a calendar row came from.
- *
- * Not CHECK-constrained: SQLite cannot add one to an existing table, so the
- * repos and the sync are what keep the domain honest.
- */
+Where a calendar row came from.
+
+Not CHECK-constrained: SQLite cannot add one to an existing table, so the
+repos and the sync are what keep the domain honest.
+*/
 export type CalendarEventSource = "fhir" | "portal";
 
 export interface SettingRow {
@@ -44,9 +44,9 @@ export interface SettingRow {
 }
 
 /**
- * A health system's row as the repo hands it out: the identity columns opened.
- * The stored row is `HealthSystemDbRow`, where each of them is an `_enc` column.
- */
+A health system's row as the repo hands it out: the identity columns opened.
+The stored row is `HealthSystemDbRow`, where each of them is an `_enc` column.
+*/
 export interface HealthSystemRow {
   id: string;
   vendor: string;
@@ -143,25 +143,25 @@ export interface FhirSyncStateRow {
 }
 
 /**
- * A `calendar_events` row as the repo hands it out: the stored row with
- * `detail_enc` opened.
- *
- * The one row type in this file that is *not* the raw shape, because the sync
- * reads a row's start and calendar on every run and the raw columns no longer
- * hold them (0007). `start_at` and `calendar_id` here are the opened values;
- * `event_key`, `encounter_id` and `portal_csn` are the stored, blinded ones --
- * the sync only ever compares those, and blinds its own side to match. See
- * `worker/src/db/repos/calendar-events.ts`.
- */
+A `calendar_events` row as the repo hands it out: the stored row with
+`detail_enc` opened.
+
+The one row type in this file that is *not* the raw shape, because the sync
+reads a row's start and calendar on every run and the raw columns no longer
+hold them (0007). `start_at` and `calendar_id` here are the opened values;
+`event_key`, `encounter_id` and `portal_csn` are the stored, blinded ones --
+the sync only ever compares those, and blinds its own side to match. See
+`worker/src/db/repos/calendar-events.ts`.
+*/
 export interface CalendarEventRow {
   /** `<healthSystemId>:<blind>` or `<healthSystemId>:csn:<blind>`. See `blindEventKey`. */
   event_key: string;
   health_system_id: string;
   /**
-   * The blinded upstream id: `blindResourceId(health_system, "Encounter", id)` for a
-   * FHIR row -- the same value `fhir_cache.resource_id` keys the Encounter by --
-   * or `blindCsn(health_system, csn)` for a portal row.
-   */
+  The blinded upstream id: `blindResourceId(health_system, "Encounter", id)` for a
+  FHIR row -- the same value `fhir_cache.resource_id` keys the Encounter by --
+  or `blindCsn(health_system, csn)` for a portal row.
+  */
   encounter_id: string;
   /** The real calendar id, opened from `detail_enc`. */
   calendar_id: string;
@@ -179,35 +179,35 @@ export interface CalendarEventRow {
   /** `blindCsn(health_system, csn)`, set only when `source` is 'portal'. */
   portal_csn: string | null;
   /**
-   * Keyed digest of the title Healthy last wrote to the event (0015), or null on
-   * a row no run has seeded yet. See `worker/src/sync/titles.ts`.
-   */
+  Keyed digest of the title Healthy last wrote to the event (0015), or null on
+  a row no run has seeded yet. See `worker/src/sync/titles.ts`.
+  */
   title_digest: string | null;
 }
 
 /**
- * The raw `calendar_events` row.
- *
- * `calendar_id` is `blindCalendarId(...)`, and the real calendar id and start
- * live in `detail_enc`, sealed against `calendar_events.detail_enc.<google_event_id>`
- * (0007). There is no plaintext start column (0009).
- */
+The raw `calendar_events` row.
+
+`calendar_id` is `blindCalendarId(...)`, and the real calendar id and start
+live in `detail_enc`, sealed against `calendar_events.detail_enc.<google_event_id>`
+(0007). There is no plaintext start column (0009).
+*/
 export interface CalendarEventDbRow extends Omit<CalendarEventRow, "calendar_id" | "start_at"> {
   calendar_id: string;
   /**
-   * Nullable in the schema: 0007 added it with `ADD COLUMN ... TEXT` and a
-   * backfill. A row the backfill missed, or one written by hand, has NULL here,
-   * and the repo skips it rather than failing every list that reaches it.
-   */
+  Nullable in the schema: 0007 added it with `ADD COLUMN ... TEXT` and a
+  backfill. A row the backfill missed, or one written by hand, has NULL here,
+  and the repo skips it rather than failing every list that reaches it.
+  */
   detail_enc: string | null;
 }
 
 export interface AlertRow {
   id: string;
   /**
-   * `reconnect`: a grant or session to renew. `hc_parked`: a phone's uploads set
-   * aside. `sync_failing`: a sync that keeps failing though nothing needs renewing.
-   */
+  `reconnect`: a grant or session to renew. `hc_parked`: a phone's uploads set
+  aside. `sync_failing`: a sync that keeps failing though nothing needs renewing.
+  */
   kind: "reconnect" | "hc_parked" | "sync_failing";
   /** 'health_system:<id>', 'portal:<id>', 'google', 'sync' or 'device:<id>'. */
   subject: string;
@@ -253,10 +253,10 @@ export interface McpPolicyRow {
   id: string;
   rule_type: PolicyRuleType;
   /**
-   * The tool name, resource type or health system id. For a `field` rule, a
-   * canonical signature of the columns below (so the same rule is not stored
-   * twice), or the legacy `ResourceType.path` string on a pre-0012 row.
-   */
+  The tool name, resource type or health system id. For a `field` rule, a
+  canonical signature of the columns below (so the same rule is not stored
+  twice), or the legacy `ResourceType.path` string on a pre-0012 row.
+  */
   target: string;
   note: string | null;
   created_at: number;
@@ -298,10 +298,10 @@ export interface McpSyncRequestRow {
 }
 
 /**
- * What one (health system, kind) pair is held to. Here, beside the row, rather
- * than in the repo: the MCP tool layer reads these shapes and must not import
- * a module that touches D1.
- */
+What one (health system, kind) pair is held to. Here, beside the row, rather
+than in the repo: the MCP tool layer reads these shapes and must not import
+a module that touches D1.
+*/
 export interface McpSyncRequestLimits {
   /** Least seconds between two requests that are let through. */
   cooldownSeconds: number;
@@ -330,13 +330,13 @@ export interface MailInboxRow {
   id: string;
   received_at: number;
   /**
-   * The sender address, sealed against `mail_inbox.from_addr_enc.<id>` (0005).
-   *
-   * For a forwarded portal message this is the health system's own sending
-   * address -- an organisation identity, and a value the sender chose. NULL on
-   * a row written before 0005 (none is left: 0007 purged their plaintext and
-   * 0009 dropped the plaintext columns).
-   */
+  The sender address, sealed against `mail_inbox.from_addr_enc.<id>` (0005).
+
+  For a forwarded portal message this is the health system's own sending
+  address -- an organisation identity, and a value the sender chose. NULL on
+  a row written before 0005 (none is left: 0007 purged their plaintext and
+  0009 dropped the plaintext columns).
+  */
   from_addr_enc: string | null;
   /** The subject, sealed against `mail_inbox.subject_enc.<id>` (0005). */
   subject_enc: string | null;
@@ -348,45 +348,45 @@ export interface MailInboxRow {
 }
 
 /**
- * One portal account per health system (0002_portal.sql).
- *
- * Four sealed columns, all bound to `portal_accounts.<column>.<healthSystemId>`.
- * `cookie_jar_enc` is a whole serialised cookie jar rather than one value: the
- * trust-this-device cookie inside it is what lets a later run skip the emailed
- * code, so it is exactly as sensitive as the password.
- */
+One portal account per health system (0002_portal.sql).
+
+Four sealed columns, all bound to `portal_accounts.<column>.<healthSystemId>`.
+`cookie_jar_enc` is a whole serialised cookie jar rather than one value: the
+trust-this-device cookie inside it is what lets a later run skip the emailed
+code, so it is exactly as sensitive as the password.
+*/
 export interface PortalAccountRow {
   health_system_id: string;
   /** Opened from `base_url_enc`. */
   base_url: string | null;
   mount_path: string | null;
   /**
-   * The whole discovery result, as the portal adapter's own JSON (0003).
-   *
-   * Opaque outside `worker/src/ehr/mychart/**`: it carries `baseUrl` and
-   * `mountPath`, which the db layer validates, plus whatever else the adapter
-   * needs to drive that deployment's login -- which varies, and is why this is
-   * one JSON column rather than a column per field. NULL on a row written before
-   * 0003 or by the CLI script; the sign-in then falls back to the two columns
-   * above.
-   */
+  The whole discovery result, as the portal adapter's own JSON (0003).
+
+  Opaque outside `worker/src/ehr/mychart/**`: it carries `baseUrl` and
+  `mountPath`, which the db layer validates, plus whatever else the adapter
+  needs to drive that deployment's login -- which varies, and is why this is
+  one JSON column rather than a column per field. NULL on a row written before
+  0003 or by the CLI script; the sign-in then falls back to the two columns
+  above.
+  */
   endpoint_json: string | null;
   username_enc: string | null;
   password_enc: string | null;
   /**
-   * Where the portal should email a verification code, when its own login
-   * response does not say (0004). NULL for every account that never needed it.
-   */
+  Where the portal should email a verification code, when its own login
+  response does not say (0004). NULL for every account that never needed it.
+  */
   mfa_contact_enc: string | null;
   /**
-   * The domain this account's emailed verification codes come from (0005).
-   *
-   * What binds a `mail_inbox` claim to the health system that asked for the code:
-   * with it set, no other sender's row is eligible as this account's OTP. Set
-   * by the owner, or learned the first time a code is accepted by the portal.
-   * Sealed because a sending domain names the health system. NULL until either
-   * happens.
-   */
+  The domain this account's emailed verification codes come from (0005).
+
+  What binds a `mail_inbox` claim to the health system that asked for the code:
+  with it set, no other sender's row is eligible as this account's OTP. Set
+  by the owner, or learned the first time a code is accepted by the portal.
+  Sealed because a sending domain names the health system. NULL until either
+  happens.
+  */
   otp_sender_enc: string | null;
   cookie_jar_enc: string | null;
   session_state: PortalSessionState;
@@ -399,9 +399,9 @@ export interface PortalAccountRow {
   needs_reauth_since: number | null;
   updated_at: number;
   /**
-   * Emailed codes an unattended (scheduled) sign-in asked for today (0008).
-   * Resets by day comparison, exactly like `login_attempts_today`.
-   */
+  Emailed codes an unattended (scheduled) sign-in asked for today (0008).
+  Resets by day comparison, exactly like `login_attempts_today`.
+  */
   unattended_codes_today: number;
   /** Whole UTC days since the epoch the counter above belongs to. */
   unattended_codes_day: number | null;

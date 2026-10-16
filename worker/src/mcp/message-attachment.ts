@@ -1,23 +1,23 @@
 /**
- * `get_message_attachment`: one secure message's attached file, as the portal
- * pass stored it.
- *
- * The file was fetched and sealed by the sync (the portal's own id for it lasts
- * only as long as the session that listed it), so this reads storage and never
- * talks to a portal. What comes back depends on what the file is:
- *
- *  - text the repository already knows how to read (plain text, HTML, RTF --
- *    `convertDocument`, the same conversion `get_document_text` uses): the text;
- *  - an image a model can look at (PNG, JPEG, GIF, WebP): the item, plus the
- *    image itself as an MCP image content block;
- *  - anything else (a PDF, a TIFF scan): the item with the file's type and size
- *    and a `note` saying the content cannot be shown -- never a base64 blob, which
- *    a model would summarise confidently without having read.
- *
- * The item goes through `respond()` like every other: a `Communication` resource
- * rule removes it, and a field rule on `text` or `image` withholds that content
- * -- the image block is added only when the policy released the item's `image`.
- */
+`get_message_attachment`: one secure message's attached file, as the portal
+pass stored it.
+
+The file was fetched and sealed by the sync (the portal's own id for it lasts
+only as long as the session that listed it), so this reads storage and never
+talks to a portal. What comes back depends on what the file is:
+
+ - text the repository already knows how to read (plain text, HTML, RTF --
+   `convertDocument`, the same conversion `get_document_text` uses): the text;
+ - an image a model can look at (PNG, JPEG, GIF, WebP): the item, plus the
+   image itself as an MCP image content block;
+ - anything else (a PDF, a TIFF scan): the item with the file's type and size
+   and a `note` saying the content cannot be shown -- never a base64 blob, which
+   a model would summarise confidently without having read.
+
+The item goes through `respond()` like every other: a `Communication` resource
+rule removes it, and a field rule on `text` or `image` withholds that content
+-- the image block is added only when the policy released the item's `image`.
+*/
 
 import { bytesToBase64 } from "../lib/base64.ts";
 import { applyPolicy } from "../policy/filter.ts";
@@ -139,10 +139,10 @@ export function attachmentItem(
 }
 
 /**
- * True when the policy releases the item's `image` for this caller -- the same
- * judgement `respond()` makes on the item itself, made here because the image
- * block travels beside the JSON rather than inside it.
- */
+True when the policy releases the item's `image` for this caller -- the same
+judgement `respond()` makes on the item itself, made here because the image
+block travels beside the JSON rather than inside it.
+*/
 export function imageReleased(
   tool: string,
   rules: PolicyRules,

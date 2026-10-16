@@ -1,23 +1,23 @@
 /**
- * Google access tokens, and the calendar client built on them.
- *
- * The same shape as `tokens.ts` -- refresh inside a five-minute skew, single
- * flight behind the `google_account` lease -- with three Google-specific
- * differences that are each easy to get wrong:
- *
- *   - **A refresh returns no new refresh token.** Google keeps the original
- *     valid, so `GoogleRefreshedTokens` has no such field and nothing is rotated.
- *     The failure mode this avoids is a well-meaning `refreshToken: ""` write that
- *     erases the only way back in.
- *   - **A refresh omits `scope` when nothing changed**, and `oauth.ts` normalises
- *     that to `""`. Writing the empty string would blank the stored scope, which
- *     the admin UI reads to show what the grant covers, so an empty scope means
- *     "keep what is there".
- *   - **There is exactly one account.** Its subject is the literal `"google"`, and
- *     it is resolved once per run *before* the health system loop: if the calendar is
- *     unreachable there is no point asking four organisations for appointments
- *     nobody can write down.
- */
+Google access tokens, and the calendar client built on them.
+
+The same shape as `tokens.ts` -- refresh inside a five-minute skew, single
+flight behind the `google_account` lease -- with three Google-specific
+differences that are each easy to get wrong:
+
+  - **A refresh returns no new refresh token.** Google keeps the original
+    valid, so `GoogleRefreshedTokens` has no such field and nothing is rotated.
+    The failure mode this avoids is a well-meaning `refreshToken: ""` write that
+    erases the only way back in.
+  - **A refresh omits `scope` when nothing changed**, and `oauth.ts` normalises
+    that to `""`. Writing the empty string would blank the stored scope, which
+    the admin UI reads to show what the grant covers, so an empty scope means
+    "keep what is there".
+  - **There is exactly one account.** Its subject is the literal `"google"`, and
+    it is resolved once per run *before* the health system loop: if the calendar is
+    unreachable there is no point asking four organisations for appointments
+    nobody can write down.
+*/
 
 import { makeRepos } from "../db/index.ts";
 import { createCalendarClient } from "../google/calendar.ts";
@@ -40,12 +40,12 @@ const LEASE_WAIT_MS = 400;
 export type GoogleTokenGetter = (options?: { forceRefresh?: boolean }) => Promise<string>;
 
 /**
- * Build the token getter for the single Google account.
- *
- * Throws `not_connected` when the owner has never connected Google and
- * `needs_reauth` when the grant is gone -- both of which the caller reports on the
- * run rather than retrying.
- */
+Build the token getter for the single Google account.
+
+Throws `not_connected` when the owner has never connected Google and
+`needs_reauth` when the grant is gone -- both of which the caller reports on the
+run rather than retrying.
+*/
 export async function withGoogleAccessToken(
   ctx: Ctx,
   deps: SyncDeps = {},
@@ -163,12 +163,12 @@ export async function withGoogleAccessToken(
 }
 
 /**
- * The calendar client the sync writes through.
- *
- * `getAccessToken` is forwarded straight to the getter above, including its
- * `forceRefresh` flag: the calendar client retries a 401 exactly once after
- * asking for a forced refresh, and that is the path this wires up.
- */
+The calendar client the sync writes through.
+
+`getAccessToken` is forwarded straight to the getter above, including its
+`forceRefresh` flag: the calendar client retries a 401 exactly once after
+asking for a forced refresh, and that is the path this wires up.
+*/
 export async function getGoogleCalendarFor(ctx: Ctx, deps: SyncDeps = {}): Promise<CalendarClient> {
   const resolved = resolveDeps(deps);
   const getAccessToken = await withGoogleAccessToken(ctx, deps);

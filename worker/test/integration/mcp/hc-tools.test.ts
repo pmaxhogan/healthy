@@ -70,10 +70,10 @@ const at = (hour: number, minute = 0): number => DAY + hour * HOUR_MS + minute *
 const instant = (ms: number): string => new Date(ms).toISOString();
 
 /**
- * The clock the tools see unless a test passes another: six hours after the
- * invented day, in unix seconds. Fixed relative to the data, so that the local
- * day the data falls on is over whatever time of day this file happens to run.
- */
+The clock the tools see unless a test passes another: six hours after the
+invented day, in unix seconds. Fixed relative to the data, so that the local
+day the data falls on is over whatever time of day this file happens to run.
+*/
 const toolNow = (): number => DAY_END / 1000 + 6 * 3600;
 
 /** Everything the phone sent, as instants: from before the night began to the end of the day. */

@@ -247,18 +247,18 @@ describe("sealed settings", () => {
   it("pads the sealed value, so its length does not give the plaintext's away", async () => {
     const ctx = testCtx();
     await setSetting(ctx, "calendar_id", "a@example.test");
-    const short = await rawSetting(ctx, "calendar_id");
+    const short = await rawCalendarId(ctx);
     await setSetting(ctx, "calendar_id", "a-much-longer-address@example.test");
-    const longer = await rawSetting(ctx, "calendar_id");
+    const longer = await rawCalendarId(ctx);
 
     expect(short).toHaveLength(longer.length);
   });
 });
 
-async function rawSetting(ctx: ReturnType<typeof testCtx>, key: string): Promise<string> {
+async function rawCalendarId(ctx: ReturnType<typeof testCtx>): Promise<string> {
   const row = await ctx.db
     .prepare("SELECT value_json FROM settings WHERE key = ?")
-    .bind(key)
+    .bind("calendar_id")
     .first<{ value_json: string }>();
   return row?.value_json ?? "";
 }

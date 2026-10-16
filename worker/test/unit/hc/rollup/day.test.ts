@@ -34,10 +34,10 @@ const SKIPPED_DAY = "Pacific/Apia";
 const NORTHERN_DST = "Europe/London";
 
 /**
- * Zones whose clocks once went back ACROSS midnight, so the date on the wall
- * clock ran backwards: a change at 00:01 back to 23:01 of the day before, or
- * (the last) three hours back from 02:00. Each with the instant it happened.
- */
+Zones whose clocks once went back ACROSS midnight, so the date on the wall
+clock ran backwards: a change at 00:01 back to 23:01 of the day before, or
+(the last) three hours back from 02:00. Each with the instant it happened.
+*/
 const BACKWARD_DATES: readonly (readonly [string, number])[] = [
   ["America/Goose_Bay", Date.UTC(2010, 10, 7, 3, 1)],
   ["America/St_Johns", Date.UTC(2010, 10, 7, 2, 31)],

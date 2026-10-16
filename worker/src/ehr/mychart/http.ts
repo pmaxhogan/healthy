@@ -1,58 +1,58 @@
 /**
- * The one place a portal request is made.
- *
- * Both the mount discovery and the authenticated client go through `portalFetch`,
- * so every rule below holds for every request either of them makes.
- *
- * **Redirects are followed by hand** (`redirect: "manual"` plus a loop). Letting
- * the runtime follow them would lose the `Set-Cookie` headers on the
- * intermediate hops, and those hops are where the interesting cookies are: the
- * session cookie arrives on the 302 out of the credential POST, and the
- * trust-this-device cookie on the 302 out of the code POST. Following by hand
- * also means the caller learns *where it landed*, which is how "signed in",
- * "needs a code" and "bounced back to login" are told apart at all.
- *
- * **An empty POST body is really empty.** `body: ""` is not the same request as
- * no body: both undici and workerd add `Content-Type: text/plain` to a string
- * body, and the research found a WAF in front of these endpoints that rejects
- * exactly that. So a request with no form passes `body: undefined` and sets no
- * content type, and `worker/test/unit/ehr/mychart/client.test.ts` asserts on the
- * raw `init.body` being `undefined` rather than on a rendered string.
- *
- * **A cross-origin 307/308 never re-sends the form.** A redirect chain is under
- * the server's control, and a 307 is the one redirect that re-sends the body --
- * including a password. Crossing an origin drops the body and continues as a
- * GET, which lands on a page that is not signed in and therefore fails loudly
- * instead of leaking a credential to wherever the chain pointed.
- *
- * **A redirect may not leave the site, and may never leave https.** Where the
- * chain ends is what `portal_accounts.base_url` becomes, and that origin is
- * where the owner's portal password is POSTed on every later sign-in. A vanity
- * alias that is dropped and re-registered, or a CDN in the chain that is taken
- * over, would otherwise silently relocate the credential. So a hop to a
- * different registrable domain is `portal_redirected_offsite` (with the landed
- * origin in `details`, for the admin UI to show -- it never reaches a log line,
- * because `errorFields` does not carry `details`), and a hop to anything but
- * `https:` is `portal_insecure_redirect`. The recovery for a deployment that
- * genuinely federates across sites is for the owner to paste the origin the
- * error names, confirm it, and have that be the site the chain may move within.
- *
- * **A body-level redirect may not even leave the origin.** A `<meta refresh>` or
- * a `window.location` in a 200 body is content, not an HTTP redirect, and a
- * cross-origin one is simply not followed -- discovery then reports that it
- * found no login page, which is the fail-closed answer.
- *
- * **Caller headers are dropped once the origin changes.** `request.headers`
- * carries the antiforgery token on the visits calls, and would carry an
- * `Authorization` header the day one is added. A hop that has left the origin
- * gets the browser-shaped headers and the jar's cookies for that host, and
- * nothing the caller supplied.
- *
- * **Nothing here logs a URL, a host, a mount or a body.** A mount path and a
- * hostname both identify the organisation, and the body is the chart. Log lines
- * and `AppError.details` carry the stable endpoint label, the HTTP status and
- * the hop count, and nothing else.
- */
+The one place a portal request is made.
+
+Both the mount discovery and the authenticated client go through `portalFetch`,
+so every rule below holds for every request either of them makes.
+
+**Redirects are followed by hand** (`redirect: "manual"` plus a loop). Letting
+the runtime follow them would lose the `Set-Cookie` headers on the
+intermediate hops, and those hops are where the interesting cookies are: the
+session cookie arrives on the 302 out of the credential POST, and the
+trust-this-device cookie on the 302 out of the code POST. Following by hand
+also means the caller learns *where it landed*, which is how "signed in",
+"needs a code" and "bounced back to login" are told apart at all.
+
+**An empty POST body is really empty.** `body: ""` is not the same request as
+no body: both undici and workerd add `Content-Type: text/plain` to a string
+body, and the research found a WAF in front of these endpoints that rejects
+exactly that. So a request with no form passes `body: undefined` and sets no
+content type, and `worker/test/unit/ehr/mychart/client.test.ts` asserts on the
+raw `init.body` being `undefined` rather than on a rendered string.
+
+**A cross-origin 307/308 never re-sends the form.** A redirect chain is under
+the server's control, and a 307 is the one redirect that re-sends the body --
+including a password. Crossing an origin drops the body and continues as a
+GET, which lands on a page that is not signed in and therefore fails loudly
+instead of leaking a credential to wherever the chain pointed.
+
+**A redirect may not leave the site, and may never leave https.** Where the
+chain ends is what `portal_accounts.base_url` becomes, and that origin is
+where the owner's portal password is POSTed on every later sign-in. A vanity
+alias that is dropped and re-registered, or a CDN in the chain that is taken
+over, would otherwise silently relocate the credential. So a hop to a
+different registrable domain is `portal_redirected_offsite` (with the landed
+origin in `details`, for the admin UI to show -- it never reaches a log line,
+because `errorFields` does not carry `details`), and a hop to anything but
+`https:` is `portal_insecure_redirect`. The recovery for a deployment that
+genuinely federates across sites is for the owner to paste the origin the
+error names, confirm it, and have that be the site the chain may move within.
+
+**A body-level redirect may not even leave the origin.** A `<meta refresh>` or
+a `window.location` in a 200 body is content, not an HTTP redirect, and a
+cross-origin one is simply not followed -- discovery then reports that it
+found no login page, which is the fail-closed answer.
+
+**Caller headers are dropped once the origin changes.** `request.headers`
+carries the antiforgery token on the visits calls, and would carry an
+`Authorization` header the day one is added. A hop that has left the origin
+gets the browser-shaped headers and the jar's cookies for that host, and
+nothing the caller supplied.
+
+**Nothing here logs a URL, a host, a mount or a body.** A mount path and a
+hostname both identify the organisation, and the body is the chart. Log lines
+and `AppError.details` carry the stable endpoint label, the HTTP status and
+the hop count, and nothing else.
+*/
 
 import { AppError } from "../../lib/errors.ts";
 
@@ -72,23 +72,23 @@ import type { Logger } from "../../lib/log.ts";
 
 export interface PortalHttpDeps {
   /**
-   * Whatever this holds, `portalFetch` calls it unbound (never as
-   * `deps.fetchImpl(...)`): workerd's native `fetch` throws "Illegal
-   * invocation" for any `this` that is not itself or `undefined`, and a
-   * property-access call sets `this` to `deps`. `portalDeps`
-   * (`worker/src/sync/portal-signin.ts`) and `resolveDeps`
-   * (`worker/src/sync/deps.ts`) also wrap their own default rather than handing
-   * out the raw global reference, the same fix `worker/src/api/ports.ts`'s
-   * `defaults()` already has -- this field's own call site is the second,
-   * independent guard against the same mistake reappearing.
-   */
+  Whatever this holds, `portalFetch` calls it unbound (never as
+  `deps.fetchImpl(...)`): workerd's native `fetch` throws "Illegal
+  invocation" for any `this` that is not itself or `undefined`, and a
+  property-access call sets `this` to `deps`. `portalDeps`
+  (`worker/src/sync/portal-signin.ts`) and `resolveDeps`
+  (`worker/src/sync/deps.ts`) also wrap their own default rather than handing
+  out the raw global reference, the same fix `worker/src/api/ports.ts`'s
+  `defaults()` already has -- this field's own call site is the second,
+  independent guard against the same mistake reappearing.
+  */
   fetchImpl: typeof fetch;
   logger: Logger;
   /**
-   * Absent means no cookies are sent and none are kept. Discovery runs without
-   * one on purpose: it probes unauthenticated, and a jar there could carry a
-   * cookie planted by a wrong-mount probe into the real session.
-   */
+  Absent means no cookies are sent and none are kept. Discovery runs without
+  one on purpose: it probes unauthenticated, and a jar there could carry a
+  cookie planted by a wrong-mount probe into the real session.
+  */
   jar?: CookieJar | undefined;
   maxRedirects?: number | undefined;
 }
@@ -98,26 +98,26 @@ export interface PortalRequest {
   url: string;
   method?: "GET" | "POST";
   /**
-   * Form fields to urlencode into the body. **Absent means no body and no
-   * `Content-Type` header at all** -- see the module comment.
-   */
+  Form fields to urlencode into the body. **Absent means no body and no
+  `Content-Type` header at all** -- see the module comment.
+  */
   form?: Record<string, string> | undefined;
   /**
-   * A body to send as JSON instead. Mutually exclusive with `form`.
-   *
-   * The classic pages take forms; the `custom_oidc` shell's API takes JSON for
-   * everything except its credential POST, which is form-urlencoded. Absent here
-   * means the same thing absent `form` means: no body, and no `Content-Type`.
-   */
+  A body to send as JSON instead. Mutually exclusive with `form`.
+
+  The classic pages take forms; the `custom_oidc` shell's API takes JSON for
+  everything except its credential POST, which is form-urlencoded. Absent here
+  means the same thing absent `form` means: no body, and no `Content-Type`.
+  */
   jsonBody?: unknown;
   /**
-   * A literal body to send as `text/plain` instead. Mutually exclusive with the
-   * other two.
-   *
-   * Exists for exactly one call: the `custom_oidc` shell posts the *string*
-   * `"{}"` to its SSO-token route, which its HTTP library sends as `text/plain`
-   * rather than as JSON. Mirrored as captured rather than "corrected".
-   */
+  A literal body to send as `text/plain` instead. Mutually exclusive with the
+  other two.
+
+  Exists for exactly one call: the `custom_oidc` shell posts the *string*
+  `"{}"` to its SSO-token route, which its HTTP library sends as `text/plain`
+  rather than as JSON. Mirrored as captured rather than "corrected".
+  */
   textBody?: string | undefined;
   headers?: Record<string, string> | undefined;
   accept?: "html" | "json" | undefined;
@@ -126,27 +126,27 @@ export interface PortalRequest {
   /** Also follow a `<meta refresh>` / `window.location` redirect in a 200 body. */
   followBodyRedirects?: boolean | undefined;
   /**
-   * Recognise the landed hop before deciding whether to follow a body redirect.
-   *
-   * Checked on every hop `followBodyRedirects` would otherwise act on, and it
-   * takes priority: a hop this returns `true` for is the final answer even when
-   * its body also carries a redirect. Discovery uses this to recognise the
-   * OpenID handoff stub, or a classic login form, before any further
-   * body-level hop is considered -- either one can carry a redirect of its own
-   * (a no-JS fallback, an unrelated same-origin `location.replace`, or a
-   * clickjacking guard's frame-busting assignment) and following it blind
-   * would walk straight past the one page that answers the question discovery
-   * is asking. The authenticated client (`client.ts`) passes the same login-
-   * form check on its own page fetches, which can land on that exact page
-   * mid-session.
-   */
+  Recognise the landed hop before deciding whether to follow a body redirect.
+
+  Checked on every hop `followBodyRedirects` would otherwise act on, and it
+  takes priority: a hop this returns `true` for is the final answer even when
+  its body also carries a redirect. Discovery uses this to recognise the
+  OpenID handoff stub, or a classic login form, before any further
+  body-level hop is considered -- either one can carry a redirect of its own
+  (a no-JS fallback, an unrelated same-origin `location.replace`, or a
+  clickjacking guard's frame-busting assignment) and following it blind
+  would walk straight past the one page that answers the question discovery
+  is asking. The authenticated client (`client.ts`) passes the same login-
+  form check on its own page fetches, which can land on that exact page
+  mid-session.
+  */
   recognizeLanding?: ((landed: { url: string; body: string }) => boolean) | undefined;
   /**
-   * Read a final answer that is not text as bytes (`PortalResponse.bytes`), for
-   * a file download. A text answer (HTML, JSON, plain text) is still read as
-   * `body`, so a login page or an error page where a file was expected is
-   * recognised exactly as it is everywhere else.
-   */
+  Read a final answer that is not text as bytes (`PortalResponse.bytes`), for
+  a file download. A text answer (HTML, JSON, plain text) is still read as
+  `body`, so a login page or an error page where a file was expected is
+  recognised exactly as it is everywhere else.
+  */
   binary?: boolean | undefined;
 }
 
@@ -156,14 +156,14 @@ export interface PortalResponse {
   url: string;
   body: string;
   /**
-   * The answering hop's `Content-Type`, lower-cased, or null when it sent none.
-   *
-   * Load-bearing rather than informational: the JSON endpoints answer a stale
-   * antiforgery token with an HTTP **200 carrying an HTML page**, so "was this
-   * JSON" cannot be decided from the status code and has to be decided from here
-   * (plus a body sniff) instead. Without it a silent auth failure reads as a day
-   * with no appointments on it.
-   */
+  The answering hop's `Content-Type`, lower-cased, or null when it sent none.
+
+  Load-bearing rather than informational: the JSON endpoints answer a stale
+  antiforgery token with an HTTP **200 carrying an HTML page**, so "was this
+  JSON" cannot be decided from the status code and has to be decided from here
+  (plus a body sniff) instead. Without it a silent auth failure reads as a day
+  with no appointments on it.
+  */
   contentType: string | null;
   /** Redirects followed to get here, header and body alike. */
   hops: number;
@@ -203,12 +203,12 @@ function encodeForm(form: Record<string, string>): string {
 }
 
 /**
- * The first hop's body and its content type, or neither.
- *
- * `form` wins over `jsonBody` when a caller passes both, which nothing does; what
- * matters is that with neither the result is two `undefined`s, because a request
- * with no body must send no `Content-Type` at all.
- */
+The first hop's body and its content type, or neither.
+
+`form` wins over `jsonBody` when a caller passes both, which nothing does; what
+matters is that with neither the result is two `undefined`s, because a request
+with no body must send no `Content-Type` at all.
+*/
 function firstBody(request: PortalRequest): {
   body: string | undefined;
   bodyContentType: string | undefined;
@@ -259,12 +259,12 @@ function sameOrigin(a: string, b: string): boolean {
 }
 
 /**
- * Refuse a redirect that would leave https, or leave the site.
- *
- * Both are the same failure in different clothes -- the chain deciding where a
- * credential goes -- and both are refused rather than reported, because there is
- * no safe way to carry on from either. See the module comment.
- */
+Refuse a redirect that would leave https, or leave the site.
+
+Both are the same failure in different clothes -- the chain deciding where a
+credential goes -- and both are refused rather than reported, because there is
+no safe way to carry on from either. See the module comment.
+*/
 function requireSameSiteHttps(target: URL, current: Hop, endpoint: string): void {
   if (target.protocol !== "https:") {
     throw new AppError("portal_insecure_redirect", "the portal redirected away from https", {
@@ -312,13 +312,13 @@ function nextHop(response: Response, current: Hop, endpoint: string): Hop | null
 }
 
 /**
- * A `<meta refresh>` / `window.location` redirect in a 200 body, resolved.
- *
- * Null when it would leave the origin. A body redirect is content the page
- * chose, not an HTTP redirect, and it is the one this client will not follow
- * across an origin at all -- not even within the site -- because it is also the
- * cheapest thing for a compromised page to inject.
- */
+A `<meta refresh>` / `window.location` redirect in a 200 body, resolved.
+
+Null when it would leave the origin. A body redirect is content the page
+chose, not an HTTP redirect, and it is the one this client will not follow
+across an origin at all -- not even within the site -- because it is also the
+cheapest thing for a compromised page to inject.
+*/
 function bodyHop(body: string, current: Hop): Hop | null {
   const target = bodyRedirectTarget(body);
   if (target === null) return null;
@@ -346,10 +346,10 @@ function retryAfterMs(response: Response): number | undefined {
 }
 
 /**
- * Turn a WAF answer into `portal_bot_blocked`, and an upstream fault into
- * `portal_unreachable`. Everything else -- including a 404 on a wrong mount --
- * is handed back for the caller to interpret.
- */
+Turn a WAF answer into `portal_bot_blocked`, and an upstream fault into
+`portal_unreachable`. Everything else -- including a 404 on a wrong mount --
+is handed back for the caller to interpret.
+*/
 function rejectIfBlocked(
   response: Response,
   body: string,
@@ -380,13 +380,13 @@ function rejectIfBlocked(
 }
 
 /**
- * One portal request, redirects followed, cookies applied and recorded.
- *
- * Throws `portal_unreachable` for a transport failure, `portal_bot_blocked` for a
- * WAF, `portal_parse_failed` when the redirect chain does not terminate, and
- * `portal_redirected_offsite` / `portal_insecure_redirect` when it tries to
- * leave the site or leave https. Every other status comes back in the result.
- */
+One portal request, redirects followed, cookies applied and recorded.
+
+Throws `portal_unreachable` for a transport failure, `portal_bot_blocked` for a
+WAF, `portal_parse_failed` when the redirect chain does not terminate, and
+`portal_redirected_offsite` / `portal_insecure_redirect` when it tries to
+leave the site or leave https. Every other status comes back in the result.
+*/
 export async function portalFetch(
   deps: PortalHttpDeps,
   request: PortalRequest,
@@ -457,12 +457,12 @@ export async function portalFetch(
 }
 
 /**
- * Refuse a first hop that is not https, before anything is sent.
- *
- * The URL comes from a stored endpoint or from what the owner pasted, and both
- * are validated where they enter -- this is the backstop that means no code path
- * into this module can send a portal request in cleartext.
- */
+Refuse a first hop that is not https, before anything is sent.
+
+The URL comes from a stored endpoint or from what the owner pasted, and both
+are validated where they enter -- this is the backstop that means no code path
+into this module can send a portal request in cleartext.
+*/
 export function requireHttps(url: string, endpoint: string): void {
   let parsed: URL;
   try {
@@ -488,22 +488,22 @@ export function pathOf(url: string): string {
 }
 
 /**
- * True when a response is an OpenID Connect handoff rather than a page.
- *
- * Either signal is enough. The URL is the strong one: on a `custom_oidc`
- * deployment the login path 302s to the handoff stub, so a chain that started at
- * a login page ends on a path containing it. The body marker covers the
- * deployment that serves the stub *at* the login path, where there is no redirect
- * to read -- the page is then one script tag and one hidden antiforgery input,
- * which every other check in this directory reads as "not a login form".
- *
- * Used in two places for two different conclusions: discovery reads it as "this
- * is the custom flavour", and the authenticated client reads it as "the session
- * is gone". It is the same observation either way.
- *
- * Takes only the two fields it reads, not a full `PortalResponse`, so discovery
- * can also pass it as a `PortalRequest.recognizeLanding` hook.
- */
+True when a response is an OpenID Connect handoff rather than a page.
+
+Either signal is enough. The URL is the strong one: on a `custom_oidc`
+deployment the login path 302s to the handoff stub, so a chain that started at
+a login page ends on a path containing it. The body marker covers the
+deployment that serves the stub *at* the login path, where there is no redirect
+to read -- the page is then one script tag and one hidden antiforgery input,
+which every other check in this directory reads as "not a login form".
+
+Used in two places for two different conclusions: discovery reads it as "this
+is the custom flavour", and the authenticated client reads it as "the session
+is gone". It is the same observation either way.
+
+Takes only the two fields it reads, not a full `PortalResponse`, so discovery
+can also pass it as a `PortalRequest.recognizeLanding` hook.
+*/
 export function isOpenIdHandoff(response: Pick<PortalResponse, "url" | "body">): boolean {
   return (
     pathOf(response.url).includes(`/${PATHS.openId.toLowerCase()}`) ||

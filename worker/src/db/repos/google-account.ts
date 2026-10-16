@@ -1,20 +1,20 @@
 /**
- * The single Google account the calendar is written to.
- *
- * Exactly one row, `id = 1`, seeded by the migration and CHECK-constrained so a
- * second can never appear. Everything here is an UPDATE for that reason -- there
- * is no insert path, and the AAD row id is the constant "1".
- *
- * The lease mirrors the one on `connections`: Google's refresh tokens survive
- * re-use, but two concurrent refreshes still race to write `access_token_enc`, and
- * the loser can persist a token that has already been superseded.
- *
- * And as on `connections`, holding the lease when the refresh began is not enough:
- * `upsertTokensLeased` puts `lease_owner = ? AND lease_expires_at > now` in the
- * write's own predicate, so a refresher whose lease expired mid-flight cannot land
- * a stale access token on top of the winner's. `upsertTokens` -- the consent
- * callback, which holds no lease -- writes only while no live lease exists.
- */
+The single Google account the calendar is written to.
+
+Exactly one row, `id = 1`, seeded by the migration and CHECK-constrained so a
+second can never appear. Everything here is an UPDATE for that reason -- there
+is no insert path, and the AAD row id is the constant "1".
+
+The lease mirrors the one on `connections`: Google's refresh tokens survive
+re-use, but two concurrent refreshes still race to write `access_token_enc`, and
+the loser can persist a token that has already been superseded.
+
+And as on `connections`, holding the lease when the refresh began is not enough:
+`upsertTokensLeased` puts `lease_owner = ? AND lease_expires_at > now` in the
+write's own predicate, so a refresher whose lease expired mid-flight cannot land
+a stale access token on top of the winner's. `upsertTokens` -- the consent
+callback, which holds no lease -- writes only while no live lease exists.
+*/
 
 import { AppError } from "../../lib/errors.ts";
 import { one, run, ttlSeconds } from "../client.ts";
@@ -93,12 +93,12 @@ export function makeGoogleAccountRepo(ctx: Ctx) {
     get: read,
 
     /**
-     * Store whichever fields the caller has, sealed, while no refresh is in flight.
-     *
-     * The status only moves if the caller passes one; `markConnected()` is the
-     * separate step that does that. Throws `conflict` when a live lease says a
-     * refresh is mid-flight -- see the module comment.
-     */
+    Store whichever fields the caller has, sealed, while no refresh is in flight.
+
+    The status only moves if the caller passes one; `markConnected()` is the
+    separate step that does that. Throws `conflict` when a live lease says a
+    refresh is mid-flight -- see the module comment.
+    */
     async upsertTokens(patch: GooglePatch): Promise<GoogleAccountRow> {
       const row = await writeTokens(patch, {
         clause: "AND (lease_expires_at IS NULL OR lease_expires_at <= ?)",
@@ -112,11 +112,11 @@ export function makeGoogleAccountRepo(ctx: Ctx) {
     },
 
     /**
-     * Store tokens under the lease this caller holds.
-     *
-     * `null` means the lease expired or somebody else took it, so the token this
-     * caller obtained must be discarded rather than written over the winner's.
-     */
+    Store tokens under the lease this caller holds.
+
+    `null` means the lease expired or somebody else took it, so the token this
+    caller obtained must be discarded rather than written over the winner's.
+    */
     async upsertTokensLeased(owner: string, patch: GooglePatch): Promise<GoogleAccountRow | null> {
       const row = await writeTokens(patch, {
         clause: "AND lease_owner = ? AND lease_expires_at > ?",

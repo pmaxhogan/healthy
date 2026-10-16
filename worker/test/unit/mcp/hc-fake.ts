@@ -57,10 +57,10 @@ export interface FakeHc {
   ingestLog: Map<string, IngestLogRow[]>;
   calls: ReadCall[];
   /**
-   * Day rollups waiting to be rebuilt, per phone. Undefined (the default)
-   * models a store that does not offer the finer `dirtyDays` reader at all;
-   * a map, even an empty one, models one that does.
-   */
+  Day rollups waiting to be rebuilt, per phone. Undefined (the default)
+  models a store that does not offer the finer `dirtyDays` reader at all;
+  a map, even an empty one, models one that does.
+  */
   dirtyDays?: Map<string, { type: string; day: string }[]>;
 }
 
@@ -203,9 +203,9 @@ function syncRowsOf(
 }
 
 /**
- * A sorted copy. Not `Array#toSorted`: the workerd integration tests import
- * this file too, and they compile against the Worker's ES2022 lib.
- */
+A sorted copy. Not `Array#toSorted`: the workerd integration tests import
+this file too, and they compile against the Worker's ES2022 lib.
+*/
 function sorted<T>(items: Iterable<T>, compare: (left: T, right: T) => number): T[] {
   const out = [...items];
   out.sort(compare);
@@ -434,19 +434,19 @@ export const DEVICE_ID = "dev_test_phone";
 const DEVICE_NAME = "Test phone";
 
 /**
- * One invented day of everything, ending at `nowMs` (which must be a UTC
- * midnight so the day is whole in UTC). Laid out so that every rule the tools
- * apply has something to bite on:
- *
- *  - steps from a wearable AND a phone every hour 08:00-18:00, with the
- *    platform's own aggregate for 08:00-12:00 only;
- *  - a night's sleep with stages, overnight heart rate, HRV and the rest;
- *  - a morning of heart rate with one sustained rise and one implausible sample;
- *  - two blood-pressure readings from a cuff, the first relayed again by the
- *    phone, and the cuff's pulse written as a "resting heart rate";
- *  - a weighing, and a weight typed into a profile beside a height;
- *  - a walk, and a four-hour session nobody stopped.
- */
+One invented day of everything, ending at `nowMs` (which must be a UTC
+midnight so the day is whole in UTC). Laid out so that every rule the tools
+apply has something to bite on:
+
+ - steps from a wearable AND a phone every hour 08:00-18:00, with the
+   platform's own aggregate for 08:00-12:00 only;
+ - a night's sleep with stages, overnight heart rate, HRV and the rest;
+ - a morning of heart rate with one sustained rise and one implausible sample;
+ - two blood-pressure readings from a cuff, the first relayed again by the
+   phone, and the cuff's pulse written as a "resting heart rate";
+ - a weighing, and a weight typed into a profile beside a height;
+ - a walk, and a four-hour session nobody stopped.
+*/
 export function hcWorldRecords(nowMs: number): HcRecord[] {
   const day = nowMs - DAY_MS;
   const at = (hour: number, minute = 0): number => day + hour * HOUR_MS + minute * MINUTE_MS;

@@ -20,10 +20,10 @@ export interface LoginPageOptions {
   /** Same-origin path to return to after login; becomes `?next=` on the form action. */
   next?: string | undefined;
   /**
-   * HTTP status. Defaults to 401: this response *is* the refusal, and a 200 here
-   * would make an expired session indistinguishable from a successful page load
-   * to anything that only looks at the status line.
-   */
+  HTTP status. Defaults to 401: this response *is* the refusal, and a 200 here
+  would make an expired session indistinguishable from a successful page load
+  to anything that only looks at the status line.
+  */
   status?: number | undefined;
   /** Extra response headers, e.g. `retry-after` when the limiter has closed. */
   headers?: Record<string, string> | undefined;

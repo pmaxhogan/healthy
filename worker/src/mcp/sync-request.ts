@@ -1,27 +1,27 @@
 /**
- * Deciding whether an MCP client may have the sync it asked for.
- *
- * `sync_health_systems` is the one tool on this server that acts, and what it
- * causes is not free: an ordinary sync searches a health system's FHIR API and
- * reads its patient portal, a full refresh re-reads every resource type, and
- * the caller is a language model that can call a tool on a loop without
- * meaning to. So every request is judged here, per health system, before
- * anything is started, and the judgement is a pure function of facts the tool
- * gathered: this module reads nothing and starts nothing, which is what lets a
- * unit test walk every branch of it.
- *
- * The order is deliberate. First what cannot work at all (`skipped`: nothing
- * to sync, or only the owner can fix it), then what the upstream asked for (a
- * rate-limit backoff), then a run already in flight, then data that is already
- * fresh, and only then the caller's own history. A request refused for an
- * earlier reason has not spent its cooldown.
- *
- * What it never allows, by construction, is a patient-portal sign-in. The
- * portal kind is offered only for an account that is signed in already, and the
- * job the tool queues runs with no sign-in wait (`worker/src/sync/runner.ts`), so a
- * session that turns out to be dead is reported and left for the hourly sync,
- * which re-establishes it under its own limits, or for the owner.
- */
+Deciding whether an MCP client may have the sync it asked for.
+
+`sync_health_systems` is the one tool on this server that acts, and what it
+causes is not free: an ordinary sync searches a health system's FHIR API and
+reads its patient portal, a full refresh re-reads every resource type, and
+the caller is a language model that can call a tool on a loop without
+meaning to. So every request is judged here, per health system, before
+anything is started, and the judgement is a pure function of facts the tool
+gathered: this module reads nothing and starts nothing, which is what lets a
+unit test walk every branch of it.
+
+The order is deliberate. First what cannot work at all (`skipped`: nothing
+to sync, or only the owner can fix it), then what the upstream asked for (a
+rate-limit backoff), then a run already in flight, then data that is already
+fresh, and only then the caller's own history. A request refused for an
+earlier reason has not spent its cooldown.
+
+What it never allows, by construction, is a patient-portal sign-in. The
+portal kind is offered only for an account that is signed in already, and the
+job the tool queues runs with no sign-in wait (`worker/src/sync/runner.ts`), so a
+session that turns out to be dead is reported and left for the hourly sync,
+which re-establishes it under its own limits, or for the owner.
+*/
 
 import { DAY_SECONDS, utcDayNumber } from "../lib/time.ts";
 
@@ -34,25 +34,25 @@ export const SYNC_KINDS = ["ordinary", "full", "portal"] as const satisfies read
 /** What one kind of sync is held to, per health system. */
 interface SyncKindLimits extends McpSyncRequestLimits {
   /**
-   * How recently a sync of this kind may have finished, by any trigger, for a
-   * new one to be refused as pointless.
-   */
+  How recently a sync of this kind may have finished, by any trigger, for a
+  new one to be refused as pointless.
+  */
   freshSeconds: number;
 }
 
 /**
- * The numbers. Each kind is also run on a schedule (hourly, every four hours,
- * and hourly again for the portal pass), so these bound how far an assistant
- * can add to that, not how fresh the data can be.
- *
- *  - `ordinary`: at most once every 15 minutes and 12 times a UTC day, and not
- *    within 5 minutes of the last one that finished.
- *  - `full`: every resource type, so at most once every 4 hours and 3 times a
- *    UTC day, and not within 30 minutes of the last full refresh.
- *  - `portal`: a scrape of the owner's own portal session, so at most once
- *    every 30 minutes and 8 times a UTC day, and not within 10 minutes of the
- *    portal's last good answer.
- */
+The numbers. Each kind is also run on a schedule (hourly, every four hours,
+and hourly again for the portal pass), so these bound how far an assistant
+can add to that, not how fresh the data can be.
+
+ - `ordinary`: at most once every 15 minutes and 12 times a UTC day, and not
+   within 5 minutes of the last one that finished.
+ - `full`: every resource type, so at most once every 4 hours and 3 times a
+   UTC day, and not within 30 minutes of the last full refresh.
+ - `portal`: a scrape of the owner's own portal session, so at most once
+   every 30 minutes and 8 times a UTC day, and not within 10 minutes of the
+   portal's last good answer.
+*/
 export const SYNC_LIMITS: Readonly<Record<McpSyncKind, SyncKindLimits>> = {
   ordinary: { cooldownSeconds: 15 * 60, dailyLimit: 12, freshSeconds: 5 * 60 },
   full: { cooldownSeconds: 4 * 60 * 60, dailyLimit: 3, freshSeconds: 30 * 60 },
@@ -75,15 +75,15 @@ export function syncLimits(kind: McpSyncKind): SyncKindLimits {
 }
 
 /**
- * How one health system's request ended.
- *
- *  - `started`: queued; the result arrives later, in `get_sync_status`.
- *  - `would_start`: a dry run found nothing in the way.
- *  - `already_running`: a run that covers it is in flight; nothing was added.
- *  - `refused`: a guardrail said no; `nextAllowedAt` says when to ask again.
- *  - `skipped`: there is nothing this tool can sync here; `code` says why.
- *  - `failed`: the request was allowed but could not be queued.
- */
+How one health system's request ended.
+
+ - `started`: queued; the result arrives later, in `get_sync_status`.
+ - `would_start`: a dry run found nothing in the way.
+ - `already_running`: a run that covers it is in flight; nothing was added.
+ - `refused`: a guardrail said no; `nextAllowedAt` says when to ask again.
+ - `skipped`: there is nothing this tool can sync here; `code` says why.
+ - `failed`: the request was allowed but could not be queued.
+*/
 export type SyncOutcome =
   "started" | "would_start" | "already_running" | "refused" | "skipped" | "failed";
 
@@ -150,13 +150,13 @@ function fhirSkipCode(healthSystem: HealthSystemInfo): SyncCode {
 }
 
 /**
- * Why the portal pass cannot run for this health system, or null when it can.
- *
- * The first two are the check the admin API makes before it queues a portal
- * sync (no stored login, nothing to do). The last two go further than it does:
- * an account that needs re-authorising, was locked out or has never signed in
- * can only be brought back by a sign-in, and that is the owner's to start.
- */
+Why the portal pass cannot run for this health system, or null when it can.
+
+The first two are the check the admin API makes before it queues a portal
+sync (no stored login, nothing to do). The last two go further than it does:
+an account that needs re-authorising, was locked out or has never signed in
+can only be brought back by a sign-in, and that is the owner's to start.
+*/
 function portalSkipCode(healthSystem: HealthSystemInfo): SyncCode | null {
   const { portal } = healthSystem;
   if (portal === null) return "portal_not_configured";
@@ -200,9 +200,9 @@ function inFlightCode(
 }
 
 /**
- * When the caller's own history next allows this request, and which limit is
- * in the way. Null when neither is.
- */
+When the caller's own history next allows this request, and which limit is
+in the way. Null when neither is.
+*/
 function historyLimit(
   kind: McpSyncKind,
   entry: McpSyncRequestEntry | undefined,

@@ -31,14 +31,14 @@ export const CSRF_HEADER_VALUE = "1";
 const STATE_CHANGING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 /**
- * Paths that are checked with the same-origin proof alone. See the header note.
- *
- * Both are server-rendered HTML forms, and an HTML form cannot set a header.
- * `/authorize` is the MCP consent page (wave 2): its GET is a cross-site
- * navigation from the client that wants the grant, which is a safe method and so
- * is not checked at all; its POST is the owner approving, same-origin, from the
- * form this Worker rendered.
- */
+Paths that are checked with the same-origin proof alone. See the header note.
+
+Both are server-rendered HTML forms, and an HTML form cannot set a header.
+`/authorize` is the MCP consent page (wave 2): its GET is a cross-site
+navigation from the client that wants the grant, which is a safe method and so
+is not checked at all; its POST is the owner approving, same-origin, from the
+form this Worker rendered.
+*/
 const HEADER_EXEMPT_PATHS = new Set(["/auth/login", "/authorize"]);
 
 /** True for the methods that can change state, and so need a CSRF check. */
@@ -47,12 +47,12 @@ export function isStateChanging(method: string): boolean {
 }
 
 /**
- * True when the request proves it came from this origin.
- *
- * Either signal alone is sufficient, and a request carrying neither is rejected:
- * an absent `Origin` on a POST means a client too old to be trusted with the
- * admin surface, not a request to wave through.
- */
+True when the request proves it came from this origin.
+
+Either signal alone is sufficient, and a request carrying neither is rejected:
+an absent `Origin` on a POST means a client too old to be trusted with the
+admin surface, not a request to wave through.
+*/
 export function hasSameOriginProof(request: Request): boolean {
   const origin = request.headers.get("origin");
   const originMatches = origin !== null && origin === new URL(request.url).origin;
@@ -73,11 +73,11 @@ export function checkCsrf(request: Request, options: CsrfOptions = {}): boolean 
 }
 
 /**
- * Hono middleware form. Mount it on `/api/*` and `/auth/*`.
- *
- * Rejection is a 403 `forbidden` AppError rather than a bespoke response so it
- * renders through the app's single error handler like every other failure.
- */
+Hono middleware form. Mount it on `/api/*` and `/auth/*`.
+
+Rejection is a 403 `forbidden` AppError rather than a bespoke response so it
+renders through the app's single error handler like every other failure.
+*/
 export const csrfGuard = createMiddleware(async (c, next) => {
   const request = c.req.raw;
   if (isStateChanging(request.method)) {

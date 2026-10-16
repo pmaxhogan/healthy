@@ -1,23 +1,23 @@
 /**
- * What the tools are allowed to touch.
- *
- * The tool layer is written against this interface and never against `Repos`,
- * `Env` or `fetch`. Two reasons, both about being able to prove things:
- *
- *  - The surface is the audit. Anything a tool can reach is listed here, so
- *    "could a tool write to D1?" or "could a tool read a token?" is answered by
- *    reading one file rather than by trusting twenty.
- *  - Every tool becomes unit-testable in plain Node. The policy tests, the output
- *    shape tests and the "the audit row carries no content" test all run against
- *    an in-memory implementation of this interface, with no workerd and no D1.
- *
- * `worker/src/mcp/deps-d1.ts` is the one real implementation.
- *
- * Everything here reads, with two exceptions that are named as such: the audit
- * row, and {@link SyncControls}, the one way a tool can make this server act
- * (ask the sync engine for a run). No tool but `sync_health_systems` touches
- * the second.
- */
+What the tools are allowed to touch.
+
+The tool layer is written against this interface and never against `Repos`,
+`Env` or `fetch`. Two reasons, both about being able to prove things:
+
+ - The surface is the audit. Anything a tool can reach is listed here, so
+   "could a tool write to D1?" or "could a tool read a token?" is answered by
+   reading one file rather than by trusting twenty.
+ - Every tool becomes unit-testable in plain Node. The policy tests, the output
+   shape tests and the "the audit row carries no content" test all run against
+   an in-memory implementation of this interface, with no workerd and no D1.
+
+`worker/src/mcp/deps-d1.ts` is the one real implementation.
+
+Everything here reads, with two exceptions that are named as such: the audit
+row, and {@link SyncControls}, the one way a tool can make this server act
+(ask the sync engine for a run). No tool but `sync_health_systems` touches
+the second.
+*/
 
 import type {
   ConnectionStatus,
@@ -54,11 +54,11 @@ export interface HealthSystemInfo {
   lastErrorCode: string | null;
   needsReauthSince: number | null;
   /**
-   * The patient-portal account, when the health system has one. Its health is its
-   * own: a portal-only health system has no FHIR connection at all (`status` is
-   * `not_connected`) while its portal syncs fine, and a FHIR connection that needs
-   * re-authorising says nothing about the portal session.
-   */
+  The patient-portal account, when the health system has one. Its health is its
+  own: a portal-only health system has no FHIR connection at all (`status` is
+  `not_connected`) while its portal syncs fine, and a FHIR connection that needs
+  re-authorising says nothing about the portal session.
+  */
   portal: PortalAccountInfo | null;
 }
 
@@ -67,9 +67,9 @@ export interface PortalAccountInfo {
   /** `portal_accounts.session_state`. */
   state: "none" | "active" | "needs_reauth";
   /**
-   * Whether a login is stored for it. A fact about the row and nothing more:
-   * the login itself is sealed and no tool can reach it.
-   */
+  Whether a login is stored for it. A fact about the row and nothing more:
+  the login itself is sealed and no tool can reach it.
+  */
   hasCredentials: boolean;
   /** Unix seconds the portal last answered a signed-in read (or a sign-in completed). */
   lastOkAt: number | null;
@@ -86,11 +86,11 @@ export interface CachedRow {
 }
 
 /**
- * One visit the patient portal reported, as the portal pass last stored it.
- *
- * `missing` is the calendar's ghost rule: a visit that stopped being returned
- * while it was still ahead. Treated as cancelled.
- */
+One visit the patient portal reported, as the portal pass last stored it.
+
+`missing` is the calendar's ghost rule: a visit that stopped being returned
+while it was still ahead. Treated as cancelled.
+*/
 export interface PortalVisitRecord {
   visit: PortalVisit;
   missing: boolean;
@@ -99,13 +99,13 @@ export interface PortalVisitRecord {
 }
 
 /**
- * One secure message the portal pass stored (`portal_messages`), opened.
- *
- * `threadId` and `messageId` are keyed blinds of the thread's and the message's
- * content, the same for one message whichever portal it was read from;
- * `fingerprint` is the content digest two portals' copies are matched on (see
- * `worker/src/sync/message-dedupe.ts`). Never returned as such.
- */
+One secure message the portal pass stored (`portal_messages`), opened.
+
+`threadId` and `messageId` are keyed blinds of the thread's and the message's
+content, the same for one message whichever portal it was read from;
+`fingerprint` is the content digest two portals' copies are matched on (see
+`worker/src/sync/message-dedupe.ts`). Never returned as such.
+*/
 export interface PortalMessageRecord {
   threadId: string;
   messageId: string;
@@ -113,25 +113,25 @@ export interface PortalMessageRecord {
   thread: Omit<PortalThread, "messages">;
   message: PortalMessage;
   /**
-   * What is stored of each attachment's file, index-aligned with
-   * `message.attachments`. Absent means none of them has been looked up.
-   */
+  What is stored of each attachment's file, index-aligned with
+  `message.attachments`. Absent means none of them has been looked up.
+  */
   files?: MessageAttachmentFile[] | undefined;
   /** The portal's own organisation stopped listing it. */
   missing: boolean;
 }
 
 /**
- * Where one attachment's file stands (`portal_message_attachments`):
- *
- *  - `stored`: fetched and sealed; `get_message_attachment` can read it.
- *  - `failed`: the portal would not serve it; `errorCode` says how. Tried again
- *    a day later.
- *  - `waiting_until_read`: on a message the portal still marks unread; fetched
- *    on the first portal pass after it has been read (fetching could mark it read).
- *  - `not_fetched`: not tried yet, or not a file the portal serves (a clinical
- *    reference, a link into another organisation's portal).
- */
+Where one attachment's file stands (`portal_message_attachments`):
+
+ - `stored`: fetched and sealed; `get_message_attachment` can read it.
+ - `failed`: the portal would not serve it; `errorCode` says how. Tried again
+   a day later.
+ - `waiting_until_read`: on a message the portal still marks unread; fetched
+   on the first portal pass after it has been read (fetching could mark it read).
+ - `not_fetched`: not tried yet, or not a file the portal serves (a clinical
+   reference, a link into another organisation's portal).
+*/
 type MessageAttachmentStatus = "stored" | "failed" | "waiting_until_read" | "not_fetched";
 
 export interface MessageAttachmentFile {
@@ -176,22 +176,22 @@ export interface SyncStatusEntry {
 export interface DocumentTextRequest {
   healthSystemId: string;
   /**
-   * What `get_documents` reported as the document's `id`, or a Binary reference
-   * copied from one of its `attachments[].url` -- `Binary/<id>`, a bare Binary
-   * id, or an absolute URL ending in one. Either form resolves to the same
-   * document; see `parseDocumentTextId` in `mcp/document-text.ts`.
-   */
+  What `get_documents` reported as the document's `id`, or a Binary reference
+  copied from one of its `attachments[].url` -- `Binary/<id>`, a bare Binary
+  id, or an absolute URL ending in one. Either form resolves to the same
+  document; see `parseDocumentTextId` in `mcp/document-text.ts`.
+  */
   documentId: string;
 }
 
 /**
- * Why a document could not be turned into text.
- *
- * A discriminated result rather than a thrown error on purpose: the failures here
- * are ordinary answers ("that org's daily cap is spent", "that is a PDF"), and
- * routing them through exceptions would mean the tool layer had to re-derive a
- * stable code from an upstream message.
- */
+Why a document could not be turned into text.
+
+A discriminated result rather than a thrown error on purpose: the failures here
+are ordinary answers ("that org's daily cap is spent", "that is a PDF"), and
+routing them through exceptions would mean the tool layer had to re-derive a
+stable code from an upstream message.
+*/
 export type DocumentTextFailure = "cap_reached" | "not_found" | "unsupported" | "upstream";
 
 export type DocumentTextResult =
@@ -207,11 +207,11 @@ export type DocumentTextResult =
       ok: false;
       reason: DocumentTextFailure;
       /**
-       * Set on a `not_found` that a caller can act on: whether the id looked like
-       * a Binary reference or a DocumentReference id, and a pointer back at
-       * `get_documents`. Never set for the other failure reasons, which already
-       * say everything there is to say.
-       */
+      Set on a `not_found` that a caller can act on: whether the id looked like
+      a Binary reference or a DocumentReference id, and a pointer back at
+      `get_documents`. Never set for the other failure reasons, which already
+      say everything there is to say.
+      */
       detail?: string;
     };
 
@@ -230,14 +230,14 @@ export interface AuditRecord {
 }
 
 /**
- * What the audit row records about a `jq` program: a fingerprint, never the text.
- *
- * A program can carry clinical content as a literal -- `select(.code | test("..."))`
- * names what the model was looking for -- and this table's invariant is that it
- * has nowhere to put content. The SHA-256 (of the UTF-8 program) still lets the
- * owner see that two calls ran the same filter, and match a program they are
- * shown elsewhere against the row.
- */
+What the audit row records about a `jq` program: a fingerprint, never the text.
+
+A program can carry clinical content as a literal -- `select(.code | test("..."))`
+names what the model was looking for -- and this table's invariant is that it
+has nowhere to put content. The SHA-256 (of the UTF-8 program) still lets the
+owner see that two calls ran the same filter, and match a program they are
+shown elsewhere against the row.
+*/
 export interface AuditJq {
   sha256: string;
   /** In characters. */
@@ -255,22 +255,22 @@ export interface CallerIdentity {
 }
 
 /**
- * The door from a tool to the sync engine: what `sync_health_systems` needs to
- * decide whether a sync may be asked for, and to ask for it.
- *
- * Deliberately narrow. It can start the three kinds of run the admin UI's own
- * buttons start and nothing else: it cannot sign in to a patient portal, clear
- * a rate-limit backoff, refresh a token or change a setting, and it is handed
- * no credential, URL or portal identifier. Health system ids in, booleans and
- * instants out.
- */
+The door from a tool to the sync engine: what `sync_health_systems` needs to
+decide whether a sync may be asked for, and to ask for it.
+
+Deliberately narrow. It can start the three kinds of run the admin UI's own
+buttons start and nothing else: it cannot sign in to a patient portal, clear
+a rate-limit backoff, refresh a token or change a setting, and it is handed
+no credential, URL or portal identifier. Health system ids in, booleans and
+instants out.
+*/
 export interface SyncControls {
   /** Unix seconds a rate-limit backoff runs to, or null when none is set. */
   backoffUntil(): Promise<number | null>;
   /**
-   * True while any sync run is open -- the scheduled ones and the admin
-   * buttons' included -- or a calendar sync asked for here is still queued.
-   */
+  True while any sync run is open -- the scheduled ones and the admin
+  buttons' included -- or a calendar sync asked for here is still queued.
+  */
   runInFlight(): Promise<boolean>;
   /** True while a full refresh is queued or running for this health system. */
   fullRefreshInFlight(healthSystemId: string): Promise<boolean>;
@@ -279,14 +279,14 @@ export interface SyncControls {
   /** Every health system's request history for one kind of sync. */
   history(kind: McpSyncKind): Promise<McpSyncRequestEntry[]>;
   /**
-   * Take the cooldown slot for one request, atomically. False means another
-   * request holds it; nothing was written and nothing may be started.
-   */
+  Take the cooldown slot for one request, atomically. False means another
+  request holds it; nothing was written and nothing may be started.
+  */
   claim(healthSystemId: string, kind: McpSyncKind, limits: McpSyncRequestLimits): Promise<boolean>;
   /**
-   * Queue one calendar sync over these health systems. It never signs in to a
-   * portal. `started: false` means one was already queued.
-   */
+  Queue one calendar sync over these health systems. It never signs in to a
+  portal. `started: false` means one was already queued.
+  */
   startCalendarSync(
     healthSystemIds: readonly string[],
     options: { portalOnly: boolean },
@@ -300,14 +300,14 @@ export interface ToolDeps {
   /** The OAuth client behind this session, for the audit row. */
   readonly caller: CallerIdentity;
   /**
-   * Called once at the start of every tool call, before anything is read.
-   *
-   * The real implementation drops its per-call caches here. It matters because a
-   * Durable Object session outlives a single call by design: without this, an
-   * exposure rule the owner added, or `mcp_enabled` being switched off, would not
-   * take effect until the client reconnected -- which is the opposite of what a
-   * kill switch is for.
-   */
+  Called once at the start of every tool call, before anything is read.
+
+  The real implementation drops its per-call caches here. It matters because a
+  Durable Object session outlives a single call by design: without this, an
+  exposure rule the owner added, or `mcp_enabled` being switched off, would not
+  take effect until the client reconnected -- which is the opposite of what a
+  kill switch is for.
+  */
   beginCall(): void;
   /** Unix seconds. Injected so tests need no clock of their own. */
   now(): number;
@@ -320,46 +320,46 @@ export interface ToolDeps {
   /** Cached resources of one type for one health system, most recently updated first. */
   resources(healthSystemId: string, resourceType: string): Promise<CachedRow[]>;
   /**
-   * The Practitioner / Location / Organization / PractitionerRole / Medication
-   * rows one health system's references resolve against, for `mapResolver`.
-   */
+  The Practitioner / Location / Organization / PractitionerRole / Medication
+  rows one health system's references resolve against, for `mapResolver`.
+  */
   referencePool(healthSystemId: string): Promise<unknown[]>;
   /**
-   * The upcoming visits the patient-portal pass last stored for one health system
-   * (`portal_visits`), earliest first. Epic's FHIR view never returns a visit
-   * before it happens, so this is where `get_appointments` finds them.
-   */
+  The upcoming visits the patient-portal pass last stored for one health system
+  (`portal_visits`), earliest first. Epic's FHIR view never returns a visit
+  before it happens, so this is where `get_appointments` finds them.
+  */
   portalVisits(healthSystemId: string): Promise<PortalVisitRecord[]>;
   /**
-   * Every secure message the portal pass stored for one health system
-   * (`portal_messages`), in no particular order. What `get_messages` answers from.
-   */
+  Every secure message the portal pass stored for one health system
+  (`portal_messages`), in no particular order. What `get_messages` answers from.
+  */
   portalMessages(healthSystemId: string): Promise<PortalMessageRecord[]>;
   /** Every health system's last Message Center read, for `get_messages`' coverage. */
   portalMessageSync(): Promise<PortalMessageSyncEntry[]>;
   /**
-   * One stored attachment's file, by the `id` a message item reported, from
-   * `portal_message_attachment_chunks`. Null when that health system holds no
-   * stored file under that id. Never talks to a portal.
-   */
+  One stored attachment's file, by the `id` a message item reported, from
+  `portal_message_attachment_chunks`. Null when that health system holds no
+  stored file under that id. Never talks to a portal.
+  */
   portalAttachmentContent(healthSystemId: string, attachmentId: string): Promise<Uint8Array | null>;
   counts(): Promise<CacheCount[]>;
   syncStatus(): Promise<SyncStatusEntry[]>;
   /**
-   * The zone the owner's days are counted in: the sealed `timezone` setting,
-   * or UTC when none is stored. What a Health Connect tool buckets by unless
-   * the caller passes `tz`.
-   */
+  The zone the owner's days are counted in: the sealed `timezone` setting,
+  or UTC when none is stored. What a Health Connect tool buckets by unless
+  the caller passes `tz`.
+  */
   timezone(): Promise<string>;
   /**
-   * The Health Connect store: paired phones, their sync bookkeeping, raw
-   * records and the rollups beside them. Read-only; see `./hc/reads.ts`.
-   */
+  The Health Connect store: paired phones, their sync bookkeeping, raw
+  records and the rollups beside them. Read-only; see `./hc/reads.ts`.
+  */
   readonly hc: HcReads;
   /**
-   * Decode one clinical document to text, fetching and caching the Binary if
-   * needed. The only tool path that talks to an organisation at request time.
-   */
+  Decode one clinical document to text, fetching and caching the Binary if
+  needed. The only tool path that talks to an organisation at request time.
+  */
   documentText(input: DocumentTextRequest): Promise<DocumentTextResult>;
   /** Asking the sync engine for a run. Only `sync_health_systems` uses it. */
   readonly sync: SyncControls;

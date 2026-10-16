@@ -1,24 +1,24 @@
 /**
- * Token keepalive: `refreshConnectionToken`, and the every-connection sweep the
- * hourly cron runs.
- *
- * Why a keepalive exists at all. Epic's refresh tokens expire on a rolling window
- * measured from last use, so a connection that is never *refreshed* eventually
- * dies even though nothing is wrong with it -- and a health system whose appointments
- * are all in the past makes no upstream request at all. Touching every connection
- * once an hour keeps the grant alive, and it surfaces a revoked one within the hour
- * rather than whenever the owner next happens to have an appointment.
- *
- * "Touching" means asking for an access token, not forcing a refresh: the getter
- * refreshes only inside the five-minute skew, so a connection with fifty minutes
- * left costs one D1 read. `force` is for the admin button, which has to be able to
- * prove that a refresh works.
- *
- * Google is included in the sweep. It is the one account that *always* has work to
- * do -- every calendar write goes through it -- but its own grant expires the same
- * way, and a run that discovers Google is broken is far more useful at the top of
- * the hour than half way through writing events.
- */
+Token keepalive: `refreshConnectionToken`, and the every-connection sweep the
+hourly cron runs.
+
+Why a keepalive exists at all. Epic's refresh tokens expire on a rolling window
+measured from last use, so a connection that is never *refreshed* eventually
+dies even though nothing is wrong with it -- and a health system whose appointments
+are all in the past makes no upstream request at all. Touching every connection
+once an hour keeps the grant alive, and it surfaces a revoked one within the hour
+rather than whenever the owner next happens to have an appointment.
+
+"Touching" means asking for an access token, not forcing a refresh: the getter
+refreshes only inside the five-minute skew, so a connection with fifty minutes
+left costs one D1 read. `force` is for the admin button, which has to be able to
+prove that a refresh works.
+
+Google is included in the sweep. It is the one account that *always* has work to
+do -- every calendar write goes through it -- but its own grant expires the same
+way, and a run that discovers Google is broken is far more useful at the top of
+the hour than half way through writing events.
+*/
 
 import { makeRepos } from "../db/index.ts";
 import { AppError } from "../lib/errors.ts";
@@ -48,12 +48,12 @@ export interface RefreshTokenResult {
 }
 
 /**
- * Make sure one connection has a usable access token, and report where it stands.
- *
- * Writes a `run_log` row of kind "refresh". Unlike the two sync entry points this
- * one **throws** on failure: it is driven by an admin button that needs to show
- * the owner what went wrong, and the run row records the outcome either way.
- */
+Make sure one connection has a usable access token, and report where it stands.
+
+Writes a `run_log` row of kind "refresh". Unlike the two sync entry points this
+one **throws** on failure: it is driven by an admin button that needs to show
+the owner what went wrong, and the run row records the outcome either way.
+*/
 export async function refreshConnectionToken(
   ctx: Ctx,
   healthSystemId: string,
@@ -85,13 +85,13 @@ export async function refreshConnectionToken(
 }
 
 /**
- * Touch every connection, Google included, so no grant dies of disuse.
- *
- * Isolated per connection and never throws: this runs alongside the hourly sync,
- * and a single broken health system must not stop the others being kept alive. The
- * failures it finds have already marked their connection and opened their alert
- * inside the token managers.
- */
+Touch every connection, Google included, so no grant dies of disuse.
+
+Isolated per connection and never throws: this runs alongside the hourly sync,
+and a single broken health system must not stop the others being kept alive. The
+failures it finds have already marked their connection and opened their alert
+inside the token managers.
+*/
 export async function runTokenKeepalive(ctx: Ctx, deps: SyncDeps = {}): Promise<RunSummaryish> {
   const repos = makeRepos(ctx);
   const outcome = await record(ctx, "refresh", async (state) => {

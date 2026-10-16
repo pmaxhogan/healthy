@@ -15,7 +15,7 @@ const REDIRECT_URI = "https://healthy.example.test/oauth/callback";
 const epicTokenResponse = loadFixture<Record<string, unknown>>("token-response.json");
 
 /** A token response as a short-lived, rotating server would send it. All values invented. */
-function tokenBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function tokenBody(): Record<string, unknown> {
   return {
     access_token: "synthetic-access-token",
     token_type: "Bearer",
@@ -23,7 +23,6 @@ function tokenBody(overrides: Record<string, unknown> = {}): Record<string, unkn
     refresh_token: "synthetic-rotated-refresh",
     scope: "openid fhirUser offline_access launch/patient patient/Condition.rs",
     patient: "synthetic-patient-9",
-    ...overrides,
   };
 }
 

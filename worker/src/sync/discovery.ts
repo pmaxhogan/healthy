@@ -1,30 +1,30 @@
 /**
- * Cached SMART discovery and CapabilityStatement, per health system.
- *
- * **Where they live, and why.** Both documents are per-health system, JSON, and want a
- * TTL -- which is exactly what `fhir_cache` already is, down to the sealed
- * payload and the `expires_at` sweep. Rather than add a table (and a migration
- * this agent does not own) they are stored there under two synthetic resource
- * types, `_smart` and `_capability`, at the fixed resource id `v1`. The leading
- * underscore is the marker: no FHIR resource type starts with one, so nothing can
- * collide with a real cached resource, and a consumer of `fhir_cache` can filter
- * them out with a single prefix test.
- *
- * The cost of that choice is that `fhirCache.countsByType()` will report `_smart`
- * and `_capability` alongside the clinical types, so the admin overview and any
- * MCP summary must skip resource types beginning with `_`. That is called out in
- * the hand-off notes.
- *
- * **Why they are cached at all.** An organisation can move its authorize and
- * token endpoints without changing its FHIR base, and Epic's CapabilityStatement
- * is megabytes of XML-ish JSON that changes at a quarterly upgrade cadence.
- * Re-fetching either on an hourly sync would be pure waste; never re-fetching
- * would break silently at the next upgrade. Seven days is the spec's answer.
- *
- * A capability fetch needs a bearer token and a discovery fetch does not, which
- * is why they are two functions rather than one: the token manager needs
- * `tokenUrl` before it has a token at all.
- */
+Cached SMART discovery and CapabilityStatement, per health system.
+
+**Where they live, and why.** Both documents are per-health system, JSON, and want a
+TTL -- which is exactly what `fhir_cache` already is, down to the sealed
+payload and the `expires_at` sweep. Rather than add a table (and a migration
+this agent does not own) they are stored there under two synthetic resource
+types, `_smart` and `_capability`, at the fixed resource id `v1`. The leading
+underscore is the marker: no FHIR resource type starts with one, so nothing can
+collide with a real cached resource, and a consumer of `fhir_cache` can filter
+them out with a single prefix test.
+
+The cost of that choice is that `fhirCache.countsByType()` will report `_smart`
+and `_capability` alongside the clinical types, so the admin overview and any
+MCP summary must skip resource types beginning with `_`. That is called out in
+the hand-off notes.
+
+**Why they are cached at all.** An organisation can move its authorize and
+token endpoints without changing its FHIR base, and Epic's CapabilityStatement
+is megabytes of XML-ish JSON that changes at a quarterly upgrade cadence.
+Re-fetching either on an hourly sync would be pure waste; never re-fetching
+would break silently at the next upgrade. Seven days is the spec's answer.
+
+A capability fetch needs a bearer token and a discovery fetch does not, which
+is why they are two functions rather than one: the token manager needs
+`tokenUrl` before it has a token at all.
+*/
 
 import { errorFields } from "../lib/log.ts";
 
@@ -50,19 +50,19 @@ export function isDiscoveryCacheType(resourceType: string): boolean {
 }
 
 /**
- * The envelope stored in `payload_enc`.
- *
- * `resourceType` and `id` are there because `fhirCache.upsertMany` keys the row
- * (and the AAD) off them; `document` is the payload this module cares about.
- */
+The envelope stored in `payload_enc`.
+
+`resourceType` and `id` are there because `fhirCache.upsertMany` keys the row
+(and the AAD) off them; `document` is the payload this module cares about.
+*/
 interface CachedDocument {
   resourceType: string;
   id: string;
   document: unknown;
   /**
-   * `CacheableResource` carries an index signature, and TypeScript does not infer
-   * one for an interface, so it is declared. Nothing else is ever stored here.
-   */
+  `CacheableResource` carries an index signature, and TypeScript does not infer
+  one for an interface, so it is declared. Nothing else is ever stored here.
+  */
   [extra: string]: unknown;
 }
 
@@ -109,11 +109,11 @@ async function writeCached(
 }
 
 /**
- * The health system's SMART configuration, from the cache when it is still fresh.
- *
- * `force` is for the admin "test this health system" path: it re-fetches even when a
- * cached copy would do.
- */
+The health system's SMART configuration, from the cache when it is still fresh.
+
+`force` is for the admin "test this health system" path: it re-fetches even when a
+cached copy would do.
+*/
 export async function getSmartConfig(
   ctx: Ctx,
   repos: Repos,
@@ -132,13 +132,13 @@ export async function getSmartConfig(
 }
 
 /**
- * The health system's capability index, from the cache when it is still fresh.
- *
- * Returns null rather than throwing when the fetch fails: every consumer
- * (`encounterStatusFilter`, `filterSupported`) already treats a null index as
- * "assume nothing is native and filter locally", which is the correct, if
- * slower, behaviour. A missing CapabilityStatement must not fail a sync.
- */
+The health system's capability index, from the cache when it is still fresh.
+
+Returns null rather than throwing when the fetch fails: every consumer
+(`encounterStatusFilter`, `filterSupported`) already treats a null index as
+"assume nothing is native and filter locally", which is the correct, if
+slower, behaviour. A missing CapabilityStatement must not fail a sync.
+*/
 export async function getCapabilityIndex(
   ctx: Ctx,
   repos: Repos,

@@ -1,20 +1,20 @@
 /**
- * The real {@link ToolDeps}: D1, the FHIR read cache, and one door to the sync
- * engine for document bodies.
- *
- * Everything is memoised for the length of one tool call and dropped at the start
- * of the next (`beginCall`). That is what makes a twenty-four-row summary one
- * query per resource type rather than one per item, while still letting the owner
- * switch the MCP off and have it take effect on the very next call rather than
- * whenever the client happens to reconnect.
- *
- * Note what this file does NOT expose upward: no `Env`, no `Repos`, no `fetch`, no
- * token, and two write paths only: the audit row, and `sync`, through which
- * `sync_health_systems` asks the sync engine for a run (see `SyncControls` in
- * `deps.ts`, and `makeSyncControls` below for exactly what that reaches). The
- * `ToolDeps` interface is the whole of what a tool can do, and this is the only
- * place that decides what that means.
- */
+The real {@link ToolDeps}: D1, the FHIR read cache, and one door to the sync
+engine for document bodies.
+
+Everything is memoised for the length of one tool call and dropped at the start
+of the next (`beginCall`). That is what makes a twenty-four-row summary one
+query per resource type rather than one per item, while still letting the owner
+switch the MCP off and have it take effect on the very next call rather than
+whenever the client happens to reconnect.
+
+Note what this file does NOT expose upward: no `Env`, no `Repos`, no `fetch`, no
+token, and two write paths only: the audit row, and `sync`, through which
+`sync_health_systems` asks the sync engine for a run (see `SyncControls` in
+`deps.ts`, and `makeSyncControls` below for exactly what that reaches). The
+`ToolDeps` interface is the whole of what a tool can do, and this is the only
+place that decides what that means.
+*/
 
 import { blindHcRecordId, blinderFor } from "../db/blind.ts";
 import { reposFor } from "../db/index.ts";
@@ -74,14 +74,14 @@ import type { PolicyRules } from "../policy/rules.ts";
 import type { PortalSignInState } from "@shared/types.ts";
 
 /**
- * The sync engine's entry points `sync_health_systems` is allowed to reach.
- *
- * The live ones are `worker/src/sync/index.ts`'s own: the queue the admin UI's
- * full-refresh button uses, the calendar job beside it (which never signs in to
- * a portal), whether either is in flight, and the portal sign-in's progress.
- * An option rather than a direct call so an integration test can stand in for
- * the Durable Objects.
- */
+The sync engine's entry points `sync_health_systems` is allowed to reach.
+
+The live ones are `worker/src/sync/index.ts`'s own: the queue the admin UI's
+full-refresh button uses, the calendar job beside it (which never signs in to
+a portal), whether either is in flight, and the portal sign-in's progress.
+An option rather than a direct call so an integration test can stand in for
+the Durable Objects.
+*/
 export interface SyncEngine {
   startCalendarSync(
     ctx: Ctx,
@@ -291,12 +291,12 @@ async function loadHealthSystems(repos: Repos): Promise<HealthSystemInfo[]> {
 }
 
 /**
- * The phone's last sync report, as the wire schema reads it.
- *
- * It was validated when it arrived, but it is read back through the same
- * schema rather than cast: a report stored by an older Worker must not reach a
- * tool in a shape the tool was not written against.
- */
+The phone's last sync report, as the wire schema reads it.
+
+It was validated when it arrived, but it is read back through the same
+schema rather than cast: a report stored by an older Worker must not reach a
+tool in a shape the tool was not written against.
+*/
 function parsePhoneReport(json: string | null): HcSyncState | null {
   if (json === null) return null;
   let syncState: unknown;
@@ -317,11 +317,11 @@ function parsePhoneReport(json: string | null): HcSyncState | null {
 }
 
 /**
- * The memoised readers that hand back stored data, by the name they are
- * memoised under: what `releaseReads` lets go of. One window of a long walk is
- * megabytes of opened rows; the bookkeeping readers are a few rows each and
- * stay.
- */
+The memoised readers that hand back stored data, by the name they are
+memoised under: what `releaseReads` lets go of. One window of a long walk is
+megabytes of opened rows; the bookkeeping readers are a few rows each and
+stay.
+*/
 const STORED_DATA_READERS: ReadonlySet<string> = new Set([
   "records",
   "hourRollups",
@@ -333,10 +333,10 @@ const STORED_DATA_READERS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The Health Connect half of the seam: thin, memoised calls into the store's
- * readers. A summary tool asks for the same day rollups several times in one
- * call, and every rollup read opens a chunk per origin to learn its name.
- */
+The Health Connect half of the seam: thin, memoised calls into the store's
+readers. A summary tool asks for the same day rollups several times in one
+call, and every rollup read opens a chunk per origin to learn its name.
+*/
 function makeHcReads(repos: Repos, cache: () => CallCache): HcReads {
   const { ctx } = repos;
   const once = <T>(name: string, key: unknown, load: () => Promise<T>): Promise<T> => {
@@ -410,10 +410,10 @@ function makeHcReads(repos: Repos, cache: () => CallCache): HcReads {
 }
 
 /**
- * How long a portal sign-in's phase is believed. The runner's own figure for an
- * abandoned job (`portal-runner.ts`): a phase older than this was left behind
- * by a job that no longer exists.
- */
+How long a portal sign-in's phase is believed. The runner's own figure for an
+abandoned job (`portal-runner.ts`): a phase older than this was left behind
+by a job that no longer exists.
+*/
 const SIGN_IN_PHASE_STALE_SECONDS = 15 * 60;
 
 /** The phases in which a sign-in is actually under way. */
@@ -424,13 +424,13 @@ const SIGN_IN_ACTIVE_PHASES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * The real {@link SyncControls}.
- *
- * Reads: the backoff setting, open `run_log` rows, the two runners' "is a job
- * stored" answers, the sign-in phase and `mcp_sync_requests`. Writes: one
- * `mcp_sync_requests` row per claim, and a job on a runner. Nothing here
- * decides anything; `worker/src/mcp/sync-request.ts` does.
- */
+The real {@link SyncControls}.
+
+Reads: the backoff setting, open `run_log` rows, the two runners' "is a job
+stored" answers, the sign-in phase and `mcp_sync_requests`. Writes: one
+`mcp_sync_requests` row per claim, and a job on a runner. Nothing here
+decides anything; `worker/src/mcp/sync-request.ts` does.
+*/
 function makeSyncControls(repos: Repos, engine: SyncEngine, caller: CallerIdentity): SyncControls {
   const { ctx } = repos;
   return {

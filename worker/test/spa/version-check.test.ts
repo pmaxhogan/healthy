@@ -18,10 +18,10 @@ function indexHtml(entry: string): string {
 }
 
 /**
- * The page this bundle was loaded from. A parsed document rather than scripts
- * added to the live one: happy-dom tries to load a module script the moment it
- * is connected.
- */
+The page this bundle was loaded from. A parsed document rather than scripts
+added to the live one: happy-dom tries to load a module script the moment it
+is connected.
+*/
 const running: { page: Document } = { page: document };
 
 function runningEntry(entry: string | null): void {

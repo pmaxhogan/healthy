@@ -24,9 +24,9 @@ export function escapeHtml(value: string): string {
 }
 
 /**
- * Design tokens, light and dark, matching the SPA's palette so the login wall
- * does not flash a different theme than the app behind it.
- */
+Design tokens, light and dark, matching the SPA's palette so the login wall
+does not flash a different theme than the app behind it.
+*/
 const STYLES = `
 :root {
   --bg: #ffffff;

@@ -1,41 +1,41 @@
 /**
- * The Message Center: every conversation in every folder, every message in each.
- *
- * Both portal flavours serve the same MyChart "communication center" JSON API once
- * signed in -- only the mount differs -- so this is one crawler. It is pure: the
- * caller hands it a `post` that has already dealt with the session, the
- * antiforgery token and the "200 carrying HTML" failure (`client.ts`), and gets
- * back parsed threads. Nothing here logs, stores or knows a health system.
- *
- * ### What "everything" takes (all confirmed from a capture)
- *
- *  - **Every folder.** `GetConversationList` is per folder `tag`
- *    (`MESSAGE_FOLDERS`); the folders are disjoint.
- *  - **Every organisation.** A chart linked to other organisations shows their
- *    conversations too, but only for the organisations named in
- *    `externalLoadParams` -- leave one out and its threads are silently absent. So
- *    `GetOrganizations` is read first and every non-local one is asked for.
- *  - **Every page.** Each organisation pages on its own (50 at a time): the
- *    summary it sends back says `hasMoreConversations`, and the next page is asked
- *    for from its `oldestLoadedInstantISO`. Paging ends when no organisation has
- *    more. There is no page cap. A page that claims more but adds nothing new is
- *    an error rather than a loop or a silent stop.
- *  - **Every message.** A listed conversation carries its newest five messages;
- *    `GetConversationMessages` pages older ones, five at a time, from the oldest
- *    loaded instant, until `hasMoreMessages` is false. Never `maxReadMessages: 0`,
- *    which answers with nothing.
- *
- * `GetConversationDetails` is never called: it marks a conversation read, and the
- * list plus `GetConversationMessages` already reproduce every thread's
- * `totalMessages` exactly.
- *
- * ### Identifiers
- *
- * The portal's ids (`hthId`, `wmgId`, organisation and author keys) are opaque
- * `WP-...` tokens with no evidence that they survive a new session. They are used
- * only within one crawl -- to dedupe and to page -- and never leave this module.
- * The sync keys what it stores on content instead.
- */
+The Message Center: every conversation in every folder, every message in each.
+
+Both portal flavours serve the same MyChart "communication center" JSON API once
+signed in -- only the mount differs -- so this is one crawler. It is pure: the
+caller hands it a `post` that has already dealt with the session, the
+antiforgery token and the "200 carrying HTML" failure (`client.ts`), and gets
+back parsed threads. Nothing here logs, stores or knows a health system.
+
+### What "everything" takes (all confirmed from a capture)
+
+ - **Every folder.** `GetConversationList` is per folder `tag`
+   (`MESSAGE_FOLDERS`); the folders are disjoint.
+ - **Every organisation.** A chart linked to other organisations shows their
+   conversations too, but only for the organisations named in
+   `externalLoadParams` -- leave one out and its threads are silently absent. So
+   `GetOrganizations` is read first and every non-local one is asked for.
+ - **Every page.** Each organisation pages on its own (50 at a time): the
+   summary it sends back says `hasMoreConversations`, and the next page is asked
+   for from its `oldestLoadedInstantISO`. Paging ends when no organisation has
+   more. There is no page cap. A page that claims more but adds nothing new is
+   an error rather than a loop or a silent stop.
+ - **Every message.** A listed conversation carries its newest five messages;
+   `GetConversationMessages` pages older ones, five at a time, from the oldest
+   loaded instant, until `hasMoreMessages` is false. Never `maxReadMessages: 0`,
+   which answers with nothing.
+
+`GetConversationDetails` is never called: it marks a conversation read, and the
+list plus `GetConversationMessages` already reproduce every thread's
+`totalMessages` exactly.
+
+### Identifiers
+
+The portal's ids (`hthId`, `wmgId`, organisation and author keys) are opaque
+`WP-...` tokens with no evidence that they survive a new session. They are used
+only within one crawl -- to dedupe and to page -- and never leave this module.
+The sync keys what it stores on content instead.
+*/
 
 import { AppError } from "../../lib/errors.ts";
 
@@ -46,19 +46,19 @@ import { MESSAGE_FOLDERS, PAGE_NONCE_KEY, PATHS } from "./wire.ts";
 export type MessageFolder = (typeof MESSAGE_FOLDERS)[number]["folder"];
 
 /**
- * Who wrote a message. A clinician (or any staff member) is a `practitioner`;
- * the patient is `patient`; someone else signed in to the chart (a proxy) is
- * `proxy`; a sender with no person behind it -- an automated notice -- is
- * `system`.
- */
+Who wrote a message. A clinician (or any staff member) is a `practitioner`;
+the patient is `patient`; someone else signed in to the chart (a proxy) is
+`proxy`; a sender with no person behind it -- an automated notice -- is
+`system`.
+*/
 export type MessageAuthorRole = "patient" | "proxy" | "practitioner" | "system";
 
 /**
- * What fetching one attachment's file takes, as the list reported it. Per-session
- * tokens: used by the same sync run that read them (`client.ts`
- * `loadMessageAttachment`) and never stored -- `worker/src/db/repos/portal-messages.ts`
- * strips it before a message is sealed.
- */
+What fetching one attachment's file takes, as the list reported it. Per-session
+tokens: used by the same sync run that read them (`client.ts`
+`loadMessageAttachment`) and never stored -- `worker/src/db/repos/portal-messages.ts`
+strips it before a message is sealed.
+*/
 export interface AttachmentHandle {
   dcsId: string;
   fileExtension: string;
@@ -85,10 +85,10 @@ export interface PortalMessage {
   body: string;
   attachments: PortalMessageAttachment[];
   /**
-   * The portal's own unread flag, as the list reported it. Reading it never marks
-   * anything read (the crawl uses only read-safe endpoints). Absent on rows stored
-   * before it was kept.
-   */
+  The portal's own unread flag, as the list reported it. Reading it never marks
+  anything read (the crawl uses only read-safe endpoints). Absent on rows stored
+  before it was kept.
+  */
   unread?: boolean;
 }
 
@@ -96,9 +96,9 @@ export interface PortalThread {
   subject: string;
   folder: MessageFolder;
   /**
-   * True when the conversation belongs to another organisation linked to this
-   * chart (a Happy Together copy), false when it is this portal's own.
-   */
+  True when the conversation belongs to another organisation linked to this
+  chart (a Happy Together copy), false when it is this portal's own.
+  */
   external: boolean;
   /** The owning organisation's name, for an external conversation. */
   organization?: string;
@@ -113,9 +113,9 @@ export interface PortalThread {
 export interface PortalMessagesResult {
   threads: PortalThread[];
   /**
-   * False when an organisation that was asked for sent no summary back, so its
-   * conversations may be missing. The caller must not treat absence as deletion.
-   */
+  False when an organisation that was asked for sent no summary back, so its
+  conversations may be missing. The caller must not treat absence as deletion.
+  */
   complete: boolean;
   /** List and message pages read, for the log line. */
   pages: number;
@@ -249,10 +249,10 @@ function mergeInto(target: Map<string, unknown>, page: unknown, key: string): vo
 }
 
 /**
- * True when a first page summarised every external organisation it was asked
- * for. One that sends no summary back cannot be proven complete: whatever it
- * holds may simply not have arrived.
- */
+True when a first page summarised every external organisation it was asked
+for. One that sends no summary back cannot be proven complete: whatever it
+holds may simply not have arrived.
+*/
 function summarisesAll(page: unknown, externalIds: readonly string[]): boolean {
   const summarised = new Set(
     [...keyed(page, "externalSummaries")].map(
@@ -465,11 +465,11 @@ function toThread(
 }
 
 /**
- * Read the whole Message Center.
- *
- * Throws `portal_parse_failed` when paging stops making progress, and whatever
- * `post` throws (an expired session, a token failure) as it is.
- */
+Read the whole Message Center.
+
+Throws `portal_parse_failed` when paging stops making progress, and whatever
+`post` throws (an expired session, a token failure) as it is.
+*/
 export async function loadMessageCenter(deps: LoadMessagesDeps): Promise<PortalMessagesResult> {
   const crawl: Crawl = {
     organizations: await readOrganizations(deps),

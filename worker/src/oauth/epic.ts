@@ -1,39 +1,39 @@
 /**
- * The standalone patient launch for a health system: `/oauth/epic/start` and
- * `/oauth/callback`.
- *
- * Written for Epic and named for it -- the start path, the `epic` state kind and
- * this file -- but it drives whichever vendor the health system row names, through
- * `adapterFor`. The names stay because the callback path is registered with each
- * vendor and the state kind is a CHECK constraint; neither is worth a migration
- * to rename.
- *
- * Four details here came from Epic and each one fails silently if it is wrong,
- * which is why they are stated rather than inferred:
- *
- *  - **`aud` is the FHIR base, byte for byte.** Epic compares it as a string. A
- *    trailing slash added or removed produces an authorize page that never
- *    redirects back, with no error anywhere the owner can see. The value goes
- *    straight from `health_systems.fhir_base_url` to the URL, untouched.
- *  - **The redirect URI is locked.** `/oauth/callback` -- exactly what is
- *    registered in the Epic developer portal, for both the deployed origin and
- *    `http://localhost:8787`. It is built from the request's own origin so both
- *    work from one build, and it must be identical on the authorize request and
- *    the code exchange or the exchange is refused.
- *  - **The client id depends on the vendor and the environment.** Epic issues a
- *    non-production id for the sandbox and a production id after "Ready for
- *    Production", and they are different strings for the same app; ModMed issues
- *    one. `ehr/client-id.ts` picks.
- *  - **Scopes are the adapter's call.** Epic silently drops any scope the app is not
- *    registered for, so its adapter asks for everything; ModMed refuses the whole
- *    request over one, so its adapter asks only for what can be registered. Either
- *    way `scope` on the token response is the only honest account of what was
- *    granted, and it is stored.
- *
- * The state row is what makes the callback safe: 10 minutes, single use (a
- * `DELETE ... RETURNING`), and it carries the sealed PKCE verifier. A replayed
- * callback finds nothing.
- */
+The standalone patient launch for a health system: `/oauth/epic/start` and
+`/oauth/callback`.
+
+Written for Epic and named for it -- the start path, the `epic` state kind and
+this file -- but it drives whichever vendor the health system row names, through
+`adapterFor`. The names stay because the callback path is registered with each
+vendor and the state kind is a CHECK constraint; neither is worth a migration
+to rename.
+
+Four details here came from Epic and each one fails silently if it is wrong,
+which is why they are stated rather than inferred:
+
+ - **`aud` is the FHIR base, byte for byte.** Epic compares it as a string. A
+   trailing slash added or removed produces an authorize page that never
+   redirects back, with no error anywhere the owner can see. The value goes
+   straight from `health_systems.fhir_base_url` to the URL, untouched.
+ - **The redirect URI is locked.** `/oauth/callback` -- exactly what is
+   registered in the Epic developer portal, for both the deployed origin and
+   `http://localhost:8787`. It is built from the request's own origin so both
+   work from one build, and it must be identical on the authorize request and
+   the code exchange or the exchange is refused.
+ - **The client id depends on the vendor and the environment.** Epic issues a
+   non-production id for the sandbox and a production id after "Ready for
+   Production", and they are different strings for the same app; ModMed issues
+   one. `ehr/client-id.ts` picks.
+ - **Scopes are the adapter's call.** Epic silently drops any scope the app is not
+   registered for, so its adapter asks for everything; ModMed refuses the whole
+   request over one, so its adapter asks only for what can be registered. Either
+   way `scope` on the token response is the only honest account of what was
+   granted, and it is stored.
+
+The state row is what makes the callback safe: 10 minutes, single use (a
+`DELETE ... RETURNING`), and it carries the sealed PKCE verifier. A replayed
+callback finds nothing.
+*/
 
 import { Hono } from "hono";
 
@@ -81,11 +81,11 @@ function adapterOf(healthSystem: HealthSystemRow, fetchImpl: typeof fetch): EhrA
 }
 
 /**
- * The 500 page for an unset client id.
- *
- * A 500 rather than a 400: there is nothing the owner can do in the UI about an
- * unset Worker secret, and a 400 would suggest there was.
- */
+The 500 page for an unset client id.
+
+A 500 rather than a 400: there is nothing the owner can do in the UI about an
+unset Worker secret, and a 400 would suggest there was.
+*/
 function clientIdMissingPage(c: Context<AppHonoEnv>, healthSystem: HealthSystemRow): Response {
   return oauthPage({
     nonce: c.get("nonce"),
@@ -97,12 +97,12 @@ function clientIdMissingPage(c: Context<AppHonoEnv>, healthSystem: HealthSystemR
 }
 
 /**
- * `GET /oauth/epic/start?healthSystem=<id>`
- *
- * Ends in a 302 to the organisation's authorize endpoint. Everything before that
- * redirect is preparation that must be durable, because the browser leaves: the
- * state row is written before the redirect is issued, never after.
- */
+`GET /oauth/epic/start?healthSystem=<id>`
+
+Ends in a 302 to the organisation's authorize endpoint. Everything before that
+redirect is preparation that must be durable, because the browser leaves: the
+state row is written before the redirect is issued, never after.
+*/
 epicRouter.get("/epic/start", async (c) => {
   const nonce = c.get("nonce");
   const healthSystemId = c.req.query("healthSystem") ?? c.req.query("provider") ?? "";
@@ -154,12 +154,12 @@ epicRouter.get("/epic/start", async (c) => {
 });
 
 /**
- * `GET /oauth/callback` -- the vendor's redirect back.
- *
- * The order of the failure checks is the order of increasing trust: an `error`
- * parameter is handled before the state is consumed, so a health system that refused the
- * request does not burn the owner's state row for a flow they may retry.
- */
+`GET /oauth/callback` -- the vendor's redirect back.
+
+The order of the failure checks is the order of increasing trust: an `error`
+parameter is handled before the state is consumed, so a health system that refused the
+request does not burn the owner's state row for a flow they may retry.
+*/
 epicRouter.get("/callback", async (c) => {
   const nonce = c.get("nonce");
   const error = c.req.query("error");

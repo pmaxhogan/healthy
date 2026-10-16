@@ -1,19 +1,19 @@
 /**
- * Schemas for every JSON-bearing D1 column, and the settings catalogue.
- *
- * SQLite has no JSON type, so `settings.value_json`, `health_systems.config_json`,
- * `run_log.summary_json`, `fhir_sync_state.warnings_json` and
- * `mcp_audit.health_systems_json` are all TEXT. Parsing them through zod at the
- * boundary is what keeps a hand-edited row, or a shape left behind by an older
- * deploy, from becoming an `undefined` three layers up.
- *
- * This module is deliberately free of Worker runtime types: it is the half of the
- * db layer the plain-Node unit tests can import.
- *
- * Note what is NOT here: a default timezone. `timezone` defaults to `null`,
- * because a real default in source would say where the owner lives. The accessor
- * in settings.ts falls back to UTC and warns; see there.
- */
+Schemas for every JSON-bearing D1 column, and the settings catalogue.
+
+SQLite has no JSON type, so `settings.value_json`, `health_systems.config_json`,
+`run_log.summary_json`, `fhir_sync_state.warnings_json` and
+`mcp_audit.health_systems_json` are all TEXT. Parsing them through zod at the
+boundary is what keeps a hand-edited row, or a shape left behind by an older
+deploy, from becoming an `undefined` three layers up.
+
+This module is deliberately free of Worker runtime types: it is the half of the
+db layer the plain-Node unit tests can import.
+
+Note what is NOT here: a default timezone. `timezone` defaults to `null`,
+because a real default in source would say where the owner lives. The accessor
+in settings.ts falls back to UTC and warns; see there.
+*/
 
 import { z } from "zod";
 
@@ -48,9 +48,9 @@ export function parseJsonColumn<T>(schema: z.ZodType<T>, value: string, what: st
 // ---------------------------------------------------------------------------
 
 /**
- * One schema per settings key. The set of keys is closed: a typo in an API
- * payload is rejected rather than silently stored under a key nothing reads.
- */
+One schema per settings key. The set of keys is closed: a typo in an API
+payload is rejected rather than silently stored under a key nothing reads.
+*/
 export const settingSchemas = {
   /** IANA zone used for every display and for the local-day sync window. */
   timezone: z.string().min(1).nullable(),
@@ -73,21 +73,21 @@ export const settingSchemas = {
   /** Comma-separated sender domains the inbound email handler accepts mail from. */
   mail_sender_allowlist: z.string().min(1),
   /**
-   * Sign-in attempts one patient-portal account may make per UTC day.
-   *
-   * A setting rather than a constant because it is a safety limit against the
-   * portal's own lockout, and the one time it has to move is live QA against a
-   * real portal, where three attempts is a short afternoon. The default is three.
-   */
+  Sign-in attempts one patient-portal account may make per UTC day.
+
+  A setting rather than a constant because it is a safety limit against the
+  portal's own lockout, and the one time it has to move is live QA against a
+  real portal, where three attempts is a short afternoon. The default is three.
+  */
   portal_login_attempt_limit: z.number().int().min(1).max(20),
   /**
-   * The patient-portal login shell's API path prefix, for the rare deployment
-   * that needs one and that discovery could not learn on its own.
-   *
-   * No default in source is possible either way -- unlike a real default, this
-   * is genuinely absent for almost every install, not merely undisclosed. See
-   * `PortalAdapterDeps.custom` in `worker/src/ehr/mychart/index.ts`.
-   */
+  The patient-portal login shell's API path prefix, for the rare deployment
+  that needs one and that discovery could not learn on its own.
+
+  No default in source is possible either way -- unlike a real default, this
+  is genuinely absent for almost every install, not merely undisclosed. See
+  `PortalAdapterDeps.custom` in `worker/src/ehr/mychart/index.ts`.
+  */
   portal_api_base_path: z.string().min(1).max(200).nullable(),
 } as const;
 
@@ -95,11 +95,11 @@ export type SettingKey = keyof typeof settingSchemas;
 export type Settings = { [K in SettingKey]: z.infer<(typeof settingSchemas)[K]> };
 
 /**
- * The value each key takes when the row is absent.
- *
- * `timezone` and `default_color_id` have no usable default, so they are null and
- * their callers decide what that means.
- */
+The value each key takes when the row is absent.
+
+`timezone` and `default_color_id` have no usable default, so they are null and
+their callers decide what that means.
+*/
 export const SETTING_DEFAULTS: Settings = {
   timezone: null,
   calendar_id: "primary",
@@ -122,17 +122,17 @@ export function isSettingKey(key: string): key is SettingKey {
 }
 
 /**
- * Parse a stored `value_json` for one key.
- *
- * The cast is unavoidable: indexing a heterogeneous record of schemas by a
- * generic key gives TypeScript a union of parsers, and it cannot see that the
- * parser for key K produces Settings[K]. The mapped type above is what ties the
- * two together, and the runtime check is the schema itself.
- *
- * `security/detect-object-injection` warns on both lookups below. Both index a
- * const map by `K extends SettingKey`, a closed union of literals, so the key can
- * only be one this module declared.
- */
+Parse a stored `value_json` for one key.
+
+The cast is unavoidable: indexing a heterogeneous record of schemas by a
+generic key gives TypeScript a union of parsers, and it cannot see that the
+parser for key K produces Settings[K]. The mapped type above is what ties the
+two together, and the runtime check is the schema itself.
+
+`security/detect-object-injection` warns on both lookups below. Both index a
+const map by `K extends SettingKey`, a closed union of literals, so the key can
+only be one this module declared.
+*/
 export function parseSetting<K extends SettingKey>(key: K, valueJson: string): Settings[K] {
   const schema = settingSchemas[key] as unknown as z.ZodType<Settings[K]>;
   return parseJsonColumn(schema, valueJson, `settings.${key}`);
@@ -157,10 +157,10 @@ export function encodeSetting<K extends SettingKey>(key: K, value: Settings[K]):
 const offsetMinutes = z.number().int().min(0).max(1440);
 
 /**
- * Per-health system overrides. Every field is optional: an absent one means "use the
- * matching `settings` default", which is why nothing here has a value baked in
- * except `enabled`.
- */
+Per-health system overrides. Every field is optional: an absent one means "use the
+matching `settings` default", which is why nothing here has a value baked in
+except `enabled`.
+*/
 export const healthSystemConfigSchema = z.object({
   title_template: z.string().min(1).optional(),
   color_id: z.string().min(1).optional(),
@@ -170,9 +170,9 @@ export const healthSystemConfigSchema = z.object({
   /** Short label for the org, used in title templates. */
   org_short: z.string().min(1).optional(),
   /**
-   * The organisation's id in Epic's developer portal. With it, and no stored
-   * secret, the client secret is derived (see `org-secret.ts`).
-   */
+  The organisation's id in Epic's developer portal. With it, and no stored
+  secret, the client secret is derived (see `org-secret.ts`).
+  */
   epic_org_id: z.string().regex(ORG_ID_PATTERN).optional(),
   enabled: z.boolean().default(true),
 });
@@ -188,9 +188,9 @@ export type HealthSystemConfigInput = z.input<typeof healthSystemConfigSchema>;
 const count = z.number().int().nonnegative().default(0);
 
 /**
- * Counts and codes only. Nothing in here may identify an appointment, a person
- * or an organisation -- the run log is the one table an operator reads casually.
- */
+Counts and codes only. Nothing in here may identify an appointment, a person
+or an organisation -- the run log is the one table an operator reads casually.
+*/
 export const runSummarySchema = z.object({
   healthSystems: count,
   inserted: count,
@@ -204,18 +204,18 @@ export const runSummarySchema = z.object({
   /** OperationOutcome codes an org returned, e.g. "4119" -- which, not how many. */
   warnings: z.array(z.string()).default([]),
   /**
-   * How many warnings there were, as opposed to how many distinct codes.
-   * One org repeating 4119 for every Encounter is a different situation from one
-   * that said it once, and `warnings` alone cannot tell them apart.
-   */
+  How many warnings there were, as opposed to how many distinct codes.
+  One org repeating 4119 for every Encounter is a different situation from one
+  that said it once, and `warnings` alone cannot tell them apart.
+  */
   warningCount: count,
   /**
-   * An organisation served a patient-facing, filtered view of the schedule.
-   *
-   * On the summary rather than derived, because it is the reason a run may have
-   * seen fewer appointments than exist -- and therefore the reason it refused to
-   * ghost anything.
-   */
+  An organisation served a patient-facing, filtered view of the schedule.
+
+  On the summary rather than derived, because it is the reason a run may have
+  seen fewer appointments than exist -- and therefore the reason it refused to
+  ghost anything.
+  */
   filteredView: z.boolean().default(false),
   /** The run stopped early, or never started, because of a rate-limit backoff. */
   backedOff: z.boolean().default(false),
@@ -241,21 +241,21 @@ export type RunSummaryInput = z.input<typeof runSummarySchema>;
 // ---------------------------------------------------------------------------
 
 /**
- * The stored discovery result.
- *
- * Deliberately loose: `worker/src/ehr/mychart/**` owns this shape and adds to
- * it as deployments turn out to differ (which login application to drive, for
- * one). Validating the fields the db layer and the sign-in actually read, and
- * passing everything else through untouched, is what lets the adapter evolve
- * without a migration or a schema change here. A strict object would silently
- * strip the field that decides how to sign in.
- *
- * The two origins are checked as **https URLs**, not merely as non-empty
- * strings. They are what the sign-in rebuilds a credential-bearing URL from, so
- * a stored `http://…` (or a stored anything-else) would put the owner's portal
- * password on the wire in cleartext. A row that fails this makes the sign-in
- * fail closed -- see `portalAccounts.getEndpoint`.
- */
+The stored discovery result.
+
+Deliberately loose: `worker/src/ehr/mychart/**` owns this shape and adds to
+it as deployments turn out to differ (which login application to drive, for
+one). Validating the fields the db layer and the sign-in actually read, and
+passing everything else through untouched, is what lets the adapter evolve
+without a migration or a schema change here. A strict object would silently
+strip the field that decides how to sign in.
+
+The two origins are checked as **https URLs**, not merely as non-empty
+strings. They are what the sign-in rebuilds a credential-bearing URL from, so
+a stored `http://…` (or a stored anything-else) would put the owner's portal
+password on the wire in cleartext. A row that fails this makes the sign-in
+fail closed -- see `portalAccounts.getEndpoint`.
+*/
 const httpsOrigin = z
   .string()
   .min(1)

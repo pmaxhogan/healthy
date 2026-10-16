@@ -1,55 +1,55 @@
 /**
- * `hc_platform_stale`: hours whose stored platform total (`Agg.<Metric>`) is
- * out of date, for the phone to work out again. See worker/src/hc/platform-totals.ts
- * for what a platform total is and why the phone cannot find these hours
- * itself.
- *
- * ### Marking, and clearing
- *
- * Applying a batch marks an hour when a record of a totalled type is taken out
- * of it: deleted, or rewritten with other times (or another origin) so that it
- * leaves the hours its old copy covered. Every hour the OLD copy covered is
- * marked -- start to end, not only the hour it starts in. Not the new copy's:
- * an upsert carries its times, and the phone works out the totals of the hours
- * it touches in the same upload. Not an hour the marking batch itself carries
- * the total of, which Health Connect worked out after the change. And never
- * for the `Agg.*` records themselves.
- *
- * The mark is written in the same `db.batch` as the chunk write that causes it
- * (worker/src/hc/apply.ts), so a slice that dies leaves both or neither, and a
- * replay writes it again to the same row.
- *
- * It is cleared by a total for that hour -- upserted, or deleted because the
- * hour has none any more -- from a batch that arrived AFTER the one that
- * marked it: a higher queue sequence number, the order tombstones go by
- * (worker/src/hc/store/record-index.ts). A total from an earlier batch, applied
- * late because it was set aside and queued again, was worked out before the
- * deletion and leaves the mark. A mark the one-off scan below wrote has no
- * batch behind it, and is cleared by a total from a batch that arrived in a
- * later second than it was written.
- *
- * Both statements write what the row is to be, so applying them twice leaves
- * what applying them once does.
- *
- * ### Telling the phone
- *
- * The ingest route's answer carries the device's marks (`staleHoursFor`):
- * the only way anything reaches the phone. A mark stays until a total clears
- * it, however many answers it has been in.
- *
- * ### The scan
- *
- * Totals that went stale before marks were kept were never marked. So the
- * runner walks every stored `Agg.<Metric>` hour once, a bounded pass at a time
- * when it has nothing else to do, and marks the hours whose total has a figure
- * where the type has no record at all (`scanPlatformTotals`; `staleTotals` in
- * worker/src/hc/platform-totals.ts says why it cannot also judge the apps a
- * total names). Revision 1 did judge them, and marked hours whose total was
- * fresh: those cost the phone one request each and were cleared by it, so
- * the revision is not raised for the change. `SCAN_REVISION`
- * says which making of the scan a device has been through: raising it walks
- * every device again after the next deploy, with nothing to run by hand.
- */
+`hc_platform_stale`: hours whose stored platform total (`Agg.<Metric>`) is
+out of date, for the phone to work out again. See worker/src/hc/platform-totals.ts
+for what a platform total is and why the phone cannot find these hours
+itself.
+
+### Marking, and clearing
+
+Applying a batch marks an hour when a record of a totalled type is taken out
+of it: deleted, or rewritten with other times (or another origin) so that it
+leaves the hours its old copy covered. Every hour the OLD copy covered is
+marked -- start to end, not only the hour it starts in. Not the new copy's:
+an upsert carries its times, and the phone works out the totals of the hours
+it touches in the same upload. Not an hour the marking batch itself carries
+the total of, which Health Connect worked out after the change. And never
+for the `Agg.*` records themselves.
+
+The mark is written in the same `db.batch` as the chunk write that causes it
+(worker/src/hc/apply.ts), so a slice that dies leaves both or neither, and a
+replay writes it again to the same row.
+
+It is cleared by a total for that hour -- upserted, or deleted because the
+hour has none any more -- from a batch that arrived AFTER the one that
+marked it: a higher queue sequence number, the order tombstones go by
+(worker/src/hc/store/record-index.ts). A total from an earlier batch, applied
+late because it was set aside and queued again, was worked out before the
+deletion and leaves the mark. A mark the one-off scan below wrote has no
+batch behind it, and is cleared by a total from a batch that arrived in a
+later second than it was written.
+
+Both statements write what the row is to be, so applying them twice leaves
+what applying them once does.
+
+### Telling the phone
+
+The ingest route's answer carries the device's marks (`staleHoursFor`):
+the only way anything reaches the phone. A mark stays until a total clears
+it, however many answers it has been in.
+
+### The scan
+
+Totals that went stale before marks were kept were never marked. So the
+runner walks every stored `Agg.<Metric>` hour once, a bounded pass at a time
+when it has nothing else to do, and marks the hours whose total has a figure
+where the type has no record at all (`scanPlatformTotals`; `staleTotals` in
+worker/src/hc/platform-totals.ts says why it cannot also judge the apps a
+total names). Revision 1 did judge them, and marked hours whose total was
+fresh: those cost the phone one request each and were cleared by it, so
+the revision is not raised for the change. `SCAN_REVISION`
+says which making of the scan a device has been through: raising it walks
+every device again after the next deploy, with nothing to run by hand.
+*/
 
 import { blindHcOrigin, blinderFor } from "../../db/blind.ts";
 import { all, batch } from "../../db/client.ts";
@@ -77,10 +77,10 @@ const MARK_PAGE = 5000;
 type Stamp = Pick<BatchArrival, "seq" | "receivedAt">;
 
 /**
- * Mark `hours` of `sourceType` stale, stamped with the batch `by`. A row that
- * is already there keeps the later of the two stamps: a delete applied late
- * does not move a mark back, and neither does a replay.
- */
+Mark `hours` of `sourceType` stale, stamped with the batch `by`. A row that
+is already there keeps the later of the two stamps: a delete applied late
+does not move a mark back, and neither does a replay.
+*/
 export function markStaleStatements(
   ctx: Ctx,
   deviceId: string,
@@ -108,9 +108,9 @@ function pagesOf(hours: readonly number[]): string[] {
 }
 
 /**
- * Clear the marks of `hours` of `sourceType` that the batch `by` arrived
- * after: the total it carries for them is newer than what made them stale.
- */
+Clear the marks of `hours` of `sourceType` that the batch `by` arrived
+after: the total it carries for them is newer than what made them stale.
+*/
 export function clearStaleStatements(
   ctx: Ctx,
   deviceId: string,
@@ -132,38 +132,38 @@ export function clearStaleStatements(
 // ---------------------------------------------------------------------------
 
 /**
- * Stale hours of one record type one answer carries, at most: the earliest
- * ones. Delivery pacing, not a cap: the phone works out a few hundred hours a
- * sync, politely, and a mark stays until a total clears it, so whatever is not
- * in this answer is in a later one. Nothing is dropped. Per type, so that one
- * type with months of stale hours does not keep another's out of the answer;
- * twenty days of hours, so a month of one type's history deleted at once is
- * answered over a few syncs.
- */
+Stale hours of one record type one answer carries, at most: the earliest
+ones. Delivery pacing, not a cap: the phone works out a few hundred hours a
+sync, politely, and a mark stays until a total clears it, so whatever is not
+in this answer is in a later one. Nothing is dropped. Per type, so that one
+type with months of stale hours does not keep another's out of the answer;
+twenty days of hours, so a month of one type's history deleted at once is
+answered over a few syncs.
+*/
 export const STALE_HOURS_PER_ANSWER = 500;
 
 /**
- * The device's stale hours for the answer to the upload of `batchId`, by
- * record type, as epoch milliseconds of each hour's start; or null when this
- * answer cannot say.
- *
- * It cannot while another batch of the device is still waiting to be applied.
- * That batch may carry the very totals that clear a mark -- the phone's last
- * repair, waiting behind a backfill -- and an answer that listed the hour all
- * the same would have the phone work it out once more for nothing, every sync
- * until the queue drained. So the list is given only when nothing but this
- * batch is queued: every mark is then as the batches before it left it. (A
- * batch that was set aside does not count: it is applied only once it is
- * queued again, and the phone working an hour out again meanwhile is harmless.)
- *
- * The hours this very batch carries totals for are left out, for the same
- * reason: it is the repair of them, and has only not been applied yet. What
- * this batch's own deletes make stale is not marked yet either; the answer
- * after it says so.
- *
- * One `db.batch`, so one round trip: whether anything else is queued, and the
- * first `STALE_HOURS_PER_ANSWER` marks of each type.
- */
+The device's stale hours for the answer to the upload of `batchId`, by
+record type, as epoch milliseconds of each hour's start; or null when this
+answer cannot say.
+
+It cannot while another batch of the device is still waiting to be applied.
+That batch may carry the very totals that clear a mark -- the phone's last
+repair, waiting behind a backfill -- and an answer that listed the hour all
+the same would have the phone work it out once more for nothing, every sync
+until the queue drained. So the list is given only when nothing but this
+batch is queued: every mark is then as the batches before it left it. (A
+batch that was set aside does not count: it is applied only once it is
+queued again, and the phone working an hour out again meanwhile is harmless.)
+
+The hours this very batch carries totals for are left out, for the same
+reason: it is the repair of them, and has only not been applied yet. What
+this batch's own deletes make stale is not marked yet either; the answer
+after it says so.
+
+One `db.batch`, so one round trip: whether anything else is queued, and the
+first `STALE_HOURS_PER_ANSWER` marks of each type.
+*/
 export async function staleHoursFor(
   ctx: Ctx,
   deviceId: string,
@@ -210,24 +210,24 @@ export async function staleHoursFor(
 // ---------------------------------------------------------------------------
 
 /**
- * Which making of the scan a device has been through. Raise it when the rule
- * that decides a stale total changes, and every device is walked again, a
- * pass at a time, after the next deploy.
- */
+Which making of the scan a device has been through. Raise it when the rule
+that decides a stale total changes, and every device is walked again, a
+pass at a time, after the next deploy.
+*/
 export const SCAN_REVISION = 1;
 
 /** Stored hours of one `Agg.<Metric>` type one pass reads: a week of a type worn all day. */
 const SCAN_HOURS = 168;
 
 /**
- * How far before an hour the store looks for a record still running into it.
- * A record lives in the chunk of the hour it starts in; one that started up to
- * this long before and runs on is found by its chunk's `max_end_ms`. A record
- * that started longer ago than this (a total written for days at a stretch)
- * is not seen, and an hour it is the only record of is marked: that costs the
- * phone one call that works the same total out again, after which the mark is
- * cleared. Two days, the bound the rollups divide records over.
- */
+How far before an hour the store looks for a record still running into it.
+A record lives in the chunk of the hour it starts in; one that started up to
+this long before and runs on is found by its chunk's `max_end_ms`. A record
+that started longer ago than this (a total written for days at a stretch)
+is not seen, and an hour it is the only record of is marked: that costs the
+phone one call that works the same total out again, after which the mark is
+cleared. Two days, the bound the rollups divide records over.
+*/
 const LOOKBACK_HOURS = 48;
 
 /** Statements one pass issues: the hours, the totals, the extents, the commit. */
@@ -269,12 +269,12 @@ function positionFrom(scan: Scan, aggType: string, nextHour: number): ScanAt | n
 }
 
 /**
- * Where the scan of a device stands, and which totalled types it has any
- * stored total of: one round trip. Null when there is nothing left to do --
- * the scan of this revision is done, or the device has no stored total at all
- * (then nothing is written: a device that starts uploading totals later
- * uploads them beside their records, and the marks apply keeps cover those).
- */
+Where the scan of a device stands, and which totalled types it has any
+stored total of: one round trip. Null when there is nothing left to do --
+the scan of this revision is done, or the device has no stored total at all
+(then nothing is written: a device that starts uploading totals later
+uploads them beside their records, and the marks apply keeps cover those).
+*/
 async function startScan(
   ctx: Ctx,
   deviceId: string,
@@ -426,11 +426,11 @@ async function scanPass(scan: Scan, at: ScanAt): Promise<ScanAt | null> {
 }
 
 /**
- * Walk the stored platform totals of a device for stale hours, a pass at a
- * time, while the budget lasts. True when there is more to walk. What the
- * runner does when it has nothing else to do; each pass writes its marks and
- * where it got to in one transaction, so a slice that dies repeats one pass.
- */
+Walk the stored platform totals of a device for stale hours, a pass at a
+time, while the budget lasts. True when there is more to walk. What the
+runner does when it has nothing else to do; each pass writes its marks and
+where it got to in one transaction, so a slice that dies repeats one pass.
+*/
 export async function scanPlatformTotals(
   ctx: Ctx,
   deviceId: string,

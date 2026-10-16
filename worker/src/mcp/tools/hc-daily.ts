@@ -1,21 +1,21 @@
 /**
- * `daily_summary` and `data_quality`: the two Health Connect tools that read
- * across record types.
- *
- * `daily_summary` is the join point between phone data and a question like
- * "how was last week" (`../hc/daily.ts`); `data_quality` says what in a range
- * is duplicated, implausible, missing or changed hands (`../hc/quality.ts`).
- *
- * Reading across types is where a `resource` deny rule is easiest to leak
- * past, so both decide which types they may read before reading any: a denied
- * type's section is not read and is absent from a day, a denied type yields no
- * finding and is not used as context for another type's rule, and every day
- * row goes out through `stripJoined` (`../hc/policy.ts`), which removes a
- * field that sits inside another type's section.
- *
- * `data_quality`'s `types` argument is a different thing from the policy: it
- * chooses which findings to report, and never what a rule may read as context.
- */
+`daily_summary` and `data_quality`: the two Health Connect tools that read
+across record types.
+
+`daily_summary` is the join point between phone data and a question like
+"how was last week" (`../hc/daily.ts`); `data_quality` says what in a range
+is duplicated, implausible, missing or changed hands (`../hc/quality.ts`).
+
+Reading across types is where a `resource` deny rule is easiest to leak
+past, so both decide which types they may read before reading any: a denied
+type's section is not read and is absent from a day, a denied type yields no
+finding and is not used as context for another type's rule, and every day
+row goes out through `stripJoined` (`../hc/policy.ts`), which removes a
+field that sits inside another type's section.
+
+`data_quality`'s `types` argument is a different thing from the policy: it
+chooses which findings to report, and never what a rule may read as context.
+*/
 
 import { z } from "zod";
 
@@ -110,14 +110,14 @@ const DAILY_UNITS = {
 } as const;
 
 /**
- * The local days a `daily_summary` call names: one `date`, a range, or today.
- *
- * Arguments that cannot mean anything are refused, not guessed at: `end`
- * without `start` (which day would the range begin on?), `date` beside a
- * range, and a range that ends before it starts -- each of which used to come
- * back as an answer for some other days, or for none. The refusal is the
- * `invalid_range` error with `detail` saying which of the three it was.
- */
+The local days a `daily_summary` call names: one `date`, a range, or today.
+
+Arguments that cannot mean anything are refused, not guessed at: `end`
+without `start` (which day would the range begin on?), `date` beside a
+range, and a range that ends before it starts -- each of which used to come
+back as an answer for some other days, or for none. The refusal is the
+`invalid_range` error with `detail` saying which of the three it was.
+*/
 function daysAsked(
   call: HcCall,
   args: { date?: string | undefined; start?: string | undefined; end?: string | undefined },

@@ -19,14 +19,14 @@ const DATA_KEY = randomDataKey();
 const ENV = handlerEnv(DATA_KEY);
 
 /**
- * The tenant's own sending domain, added to the allowlist by the tests that
- * need it.
- *
- * Not a default any more: the shipped allowlist is Gmail's own
- * forwarding-verification sender and nothing else, because the generic entry it
- * used to carry was matched by containment and so allowlisted every domain on
- * the internet whose own label happened to contain it.
- */
+The tenant's own sending domain, added to the allowlist by the tests that
+need it.
+
+Not a default any more: the shipped allowlist is Gmail's own
+forwarding-verification sender and nothing else, because the generic entry it
+used to carry was matched by containment and so allowlisted every domain on
+the internet whose own label happened to contain it.
+*/
 const TENANT_DOMAIN = "mychart.example.org";
 
 async function allowTenantDomain(): Promise<void> {
@@ -48,10 +48,10 @@ const OTP_EMAIL = [
 ].join("\r\n");
 
 /**
- * No `text/plain` part at all -- the shape of the live bug: some portals send
- * their verification code as HTML-only mail, and `worker/src/mail/parse.ts` has to
- * flatten the html to find it.
- */
+No `text/plain` part at all -- the shape of the live bug: some portals send
+their verification code as HTML-only mail, and `worker/src/mail/parse.ts` has to
+flatten the html to find it.
+*/
 const HTML_ONLY_OTP_EMAIL = [
   "From: MyChart <noreply@mychart.example.org>",
   "To: 2fa@healthy.example.test",

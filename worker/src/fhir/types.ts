@@ -1,16 +1,16 @@
 /**
- * The FHIR types this project uses, plus the handful of small shapes that are
- * ours rather than HL7's.
- *
- * Everything FHIR comes from `@types/fhir` (`fhir/r4`). Re-exporting the subset
- * we actually touch from one place means the rest of the Worker imports
- * `../fhir/types.ts` and never has to remember which of r4/r4b/r5 it wanted.
- *
- * Our own shapes deliberately use `T | null` rather than optional properties:
- * `exactOptionalPropertyTypes` is on, these values are round-tripped through
- * `JSON.stringify` into D1, and a missing key and an explicit null then behave
- * the same on the way back out.
- */
+The FHIR types this project uses, plus the handful of small shapes that are
+ours rather than HL7's.
+
+Everything FHIR comes from `@types/fhir` (`fhir/r4`). Re-exporting the subset
+we actually touch from one place means the rest of the Worker imports
+`../fhir/types.ts` and never has to remember which of r4/r4b/r5 it wanted.
+
+Our own shapes deliberately use `T | null` rather than optional properties:
+`exactOptionalPropertyTypes` is on, these values are round-tripped through
+`JSON.stringify` into D1, and a missing key and an explicit null then behave
+the same on the way back out.
+*/
 
 // Only the types something actually imports: knip fails the build on an export
 // nothing uses, so this list grows as the code that needs it lands.
@@ -29,16 +29,16 @@ export type {
 export type Vendor = "epic" | "modmed";
 
 /**
- * The result of a successful token exchange or refresh.
- *
- * `expiresAt` is absolute epoch milliseconds, computed from the response's
- * `expires_in` against the injected clock: Epic's access-token lifetime is set
- * per organisation and has been observed anywhere from minutes to an hour, so
- * it is never assumed.
- *
- * `patientId` is the R4 Patient id from the token response's `patient` field --
- * the only patient id that is valid at that organisation.
- */
+The result of a successful token exchange or refresh.
+
+`expiresAt` is absolute epoch milliseconds, computed from the response's
+`expires_in` against the injected clock: Epic's access-token lifetime is set
+per organisation and has been observed anywhere from minutes to an hour, so
+it is never assumed.
+
+`patientId` is the R4 Patient id from the token response's `patient` field --
+the only patient id that is valid at that organisation.
+*/
 export interface TokenSet {
   accessToken: string;
   expiresAt: number;
@@ -49,11 +49,11 @@ export interface TokenSet {
 }
 
 /**
- * The fields of `.well-known/smart-configuration` this project needs.
- *
- * Cached by the caller (7 days, per health system) -- nothing in here is fetched on
- * a hot path.
- */
+The fields of `.well-known/smart-configuration` this project needs.
+
+Cached by the caller (7 days, per health system) -- nothing in here is fetched on
+a hot path.
+*/
 export interface SmartConfig {
   authorizeUrl: string;
   tokenUrl: string;
@@ -74,30 +74,30 @@ export interface CapabilityResource {
 }
 
 /**
- * A compact, JSON-serialisable index of one organisation's CapabilityStatement.
- *
- * Plain objects and arrays on purpose: wave 2 caches this per health system in D1,
- * and a Map or a Set would not survive the round trip.
- */
+A compact, JSON-serialisable index of one organisation's CapabilityStatement.
+
+Plain objects and arrays on purpose: wave 2 caches this per health system in D1,
+and a Map or a Set would not survive the round trip.
+*/
 export interface CapabilityIndex {
   fhirVersion: string | null;
   resources: Record<string, CapabilityResource>;
 }
 
 /**
- * A non-fatal problem a search reported, flattened for storage and logging.
- *
- * Carries codes and severities only, with one exception.
- *
- * @remarks
- * `diagnostics` is free text from the organisation and is **internal to this
- * module's callers inside the FHIR layer**: it must never be logged, persisted or
- * put in an API body. Epic quotes the request URL in it -- which contains the
- * patient id -- and at some organisations it names the department that filtered a
- * result. `fhir_sync_state.warnings_json` stores codes and counts, and the run
- * summary stores codes and a count; neither has a field for this, which is the
- * property to preserve.
- */
+A non-fatal problem a search reported, flattened for storage and logging.
+
+Carries codes and severities only, with one exception.
+
+@remarks
+`diagnostics` is free text from the organisation and is **internal to this
+module's callers inside the FHIR layer**: it must never be logged, persisted or
+put in an API body. Epic quotes the request URL in it -- which contains the
+patient id -- and at some organisations it names the department that filtered a
+result. `fhir_sync_state.warnings_json` stores codes and counts, and the run
+summary stores codes and a count; neither has a field for this, which is the
+property to preserve.
+*/
 export interface SearchWarning {
   resourceType: string;
   severity: string;

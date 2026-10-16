@@ -1,18 +1,18 @@
 /**
- * Retry-with-jitter wrapper around fetch.
- *
- * Classification:
- *   - transient: network failures, 408/425/429, 5xx  -> retried with backoff
- *   - auth: 401/403                                   -> returned to the caller as a Response
- *                                                        (callers refresh tokens and retry once)
- *   - permanent: every other 4xx                      -> thrown immediately, never retried
- *
- * Backoff is exponential (base 200 ms, cap 5 s) with +/-25% jitter. A 429 or 503 with a
- * Retry-After header raises the delay to at least that value. A wall-clock budget
- * (default 30 s) stops the loop early instead of sleeping past it.
- *
- * Every time source is injectable so the unit tests are deterministic.
- */
+Retry-with-jitter wrapper around fetch.
+
+Classification:
+  - transient: network failures, 408/425/429, 5xx  -> retried with backoff
+  - auth: 401/403                                   -> returned to the caller as a Response
+                                                       (callers refresh tokens and retry once)
+  - permanent: every other 4xx                      -> thrown immediately, never retried
+
+Backoff is exponential (base 200 ms, cap 5 s) with +/-25% jitter. A 429 or 503 with a
+Retry-After header raises the delay to at least that value. A wall-clock budget
+(default 30 s) stops the loop early instead of sleeping past it.
+
+Every time source is injectable so the unit tests are deterministic.
+*/
 
 export interface RetryOpts {
   /** Maximum number of attempts including the first. Default 4. */
@@ -224,13 +224,13 @@ async function waitBeforeRetry(
 }
 
 /**
- * Fetch with retries on transient failures.
- *
- * Resolves with the Response for 2xx/3xx and for 401/403 (auth is the caller's problem).
- * Throws PermanentError for other 4xx immediately, TransientError once retries or the
- * wall-clock budget are exhausted. The last Retry-After seen is attached to the
- * TransientError so callers can back off a whole sync run, not just one call.
- */
+Fetch with retries on transient failures.
+
+Resolves with the Response for 2xx/3xx and for 401/403 (auth is the caller's problem).
+Throws PermanentError for other 4xx immediately, TransientError once retries or the
+wall-clock budget are exhausted. The last Retry-After seen is attached to the
+TransientError so callers can back off a whole sync run, not just one call.
+*/
 export async function retriedFetch(
   input: string,
   init: RequestInit = {},

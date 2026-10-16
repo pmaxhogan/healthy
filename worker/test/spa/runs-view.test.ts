@@ -13,7 +13,7 @@ import { fakeResponse, installFakeApi, settings, testRouter } from "./helpers.ts
 
 import type { RunDto } from "@shared/types.ts";
 
-function run(overrides: Partial<RunDto> = {}): RunDto {
+function run(): RunDto {
   return {
     id: "run-1",
     kind: "calendar",
@@ -21,7 +21,6 @@ function run(overrides: Partial<RunDto> = {}): RunDto {
     finishedAt: null,
     ok: null,
     summary: null,
-    ...overrides,
   };
 }
 

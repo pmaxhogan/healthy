@@ -1,47 +1,47 @@
 /**
- * Trims a raw Epic sandbox FHIR response down to something safe and small to
- * commit as a test fixture.
- *
- * Epic's sandbox patients are synthetic -- there is no real person behind
- * "Camila Lopez" -- so nothing here exists because the data is sensitive.
- * It exists so fixtures stay small, stable, and free of URLs that name a real
- * Epic host outside the one already named in this codebase
- * (`fhir.epic.com`, the public sandbox base):
- *
- *  - `meta.security` is dropped. It is SMART-on-FHIR consent/segmentation
- *    metadata the sync engine never reads, and it is one of the fields most
- *    likely to vary between recordings for reasons that have nothing to do
- *    with the shape a test wants to assert against.
- *  - Any `extension` entry whose `url` mentions "identity" or "photo" is
- *    dropped. Epic's patient-facing USCDI extensions occasionally carry a
- *    photo reference or an identity-assurance assertion; neither is exercised
- *    by any code path this project has, so there is no reason for a fixture
- *    to carry one.
- *  - `Patient.telecom` is dropped and `Patient.address` is reduced to
- *    `{city, state}`. The sandbox's phone numbers and street addresses are
- *    invented, but they are also irrelevant to every normalizer and test this
- *    repo has, so keeping only the two fields the mapping logic could ever
- *    plausibly want keeps the fixture from ballooning for no reason.
- *  - Absolute URLs under the recorded sandbox base (`fullUrl`, pagination
- *    `link.url`, and similar) are rewritten onto the placeholder host the
- *    unit fixtures already use (see `worker/test/unit/ehr/fixtures.ts`,
- *    `TEST_FHIR_BASE`), so a fixture never encodes a live Epic sandbox URL
- *    that a future recording could resolve differently, and integration
- *    tests get the same synthetic host every other fixture in this repo uses.
- *
- * Everything else -- clinical codes, statuses, dates, ids, the synthetic
- * patient's name -- is left alone. It is fabricated sandbox data and it is
- * what the tests exist to assert against.
- */
+Trims a raw Epic sandbox FHIR response down to something safe and small to
+commit as a test fixture.
+
+Epic's sandbox patients are synthetic -- there is no real person behind
+"Camila Lopez" -- so nothing here exists because the data is sensitive.
+It exists so fixtures stay small, stable, and free of URLs that name a real
+Epic host outside the one already named in this codebase
+(`fhir.epic.com`, the public sandbox base):
+
+ - `meta.security` is dropped. It is SMART-on-FHIR consent/segmentation
+   metadata the sync engine never reads, and it is one of the fields most
+   likely to vary between recordings for reasons that have nothing to do
+   with the shape a test wants to assert against.
+ - Any `extension` entry whose `url` mentions "identity" or "photo" is
+   dropped. Epic's patient-facing USCDI extensions occasionally carry a
+   photo reference or an identity-assurance assertion; neither is exercised
+   by any code path this project has, so there is no reason for a fixture
+   to carry one.
+ - `Patient.telecom` is dropped and `Patient.address` is reduced to
+   `{city, state}`. The sandbox's phone numbers and street addresses are
+   invented, but they are also irrelevant to every normalizer and test this
+   repo has, so keeping only the two fields the mapping logic could ever
+   plausibly want keeps the fixture from ballooning for no reason.
+ - Absolute URLs under the recorded sandbox base (`fullUrl`, pagination
+   `link.url`, and similar) are rewritten onto the placeholder host the
+   unit fixtures already use (see `worker/test/unit/ehr/fixtures.ts`,
+   `TEST_FHIR_BASE`), so a fixture never encodes a live Epic sandbox URL
+   that a future recording could resolve differently, and integration
+   tests get the same synthetic host every other fixture in this repo uses.
+
+Everything else -- clinical codes, statuses, dates, ids, the synthetic
+patient's name -- is left alone. It is fabricated sandbox data and it is
+what the tests exist to assert against.
+*/
 
 import { isRecord } from "../../src/fhir/bundle.ts";
 
 /**
- * The placeholder host every other fixture in this repo already uses (see
- * `worker/test/unit/ehr/fixtures.ts`'s `TEST_FHIR_BASE`). Not exported: nothing
- * outside this file needs it, since `ScrubOptions.placeholderBase` is how a
- * caller would override it.
- */
+The placeholder host every other fixture in this repo already uses (see
+`worker/test/unit/ehr/fixtures.ts`'s `TEST_FHIR_BASE`). Not exported: nothing
+outside this file needs it, since `ScrubOptions.placeholderBase` is how a
+caller would override it.
+*/
 const PLACEHOLDER_FHIR_BASE = "https://fhir.example-health.test/api/FHIR/R4";
 
 const IDENTITY_OR_PHOTO_EXTENSION = /identity|photo/i;
@@ -119,14 +119,14 @@ export function scrubFixture(value: unknown, options: ScrubOptions): unknown {
 }
 
 /**
- * Cap a Bundle's `entry` array at `maxEntries`, so one prolific sandbox patient
- * cannot make a single fixture file balloon.
- *
- * The `next` link is dropped when this actually truncates something: a
- * fixture that claims more pages exist, when the recorder chose not to fetch
- * or keep them, would be misleading to read later. Anything that is not a
- * Bundle, or a Bundle within the cap, is returned unchanged.
- */
+Cap a Bundle's `entry` array at `maxEntries`, so one prolific sandbox patient
+cannot make a single fixture file balloon.
+
+The `next` link is dropped when this actually truncates something: a
+fixture that claims more pages exist, when the recorder chose not to fetch
+or keep them, would be misleading to read later. Anything that is not a
+Bundle, or a Bundle within the cap, is returned unchanged.
+*/
 export function truncateBundleEntries(value: unknown, maxEntries: number): unknown {
   if (!isRecord(value) || value.resourceType !== "Bundle" || !Array.isArray(value.entry)) {
     return value;

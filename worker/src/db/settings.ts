@@ -1,26 +1,26 @@
 /**
- * Typed accessors over the `settings` table.
- *
- * Every read falls back to `SETTING_DEFAULTS` when the row is absent, so the app
- * works on a freshly migrated database with an empty table.
- *
- * `timezone` is the exception worth reading twice. It has no default in source --
- * a real one would disclose where the owner lives, which this repository must not
- * do -- so the stored value is the only correct answer. When it is unset,
- * `getTimezone` returns "UTC" and warns once per isolate: the sync still runs, and
- * its local-day window is simply a UTC day until the owner sets the zone in the UI.
- *
- * ### Sealed keys
- *
- * Four keys name the owner or where they get care, so their `value_json` is
- * sealed (padded, `v2:`) against `settings.value_json.<key>` rather than stored
- * as JSON: `calendar_id` (usually the owner's email address), `timezone` (where
- * they live), `mail_sender_allowlist` (the health systems' mail domains) and
- * `portal_api_base_path` (a portal deployment's path, which names the
- * organisation). No query filters or orders on a setting's value, so sealing
- * costs one decrypt per sealed key per read -- `getAllSettings` is one query and
- * at most four decrypts per run or request.
- */
+Typed accessors over the `settings` table.
+
+Every read falls back to `SETTING_DEFAULTS` when the row is absent, so the app
+works on a freshly migrated database with an empty table.
+
+`timezone` is the exception worth reading twice. It has no default in source --
+a real one would disclose where the owner lives, which this repository must not
+do -- so the stored value is the only correct answer. When it is unset,
+`getTimezone` returns "UTC" and warns once per isolate: the sync still runs, and
+its local-day window is simply a UTC day until the owner sets the zone in the UI.
+
+### Sealed keys
+
+Four keys name the owner or where they get care, so their `value_json` is
+sealed (padded, `v2:`) against `settings.value_json.<key>` rather than stored
+as JSON: `calendar_id` (usually the owner's email address), `timezone` (where
+they live), `mail_sender_allowlist` (the health systems' mail domains) and
+`portal_api_base_path` (a portal deployment's path, which names the
+organisation). No query filters or orders on a setting's value, so sealing
+costs one decrypt per sealed key per read -- `getAllSettings` is one query and
+at most four decrypts per run or request.
+*/
 
 import { all, batch, one, run } from "./client.ts";
 import { aadFor, open, sealShort } from "./crypto.ts";
@@ -121,11 +121,11 @@ export async function getAllSettings(ctx: Ctx): Promise<Settings> {
 }
 
 /**
- * Write several settings at once, validating all of them before writing any.
- *
- * That ordering is what stops a half-applied PUT /api/settings: one bad field
- * rejects the whole payload.
- */
+Write several settings at once, validating all of them before writing any.
+
+That ordering is what stops a half-applied PUT /api/settings: one bad field
+rejects the whole payload.
+*/
 export async function setSettings(ctx: Ctx, values: Partial<Settings>): Promise<void> {
   const at = ctx.now();
   const statements: D1PreparedStatement[] = [];
@@ -147,11 +147,11 @@ export async function setSettings(ctx: Ctx, values: Partial<Settings>): Promise<
 }
 
 /**
- * The display and windowing zone.
- *
- * Returns the stored value, or "UTC" with a one-time warning when nothing is
- * stored. Never a guess at the owner's real zone.
- */
+The display and windowing zone.
+
+Returns the stored value, or "UTC" with a one-time warning when nothing is
+stored. Never a guess at the owner's real zone.
+*/
 export async function getTimezone(ctx: Ctx): Promise<string> {
   const stored = await getSetting(ctx, "timezone");
   if (stored !== null) return stored;
@@ -185,12 +185,12 @@ export async function clearSyncBackoff(ctx: Ctx): Promise<void> {
 }
 
 /**
- * Write one key of `Settings` without widening the whole object to `any`.
- *
- * `settings[key] = value` does not narrow for a generic K, because TypeScript
- * cannot prove the value matches the slot it is going into; the generic here is
- * what supplies that proof.
- */
+Write one key of `Settings` without widening the whole object to `any`.
+
+`settings[key] = value` does not narrow for a generic K, because TypeScript
+cannot prove the value matches the slot it is going into; the generic here is
+what supplies that proof.
+*/
 function assign<K extends SettingKey>(settings: Settings, key: K, value: Settings[K]): void {
   settings[key] = value;
 }

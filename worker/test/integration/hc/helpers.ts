@@ -23,13 +23,13 @@ import type { HcRecord, HcSyncState } from "../../../src/hc/wire.ts";
 import type { TestOptions } from "../db/helpers.ts";
 
 /**
- * The db helpers' context, without the alert channel's secrets.
- *
- * A batch that is set aside raises an alert, and with Trello configured the
- * alert opens a card over the network. These suites park batches all the time
- * and none of them is about the card (alerts.test.ts is, with a stub), so here
- * Trello is simply not configured: the alert row is written and nothing is sent.
- */
+The db helpers' context, without the alert channel's secrets.
+
+A batch that is set aside raises an alert, and with Trello configured the
+alert opens a card over the network. These suites park batches all the time
+and none of them is about the card (alerts.test.ts is, with a stub), so here
+Trello is simply not configured: the alert row is written and nothing is sent.
+*/
 export function testCtx(options: TestOptions = {}): Ctx {
   const ctx = dbTestCtx(options);
   return makeCtx(ctx.db, withoutTrello(ctx.env), { now: ctx.now, log: ctx.log });
@@ -103,10 +103,10 @@ export function steps(id: string, startMs: number, count: number, extra: Extra =
 const PLATFORM = "healthconnect";
 
 /**
- * The phone's synthetic platform total of one UTC hour of steps, as it uploads
- * it: id `agg:Steps:<hour start>`, `data.origins` the apps Health Connect
- * counted.
- */
+The phone's synthetic platform total of one UTC hour of steps, as it uploads
+it: id `agg:Steps:<hour start>`, `data.origins` the apps Health Connect
+counted.
+*/
 export function aggSteps(
   hourMs: number,
   value: number,

@@ -54,10 +54,10 @@ const DAYS = 12;
 const TIGHT: SliceBudget = { maxQueries: 70, maxMs: 20_000 };
 
 /**
- * Twelve days: steps from a wearable every third hour, steps from a phone on
- * some days, heart rate once a day -- and, each day, one record of energy for
- * the whole day, and a walk that runs past midnight.
- */
+Twelve days: steps from a wearable every third hour, steps from a phone on
+some days, heart rate once a day -- and, each day, one record of energy for
+the whole day, and a walk that runs past midnight.
+*/
 function history(): HcRecord[] {
   const records: HcRecord[] = [];
   for (let day = 0; day < DAYS; day += 1) {

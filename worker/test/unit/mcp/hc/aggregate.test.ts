@@ -77,11 +77,11 @@ function request(
 
 const readers = (hc: FakeHc): string[] => [...new Set(hc.calls.map((call) => call.reader))];
 /**
- * The readers used for the range itself. A running count also reads the hour
- * rollups of the two days BEFORE the range (or before a day it opens), where a
- * record that runs into it would be listed: those reads end where the range
- * (or the day) starts, and are left out here.
- */
+The readers used for the range itself. A running count also reads the hour
+rollups of the two days BEFORE the range (or before a day it opens), where a
+record that runs into it would be listed: those reads end where the range
+(or the day) starts, and are left out here.
+*/
 const readersWithin = (hc: FakeHc, ...starts: number[]): string[] => [
   ...new Set(
     hc.calls
@@ -553,16 +553,16 @@ describe("sessions", () => {
   });
 });
 
-/** The local days `first`..`last` (YYYY-MM-DD) of a zone, as a range. */
-function daysRange(first: string, last: string, timeZone: string) {
+/** The local days of April 2026 in a zone, as a range. */
+function aprilRange(timeZone: string) {
   return {
-    startMs: dayBoundsMs(first, timeZone).startMs,
-    endMs: dayBoundsMs(last, timeZone).endMs,
+    startMs: dayBoundsMs("2026-04-01", timeZone).startMs,
+    endMs: dayBoundsMs("2026-04-30", timeZone).endMs,
   };
 }
 
-const total = (result: AggregateResult, field = "count"): number =>
-  result.rows.reduce((sum, row) => sum + (row.values[field]?.sum ?? 0), 0);
+const total = (result: AggregateResult): number =>
+  result.rows.reduce((sum, row) => sum + (row.values.count?.sum ?? 0), 0);
 
 /** A small deterministic generator (a linear congruential one): the same data every run. */
 function seeded(seed: number): () => number {
@@ -611,7 +611,7 @@ describe("the fallback adds up: a month is the sum of its days and of its hours"
     ["from day rollups, in the configured zone", UTC, undefined],
     ["from hour rollups, while day rollups are not usable", UTC, false],
   ] as const)("keeps both halves of a month two apps split, %s", async (_name, zone, usable) => {
-    const range = daysRange("2026-04-01", "2026-04-30", zone);
+    const range = aprilRange(zone);
     const by = async (bucket: CalendarBucket): Promise<AggregateResult> => {
       const hc = store(handover, zone);
       return aggregate(
@@ -638,7 +638,7 @@ describe("the fallback adds up: a month is the sum of its days and of its hours"
 
     await aggregate(
       fakeHcReads(hc),
-      request(hc, { range: daysRange("2026-04-01", "2026-04-30", UTC), bucket: "month", nowMs }),
+      request(hc, { range: aprilRange(UTC), bucket: "month", nowMs }),
     );
 
     expect(readersWithin(hc, APRIL)).toStrictEqual(["dayRollups"]);
@@ -655,7 +655,7 @@ describe("the fallback adds up: a month is the sum of its days and of its hours"
 
     const month = await aggregate(
       fakeHcReads(hc),
-      request(hc, { range: daysRange("2026-04-01", "2026-04-30", UTC), bucket: "month", nowMs }),
+      request(hc, { range: aprilRange(UTC), bucket: "month", nowMs }),
     );
 
     // 12:00 on the 3rd is the wearable's; 15:00 only the phone recorded.
@@ -739,7 +739,7 @@ describe("the fallback adds up: a month is the sum of its days and of its hours"
   ])("for random data from three apps in %s", async (_name, configured, zone) => {
     for (const seed of [1, 2, 3]) {
       const records = randomSteps(seed, Date.UTC(2026, 2, 30));
-      const range = daysRange("2026-04-01", "2026-04-30", zone);
+      const range = aprilRange(zone);
       const want = expected(records, range);
       const by = async (bucket: CalendarBucket): Promise<AggregateResult> => {
         const hc = store(records, configured);

@@ -61,17 +61,17 @@ interface Fault {
   /** Which of them were a `db.batch` of chunk writes: the commits of the apply. */
   commits: number[];
   /**
-   * A `db.batch` of chunk writes with more statements than this is not taken: refused outright
-   * (`"refuse"`, a request too large for D1), or run and then reported as
-   * failed (`"lose"`, a reply that never arrived).
-   */
+  A `db.batch` of chunk writes with more statements than this is not taken: refused outright
+  (`"refuse"`, a request too large for D1), or run and then reported as
+  failed (`"lose"`, a reply that never arrived).
+  */
   tooMany?: { over: number; how: "refuse" | "lose" };
   /** How many were turned away that way. */
   turnedAway: number;
   /**
-   * Called just before the transaction that closes a batch is run: every chunk
-   * of the batch is committed, and nothing has been rebuilt since it began.
-   */
+  Called just before the transaction that closes a batch is run: every chunk
+  of the batch is committed, and nothing has been rebuilt since it began.
+  */
   onClose?: () => Promise<void>;
 }
 
@@ -156,10 +156,10 @@ function faultyDb(fault: Fault): D1Database {
 }
 
 /**
- * Apply everything queued the way the runner's alarm chain does: a slice that
- * throws loses its cursor and its cached batch, and the next one starts from
- * what the last good slice returned.
- */
+Apply everything queued the way the runner's alarm chain does: a slice that
+throws loses its cursor and its cached batch, and the next one starts from
+what the last good slice returned.
+*/
 async function run(deviceId: string, fault: Fault, budget?: SliceBudget): Promise<void> {
   const faulty = makeCtx(faultyDb(fault), ctx.env, { now: ctx.now, log: ctx.log });
   let state = EMPTY_RUNNER_STATE;
@@ -320,9 +320,9 @@ async function outcome(
 }
 
 /**
- * Run the batches once for every death in `faults` and expect the store an
- * uninterrupted run leaves.
- */
+Run the batches once for every death in `faults` and expect the store an
+uninterrupted run leaves.
+*/
 async function expectSameStore(
   deviceId: string,
   batches: () => TestBatch[],
@@ -355,13 +355,13 @@ function series(id: string, startMs: number, spanMs: number, extra: Partial<HcRe
 }
 
 /**
- * Three batches that between them do everything the apply does: more groups
- * than one page, two origins, heart rate in consecutive hours (a series ending
- * exactly on the hour with a sample on it, one running past it, one running
- * across midnight), a night and a workout with what their summaries read,
- * records that move between hours in both directions inside one page, a
- * re-upload, stale copies, and deletes of stored, moved and never-seen ids.
- */
+Three batches that between them do everything the apply does: more groups
+than one page, two origins, heart rate in consecutive hours (a series ending
+exactly on the hour with a sample on it, one running past it, one running
+across midnight), a night and a workout with what their summaries read,
+records that move between hours in both directions inside one page, a
+re-upload, stale copies, and deletes of stored, moved and never-seen ids.
+*/
 function scenario(): TestBatch[] {
   const sparse = Array.from({ length: 26 }, (_, index) =>
     steps(`sparse-${String(index)}`, T + (10 + index) * HOUR_MS + 5 * MINUTE_MS, 10 + index),
@@ -457,18 +457,18 @@ const NOISE = Array.from({ length: 50 }, () => {
 
 /** A chunk too large for one row, written, shrunk and emptied, beside ordinary ones. */
 function heavy(): TestBatch[] {
-  const big = (from: number, to: number, lastModified: number): HcRecord[] =>
-    NOISE.slice(from, to).map((notes, index) =>
-      steps(`heavy-${String(from + index)}`, T + (from + index) * MINUTE_MS, index, {
+  const big = (count: number, lastModified: number): HcRecord[] =>
+    NOISE.slice(0, count).map((notes, index) =>
+      steps(`heavy-${String(index)}`, T + index * MINUTE_MS, index, {
         lastModified,
         data: { count: index, notes },
       }),
     );
   return [
-    { batchId: "batch-0001", upserts: [...big(0, 50, 1000), steps("small", NEXT, 5)] },
+    { batchId: "batch-0001", upserts: [...big(50, 1000), steps("small", NEXT, 5)] },
     {
       batchId: "batch-0002",
-      upserts: [steps("small-2", NEXT + MINUTE_MS, 6), ...big(0, 3, 2000)],
+      upserts: [steps("small-2", NEXT + MINUTE_MS, 6), ...big(3, 2000)],
       deletes: Array.from({ length: 40 }, (_, index) => `heavy-${String(10 + index)}`),
     },
   ];
@@ -478,10 +478,10 @@ function heavy(): TestBatch[] {
 const TIGHT: SliceBudget = { maxQueries: 70, maxMs: 20_000 };
 
 /**
- * Every chunk committed by itself, its heart-rate spill read from the table:
- * applying as it was before chunks shared a commit, and what every other way
- * of running it is compared with.
- */
+Every chunk committed by itself, its heart-rate spill read from the table:
+applying as it was before chunks shared a commit, and what every other way
+of running it is compared with.
+*/
 const PER_CHUNK: SliceBudget = { maxQueries: 650, maxMs: 20_000, perChunk: true };
 
 /** The store an uninterrupted chunk-by-chunk run leaves. */
@@ -490,13 +490,13 @@ function reference(deviceId: string, batches: () => TestBatch[]): Promise<Record
 }
 
 /**
- * Apply the batches one at a time, each on a store the one before has left
- * idle, and say what was stored at the moment each was about to be closed:
- * all of its chunks written, and no rebuild run since it began. That is where
- * the rows the apply itself writes -- the minute rows, and the marks for the
- * hours a series ran into -- can be seen as it left them, before a rebuild has
- * had the chance to put anything right.
- */
+Apply the batches one at a time, each on a store the one before has left
+idle, and say what was stored at the moment each was about to be closed:
+all of its chunks written, and no rebuild run since it began. That is where
+the rows the apply itself writes -- the minute rows, and the marks for the
+hours a series ran into -- can be seen as it left them, before a rebuild has
+had the chance to put anything right.
+*/
 async function closings(
   deviceId: string,
   batches: readonly TestBatch[],

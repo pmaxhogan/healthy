@@ -1,22 +1,22 @@
 /**
- * The bearer token a paired phone presents to `POST /ingest/health-connect`.
- *
- * Shape: `hcd1.<deviceId>.<secret>` -- a version tag, this app's own row id for
- * the device, and 32 random bytes as unpadded base64url. The device id is in
- * the token on purpose: it lets the route load exactly one row by primary key
- * and compare digests in constant time, rather than search a table by a value
- * an unauthenticated caller chose.
- *
- * Only `sha256(token)` is stored (`devices.token_hash`). The secret half is 256
- * bits from the CSPRNG, so an unkeyed digest is not the confirmation oracle it
- * would be for a guessable value, and there is nothing to gain from a slow
- * hash: a password stretcher defends a small search space, and this has none.
- *
- * The token is shown once, when it is minted, and is not recoverable after
- * that: rotating mints a new one and the old digest is overwritten.
- *
- * Plain WebCrypto and no Worker types, so the unit project can run it.
- */
+The bearer token a paired phone presents to `POST /ingest/health-connect`.
+
+Shape: `hcd1.<deviceId>.<secret>` -- a version tag, this app's own row id for
+the device, and 32 random bytes as unpadded base64url. The device id is in
+the token on purpose: it lets the route load exactly one row by primary key
+and compare digests in constant time, rather than search a table by a value
+an unauthenticated caller chose.
+
+Only `sha256(token)` is stored (`devices.token_hash`). The secret half is 256
+bits from the CSPRNG, so an unkeyed digest is not the confirmation oracle it
+would be for a guessable value, and there is nothing to gain from a slow
+hash: a password stretcher defends a small search space, and this has none.
+
+The token is shown once, when it is minted, and is not recoverable after
+that: rotating mints a new one and the old digest is overwritten.
+
+Plain WebCrypto and no Worker types, so the unit project can run it.
+*/
 
 import { b64urlEncode, timingSafeEqual, utf8 } from "../auth/primitives.ts";
 import { ID_PATTERN } from "../lib/ids.ts";
@@ -28,9 +28,9 @@ const SECRET_BYTES = 32;
 /** 32 bytes as unpadded base64url. */
 const SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 /**
- * The longest `Authorization` value worth parsing. A real one is well under
- * 100 characters; anything longer is refused before it is split or hashed.
- */
+The longest `Authorization` value worth parsing. A real one is well under
+100 characters; anything longer is refused before it is split or hashed.
+*/
 const MAX_HEADER_LENGTH = 256;
 const BEARER_PREFIX = "Bearer ";
 
@@ -47,11 +47,11 @@ export function mintDeviceToken(deviceId: string): string {
 }
 
 /**
- * Split a presented token, or null for anything that is not exactly one.
- *
- * Strict on every part so that a malformed token never reaches the database:
- * the version, an id of the shape this app mints, a secret of the exact length.
- */
+Split a presented token, or null for anything that is not exactly one.
+
+Strict on every part so that a malformed token never reaches the database:
+the version, an id of the shape this app mints, a secret of the exact length.
+*/
 export function parseDeviceToken(token: string): ParsedDeviceToken | null {
   if (token.length > MAX_HEADER_LENGTH) return null;
   const parts = token.split(".");
@@ -85,12 +85,12 @@ export async function hashDeviceToken(token: string): Promise<string> {
 }
 
 /**
- * Whether `token` is the one whose digest is `storedHash`.
- *
- * Both sides are hashed to a fixed width before the comparison, and the
- * comparison is constant-time, so neither the stored digest nor how much of a
- * guess matched it is observable from timing.
- */
+Whether `token` is the one whose digest is `storedHash`.
+
+Both sides are hashed to a fixed width before the comparison, and the
+comparison is constant-time, so neither the stored digest nor how much of a
+guess matched it is observable from timing.
+*/
 export async function verifyDeviceToken(token: string, storedHash: string): Promise<boolean> {
   const presented = utf8(await hashDeviceToken(token));
   return timingSafeEqual(presented, utf8(storedHash));

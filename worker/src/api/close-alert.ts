@@ -1,15 +1,15 @@
 /**
- * Close a subject's open alert from the API, card and all.
- *
- * Distinct from the sync engine's `resolveReconnectAlert`, which is the path a
- * successful reconnection takes. This is the administrative one: the owner deleted
- * the health system or disconnected Google, so the alert is moot rather than resolved.
- *
- * Trello is best effort on purpose. The database row is the source of truth for
- * "is there an open alert"; a card that could not be moved is a stale card, which
- * is a great deal better than a failed DELETE that leaves the health system half
- * removed.
- */
+Close a subject's open alert from the API, card and all.
+
+Distinct from the sync engine's `resolveReconnectAlert`, which is the path a
+successful reconnection takes. This is the administrative one: the owner deleted
+the health system or disconnected Google, so the alert is moot rather than resolved.
+
+Trello is best effort on purpose. The database row is the source of truth for
+"is there an open alert"; a card that could not be moved is a stale card, which
+is a great deal better than a failed DELETE that leaves the health system half
+removed.
+*/
 
 import { AppError, isAppError } from "../lib/errors.ts";
 import { logLine } from "../lib/log.ts";

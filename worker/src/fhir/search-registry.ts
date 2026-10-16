@@ -1,25 +1,25 @@
 /**
- * What to fetch from an organisation, and how.
- *
- * One table drives both the hourly appointment sync and the daily full refresh.
- * Each entry says which resource type, whether it is searched or only read by
- * id, which Epic "Incoming API" the app registration must include, and which
- * USCDI generation it belongs to.
- *
- * Two shapes of Epic behaviour are baked in:
- *
- *  - Several resource types must be searched once per `category` rather than
- *    once overall. Epic's patient-facing Condition and Observation searches
- *    require a category and return only that category, so `params` returns a
- *    *list* of parameter sets and the caller runs one search per set.
- *  - Support varies by organisation and by Epic version. `filterSupported`
- *    intersects this table with the organisation's CapabilityStatement, dropping
- *    resource types it does not expose and parameters it does not advertise,
- *    rather than sending a search that returns 4122 or nothing.
- *
- * No organisation, base URL or patient id appears here: `patientId` is always an
- * argument.
- */
+What to fetch from an organisation, and how.
+
+One table drives both the hourly appointment sync and the daily full refresh.
+Each entry says which resource type, whether it is searched or only read by
+id, which Epic "Incoming API" the app registration must include, and which
+USCDI generation it belongs to.
+
+Two shapes of Epic behaviour are baked in:
+
+ - Several resource types must be searched once per `category` rather than
+   once overall. Epic's patient-facing Condition and Observation searches
+   require a category and return only that category, so `params` returns a
+list* of parameter sets and the caller runs one search per set.
+ - Support varies by organisation and by Epic version. `filterSupported`
+   intersects this table with the organisation's CapabilityStatement, dropping
+   resource types it does not expose and parameters it does not advertise,
+   rather than sending a search that returns 4122 or nothing.
+
+No organisation, base URL or patient id appears here: `patientId` is always an
+argument.
+*/
 
 import type { CapabilityIndex, CapabilityResource, Encounter } from "./types.ts";
 
@@ -39,15 +39,15 @@ export interface RegistryEntry {
   epicApiName: string;
   uscdi: "v1" | "v3";
   /**
-   * One parameter set per search to run. Several sets means several searches.
-   * Empty for `mode: "read"` entries.
-   */
+  One parameter set per search to run. Several sets means several searches.
+  Empty for `mode: "read"` entries.
+  */
   params: (patientId: string, sinceIso?: string) => Record<string, string>[];
   /**
-   * A search parameter the organisation must advertise, or the entry is skipped
-   * entirely -- a search that cannot be narrowed the way it needs to be would
-   * either fail or return an unusable superset.
-   */
+  A search parameter the organisation must advertise, or the entry is skipped
+  entirely -- a search that cannot be narrowed the way it needs to be would
+  either fail or return an unusable superset.
+  */
   needsCapability?: string | undefined;
 }
 
@@ -72,12 +72,12 @@ function byCategory(...categories: string[]): (patientId: string) => Record<stri
 }
 
 /**
- * The full table.
- *
- * `uscdi` marks which generation of Epic's USCDI appendix an API comes from; the
- * app is registered for both v1 and v3, and the field exists so a v3-only
- * organisation can be told apart from one that simply does not expose a type.
- */
+The full table.
+
+`uscdi` marks which generation of Epic's USCDI appendix an API comes from; the
+app is registered for both v1 and v3, and the field exists so a v3-only
+organisation can be told apart from one that simply does not expose a type.
+*/
 export const SEARCH_REGISTRY: readonly RegistryEntry[] = [
   // Read by id: the patient id comes from the token response, so there is
   // nothing to search for.
@@ -273,13 +273,13 @@ export interface PreparedSearch {
 }
 
 /**
- * The one search the hourly appointment sync runs.
- *
- * `status` is deliberately absent: at many organisations it is not a native
- * Encounter search parameter, so it is applied with `encounterStatusFilter`
- * instead. `date=ge{since}` covers the rolling past window and everything ahead
- * of it.
- */
+The one search the hourly appointment sync runs.
+
+`status` is deliberately absent: at many organisations it is not a native
+Encounter search parameter, so it is applied with `encounterStatusFilter`
+instead. `date=ge{since}` covers the rolling past window and everything ahead
+of it.
+*/
 export function appointmentEncounterSearch(patientId: string, sinceIso: string): PreparedSearch {
   return {
     resourceType: "Encounter",
@@ -326,12 +326,12 @@ function prune(
 }
 
 /**
- * De-duplicate parameter sets.
- *
- * Needed because pruning collapses them: drop `category` from Condition's three
- * category searches and all three become the same search, which would otherwise
- * be run three times.
- */
+De-duplicate parameter sets.
+
+Needed because pruning collapses them: drop `category` from Condition's three
+category searches and all three become the same search, which would otherwise
+be run three times.
+*/
 function dedupe(sets: readonly Record<string, string>[]): Record<string, string>[] {
   const seen = new Set<string>();
   const out: Record<string, string>[] = [];
@@ -346,14 +346,14 @@ function dedupe(sets: readonly Record<string, string>[]): Record<string, string>
 }
 
 /**
- * Intersect the registry with one organisation's CapabilityStatement.
- *
- * Drops an entry when the organisation does not list the resource type at all,
- * does not support the interaction the entry needs, cannot scope a search to a
- * patient, or lacks the entry's `needsCapability` parameter. Keeps the entry but
- * prunes individual parameters otherwise, then de-duplicates the parameter sets
- * that pruning collapsed together.
- */
+Intersect the registry with one organisation's CapabilityStatement.
+
+Drops an entry when the organisation does not list the resource type at all,
+does not support the interaction the entry needs, cannot scope a search to a
+patient, or lacks the entry's `needsCapability` parameter. Keeps the entry but
+prunes individual parameters otherwise, then de-duplicates the parameter sets
+that pruning collapsed together.
+*/
 export function filterSupported(
   registry: readonly RegistryEntry[],
   index: CapabilityIndex,
@@ -383,13 +383,13 @@ export function filterSupported(
 }
 
 /**
- * The same entries with `category` taken off every search.
- *
- * For a server that answers a plain `patient=` search
- * (`EhrAdapter.categoryScopedSearches` is false): one search then returns every
- * category, where the per-category ones return only the categories this table
- * happens to name. The per-category sets collapse into one, hence the dedupe.
- */
+The same entries with `category` taken off every search.
+
+For a server that answers a plain `patient=` search
+(`EhrAdapter.categoryScopedSearches` is false): one search then returns every
+category, where the per-category ones return only the categories this table
+happens to name. The per-category sets collapse into one, hence the dedupe.
+*/
 export function withoutCategoryScope(registry: readonly RegistryEntry[]): RegistryEntry[] {
   return registry.map((entry) => {
     const build = entry.params;
@@ -406,11 +406,11 @@ export function withoutCategoryScope(registry: readonly RegistryEntry[]): Regist
 }
 
 /**
- * Encounter statuses the calendar sync cares about.
- *
- * `cancelled` is included on purpose: a cancelled encounter is what turns an
- * existing calendar event into a ghost, so it has to come back from the search.
- */
+Encounter statuses the calendar sync cares about.
+
+`cancelled` is included on purpose: a cancelled encounter is what turns an
+existing calendar event into a ghost, so it has to come back from the search.
+*/
 export const CALENDAR_ENCOUNTER_STATUSES: readonly string[] = [
   "planned",
   "arrived",
@@ -428,17 +428,17 @@ export interface EncounterStatusFilter {
 }
 
 /**
- * Filter Encounters by status, natively where the organisation supports it.
- *
- * Epic added `status` as a *post-filter* parameter in some versions and does not
- * support it at all in others, so the client-side pass runs either way: when the
- * parameter is native it is a no-op, and when Epic quietly ignores it (the
- * documented post-filter behaviour varies by version) it is the thing that
- * actually works.
- *
- * `index` may be null when the CapabilityStatement has not been fetched yet, in
- * which case nothing is sent and everything is filtered locally.
- */
+Filter Encounters by status, natively where the organisation supports it.
+
+Epic added `status` as a *post-filter* parameter in some versions and does not
+support it at all in others, so the client-side pass runs either way: when the
+parameter is native it is a no-op, and when Epic quietly ignores it (the
+documented post-filter behaviour varies by version) it is the thing that
+actually works.
+
+`index` may be null when the CapabilityStatement has not been fetched yet, in
+which case nothing is sent and everything is filtered locally.
+*/
 export function encounterStatusFilter(
   index: CapabilityIndex | null,
   allowed: readonly string[] = CALENDAR_ENCOUNTER_STATUSES,

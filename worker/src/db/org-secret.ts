@@ -1,27 +1,27 @@
 /**
- * Derived per-organisation client secrets.
- *
- * Epic wants a different client secret for every organisation and for each of
- * its two environments, and keeps only a hash of each. Storing one secret per
- * organisation the app is merely *enabled* at -- hundreds, almost none of which
- * will ever be connected -- is the wrong shape for that, so the secret is
- * computed instead: HMAC-SHA256 under one key only this deployment has, over the
- * environment and the organisation's id in Epic's developer portal. The same
- * function runs in two places: `worker/scripts/epic-org-secret.ts` prints the value to
- * register with Epic, and the health systems repo recomputes it whenever a
- * health system that names its organisation has no stored secret.
- *
- * **A dedicated key, not `DATA_KEY`.** Epic holds hashes of these values and
- * cannot be re-sealed. A key that is ever rotated for another reason would
- * silently invalidate the app at every organisation at once.
- * `EPIC_ORG_SECRET_KEY` exists for this and nothing else; treat it as permanent.
- *
- * **Output.** 64 lowercase hex characters: the full 256-bit MAC, in the one
- * alphabet no form field or Basic-auth encoder disagrees about.
- *
- * Plain WebCrypto and no Worker types, so the script and the plain-Node unit
- * tests can call it without a runtime.
- */
+Derived per-organisation client secrets.
+
+Epic wants a different client secret for every organisation and for each of
+its two environments, and keeps only a hash of each. Storing one secret per
+organisation the app is merely *enabled* at -- hundreds, almost none of which
+will ever be connected -- is the wrong shape for that, so the secret is
+computed instead: HMAC-SHA256 under one key only this deployment has, over the
+environment and the organisation's id in Epic's developer portal. The same
+function runs in two places: `worker/scripts/epic-org-secret.ts` prints the value to
+register with Epic, and the health systems repo recomputes it whenever a
+health system that names its organisation has no stored secret.
+
+**A dedicated key, not `DATA_KEY`.** Epic holds hashes of these values and
+cannot be re-sealed. A key that is ever rotated for another reason would
+silently invalidate the app at every organisation at once.
+`EPIC_ORG_SECRET_KEY` exists for this and nothing else; treat it as permanent.
+
+**Output.** 64 lowercase hex characters: the full 256-bit MAC, in the one
+alphabet no form field or Basic-auth encoder disagrees about.
+
+Plain WebCrypto and no Worker types, so the script and the plain-Node unit
+tests can call it without a runtime.
+*/
 
 import { AppError } from "../lib/errors.ts";
 
@@ -32,10 +32,10 @@ const DOMAIN = "healthy/epic-org-secret/v1";
 const KEY_BYTES = 32;
 
 /**
- * What an organisation id may look like. Epic's are short decimal numbers; the
- * wider alphabet only keeps a future format from needing a code change. The
- * value is MAC input, so it is never normalised -- `0123` and `123` differ.
- */
+What an organisation id may look like. Epic's are short decimal numbers; the
+wider alphabet only keeps a future format from needing a code change. The
+value is MAC input, so it is never normalised -- `0123` and `123` differ.
+*/
 export const ORG_ID_PATTERN = /^[\w.-]{1,64}$/u;
 
 const encoder = new TextEncoder();
@@ -60,9 +60,9 @@ function keyBytes(key: string): Uint8Array<ArrayBuffer> {
 }
 
 /**
- * Epic's name for the environment. The app's `sandbox` covers Epic's own sandbox
- * and every organisation's non-production system, which is one secret slot.
- */
+Epic's name for the environment. The app's `sandbox` covers Epic's own sandbox
+and every organisation's non-production system, which is one secret slot.
+*/
 function environmentLabel(environment: HealthSystemEnvironment): string {
   return environment === "prod" ? "prod" : "nonprod";
 }

@@ -36,11 +36,11 @@ const SEGMENT_PATTERN = /^[A-Za-z_][\w-]*(?:\[x\])?$/u;
 export type PathParse = { ok: true; segments: string[] } | { ok: false; message: string };
 
 /**
- * Split a path into segments, `[]` as a segment of its own.
- *
- * `a[][]` (an array of arrays) is two array segments. A path that is only array
- * markers is refused: it would name the item itself, not a field of it.
- */
+Split a path into segments, `[]` as a segment of its own.
+
+`a[][]` (an array of arrays) is two array segments. A path that is only array
+markers is refused: it would name the item itself, not a field of it.
+*/
 export function parsePath(input: string): PathParse {
   const trimmed = input.trim();
   if (trimmed.length === 0) return { ok: false, message: "the path is empty" };
@@ -92,12 +92,12 @@ export function isChoiceSegment(segment: string): boolean {
 }
 
 /**
- * True when `key` is one variant of the choice segment `choice`.
- *
- * `value[x]` matches `valueQuantity` and `valueString` but not `value` itself
- * (a normalized key, not a FHIR choice) and not `values` (lower-case after the
- * stem): FHIR spells every variant as the stem plus a capitalised type name.
- */
+True when `key` is one variant of the choice segment `choice`.
+
+`value[x]` matches `valueQuantity` and `valueString` but not `value` itself
+(a normalized key, not a FHIR choice) and not `values` (lower-case after the
+stem): FHIR spells every variant as the stem plus a capitalised type name.
+*/
 export function matchesChoice(choice: string, key: string): boolean {
   const stem = choice.slice(0, -CHOICE_SUFFIX.length);
   if (!key.startsWith(stem) || key.length === stem.length) return false;
@@ -106,11 +106,11 @@ export function matchesChoice(choice: string, key: string): boolean {
 }
 
 /**
- * How a path reads in a sentence: `participants → name`, `code → coding → display`.
- *
- * Array markers are dropped: "hide participants → name" already means every
- * participant, and that is how the owner thinks of it.
- */
+How a path reads in a sentence: `participants → name`, `code → coding → display`.
+
+Array markers are dropped: "hide participants → name" already means every
+participant, and that is how the owner thinks of it.
+*/
 export function humanPath(segments: readonly string[]): string {
   return segments.filter((segment) => segment !== ARRAY_SEGMENT).join(" → ");
 }

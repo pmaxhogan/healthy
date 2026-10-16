@@ -131,9 +131,9 @@ const STATE = "synthetic-state";
 const RESULT_PATH = "/prd/OpenId/AuthorizeResult";
 
 /**
- * A synthetic authorization URL with the captured structure: the shell's own
- * authorize route, and the ten query parameters the capture's had, in order.
- */
+A synthetic authorization URL with the captured structure: the shell's own
+authorize route, and the ten query parameters the capture's had, in order.
+*/
 function authorizeUrl(overrides: Record<string, string | null> = {}): string {
   const params: Record<string, string | null> = {
     response_type: "code",
@@ -156,11 +156,11 @@ function authorizeUrl(overrides: Record<string, string | null> = {}): string {
 type Route = (call: PortalCall) => Response;
 
 /**
- * The whole captured hand-off, route by route, with enough state to fail the
- * way a real portal would if a step were skipped: the stub only renders once
- * the `yum` cookie is present, and `Home` is only signed in once finalize's
- * session cookie comes back.
- */
+The whole captured hand-off, route by route, with enough state to fail the
+way a real portal would if a step were skipped: the stub only renders once
+the `yum` cookie is present, and `Home` is only signed in once finalize's
+session cookie comes back.
+*/
 function handoffRoutes(): Record<string, Route> {
   return {
     "POST /shellwebapi/sso/token": () => json({ yum: YUM, mychartRegionUrl: "/prd/" }),
@@ -423,11 +423,11 @@ describe("secondaryValidation.sendCode", () => {
 });
 
 /**
- * Sign in as far as the code, then hand the *sealed* jar to a fresh client.
- *
- * This is what the runner really does: the login and the code happen in two
- * Worker invocations, and everything the second one knows came out of D1.
- */
+Sign in as far as the code, then hand the *sealed* jar to a fresh client.
+
+This is what the runner really does: the login and the code happen in two
+Worker invocations, and everything the second one knows came out of D1.
+*/
 async function awaitingCode(stub: PortalFetchStub): Promise<PortalClient> {
   const first = client(stub);
   await first.login(CREDENTIALS);

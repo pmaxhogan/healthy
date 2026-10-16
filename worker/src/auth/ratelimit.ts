@@ -33,13 +33,13 @@ export interface LoginAttemptWindow {
 }
 
 /**
- * The persistence this module needs, as an interface rather than a `D1Database`.
- *
- * Two reasons. It keeps the module importable from the plain-Node unit project,
- * which has no Workers globals; and it makes the limiter's decision logic
- * testable without standing up a database, leaving the SQL itself to the
- * integration suite where it runs against real D1.
- */
+The persistence this module needs, as an interface rather than a `D1Database`.
+
+Two reasons. It keeps the module importable from the plain-Node unit project,
+which has no Workers globals; and it makes the limiter's decision logic
+testable without standing up a database, leaving the SQL itself to the
+integration suite where it runs against real D1.
+*/
 export interface LoginAttemptStore {
   /** Increment the client's counter, resetting it first if its window rolled over. */
   bump(ipHash: string, nowSeconds: number): Promise<LoginAttemptWindow>;
@@ -58,16 +58,16 @@ interface LoginAttemptsStatement {
 }
 
 /**
- * Written against the `login_attempts(ip_hash PK, count, window_start)` columns
- * from worker/migrations/0001_init.sql directly, rather than through the repository
- * layer: the limiter has to run before anything else on the login path, so it
- * should not depend on a module that may itself want a database.
- *
- * `window_start <= cutoff` is "the window has expired", where `cutoff = now -
- * LOGIN_WINDOW_SECONDS`. `excluded.window_start` is the `now` from VALUES, so a
- * rolled-over window restarts at this attempt. Times are unix seconds, matching
- * the `unixepoch()` default the rest of the schema uses.
- */
+Written against the `login_attempts(ip_hash PK, count, window_start)` columns
+from worker/migrations/0001_init.sql directly, rather than through the repository
+layer: the limiter has to run before anything else on the login path, so it
+should not depend on a module that may itself want a database.
+
+`window_start <= cutoff` is "the window has expired", where `cutoff = now -
+LOGIN_WINDOW_SECONDS`. `excluded.window_start` is the `now` from VALUES, so a
+rolled-over window restarts at this attempt. Times are unix seconds, matching
+the `unixepoch()` default the rest of the schema uses.
+*/
 const BUMP_SQL = `
 INSERT INTO login_attempts (ip_hash, count, window_start) VALUES (?, 1, ?)
 ON CONFLICT(ip_hash) DO UPDATE SET
@@ -123,12 +123,12 @@ export function decide(window: LoginAttemptWindow, nowSeconds: number): RateLimi
 }
 
 /**
- * Records one login attempt and says whether it may proceed.
- *
- * Every attempt is counted, successful ones included, and a success then clears
- * the counter (see {@link forgetLoginAttempts}). Counting only failures would let
- * an attacker with one known-good password keep a window open indefinitely.
- */
+Records one login attempt and says whether it may proceed.
+
+Every attempt is counted, successful ones included, and a success then clears
+the counter (see {@link forgetLoginAttempts}). Counting only failures would let
+an attacker with one known-good password keep a window open indefinitely.
+*/
 export async function recordLoginAttempt(
   store: LoginAttemptStore,
   ipHash: string,

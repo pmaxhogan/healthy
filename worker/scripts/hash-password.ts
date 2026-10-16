@@ -23,11 +23,11 @@ const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const PASSWORD_LENGTH = 24;
 
 /**
- * A random base58 password.
- *
- * Bytes at or above `limit` are discarded rather than folded with `%`, which
- * would make the first few characters of the alphabet more likely than the rest.
- */
+A random base58 password.
+
+Bytes at or above `limit` are discarded rather than folded with `%`, which
+would make the first few characters of the alphabet more likely than the rest.
+*/
 export function generatePassword(): string {
   const limit = Math.floor(256 / ALPHABET.length) * ALPHABET.length;
   const chars: string[] = [];
@@ -47,11 +47,11 @@ export function generatePassword(): string {
 const encode = (b: Buffer): string => b.toString("base64url");
 
 /**
- * Hashes a password into the PASSWORD_HASH storage format (see worker/shared/password.ts).
- *
- * Refuses a cost above what deployed workerd derives: such a hash verifies fine
- * here and locks the owner out of the admin UI in production.
- */
+Hashes a password into the PASSWORD_HASH storage format (see worker/shared/password.ts).
+
+Refuses a cost above what deployed workerd derives: such a hash verifies fine
+here and locks the owner out of the admin UI in production.
+*/
 export function hashPassword(password: string, iterations = PBKDF2_ITERATIONS): string {
   if (iterations > MAX_PBKDF2_ITERATIONS) {
     throw new RangeError(
@@ -67,14 +67,14 @@ export function hashPassword(password: string, iterations = PBKDF2_ITERATIONS): 
 export function verifyPassword(password: string, stored: string): boolean {
   const parts = stored.split("$");
   if (parts.length !== 5) return false;
-  const [scheme, digest, iterationsRaw, saltRaw, hashRaw] = parts;
+  const [scheme, digest, iterationsRaw, saltRaw = "", hashRaw = ""] = parts;
   if (scheme !== "pbkdf2" || digest !== "sha256") return false;
 
   const iterations = Number(iterationsRaw);
   if (!Number.isSafeInteger(iterations) || iterations <= 0) return false;
 
-  const salt = Buffer.from(saltRaw ?? "", "base64url");
-  const expected = Buffer.from(hashRaw ?? "", "base64url");
+  const salt = Buffer.from(saltRaw, "base64url");
+  const expected = Buffer.from(hashRaw, "base64url");
   if (salt.length === 0 || expected.length === 0) return false;
 
   const actual = pbkdf2Sync(password, salt, iterations, expected.length, "sha256");

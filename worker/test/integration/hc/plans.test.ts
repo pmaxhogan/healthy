@@ -89,12 +89,12 @@ async function populated(): Promise<{ deviceId: string; originHash: string }> {
 const OVERRUNS = new Set([10, 40]);
 
 /**
- * A device as a wearable fills one: `HOURS` hours of heart rate and of an
- * hourly total, nearly every record ending exactly on the hour -- a contiguous
- * series, an hourly aggregate -- and a few (`OVERRUNS`) running a minute past
- * it. On this store an index holding every chunk that so much as touches the
- * next hour holds every chunk there is; the strict one holds the few.
- */
+A device as a wearable fills one: `HOURS` hours of heart rate and of an
+hourly total, nearly every record ending exactly on the hour -- a contiguous
+series, an hourly aggregate -- and a few (`OVERRUNS`) running a minute past
+it. On this store an index holding every chunk that so much as touches the
+next hour holds every chunk there is; the strict one holds the few.
+*/
 async function contiguous(): Promise<{ deviceId: string; originHash: string }> {
   const deviceId = await seedDevice(repos);
   await enqueue(repos, deviceId, {

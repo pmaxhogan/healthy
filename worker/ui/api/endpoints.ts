@@ -117,12 +117,12 @@ export const endpoints = {
   createHealthSystem: (body: CreateHealthSystemRequest): Promise<HealthSystemDto> =>
     api.post("/api/health-systems", body),
   /**
-   * PATCH, not PUT: a partial update by construction (the vendor and FHIR base are
-   * only sent when changed, and the Worker accepts them only while the health system
-   * is disconnected). The `config` it carries, however, replaces the stored config
-   * wholesale -- the Worker says so -- which is how a blank field clears back to
-   * the global default.
-   */
+  PATCH, not PUT: a partial update by construction (the vendor and FHIR base are
+  only sent when changed, and the Worker accepts them only while the health system
+  is disconnected). The `config` it carries, however, replaces the stored config
+  wholesale -- the Worker says so -- which is how a blank field clears back to
+  the global default.
+  */
   updateHealthSystem: (id: string, body: UpdateHealthSystemRequest): Promise<HealthSystemDto> =>
     api.patch(`/api/health-systems/${encodeURIComponent(id)}`, body),
   setHealthSystemSecret: (id: string, clientSecret: string): Promise<HealthSystemDto> =>
@@ -139,25 +139,25 @@ export const endpoints = {
     api.delete(`/api/health-systems/${encodeURIComponent(id)}`),
 
   /**
-   * Always answered, even for a health system that has never had a portal account --
-   * the Worker synthesizes a `state: "none"` default rather than 404ing, so the
-   * card can always render Save. See `PortalAccountStatusDto` in worker/shared/types.ts.
-   */
+  Always answered, even for a health system that has never had a portal account --
+  the Worker synthesizes a `state: "none"` default rather than 404ing, so the
+  card can always render Save. See `PortalAccountStatusDto` in worker/shared/types.ts.
+  */
   portalAccount: (healthSystemId: string, signal?: AbortSignal): Promise<PortalAccountStatusDto> =>
     api.get(`/api/health-systems/${encodeURIComponent(healthSystemId)}/portal`, signal),
   /**
-   * Probe for the portal without storing anything, so the owner can confirm the
-   * origin before a credential is sealed against it. Step one of `savePortalAccount`.
-   */
+  Probe for the portal without storing anything, so the owner can confirm the
+  origin before a credential is sealed against it. Step one of `savePortalAccount`.
+  */
   discoverPortal: (
     healthSystemId: string,
     body: PortalDiscoverRequest,
   ): Promise<PortalDiscoveryDto> =>
     api.post(`/api/health-systems/${encodeURIComponent(healthSystemId)}/portal/discover`, body),
   /**
-   * PUT, not POST: this replaces the login wholesale. `username`, `password` and
-   * `confirmedOrigin` are all required on every call, never a partial update.
-   */
+  PUT, not POST: this replaces the login wholesale. `username`, `password` and
+  `confirmedOrigin` are all required on every call, never a partial update.
+  */
   savePortalAccount: (
     healthSystemId: string,
     body: PutPortalAccountRequest,
@@ -236,11 +236,11 @@ export const endpoints = {
 };
 
 /**
- * The MCP tool catalogue, used to offer tool names as policy-rule targets.
- *
- * Optional by design: the route is a convenience, so a deployment that has not
- * got it yet loses the autocomplete and nothing else.
- */
+The MCP tool catalogue, used to offer tool names as policy-rule targets.
+
+Optional by design: the route is a convenience, so a deployment that has not
+got it yet loses the autocomplete and nothing else.
+*/
 export async function mcpToolsOrNone(signal?: AbortSignal): Promise<McpToolInfoDto[]> {
   try {
     return await api.get<McpToolInfoDto[]>("/api/mcp/tools", signal);

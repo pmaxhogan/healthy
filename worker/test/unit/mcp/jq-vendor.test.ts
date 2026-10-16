@@ -29,9 +29,9 @@ interface Manifest {
 }
 
 /**
- * The bit of the WebAssembly JS API this test reads, typed structurally: the
- * plain-Node project's libs declare no `WebAssembly` namespace.
- */
+The bit of the WebAssembly JS API this test reads, typed structurally: the
+plain-Node project's libs declare no `WebAssembly` namespace.
+*/
 interface ModuleDescriptor {
   name: string;
   kind: string;

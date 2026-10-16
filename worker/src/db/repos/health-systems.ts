@@ -1,26 +1,26 @@
 /**
- * The connected health systems.
- *
- * Deletion is soft: `calendar_events` and `fhir_cache` reference a health system, and
- * a hard delete would cascade away the history of events already written to the
- * calendar. `list()` therefore hides deleted rows unless asked.
- *
- * `client_secret_enc` is the per-organisation confidential-client secret. It is
- * sealed against `providers.client_secret_enc.<id>`, so it cannot be read from a
- * D1 dump and cannot be moved to another health system's row.
- *
- * The identity columns -- `display_name`, `fhir_base_url`, `brand_key`,
- * `portal_url` and `config_json` -- are sealed in place (0007), padded, against
- * `health_systems.<column>.<id>`: each one names the organisation, directly, through
- * the public brands index, or (the config's `org_short` and title template) in
- * words the owner typed. Nothing filters or orders on them in SQL
- * (the `health_systems_live` index is on `deleted_at, vendor`), so the list is sorted
- * after it is opened. A repo instance opens each row once and reuses the result
- * until the row's `updated_at` moves, so a sync run that reads the same health system
- * five times decrypts it once. The columns carry `_enc` names since 0009; the
- * AAD keeps the name each value was first sealed under
- * (`health_systems.<plain name>.<id>`), because the AAD is part of the tag.
- */
+The connected health systems.
+
+Deletion is soft: `calendar_events` and `fhir_cache` reference a health system, and
+a hard delete would cascade away the history of events already written to the
+calendar. `list()` therefore hides deleted rows unless asked.
+
+`client_secret_enc` is the per-organisation confidential-client secret. It is
+sealed against `providers.client_secret_enc.<id>`, so it cannot be read from a
+D1 dump and cannot be moved to another health system's row.
+
+The identity columns -- `display_name`, `fhir_base_url`, `brand_key`,
+`portal_url` and `config_json` -- are sealed in place (0007), padded, against
+`health_systems.<column>.<id>`: each one names the organisation, directly, through
+the public brands index, or (the config's `org_short` and title template) in
+words the owner typed. Nothing filters or orders on them in SQL
+(the `health_systems_live` index is on `deleted_at, vendor`), so the list is sorted
+after it is opened. A repo instance opens each row once and reuses the result
+until the row's `updated_at` moves, so a sync run that reads the same health system
+five times decrypts it once. The columns carry `_enc` names since 0009; the
+AAD keeps the name each value was first sealed under
+(`health_systems.<plain name>.<id>`), because the AAD is part of the tag.
+*/
 
 import { AppError } from "../../lib/errors.ts";
 import { newId } from "../../lib/ids.ts";
@@ -247,12 +247,12 @@ export function makeHealthSystemsRepo(ctx: Ctx) {
     },
 
     /**
-     * The client secret: the stored one, else the one derived from the
-     * organisation id in the config, else null.
-     *
-     * A stored secret always wins, so an organisation registered before
-     * derivation existed (or with a secret Epic generated) keeps working.
-     */
+    The client secret: the stored one, else the one derived from the
+    organisation id in the config, else null.
+
+    A stored secret always wins, so an organisation registered before
+    derivation existed (or with a secret Epic generated) keeps working.
+    */
     async getClientSecret(id: string): Promise<string | null> {
       const row = await require_(id);
       if (row.client_secret_enc !== null) {

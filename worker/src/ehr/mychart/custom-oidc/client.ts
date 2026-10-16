@@ -1,40 +1,40 @@
 /**
- * A `PortalClient` for the deployment style whose login lives in a separate shell.
- *
- * The sign-in job knows nothing about any of this. It calls `login`, then
- * `secondaryValidation.sendCode`, then `secondaryValidation.validate`, exactly as
- * it does for the classic pages -- so this file's job is to make three completely
- * different HTTP conversations look like those three calls, and to leave a live
- * classic session behind when it is done.
- *
- * The shape of it:
- *
- *  - `login` POSTs the credentials at the shell's API. If the shell wants a code
- *    and the jar holds a trust-this-device cookie from an earlier sign-in, the
- *    cookie's token is posted back first, exactly as the shell's own login
- *    screen does; if the shell accepts it, the bridge runs and no code is sent.
- *    Otherwise that is `awaiting_code` and nothing else happens. If it does not, the OIDC
- *    bridge runs immediately, because "signed in" has to mean the classic session
- *    exists -- the caller marks the account active on the strength of it.
- *  - `sendCode` needs three values the classic flow never had: the user id the
- *    login answered with, a per-attempt correlation number, and a contact to send
- *    to. All three go into the jar's `extras`, because **the code is submitted in
- *    a different Worker invocation by a brand-new client** (see
- *    `worker/src/sync/portal-runner.ts`), and the sealed jar is the only thing that
- *    invocation inherits.
- *  - `validate` submits the code with the same correlation number, then mints a
- *    trust-this-device token itself and puts it in the jar by hand -- it is a
- *    cookie the shell's own script writes, so no `Set-Cookie` ever carries it --
- *    and then runs the bridge.
- *  - Everything after sign-in is the classic client, unchanged. The visits
- *    endpoints are identical; only the way in differs.
- *
- * Two configuration values cannot be defaulted and are not guessed. The shell's
- * API base names the organisation, so it comes from discovery or from the caller;
- * without it this client refuses to start rather than probing. The MFA contact is
- * looked for in the login response, then in the caller's settings, then from the
- * shell -- and if all three come up empty, the failure says so.
- */
+A `PortalClient` for the deployment style whose login lives in a separate shell.
+
+The sign-in job knows nothing about any of this. It calls `login`, then
+`secondaryValidation.sendCode`, then `secondaryValidation.validate`, exactly as
+it does for the classic pages -- so this file's job is to make three completely
+different HTTP conversations look like those three calls, and to leave a live
+classic session behind when it is done.
+
+The shape of it:
+
+ - `login` POSTs the credentials at the shell's API. If the shell wants a code
+   and the jar holds a trust-this-device cookie from an earlier sign-in, the
+   cookie's token is posted back first, exactly as the shell's own login
+   screen does; if the shell accepts it, the bridge runs and no code is sent.
+   Otherwise that is `awaiting_code` and nothing else happens. If it does not, the OIDC
+   bridge runs immediately, because "signed in" has to mean the classic session
+   exists -- the caller marks the account active on the strength of it.
+ - `sendCode` needs three values the classic flow never had: the user id the
+   login answered with, a per-attempt correlation number, and a contact to send
+   to. All three go into the jar's `extras`, because **the code is submitted in
+   a different Worker invocation by a brand-new client** (see
+   `worker/src/sync/portal-runner.ts`), and the sealed jar is the only thing that
+   invocation inherits.
+ - `validate` submits the code with the same correlation number, then mints a
+   trust-this-device token itself and puts it in the jar by hand -- it is a
+   cookie the shell's own script writes, so no `Set-Cookie` ever carries it --
+   and then runs the bridge.
+ - Everything after sign-in is the classic client, unchanged. The visits
+   endpoints are identical; only the way in differs.
+
+Two configuration values cannot be defaulted and are not guessed. The shell's
+API base names the organisation, so it comes from discovery or from the caller;
+without it this client refuses to start rather than probing. The MFA contact is
+looked for in the login response, then in the caller's settings, then from the
+shell -- and if all three come up empty, the failure says so.
+*/
 
 import { AppError, isAppError } from "../../../lib/errors.ts";
 import { createMyChartClient } from "../client.ts";
@@ -57,12 +57,12 @@ import type { PortalVisit } from "../visits.ts";
 import type { PortalSignInStatus } from "@shared/types.ts";
 
 /**
- * What the owner has to supply for this flavour, when discovery could not.
- *
- * Both are optional, and both have a reason they are not in the endpoint JSON:
- * `apiBasePath` is usually discovered and this is the fallback, and `mfaContact`
- * is usually in the login response and this is the override.
- */
+What the owner has to supply for this flavour, when discovery could not.
+
+Both are optional, and both have a reason they are not in the endpoint JSON:
+`apiBasePath` is usually discovered and this is the fallback, and `mfaContact`
+is usually in the login response and this is the override.
+*/
 export interface PortalCustomSettings {
   /** The shell API's path prefix. Overrides the discovered one when both exist. */
   apiBasePath?: string | undefined;
@@ -78,16 +78,16 @@ export interface CustomOidcClientDeps extends PortalClientDeps {
 const TRUST_TOKEN_DIGITS = 16;
 
 /**
- * [confirmed] A trust-this-device token in the shape the shell's own script mints.
- *
- * That script writes `Math.random() + ""` -- a "0." and up to seventeen digits,
- * never more than twenty characters -- and the shell stores whatever it is sent.
- * An earlier version posted a 36-character UUID instead, a shape the shell's own
- * client never produces; the save was answered 200 and the token was then never
- * honoured. Nothing proves the length was the reason, but there is no reason to
- * send the shell anything its own client could not have sent. The digits come
- * from `crypto`, not `Math.random`, because this is a credential.
- */
+[confirmed] A trust-this-device token in the shape the shell's own script mints.
+
+That script writes `Math.random() + ""` -- a "0." and up to seventeen digits,
+never more than twenty characters -- and the shell stores whatever it is sent.
+An earlier version posted a 36-character UUID instead, a shape the shell's own
+client never produces; the save was answered 200 and the token was then never
+honoured. Nothing proves the length was the reason, but there is no reason to
+send the shell anything its own client could not have sent. The digits come
+from `crypto`, not `Math.random`, because this is a credential.
+*/
 function mintTrustToken(): string {
   let digits = "";
   while (digits.length < TRUST_TOKEN_DIGITS) {
@@ -149,20 +149,20 @@ export function createCustomOidcClient(deps: CustomOidcClientDeps): PortalClient
   };
 
   /**
-   * [confirmed from capture] Skip the code on a device the shell trusted before.
-   *
-   * What the shell's own login screen does when the login response wants a code
-   * and the trust cookie exists: post the cookie's value back. True only when
-   * the shell accepted it. Every "no" drops the cookie, as the screen does -- a
-   * 410 through its "forget" branch, any other refusal through its error
-   * handler -- and falls back to the emailed code.
-   *
-   * Dropping it on *every* refusal is load-bearing, not tidiness. A token the
-   * shell will not honour, kept in the jar, is a token that is posted and
-   * refused on every sign-in from then on, each one costing the owner an
-   * emailed code; dropping it is what lets the code sign-in that follows mint
-   * and register a fresh one.
-   */
+  [confirmed from capture] Skip the code on a device the shell trusted before.
+
+  What the shell's own login screen does when the login response wants a code
+  and the trust cookie exists: post the cookie's value back. True only when
+  the shell accepted it. Every "no" drops the cookie, as the screen does -- a
+  410 through its "forget" branch, any other refusal through its error
+  handler -- and falls back to the emailed code.
+
+  Dropping it on *every* refusal is load-bearing, not tidiness. A token the
+  shell will not honour, kept in the jar, is a token that is posted and
+  refused on every sign-in from then on, each one costing the owner an
+  emailed code; dropping it is what lets the code sign-in that follows mint
+  and register a fresh one.
+  */
   const trustedDevice = async (userId: string): Promise<boolean> => {
     const api = shell();
     const name = `${userId}${REMEMBER_ME_COOKIE_SUFFIX}`;
@@ -264,24 +264,24 @@ export function createCustomOidcClient(deps: CustomOidcClientDeps): PortalClient
   };
 
   /**
-   * Mint a trust-this-device token and ask the shell to remember it.
-   *
-   * A cookie, not a form field: the token still ends up in the jar by hand
-   * because nothing in the response chain sets it. But the token itself is
-   * *minted here*, not fetched -- a live capture of the shell's own client code
-   * found `saveTrustThisDeviceToken` takes a browser-generated token as
-   * `rememberMeToken`, the reverse of what an earlier version of this file
-   * assumed. `generateDeviceId` is reused rather than adding a second
-   * randomness hook: it already means "mint an opaque per-device id a test can
-   * pin," which is exactly what this is too. Failing is not a sign-in failure
-   * -- it costs one extra emailed code next time.
-   *
-   * Always a *fresh* token, even when the jar already holds one. The shell's
-   * own screen overwrites its cookie every time it saves, and a code sign-in
-   * is itself the proof that whatever the jar held did not get us in -- so
-   * keeping it, as an earlier version did, meant never re-registering a token
-   * the shell had stopped honouring, and an emailed code on every sign-in.
-   */
+  Mint a trust-this-device token and ask the shell to remember it.
+
+  A cookie, not a form field: the token still ends up in the jar by hand
+  because nothing in the response chain sets it. But the token itself is
+  *minted here*, not fetched -- a live capture of the shell's own client code
+  found `saveTrustThisDeviceToken` takes a browser-generated token as
+  `rememberMeToken`, the reverse of what an earlier version of this file
+  assumed. `generateDeviceId` is reused rather than adding a second
+  randomness hook: it already means "mint an opaque per-device id a test can
+  pin," which is exactly what this is too. Failing is not a sign-in failure
+  -- it costs one extra emailed code next time.
+
+  Always a *fresh* token, even when the jar already holds one. The shell's
+  own screen overwrites its cookie every time it saves, and a code sign-in
+  is itself the proof that whatever the jar held did not get us in -- so
+  keeping it, as an earlier version did, meant never re-registering a token
+  the shell had stopped honouring, and an emailed code on every sign-in.
+  */
   const remember = async (api: ShellApi, userId: string): Promise<void> => {
     const name = `${userId}${REMEMBER_ME_COOKIE_SUFFIX}`;
     const token = (deps.generateDeviceId ?? mintTrustToken)();

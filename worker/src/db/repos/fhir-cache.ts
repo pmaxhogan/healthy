@@ -1,27 +1,27 @@
 /**
- * The read cache of FHIR resources that the MCP serves from.
- *
- * This is the PHI-bearing table, so `payload_enc` is sealed against
- * `fhir_cache.payload.<healthSystemId>:<type>:<resource_id>` -- the composite row id,
- * because the primary key is composite. A payload lifted from one patient's row
- * to another's fails to open.
- *
- * `resource_id` is not the upstream id. It is `blindResourceId(...)`, a keyed
- * HMAC of the health system, the type and the Epic id (`worker/src/db/blind.ts`), so
- * the cache is still keyed and indexed by it but a D1 snapshot no longer carries
- * the patient's own FHIR id (the Patient row) or the id-prefix structure of
- * everything else. Every lookup blinds the id it is given, which is what lets an
- * MCP tool take a real id as its argument; the real id is only inside the sealed
- * payload, and that is what `CachedResource.resourceId` reports.
- *
- * `content_hash` is a keyed digest of the *plaintext*. Sealing is randomised, so
- * two seals of an unchanged resource differ byte for byte and cannot be
- * compared; a digest of the plaintext is what lets a daily refresh tell
- * "unchanged" from "updated" and report a meaningful count. Keyed rather than a
- * plain sha256, which would be a confirmation oracle for anyone who can guess a
- * resource, and bound to the health system, so the same document under two
- * organisations does not link them.
- */
+The read cache of FHIR resources that the MCP serves from.
+
+This is the PHI-bearing table, so `payload_enc` is sealed against
+`fhir_cache.payload.<healthSystemId>:<type>:<resource_id>` -- the composite row id,
+because the primary key is composite. A payload lifted from one patient's row
+to another's fails to open.
+
+`resource_id` is not the upstream id. It is `blindResourceId(...)`, a keyed
+HMAC of the health system, the type and the Epic id (`worker/src/db/blind.ts`), so
+the cache is still keyed and indexed by it but a D1 snapshot no longer carries
+the patient's own FHIR id (the Patient row) or the id-prefix structure of
+everything else. Every lookup blinds the id it is given, which is what lets an
+MCP tool take a real id as its argument; the real id is only inside the sealed
+payload, and that is what `CachedResource.resourceId` reports.
+
+`content_hash` is a keyed digest of the *plaintext*. Sealing is randomised, so
+two seals of an unchanged resource differ byte for byte and cannot be
+compared; a digest of the plaintext is what lets a daily refresh tell
+"unchanged" from "updated" and report a meaningful count. Keyed rather than a
+plain sha256, which would be a confirmation oracle for anyone who can guess a
+resource, and bound to the health system, so the same document under two
+organisations does not link them.
+*/
 
 import { blindResourceId, blinderFor } from "../blind.ts";
 import { BATCH_CHUNK, all, batch, chunk, one, run, ttlSeconds } from "../client.ts";
@@ -51,14 +51,14 @@ export interface CachedResource {
 }
 
 /**
- * The AAD for one cached payload.
- *
- * The column name here is `payload`, but the column is `payload_enc`. That is a
- * mismatch with every other `aadFor` call in the db layer, and it is deliberate
- * now: the AAD is part of the ciphertext's authentication tag, so "correcting" it
- * would make every row already in the cache fail to open. If it is ever worth
- * fixing it has to be a migration that re-seals, not an edit here.
- */
+The AAD for one cached payload.
+
+The column name here is `payload`, but the column is `payload_enc`. That is a
+mismatch with every other `aadFor` call in the db layer, and it is deliberate
+now: the AAD is part of the ciphertext's authentication tag, so "correcting" it
+would make every row already in the cache fail to open. If it is ever worth
+fixing it has to be a migration that re-seals, not an edit here.
+*/
 const fhirCacheAad = (healthSystemId: string, resourceType: string, storedId: string): string =>
   aadFor("fhir_cache", "payload", `${healthSystemId}:${resourceType}:${storedId}`);
 
@@ -125,12 +125,12 @@ export function makeFhirCacheRepo(ctx: Ctx) {
 
   return {
     /**
-     * Seal and store a page of resources, extending the expiry of the ones whose
-     * content has not changed rather than rewriting them.
-     *
-     * Statements are chunked because a full refresh can hand this thousands of
-     * resources at once and D1 caps a batch.
-     */
+    Seal and store a page of resources, extending the expiry of the ones whose
+    content has not changed rather than rewriting them.
+
+    Statements are chunked because a full refresh can hand this thousands of
+    resources at once and D1 caps a batch.
+    */
     async upsertMany(
       healthSystemId: string,
       resources: readonly CacheableResource[],
@@ -214,10 +214,10 @@ export function makeFhirCacheRepo(ctx: Ctx) {
     },
 
     /**
-     * One resource by its upstream id, or null when it is absent or past its
-     * expiry. The id is blinded here, on the way in -- which is how an MCP tool
-     * that takes an id finds it -- and the caller never sees the stored form.
-     */
+    One resource by its upstream id, or null when it is absent or past its
+    expiry. The id is blinded here, on the way in -- which is how an MCP tool
+    that takes an id finds it -- and the caller never sees the stored form.
+    */
     async get(
       healthSystemId: string,
       resourceType: string,
@@ -228,9 +228,9 @@ export function makeFhirCacheRepo(ctx: Ctx) {
     },
 
     /**
-     * One resource by its *stored* id: what `calendar_events.encounter_id` holds,
-     * which is the same blind this table keys the Encounter by.
-     */
+    One resource by its *stored* id: what `calendar_events.encounter_id` holds,
+    which is the same blind this table keys the Encounter by.
+    */
     async getByStoredId(
       healthSystemId: string,
       resourceType: string,
@@ -240,16 +240,16 @@ export function makeFhirCacheRepo(ctx: Ctx) {
     },
 
     /**
-     * Every live resource of one type, optionally for a single health system.
-     *
-     * `healthSystemId: null` is how a cross-health system MCP tool asks for all of them.
-     * `since` filters on the org's own `meta.lastUpdated` where it gave one,
-     * falling back to when we fetched it. `limit` is omitted by every caller in
-     * this codebase -- an MCP tool's own `limit` argument is applied later, in
-     * `respond()`, after the policy filter -- so there is no `LIMIT` clause at
-     * all unless a caller actually wants one: the owner's whole record is what
-     * "every live resource of one type" means.
-     */
+    Every live resource of one type, optionally for a single health system.
+
+    `healthSystemId: null` is how a cross-health system MCP tool asks for all of them.
+    `since` filters on the org's own `meta.lastUpdated` where it gave one,
+    falling back to when we fetched it. `limit` is omitted by every caller in
+    this codebase -- an MCP tool's own `limit` argument is applied later, in
+    `respond()`, after the policy filter -- so there is no `LIMIT` clause at
+    all unless a caller actually wants one: the owner's whole record is what
+    "every live resource of one type" means.
+    */
     async listByType(
       healthSystemId: string | null,
       resourceType: string,

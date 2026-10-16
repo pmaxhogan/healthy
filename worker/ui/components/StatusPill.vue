@@ -4,9 +4,9 @@ import { computed } from "vue";
 import type { ConnectionStatus } from "@shared/types.ts";
 
 /**
- * The one place a connection status becomes a colour and a word. `not_connected`
- * is the Google account's extra state; everything else is a `ConnectionStatus`.
- */
+The one place a connection status becomes a colour and a word. `not_connected`
+is the Google account's extra state; everything else is a `ConnectionStatus`.
+*/
 type PillStatus = ConnectionStatus | "not_connected";
 
 const LABELS: Record<PillStatus, string> = {

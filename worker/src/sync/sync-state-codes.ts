@@ -1,49 +1,49 @@
 /**
- * Stable, non-Epic codes `fhir_sync_state` records, shared between the writer
- * and every reader.
- *
- * A leaf module on purpose, with no import of its own: `worker/src/sync/full-refresh.ts`
- * (the writer) and `worker/src/mcp/coverage.ts` (a reader, reached from nearly every
- * MCP tool through `collect.ts`) both need these two strings, and `full-refresh.ts`
- * pulls in D1, the Durable Object runners and the rest of the sync engine. A
- * reader importing them from there would drag that whole graph into a context
- * that does not have the Cloudflare Workers ambient types in scope --
- * `worker/test/unit/**` in particular, which type-checks against plain Node.
- */
+Stable, non-Epic codes `fhir_sync_state` records, shared between the writer
+and every reader.
+
+A leaf module on purpose, with no import of its own: `worker/src/sync/full-refresh.ts`
+(the writer) and `worker/src/mcp/coverage.ts` (a reader, reached from nearly every
+MCP tool through `collect.ts`) both need these two strings, and `full-refresh.ts`
+pulls in D1, the Durable Object runners and the rest of the sync engine. A
+reader importing them from there would drag that whole graph into a context
+that does not have the Cloudflare Workers ambient types in scope --
+`worker/test/unit/**` in particular, which type-checks against plain Node.
+*/
 
 /**
- * `fhir_sync_state.last_error_code` for a registry search entry this
- * organisation's CapabilityStatement does not support (dropped by
- * `filterSupported`).
- *
- * Recorded rather than left as "no row at all" so the MCP coverage layer
- * (`worker/src/mcp/coverage.ts`) can tell "this organisation does not offer this
- * type" apart from "the daily refresh has not reached it yet" -- exactly the
- * distinction `worker/src/db/repos/fhir-sync-state.ts`'s own module comment says
- * this table exists to draw.
- */
+`fhir_sync_state.last_error_code` for a registry search entry this
+organisation's CapabilityStatement does not support (dropped by
+`filterSupported`).
+
+Recorded rather than left as "no row at all" so the MCP coverage layer
+(`worker/src/mcp/coverage.ts`) can tell "this organisation does not offer this
+type" apart from "the daily refresh has not reached it yet" -- exactly the
+distinction `worker/src/db/repos/fhir-sync-state.ts`'s own module comment says
+this table exists to draw.
+*/
 export const UNSUPPORTED_ERROR_CODE = "unsupported";
 
 /**
- * The prefix on a synthetic `SyncWarning.code` recorded when one parameter set
- * of a multi-set entry (a `byCategory` search) was rejected outright while at
- * least one other set of the same entry succeeded.
- *
- * Read by `worker/src/mcp/coverage.ts` to mark the pair `partial` rather than `ok`:
- * a category that came back empty because it does not apply is silence, but a
- * category Epic refused to run is not the same as "no care plans of that kind".
- */
+The prefix on a synthetic `SyncWarning.code` recorded when one parameter set
+of a multi-set entry (a `byCategory` search) was rejected outright while at
+least one other set of the same entry succeeded.
+
+Read by `worker/src/mcp/coverage.ts` to mark the pair `partial` rather than `ok`:
+a category that came back empty because it does not apply is silence, but a
+category Epic refused to run is not the same as "no care plans of that kind".
+*/
 export const CATEGORY_REJECTED_PREFIX = "category_rejected:";
 
 /**
- * How much a code `fhir_sync_state` recorded matters to someone reading the
- * cache:
- *
- *  - `info`    -- expected; everything that could be returned was returned.
- *  - `warning` -- something was left out or deferred, and it may matter.
- *  - `error`   -- the resource type could not be read.
- *  - `unknown` -- a code this server has no documented meaning for.
- */
+How much a code `fhir_sync_state` recorded matters to someone reading the
+cache:
+
+ - `info`    -- expected; everything that could be returned was returned.
+ - `warning` -- something was left out or deferred, and it may matter.
+ - `error`   -- the resource type could not be read.
+ - `unknown` -- a code this server has no documented meaning for.
+*/
 type SyncCodeSeverity = "info" | "warning" | "error" | "unknown";
 
 export interface SyncCodeMeaning {
@@ -52,26 +52,26 @@ export interface SyncCodeMeaning {
 }
 
 /**
- * What each code a sync can record means, for `get_sync_status` and `coverage`
- * to put next to the bare code. docs/mcp.md carries the same table, with its
- * sources.
- *
- * Epic's numeric codes come from `issue.details.coding[].code` on the
- * OperationOutcomes Epic interleaves with search results. The 41xx and 591xx
- * meanings follow the "FHIR Error Codes" table Epic publishes at the foot of
- * every R4 API specification on fhir.epic.com (read 2026-09-28); the severity
- * here is what the code means for a reader of the cache, not Epic's own
- * Fatal/Warning/Information label. 59204 is not in that table: its wording
- * follows Epic's own `details.text` for it, seen on a live search ("Client not
- * authorized for <Type> - Outside Record"), and Epic's "(Outside Record)" API
- * specifications for what that variant returns. A code Epic does not document
- * and this server has not seen explained is left out on purpose, so
- * {@link explainSyncCode} calls it `unknown` rather than guessing.
- *
- * Only generic wording lives here. Epic's `diagnostics` text is never stored --
- * `fhir_sync_state.warnings` holds `{code, count}` alone -- because it can echo
- * the search's parameters.
- */
+What each code a sync can record means, for `get_sync_status` and `coverage`
+to put next to the bare code. docs/mcp.md carries the same table, with its
+sources.
+
+Epic's numeric codes come from `issue.details.coding[].code` on the
+OperationOutcomes Epic interleaves with search results. The 41xx and 591xx
+meanings follow the "FHIR Error Codes" table Epic publishes at the foot of
+every R4 API specification on fhir.epic.com (read 2026-09-28); the severity
+here is what the code means for a reader of the cache, not Epic's own
+Fatal/Warning/Information label. 59204 is not in that table: its wording
+follows Epic's own `details.text` for it, seen on a live search ("Client not
+authorized for <Type> - Outside Record"), and Epic's "(Outside Record)" API
+specifications for what that variant returns. A code Epic does not document
+and this server has not seen explained is left out on purpose, so
+{@link explainSyncCode} calls it `unknown` rather than guessing.
+
+Only generic wording lives here. Epic's `diagnostics` text is never stored --
+`fhir_sync_state.warnings` holds `{code, count}` alone -- because it can echo
+the search's parameters.
+*/
 const MEANINGS: Readonly<Record<string, SyncCodeMeaning>> = {
   "4100": { meaning: "The search contained an invalid parameter.", severity: "error" },
   "4101": {
@@ -205,14 +205,14 @@ function lookup(code: string): SyncCodeMeaning | undefined {
 }
 
 /**
- * What one recorded code means.
- *
- * Takes a warning code (`"4119"`, `"category_rejected:encounter"`) or a
- * `last_error_code` (`"unsupported"`, `"upstream_error:4118"`). An error code
- * with an Epic suffix is explained by the suffix, which is the part that says
- * what happened, but is never reported as less than an `error`: whatever the
- * suffix, that type failed to sync.
- */
+What one recorded code means.
+
+Takes a warning code (`"4119"`, `"category_rejected:encounter"`) or a
+`last_error_code` (`"unsupported"`, `"upstream_error:4118"`). An error code
+with an Epic suffix is explained by the suffix, which is the part that says
+what happened, but is never reported as less than an `error`: whatever the
+suffix, that type failed to sync.
+*/
 export function explainSyncCode(code: string): SyncCodeMeaning {
   if (code.startsWith(CATEGORY_REJECTED_PREFIX)) {
     return {

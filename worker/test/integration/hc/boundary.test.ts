@@ -79,9 +79,9 @@ async function stepsIn(deviceId: string, startMs: number, endMs: number): Promis
 }
 
 /**
- * A heart-rate series that starts at :59 and ends `pastMs` after the hour,
- * with a sample at :59 and one at its very end.
- */
+A heart-rate series that starts at :59 and ends `pastMs` after the hour,
+with a sample at :59 and one at its very end.
+*/
 function endingAt(id: string, pastMs: number, extra: Partial<HcRecord> = {}): HcRecord {
   const start = T + 59 * MINUTE_MS;
   return heartRate(

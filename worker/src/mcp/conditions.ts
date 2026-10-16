@@ -1,24 +1,24 @@
 /**
- * Making a Condition list readable without removing anything from it.
- *
- * An Epic record re-mints the same diagnosis as a new Condition at every visit
- * it is coded at ("encounter diagnosis"), next to the handful of entries on the
- * problem list. Read raw, the list is mostly the same few conditions again and
- * again. This module is what `get_conditions` (and the summary's conditions
- * section) use to make the useful view easy while every row stays reachable:
- *
- *  - {@link canonicalCategory}: the category vocabulary, with the display
- *    strings and Epic's own `visit-diagnosis` mapped onto the three FHIR codes.
- *  - {@link filterStatus}: the `status` filter, honest about the rows that have
- *    no clinical status at all.
- *  - {@link collapseConditions}: one item per condition identity, with how often
- *    and when it was seen and every visit it was coded at.
- *
- * Everything here runs on NORMALIZED items that the exposure policy has already
- * filtered (`respond()`'s `reshape` hook): a hidden field is not there to be
- * grouped by, dated by or counted, so a group can never carry more than the
- * rows it was made from.
- */
+Making a Condition list readable without removing anything from it.
+
+An Epic record re-mints the same diagnosis as a new Condition at every visit
+it is coded at ("encounter diagnosis"), next to the handful of entries on the
+problem list. Read raw, the list is mostly the same few conditions again and
+again. This module is what `get_conditions` (and the summary's conditions
+section) use to make the useful view easy while every row stays reachable:
+
+ - {@link canonicalCategory}: the category vocabulary, with the display
+   strings and Epic's own `visit-diagnosis` mapped onto the three FHIR codes.
+ - {@link filterStatus}: the `status` filter, honest about the rows that have
+   no clinical status at all.
+ - {@link collapseConditions}: one item per condition identity, with how often
+   and when it was seen and every visit it was coded at.
+
+Everything here runs on NORMALIZED items that the exposure policy has already
+filtered (`respond()`'s `reshape` hook): a hidden field is not there to be
+grouped by, dated by or counted, so a group can never carry more than the
+rows it was made from.
+*/
 
 import { z } from "zod";
 
@@ -31,10 +31,10 @@ import type { RawEntry } from "../policy/filter.ts";
 type ConditionCategory = "problem-list-item" | "encounter-diagnosis" | "health-concern";
 
 /**
- * Every accepted spelling of each category, by its code. Compared as slugs, so
- * case, spaces and hyphens do not matter. `visit-diagnosis` is Epic's own
- * category, which it sends next to `encounter-diagnosis` on the same row.
- */
+Every accepted spelling of each category, by its code. Compared as slugs, so
+case, spaces and hyphens do not matter. `visit-diagnosis` is Epic's own
+category, which it sends next to `encounter-diagnosis` on the same row.
+*/
 export const CATEGORY_SPELLINGS: ReadonlyMap<ConditionCategory, readonly string[]> = new Map<
   ConditionCategory,
   readonly string[]
@@ -77,8 +77,8 @@ function stringOf(item: Item, key: string): string | undefined {
   return typeof value === "string" && value !== "" ? value : undefined;
 }
 
-function recordOf(item: Item, key: string): Item | undefined {
-  const value = Object.hasOwn(item, key) ? Reflect.get(item, key) : undefined;
+function codeOf(item: Item): Item | undefined {
+  const value = Object.hasOwn(item, "code") ? Reflect.get(item, "code") : undefined;
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Item)
     : undefined;
@@ -92,10 +92,10 @@ function stringsOf(item: Item, key: string): string[] {
 }
 
 /**
- * An item's categories as codes: each of the three by its code, anything else
- * as it was sent. Deduplicated, so Epic's "Encounter Diagnosis" + "Visit
- * Diagnosis" pair is one `encounter-diagnosis`.
- */
+An item's categories as codes: each of the three by its code, anything else
+as it was sent. Deduplicated, so Epic's "Encounter Diagnosis" + "Visit
+Diagnosis" pair is one `encounter-diagnosis`.
+*/
 function categoriesOf(item: Item): string[] {
   const out = new Set<string>();
   for (const value of stringsOf(item, "category")) out.add(canonicalCategory(value) ?? value);
@@ -115,13 +115,13 @@ interface StatusFiltered<T> {
 }
 
 /**
- * The rows a `status` filter keeps.
- *
- * `unknown` keeps exactly the rows with no `clinicalStatus`. Any other value
- * keeps the rows whose status matches it as a slug, and counts the no-status
- * rows it therefore dropped -- they are not known NOT to match, so dropping
- * them silently would misreport the record.
- */
+The rows a `status` filter keeps.
+
+`unknown` keeps exactly the rows with no `clinicalStatus`. Any other value
+keeps the rows whose status matches it as a slug, and counts the no-status
+rows it therefore dropped -- they are not known NOT to match, so dropping
+them silently would misreport the record.
+*/
 function filterStatus<T extends { item: unknown }>(
   rows: readonly T[],
   status: string,
@@ -174,18 +174,18 @@ function firstCode(
 }
 
 /**
- * What makes two rows the same condition: the health system, plus the first
- * ICD-10 code the row carries, else its first SNOMED code, else its text
- * (lower-cased, whitespace collapsed). A row with none of those is its own
- * group -- there is nothing to say it is the same as anything else.
- *
- * ICD-10 first because it is the code a problem-list entry and every visit's
- * copy of it reliably share; which coding a health system sends FIRST differs
- * between the two, so `code.code` (the first coding) cannot be the key.
- */
+What makes two rows the same condition: the health system, plus the first
+ICD-10 code the row carries, else its first SNOMED code, else its text
+(lower-cased, whitespace collapsed). A row with none of those is its own
+group -- there is nothing to say it is the same as anything else.
+
+ICD-10 first because it is the code a problem-list entry and every visit's
+copy of it reliably share; which coding a health system sends FIRST differs
+between the two, so `code.code` (the first coding) cannot be the key.
+*/
 function conditionIdentity(item: Item, index: number): string {
   const healthSystem = stringOf(item, "healthSystemId") ?? "";
-  const code = recordOf(item, "code");
+  const code = codeOf(item);
   const codingsValue = code === undefined ? undefined : Reflect.get(code, "codings");
   const codings = Array.isArray(codingsValue) ? codingsValue.filter((entry) => isItem(entry)) : [];
   const icd10 = firstCode(codings, isIcd10);
@@ -234,23 +234,23 @@ interface Building {
 }
 
 /**
- * One item per condition identity (see {@link conditionIdentity}).
- *
- * `rows` must be newest first (the order `collect` produces), so "the latest
- * row" is the first one. Each group carries:
- *
- *  - the representative row's `code`, `clinicalStatus`, `verificationStatus`
- *    and `abatement` -- the problem-list row when there is one, since the
- *    problem list is where a status is kept current; otherwise the latest row
- *    with a status (or the latest row, when none has one);
- *  - `categories` (the union, as codes) and `onProblemList`;
- *  - `firstSeen` / `lastSeen`: the earliest and latest onset or recorded date
- *    across the rows;
- *  - `occurrences` (how many rows), `ids` (their Condition ids) and
- *    `encounterIds` (each visit they name, once, newest first).
- *
- * Groups are ordered by `lastSeen`, newest first; undated groups last.
- */
+One item per condition identity (see {@link conditionIdentity}).
+
+`rows` must be newest first (the order `collect` produces), so "the latest
+row" is the first one. Each group carries:
+
+ - the representative row's `code`, `clinicalStatus`, `verificationStatus`
+   and `abatement` -- the problem-list row when there is one, since the
+   problem list is where a status is kept current; otherwise the latest row
+   with a status (or the latest row, when none has one);
+ - `categories` (the union, as codes) and `onProblemList`;
+ - `firstSeen` / `lastSeen`: the earliest and latest onset or recorded date
+   across the rows;
+ - `occurrences` (how many rows), `ids` (their Condition ids) and
+   `encounterIds` (each visit they name, once, newest first).
+
+Groups are ordered by `lastSeen`, newest first; undated groups last.
+*/
 export function collapseConditions(rows: readonly ConditionRow[]): ConditionGroup[] {
   const groups = new Map<string, Building>();
   for (const [index, row] of rows.entries()) {
@@ -297,7 +297,7 @@ function seenRange(items: readonly Item[]): { earliest?: Dated; latest?: Dated }
 function valuesOf(items: readonly Item[], key: string): string[] {
   return items.flatMap((item) => {
     const value = stringOf(item, key);
-    return value === undefined ? [] : [value];
+    return value ?? [];
   });
 }
 
@@ -315,7 +315,7 @@ function buildGroup(group: Building): ConditionGroup {
   categories.sort((a, b) => a.localeCompare(b));
   const { earliest, latest } = seenRange(items);
 
-  const code = recordOf(representative, "code");
+  const code = codeOf(representative);
   const clinicalStatus = stringOf(representative, "clinicalStatus");
   const verificationStatus = stringOf(representative, "verificationStatus");
   const abatement = stringOf(representative, "abatement");
@@ -350,12 +350,12 @@ export interface ConditionsView {
 }
 
 /**
- * `get_conditions`' reshape: the status filter, then the collapse. Undefined
- * when neither was asked for, so a call without them is exactly the plain list.
- *
- * `total` is the rows the status filter kept -- before any collapse -- and a
- * collapse adds `groups`, the number of items `jq` and `limit` then see.
- */
+`get_conditions`' reshape: the status filter, then the collapse. Undefined
+when neither was asked for, so a call without them is exactly the plain list.
+
+`total` is the rows the status filter kept -- before any collapse -- and a
+collapse adds `groups`, the number of items `jq` and `limit` then see.
+*/
 export function conditionsReshape(
   view: ConditionsView,
 ): ((rows: readonly ReshapeRow[]) => Reshaped) | undefined {

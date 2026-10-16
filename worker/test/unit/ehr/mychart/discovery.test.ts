@@ -38,12 +38,12 @@ import type { PortalFetchStub } from "./fixtures.ts";
 import type { AppError } from "../../../../src/lib/errors.ts";
 
 /**
- * `HOST` over plain http.
- *
- * Derived rather than written out: a literal `http://` URL in this repository is
- * rewritten to `https://` by an eslint fixer, which would quietly turn the two
- * downgrade tests below into tests of nothing.
- */
+`HOST` over plain http.
+
+Derived rather than written out: a literal `http://` URL in this repository is
+rewritten to `https://` by an eslint fixer, which would quietly turn the two
+downgrade tests below into tests of nothing.
+*/
 const INSECURE_HOST = HOST.replace("https://", "http://");
 
 function deps(stub: PortalFetchStub, mountHint?: string) {

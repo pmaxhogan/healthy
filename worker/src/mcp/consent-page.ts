@@ -1,26 +1,26 @@
 /**
- * The consent screen: the most sensitive page in the application.
- *
- * Approving here hands a third-party MCP client read access to an entire medical
- * record, so what stands in front of it matters more than how it looks:
- *
- *  1. Cloudflare Access. The requesting client never reaches this page; the owner's
- *    browser does, and Access has already established that it is the owner.
- *  2. The password session, from `ownerGate` in `worker/src/app.ts`. The GET is a
- *    top-level navigation, which the `SameSite=Lax` cookie rides; if the session
- *    has lapsed the gate answers with the login form carrying `?next=` and
- *    signing in resumes the flow.
- *  3. Origin check on the POST (`csrfGuard`). An HTML form cannot send a custom
- *    header, so the same-origin proof is the CSRF defence here; see
- *    `worker/src/auth/csrf.ts`, which lists `/authorize` as header-exempt on purpose.
- *  4. `frame-ancestors 'none'`, so the page cannot be framed and click-jacked.
- *
- * The authorization request travels through the form as base64 JSON rather than
- * being kept server-side. It is not a capability: the POST is worthless without
- * the session cookie and a same-origin Origin, and everything inside it is
- * re-validated -- the client is looked up again and the redirect URI is checked
- * against that client's registration before either branch redirects anywhere.
- */
+The consent screen: the most sensitive page in the application.
+
+Approving here hands a third-party MCP client read access to an entire medical
+record, so what stands in front of it matters more than how it looks:
+
+ 1. Cloudflare Access. The requesting client never reaches this page; the owner's
+   browser does, and Access has already established that it is the owner.
+ 2. The password session, from `ownerGate` in `worker/src/app.ts`. The GET is a
+   top-level navigation, which the `SameSite=Lax` cookie rides; if the session
+   has lapsed the gate answers with the login form carrying `?next=` and
+   signing in resumes the flow.
+ 3. Origin check on the POST (`csrfGuard`). An HTML form cannot send a custom
+   header, so the same-origin proof is the CSRF defence here; see
+   `worker/src/auth/csrf.ts`, which lists `/authorize` as header-exempt on purpose.
+ 4. `frame-ancestors 'none'`, so the page cannot be framed and click-jacked.
+
+The authorization request travels through the form as base64 JSON rather than
+being kept server-side. It is not a capability: the POST is worthless without
+the session cookie and a same-origin Origin, and everything inside it is
+re-validated -- the client is looked up again and the redirect URI is checked
+against that client's registration before either branch redirects anywhere.
+*/
 
 import { z } from "zod";
 
@@ -33,11 +33,11 @@ import type { Env } from "../env.ts";
 import type { AuthRequest, ClientInfo, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 
 /**
- * The library resolves a request's resource indicator(s) down to its one
- * configured canonical resource before an `AuthRequest` ever reaches here
- * (1.x): several `resource` query parameters, or one that doesn't match, fail
- * earlier with a redirect and never produce a request to encode.
- */
+The library resolves a request's resource indicator(s) down to its one
+configured canonical resource before an `AuthRequest` ever reaches here
+(1.x): several `resource` query parameters, or one that doesn't match, fail
+earlier with a redirect and never produce a request to encode.
+*/
 const RESOURCE_INDICATOR = z.string();
 
 /** What the hidden field carries, validated on the way back in. */
@@ -58,13 +58,13 @@ function encodeRequest(request: AuthRequest): string {
 }
 
 /**
- * Decode the hidden field back into an `AuthRequest`.
- *
- * Rebuilt field by field rather than cast: `exactOptionalPropertyTypes` is on, so
- * an absent optional has to be absent rather than present-and-undefined, and doing
- * it explicitly is also what keeps an unexpected key out of the object that gets
- * handed to `completeAuthorization`.
- */
+Decode the hidden field back into an `AuthRequest`.
+
+Rebuilt field by field rather than cast: `exactOptionalPropertyTypes` is on, so
+an absent optional has to be absent rather than present-and-undefined, and doing
+it explicitly is also what keeps an unexpected key out of the object that gets
+handed to `completeAuthorization`.
+*/
 function decodeRequest(encoded: string): AuthRequest | null {
   let parsed: z.infer<typeof encodedRequestSchema>;
   try {
@@ -157,13 +157,13 @@ ${extraStyles(nonce)}
 }
 
 /**
- * Only `http:` and `https:` may ever be navigated to.
- *
- * Defence in depth: both branches below already check the address against the
- * client's own registration, but a `javascript:` or `data:` URL that reached a
- * hand-off page would be script execution on this origin, so the scheme is
- * checked at the point of use as well.
- */
+Only `http:` and `https:` may ever be navigated to.
+
+Defence in depth: both branches below already check the address against the
+client's own registration, but a `javascript:` or `data:` URL that reached a
+hand-off page would be script execution on this origin, so the scheme is
+checked at the point of use as well.
+*/
 function isNavigable(location: string): boolean {
   try {
     const { protocol } = new URL(location);
@@ -174,22 +174,22 @@ function isNavigable(location: string): boolean {
 }
 
 /**
- * The hand-off back to the MCP client.
- *
- * A 200 page carrying `<meta http-equiv="refresh">`, NOT a 302 -- and that is not a
- * style choice. The global CSP sets `form-action 'self'`, and browsers apply
- * `form-action` to the redirect that a form POST is answered with: a 302 from
- * `POST /authorize` to the client's own callback (claude.ai's, say) is blocked, and
- * the connection silently never completes. Widening `form-action` to every
- * registered client's origin would weaken the policy for every other form in the
- * app, so the POST answers 200 and the browser navigates instead, which
- * `form-action` does not govern.
- *
- * The document is written out here rather than through `public/html.ts` because it
- * needs a `<meta>` in `<head>`, and a meta refresh in `<body>` is not reliably
- * honoured. The link is the no-JavaScript fallback, and it is the only thing on the
- * page a person would ever see.
- */
+The hand-off back to the MCP client.
+
+A 200 page carrying `<meta http-equiv="refresh">`, NOT a 302 -- and that is not a
+style choice. The global CSP sets `form-action 'self'`, and browsers apply
+`form-action` to the redirect that a form POST is answered with: a 302 from
+`POST /authorize` to the client's own callback (claude.ai's, say) is blocked, and
+the connection silently never completes. Widening `form-action` to every
+registered client's origin would weaken the policy for every other form in the
+app, so the POST answers 200 and the browser navigates instead, which
+`form-action` does not govern.
+
+The document is written out here rather than through `public/html.ts` because it
+needs a `<meta>` in `<head>`, and a meta refresh in `<body>` is not reliably
+honoured. The link is the no-JavaScript fallback, and it is the only thing on the
+page a person would ever see.
+*/
 function handOff(nonce: string, location: string, heading: string): Response {
   const safe = escapeHtml(location);
   const html = `<!doctype html>

@@ -1,50 +1,50 @@
 /**
- * `/api/health-systems/:id/portal` -- the patient-portal account for one health system.
- *
- * A separate file from `routes/health-systems.ts` because it is a separate subsystem:
- * the portal is a scrape with the owner's own login, a cookie jar, a daily attempt
- * budget, its own Durable Object and its own failure vocabulary. It is mounted
- * under `/api/health-systems` alongside that router; `/:id` and `/:id/portal` are
- * different path shapes, so neither can shadow the other.
- *
- * ### The five behaviours worth reading before changing anything
- *
- * **Storing a login takes two calls, and the owner decides between them.**
- * `POST .../portal/discover` probes the host for a login page and reports the
- * origin, mount and flavour it found, storing **nothing**. `PUT .../portal` then
- * has to echo that origin back as `confirmedOrigin`, and refuses with
- * `portal_origin_unconfirmed` when the probe lands anywhere else. That split is
- * the whole point: discovery deliberately follows redirects, so the origin it
- * settles on may not be the host the owner typed -- and that origin is where the
- * portal password is POSTed on every later sign-in. A vanity alias that is
- * dropped and re-registered would otherwise relocate the credential with no
- * human in the loop. (`portalFetch` additionally refuses to leave the site or
- * leave https at all; this is the second gate, not the first.)
- *
- * **Discovery is still skipped when nothing about the endpoint changed.**
- * Re-saving a password against the origin already stored -- which the owner
- * confirmed when it was stored -- must not re-probe: that is several
- * unauthenticated requests to a host with bot protection, for nothing.
- *
- * **Sealing a password against a URL that hosts no portal** produces an account
- * that can never sign in and a reconnect card that can never be cleared, which is
- * why the probe comes first at all. The whole discovery result is stored,
- * opaquely -- it says *how* to sign in to that deployment, not merely where it is.
- *
- * **The password is write-only, in both directions.** It is sealed by the repo and
- * no response here echoes it, not even as a length. `PortalAccountDto` reports
- * `hasCredentials` and nothing more.
- *
- * **A sign-in is a 202 and a Durable Object, never a `waitUntil`.** The portal
- * emails a verification code; waiting for it takes seconds to minutes, and work in
- * a request's `waitUntil` is cancelled about thirty seconds after the response. So
- * the route queues a job and the SPA polls `GET`'s `signIn` for the phase. The same
- * is true of `POST .../portal/sync`, which may have to re-establish the session
- * before it can read anything.
- *
- * Nothing here logs a username, a password, a portal host or an emailed code.
- * Health system ids, stable codes and counts only.
- */
+`/api/health-systems/:id/portal` -- the patient-portal account for one health system.
+
+A separate file from `routes/health-systems.ts` because it is a separate subsystem:
+the portal is a scrape with the owner's own login, a cookie jar, a daily attempt
+budget, its own Durable Object and its own failure vocabulary. It is mounted
+under `/api/health-systems` alongside that router; `/:id` and `/:id/portal` are
+different path shapes, so neither can shadow the other.
+
+### The five behaviours worth reading before changing anything
+
+**Storing a login takes two calls, and the owner decides between them.**
+`POST .../portal/discover` probes the host for a login page and reports the
+origin, mount and flavour it found, storing **nothing**. `PUT .../portal` then
+has to echo that origin back as `confirmedOrigin`, and refuses with
+`portal_origin_unconfirmed` when the probe lands anywhere else. That split is
+the whole point: discovery deliberately follows redirects, so the origin it
+settles on may not be the host the owner typed -- and that origin is where the
+portal password is POSTed on every later sign-in. A vanity alias that is
+dropped and re-registered would otherwise relocate the credential with no
+human in the loop. (`portalFetch` additionally refuses to leave the site or
+leave https at all; this is the second gate, not the first.)
+
+**Discovery is still skipped when nothing about the endpoint changed.**
+Re-saving a password against the origin already stored -- which the owner
+confirmed when it was stored -- must not re-probe: that is several
+unauthenticated requests to a host with bot protection, for nothing.
+
+**Sealing a password against a URL that hosts no portal** produces an account
+that can never sign in and a reconnect card that can never be cleared, which is
+why the probe comes first at all. The whole discovery result is stored,
+opaquely -- it says *how* to sign in to that deployment, not merely where it is.
+
+**The password is write-only, in both directions.** It is sealed by the repo and
+no response here echoes it, not even as a length. `PortalAccountDto` reports
+`hasCredentials` and nothing more.
+
+**A sign-in is a 202 and a Durable Object, never a `waitUntil`.** The portal
+emails a verification code; waiting for it takes seconds to minutes, and work in
+a request's `waitUntil` is cancelled about thirty seconds after the response. So
+the route queues a job and the SPA polls `GET`'s `signIn` for the phase. The same
+is true of `POST .../portal/sync`, which may have to re-establish the session
+before it can read anything.
+
+Nothing here logs a username, a password, a portal host or an emailed code.
+Health system ids, stable codes and counts only.
+*/
 
 import { Hono } from "hono";
 
@@ -79,12 +79,12 @@ async function requireHealthSystem(api: ApiContext, id: string): Promise<HealthS
 }
 
 /**
- * What `GET` answers for a health system that has never had a portal account.
- *
- * Synthesized rather than a 404: the admin UI's portal card is how an account is
- * created in the first place, so it has to be able to render against "there is
- * nothing here yet".
- */
+What `GET` answers for a health system that has never had a portal account.
+
+Synthesized rather than a 404: the admin UI's portal card is how an account is
+created in the first place, so it has to be able to render against "there is
+nothing here yet".
+*/
 function emptyAccount(healthSystemId: string): PortalAccountDto {
   return {
     healthSystemId,
@@ -105,13 +105,13 @@ function emptyAccount(healthSystemId: string): PortalAccountDto {
 }
 
 /**
- * The account, the live sign-in progress, and how many visits it is tracking.
- *
- * `lastVisitCount` is null until the portal has answered at least once, and is
- * otherwise the number of upcoming visits currently on the calendar from this
- * portal -- which is the question the card is really asking ("is this working?"),
- * and is a count of our own rows rather than anything re-fetched.
- */
+The account, the live sign-in progress, and how many visits it is tracking.
+
+`lastVisitCount` is null until the portal has answered at least once, and is
+otherwise the number of upcoming visits currently on the calendar from this
+portal -- which is the question the card is really asking ("is this working?"),
+and is a count of our own rows rather than anything re-fetched.
+*/
 async function portalStatus(
   api: ApiContext,
   healthSystemId: string,
@@ -143,18 +143,18 @@ function originOf(url: string): string {
 }
 
 /**
- * A mount hint from the path the owner's pasted URL carried, when they did not
- * name one with `mountHint` directly.
- *
- * The owner sometimes pastes the login page itself -- `<origin>/<org>/
- * Authentication/Login` -- rather than the bare host, and that first path
- * segment is exactly the vanity mount discovery's generic candidates
- * (`/MyChart/`, `/`, `/prd/`) cannot guess. `originOf` above keeps only the
- * origin for `base_url`; this is what stops the rest of the path from being
- * silently dropped on the way to `discover()`. Undefined for a bare origin
- * (no path to derive from) or an unparseable URL, in which case discovery
- * falls back to its own generic candidates exactly as it always did.
- */
+A mount hint from the path the owner's pasted URL carried, when they did not
+name one with `mountHint` directly.
+
+The owner sometimes pastes the login page itself -- `<origin>/<org>/
+Authentication/Login` -- rather than the bare host, and that first path
+segment is exactly the vanity mount discovery's generic candidates
+(`/MyChart/`, `/`, `/prd/`) cannot guess. `originOf` above keeps only the
+origin for `base_url`; this is what stops the rest of the path from being
+silently dropped on the way to `discover()`. Undefined for a bare origin
+(no path to derive from) or an unparseable URL, in which case discovery
+falls back to its own generic candidates exactly as it always did.
+*/
 function mountHintFromPath(url: string): string | undefined {
   let pathname: string;
   try {
@@ -167,21 +167,21 @@ function mountHintFromPath(url: string): string | undefined {
 }
 
 /**
- * Probe for the portal. Stores nothing.
- *
- * Every failure is reported as one code -- `portal_discovery_failed`, 400 -- with
- * the underlying code in `details.reason`. The admin UI has one thing to say
- * ("that URL does not look like a patient portal") and one place to look for why,
- * and the underlying codes (`portal_parse_failed`, `portal_bot_blocked`,
- * `portal_unreachable`) are about a host the owner typed, which makes them the
- * request's fault however the portal phrased it.
- *
- * The one detail that is passed through rather than reduced is
- * `portal_redirected_offsite`'s landed origin: "that URL sent us to
- * somewhere-else.example" is the one thing the owner can act on, and it is the
- * only host this surface ever reports. It goes in the response body, never in a
- * log line -- `errorFields` does not carry `details`.
- */
+Probe for the portal. Stores nothing.
+
+Every failure is reported as one code -- `portal_discovery_failed`, 400 -- with
+the underlying code in `details.reason`. The admin UI has one thing to say
+("that URL does not look like a patient portal") and one place to look for why,
+and the underlying codes (`portal_parse_failed`, `portal_bot_blocked`,
+`portal_unreachable`) are about a host the owner typed, which makes them the
+request's fault however the portal phrased it.
+
+The one detail that is passed through rather than reduced is
+`portal_redirected_offsite`'s landed origin: "that URL sent us to
+somewhere-else.example" is the one thing the owner can act on, and it is the
+only host this surface ever reports. It goes in the response body, never in a
+log line -- `errorFields` does not carry `details`.
+*/
 async function probeEndpoint(
   api: ApiContext,
   input: { baseUrl: string; mountHint?: string | undefined },
@@ -229,10 +229,10 @@ function toDiscoveryDto(endpoint: AnyPortalEndpoint): PortalDiscoveryDto {
 }
 
 /**
- * Refuse an identity provider the owner has not seen: it has to be the one they
- * just confirmed or, when they confirmed none, the one already stored for this
- * account. A portal that signs in on its own origin has none and always passes.
- */
+Refuse an identity provider the owner has not seen: it has to be the one they
+just confirmed or, when they confirmed none, the one already stored for this
+account. A portal that signs in on its own origin has none and always passes.
+*/
 function requireConfirmedSignIn(
   endpoint: AnyPortalEndpoint,
   confirmedSignInOrigin: string | undefined,
@@ -251,11 +251,11 @@ function requireConfirmedSignIn(
 }
 
 /**
- * The origin a stored or discovered endpoint POSTs the password to, when that is
- * a separate identity provider (ModMed's Keycloak); null when it is the portal
- * origin itself. Read loosely, because a stored endpoint is the adapter's own
- * JSON.
- */
+The origin a stored or discovered endpoint POSTs the password to, when that is
+a separate identity provider (ModMed's Keycloak); null when it is the portal
+origin itself. Read loosely, because a stored endpoint is the adapter's own
+JSON.
+*/
 function signInOriginOf(endpoint: unknown): string | null {
   if (typeof endpoint !== "object" || endpoint === null) return null;
   const record = endpoint as { portal?: unknown; authServerUrl?: unknown };
@@ -274,11 +274,11 @@ portalRouter.get("/:id/portal", async (c) => {
 });
 
 /**
- * Probe for the portal and report where it is. Stores nothing, needs no credential.
- *
- * Step one of two. The owner reads the origin out of the response, and step two
- * (`PUT`) has to echo it back before anything is sealed against it.
- */
+Probe for the portal and report where it is. Stores nothing, needs no credential.
+
+Step one of two. The owner reads the origin out of the response, and step two
+(`PUT`) has to echo it back before anything is sealed against it.
+*/
 portalRouter.post("/:id/portal/discover", async (c) => {
   const api = apiContext(c);
   await requireHealthSystem(api, c.req.param("id"));
@@ -295,15 +295,15 @@ portalRouter.post("/:id/portal/discover", async (c) => {
 });
 
 /**
- * Store (or replace) the portal login, against an origin the owner confirmed.
- *
- * Step two of two. `confirmedOrigin` is what `POST .../portal/discover` reported
- * (or, when only the password is changing, the origin already stored -- which was
- * confirmed when it was stored). Discovery re-runs unless that origin is exactly
- * the stored one, and the probe has to land on `confirmedOrigin` or nothing is
- * written: a chain that has moved since the owner looked is a
- * `portal_origin_unconfirmed`, not a silent relocation of their password.
- */
+Store (or replace) the portal login, against an origin the owner confirmed.
+
+Step two of two. `confirmedOrigin` is what `POST .../portal/discover` reported
+(or, when only the password is changing, the origin already stored -- which was
+confirmed when it was stored). Discovery re-runs unless that origin is exactly
+the stored one, and the probe has to land on `confirmedOrigin` or nothing is
+written: a chain that has moved since the owner looked is a
+`portal_origin_unconfirmed`, not a silent relocation of their password.
+*/
 portalRouter.put("/:id/portal", async (c) => {
   const api = apiContext(c);
   const row = await requireHealthSystem(api, c.req.param("id"));
@@ -363,13 +363,13 @@ portalRouter.put("/:id/portal", async (c) => {
 });
 
 /**
- * Start a sign-in. 202: the job outlives this request by minutes.
- *
- * The daily budget is checked here rather than only in the job, because this is
- * where there is somewhere to put the answer: `portal_attempts_exhausted` is a 429,
- * and the admin UI tells the owner to come back tomorrow instead of leaving them
- * pressing a button that silently does nothing.
- */
+Start a sign-in. 202: the job outlives this request by minutes.
+
+The daily budget is checked here rather than only in the job, because this is
+where there is somewhere to put the answer: `portal_attempts_exhausted` is a 429,
+and the admin UI tells the owner to come back tomorrow instead of leaving them
+pressing a button that silently does nothing.
+*/
 portalRouter.post("/:id/portal/sign-in", async (c) => {
   const api = apiContext(c);
   const row = await requireHealthSystem(api, c.req.param("id"));
@@ -401,12 +401,12 @@ portalRouter.post("/:id/portal/sync", async (c) => {
 });
 
 /**
- * Forget the cookie jar, keeping the credentials.
- *
- * The recovery for a session the portal no longer recognises: the next sign-in
- * starts from the password instead of replaying a jar that cannot work. It does
- * *not* free an attempt -- the budget is about how often we may knock.
- */
+Forget the cookie jar, keeping the credentials.
+
+The recovery for a session the portal no longer recognises: the next sign-in
+starts from the password instead of replaying a jar that cannot work. It does
+*not* free an attempt -- the budget is about how often we may knock.
+*/
 portalRouter.delete("/:id/portal/session", async (c) => {
   const api = apiContext(c);
   const row = await requireHealthSystem(api, c.req.param("id"));
@@ -417,13 +417,13 @@ portalRouter.delete("/:id/portal/session", async (c) => {
 });
 
 /**
- * Remove the portal account: credentials, jar, endpoint and counters.
- *
- * The calendar events the portal wrote are deliberately left alone, exactly as
- * deleting a health system leaves its events: they are the owner's appointments, and
- * removing an account is not a reason to rewrite their week. Any open reconnect
- * card is closed, because there is now nothing to reconnect.
- */
+Remove the portal account: credentials, jar, endpoint and counters.
+
+The calendar events the portal wrote are deliberately left alone, exactly as
+deleting a health system leaves its events: they are the owner's appointments, and
+removing an account is not a reason to rewrite their week. Any open reconnect
+card is closed, because there is now nothing to reconnect.
+*/
 portalRouter.delete("/:id/portal", async (c) => {
   const api = apiContext(c);
   const row = await requireHealthSystem(api, c.req.param("id"));

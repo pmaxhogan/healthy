@@ -1,31 +1,31 @@
 /**
- * `/api/health-systems` -- the connected health systems and the actions on one.
- *
- * Three behaviours are worth reading before changing anything here.
- *
- * **Creation validates the endpoint, not the owner's typing.** A `brandId` comes
- * from `worker/data/epic-brands.json`, which is Epic's own published directory, so its
- * FHIR base is taken as given. A manual `fhirBaseUrl` is not: it must be https and
- * it must answer a SMART discovery request *before* the row is written. Storing an
- * endpoint that turns out not to be a SMART FHIR server produces a health system that
- * can never be connected and a reconnect card that can never be cleared. The same
- * check runs when a PATCH moves an unconnected health system to another endpoint.
- *
- * **Deletion is a disconnect plus a soft delete.** The calendar events already
- * written are left exactly as they are -- they are the owner's appointment history,
- * and a health system being removed from the admin UI is not a reason to rewrite a
- * year of their calendar. `health_systems.deleted_at` hides the row; the tokens are
- * destroyed by `connections.disconnect`, and the portal account with them -- a soft
- * delete never fires its `ON DELETE CASCADE`, so the credentials have to be cleared
- * by hand or they outlive the health system.
- *
- * **The long-running actions answer 202, by two different mechanisms.** A calendar
- * sync runs in `waitUntil` after the response. A full refresh cannot: `waitUntil` is
- * cancelled about thirty seconds in, and a large record takes minutes, so that one is
- * queued on a Durable Object alarm instead (`worker/src/sync/runner.ts`). Either way the
- * Runs page polls `GET /api/runs` every few seconds while a row is still `running`,
- * so the 202 itself carries no `runId` to report.
- */
+`/api/health-systems` -- the connected health systems and the actions on one.
+
+Three behaviours are worth reading before changing anything here.
+
+**Creation validates the endpoint, not the owner's typing.** A `brandId` comes
+from `worker/data/epic-brands.json`, which is Epic's own published directory, so its
+FHIR base is taken as given. A manual `fhirBaseUrl` is not: it must be https and
+it must answer a SMART discovery request *before* the row is written. Storing an
+endpoint that turns out not to be a SMART FHIR server produces a health system that
+can never be connected and a reconnect card that can never be cleared. The same
+check runs when a PATCH moves an unconnected health system to another endpoint.
+
+**Deletion is a disconnect plus a soft delete.** The calendar events already
+written are left exactly as they are -- they are the owner's appointment history,
+and a health system being removed from the admin UI is not a reason to rewrite a
+year of their calendar. `health_systems.deleted_at` hides the row; the tokens are
+destroyed by `connections.disconnect`, and the portal account with them -- a soft
+delete never fires its `ON DELETE CASCADE`, so the credentials have to be cleared
+by hand or they outlive the health system.
+
+**The long-running actions answer 202, by two different mechanisms.** A calendar
+sync runs in `waitUntil` after the response. A full refresh cannot: `waitUntil` is
+cancelled about thirty seconds in, and a large record takes minutes, so that one is
+queued on a Durable Object alarm instead (`worker/src/sync/runner.ts`). Either way the
+Runs page polls `GET /api/runs` every few seconds while a row is still `running`,
+so the 202 itself carries no `runId` to report.
+*/
 
 import { Hono } from "hono";
 
@@ -71,11 +71,11 @@ async function projectHealthSystem(
 }
 
 /**
- * A health system row that exists and has not been soft-deleted.
- *
- * Shared with the OAuth routes: a soft-deleted health system must not be reachable
- * through a stale start link either, and one predicate is how the two stay agreed.
- */
+A health system row that exists and has not been soft-deleted.
+
+Shared with the OAuth routes: a soft-deleted health system must not be reachable
+through a stale start link either, and one predicate is how the two stay agreed.
+*/
 export function isLiveHealthSystem(row: HealthSystemRow | null): row is HealthSystemRow {
   return row !== null && row.deleted_at === null;
 }
@@ -99,18 +99,18 @@ healthSystemsRouter.get("/", async (c) => {
 });
 
 /**
- * Resolve the endpoint a new health system points at.
- *
- * Exactly one of `brandId` and `fhirBaseUrl`: with both, a disagreement between
- * them has no right answer, and silently preferring one is how a health system ends up
- * pointing somewhere the owner did not choose.
- */
+Resolve the endpoint a new health system points at.
+
+Exactly one of `brandId` and `fhirBaseUrl`: with both, a disagreement between
+them has no right answer, and silently preferring one is how a health system ends up
+pointing somewhere the owner did not choose.
+*/
 /**
- * Prove a manually entered FHIR base is really a SMART endpoint.
- *
- * `discover` throws `upstream_*` on a failure, which is the honest answer -- the
- * request was fine, the endpoint was not.
- */
+Prove a manually entered FHIR base is really a SMART endpoint.
+
+`discover` throws `upstream_*` on a failure, which is the honest answer -- the
+request was fine, the endpoint was not.
+*/
 async function assertSmartEndpoint(
   api: ApiContext,
   vendor: Vendor,
@@ -184,15 +184,15 @@ healthSystemsRouter.get("/:id", async (c) => {
 });
 
 /**
- * The endpoint columns a PATCH changes, validated; empty when it changes none.
- *
- * Refused while the health system has a live connection: its tokens, its patient
- * id and everything in its cache belong to the endpoint it was connected at, and
- * none of that survives being pointed somewhere else. Disconnecting first is what
- * makes the move explicit. What the old endpoint left in the cache -- including
- * its discovery document, which would otherwise be trusted for another week -- is
- * cleared here.
- */
+The endpoint columns a PATCH changes, validated; empty when it changes none.
+
+Refused while the health system has a live connection: its tokens, its patient
+id and everything in its cache belong to the endpoint it was connected at, and
+none of that survives being pointed somewhere else. Disconnecting first is what
+makes the move explicit. What the old endpoint left in the cache -- including
+its discovery document, which would otherwise be trusted for another week -- is
+cleared here.
+*/
 async function movedEndpoint(
   api: ApiContext,
   row: HealthSystemRow,
@@ -234,12 +234,12 @@ healthSystemsRouter.patch("/:id", async (c) => {
 });
 
 /**
- * Disconnect and hide a health system.
- *
- * The calendar is not touched: see the module comment. The FHIR cache is cleared,
- * because it is the one store that holds clinical content and nothing will read it
- * again.
- */
+Disconnect and hide a health system.
+
+The calendar is not touched: see the module comment. The FHIR cache is cleared,
+because it is the one store that holds clinical content and nothing will read it
+again.
+*/
 healthSystemsRouter.delete("/:id", async (c) => {
   const api = apiContext(c);
   const row = await requireHealthSystem(api, c.req.param("id"));
@@ -296,11 +296,11 @@ healthSystemsRouter.post("/:id/sync", async (c) => {
 });
 
 /**
- * Force a token refresh.
- *
- * Awaited, unlike the two above: it is a single round trip, and the useful answer
- * is the connection's new state -- which is the whole reason the owner pressed it.
- */
+Force a token refresh.
+
+Awaited, unlike the two above: it is a single round trip, and the useful answer
+is the connection's new state -- which is the whole reason the owner pressed it.
+*/
 healthSystemsRouter.post("/:id/refresh-token", async (c) => {
   const api = apiContext(c);
   const row = await requireHealthSystem(api, c.req.param("id"));
@@ -312,15 +312,15 @@ healthSystemsRouter.post("/:id/refresh-token", async (c) => {
 });
 
 /**
- * Re-walk every resource type for this health system, repopulating the MCP cache.
- *
- * Queued, not detached. This is the one long action that `waitUntil` cannot carry:
- * it is cancelled about thirty seconds after the response, which for the largest
- * record meant a half-filled cache and a run row left open forever. `startFullRefresh`
- * hands the work to a Durable Object alarm and returns, so the call awaited here is a
- * storage write. `started: false` reports that one was already in flight for this
- * health system -- still a 202, because the refresh the owner asked for is happening.
- */
+Re-walk every resource type for this health system, repopulating the MCP cache.
+
+Queued, not detached. This is the one long action that `waitUntil` cannot carry:
+it is cancelled about thirty seconds after the response, which for the largest
+record meant a half-filled cache and a run row left open forever. `startFullRefresh`
+hands the work to a Durable Object alarm and returns, so the call awaited here is a
+storage write. `started: false` reports that one was already in flight for this
+health system -- still a 202, because the refresh the owner asked for is happening.
+*/
 healthSystemsRouter.post("/:id/full-refresh", async (c) => {
   const api = apiContext(c);
   const row = await requireHealthSystem(api, c.req.param("id"));

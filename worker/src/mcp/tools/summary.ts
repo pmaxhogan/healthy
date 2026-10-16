@@ -1,18 +1,18 @@
 /**
- * `get_health_summary`: the one tool to call first.
- *
- * It answers "what is in here, and what has happened lately" in a single round
- * trip -- a count of every cached resource type per health system, plus the five
- * appointments nearest to now (the patient portal's upcoming visits included),
- * five conditions (problem list first, see {@link recentConditions}) and the
- * five most recent medications and lab results. A model that
- * starts here knows which of the other twenty-three tools are worth calling.
- *
- * The counts are emitted as items carrying `resourceType`, not as a separate
- * `counts` block. That is what makes a `resource` deny rule complete: denying
- * Coverage has to remove the Coverage *count* as well as the Coverage records, or
- * the summary would still say how many there are.
- */
+`get_health_summary`: the one tool to call first.
+
+It answers "what is in here, and what has happened lately" in a single round
+trip -- a count of every cached resource type per health system, plus the five
+appointments nearest to now (the patient portal's upcoming visits included),
+five conditions (problem list first, see {@link recentConditions}) and the
+five most recent medications and lab results. A model that
+starts here knows which of the other twenty-three tools are worth calling.
+
+The counts are emitted as items carrying `resourceType`, not as a separate
+`counts` block. That is what makes a `resource` deny rule complete: denying
+Coverage has to remove the Coverage *count* as well as the Coverage records, or
+the summary would still say how many there are.
+*/
 
 import { applyPolicy } from "../../policy/filter.ts";
 import { collectAppointments } from "../appointment-items.ts";
@@ -46,14 +46,14 @@ const SUMMARY_TOOL = "get_health_summary";
 const RECENT_PER_SECTION = 5;
 
 /**
- * Two of the four things a summary is asked about, and how to read each one.
- * Appointments are {@link nearestAppointments}; conditions are
- * {@link recentConditions}.
- *
- * The label goes out as `section`, not `category`: several normalized shapes
- * already carry a FHIR `category` array, and reusing the name would have the
- * summary's own label silently overwrite the resource's.
- */
+Two of the four things a summary is asked about, and how to read each one.
+Appointments are {@link nearestAppointments}; conditions are
+{@link recentConditions}.
+
+The label goes out as `section`, not `category`: several normalized shapes
+already carry a FHIR `category` array, and reusing the name would have the
+summary's own label silently overwrite the resource's.
+*/
 const SECTIONS: { section: string; specs: () => CollectSpec[] }[] = [
   {
     section: "medications",
@@ -71,16 +71,16 @@ const SECTIONS: { section: string; specs: () => CollectSpec[] }[] = [
 ];
 
 /**
- * The appointments nearest to now: the next ones first, then the latest past
- * ones to fill the section.
- *
- * Read through `collectAppointments`, the same merge `get_appointments` uses, so
- * the patient portal's upcoming visits are here too -- they are the only
- * upcoming appointments there are, because Epic's FHIR view never returns one
- * before it happens. "Most recent" by start date alone would fill the section
- * with the furthest-out visits and hide next week's. `denied` is what keeps a
- * denied health system's visit out when an allowed one's portal lists it.
- */
+The appointments nearest to now: the next ones first, then the latest past
+ones to fill the section.
+
+Read through `collectAppointments`, the same merge `get_appointments` uses, so
+the patient portal's upcoming visits are here too -- they are the only
+upcoming appointments there are, because Epic's FHIR view never returns one
+before it happens. "Most recent" by start date alone would fill the section
+with the furthest-out visits and hide next week's. `denied` is what keeps a
+denied health system's visit out when an allowed one's portal lists it.
+*/
 async function nearestAppointments(
   deps: ToolDeps,
   healthSystems: readonly HealthSystemInfo[],
@@ -107,24 +107,24 @@ async function nearestAppointments(
 }
 
 /**
- * One summary item and the raw resource it was read from, if any: the
- * exposure policy judges a rendered name (a requester, a practitioner) by
- * the reference behind it. Never returned.
- */
+One summary item and the raw resource it was read from, if any: the
+exposure policy judges a rendered name (a requester, a practitioner) by
+the reference behind it. Never returned.
+*/
 interface Sourced {
   item: TaggedItem;
   source: RawEntry | undefined;
 }
 
 /**
- * How many items each section carries.
- *
- * {@link RECENT_PER_SECTION} by default -- this tool is a fast overview, not a
- * full read, and every section has its own tool (`get_appointments`,
- * `get_conditions`, ...) for the complete list. But it is not a hidden ceiling:
- * a caller that passes its own `limit` gets that many per section instead, so
- * asking for more here is always honoured rather than silently capped at five.
- */
+How many items each section carries.
+
+{@link RECENT_PER_SECTION} by default -- this tool is a fast overview, not a
+full read, and every section has its own tool (`get_appointments`,
+`get_conditions`, ...) for the complete list. But it is not a hidden ceiling:
+a caller that passes its own `limit` gets that many per section instead, so
+asking for more here is always honoured rather than silently capped at five.
+*/
 function perSectionLimit(limit: number | undefined): number {
   return limit ?? RECENT_PER_SECTION;
 }
@@ -145,17 +145,17 @@ const SOURCE_RANK: Record<ConditionSource, number> = {
 };
 
 /**
- * The conditions section: problem-list entries first, then the most recently
- * seen encounter diagnoses, then anything else -- each one condition, collapsed
- * exactly as `get_conditions` with `collapse: true` would (so a problem-list
- * entry and its visits' copies are one item), and labelled with `source`.
- *
- * Collapsing is done on rows the exposure policy has ALREADY filtered, under
- * this tool's name: a group's dates, visits and codes can only come from what
- * the policy let through. The policy runs over the groups once more in
- * `respond`, which changes nothing a first pass already removed; the first
- * pass's warnings are passed on so none is lost.
- */
+The conditions section: problem-list entries first, then the most recently
+seen encounter diagnoses, then anything else -- each one condition, collapsed
+exactly as `get_conditions` with `collapse: true` would (so a problem-list
+entry and its visits' copies are one item), and labelled with `source`.
+
+Collapsing is done on rows the exposure policy has ALREADY filtered, under
+this tool's name: a group's dates, visits and codes can only come from what
+the policy let through. The policy runs over the groups once more in
+`respond`, which changes nothing a first pass already removed; the first
+pass's warnings are passed on so none is lost.
+*/
 async function recentConditions(
   deps: ToolDeps,
   healthSystems: readonly HealthSystemInfo[],

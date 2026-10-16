@@ -1,41 +1,41 @@
 /**
- * Directions without the health system's boilerplate.
- *
- * A visit's details page shows its department's directions, and a health system
- * injects its own paragraphs into every department's -- "check in online ahead
- * of your visit", "payment is due at the time of service". Those are noise on a
- * calendar, and the repository is public, so no health system's wording can be
- * hard-coded. The rule is statistical instead, per health system, over every
- * portal visit it has stored (past and upcoming):
- *
- *   - **Only with enough evidence.** Nothing is stripped unless the health system
- *     has at least {@link MIN_VISITS} visits with directions, across at least
- *     {@link MIN_DISTINCT} distinct practitioners and {@link MIN_DISTINCT}
- *     distinct departments. With one practitioner at one office, every paragraph
- *     repeats -- including the real "take the second elevator" -- and nothing
- *     distinguishes the boilerplate.
- *   - **A paragraph is boilerplate when two different departments both carry
- *     it.** Real directions describe one place; the same sentence under two
- *     places is the health system talking, not the department. (Not "appears in
- *     every visit": a live capture showed the check-in paragraph missing from a
- *     visit that offers no online check-in, so that rule would have left it on
- *     most visits.)
- *
- * Paragraphs are compared after whitespace and case normalisation. Departments
- * and practitioners are counted by their normalised names first, and by the
- * portal's own ids (`departmentId`, `practitionerId`) only when a visit has no
- * name. Names on purpose, although ids are the better identity in principle:
- * the stored visits span many sessions, and the ids' stability across sessions
- * has not been observed (the visit's own token's has). An id that changed per
- * session would count one department twice and strip its real directions -- the
- * one failure here that loses what the owner asked for -- while two departments
- * sharing a name only strips less.
- *
- * Visit instructions are not filtered: they are written per visit type, and no
- * capture has shown shared noise in them.
- *
- * Pure: the calendar sync and the MCP both call it, so they cannot disagree.
- */
+Directions without the health system's boilerplate.
+
+A visit's details page shows its department's directions, and a health system
+injects its own paragraphs into every department's -- "check in online ahead
+of your visit", "payment is due at the time of service". Those are noise on a
+calendar, and the repository is public, so no health system's wording can be
+hard-coded. The rule is statistical instead, per health system, over every
+portal visit it has stored (past and upcoming):
+
+  - **Only with enough evidence.** Nothing is stripped unless the health system
+    has at least {@link MIN_VISITS} visits with directions, across at least
+    {@link MIN_DISTINCT} distinct practitioners and {@link MIN_DISTINCT}
+    distinct departments. With one practitioner at one office, every paragraph
+    repeats -- including the real "take the second elevator" -- and nothing
+    distinguishes the boilerplate.
+  - **A paragraph is boilerplate when two different departments both carry
+    it.** Real directions describe one place; the same sentence under two
+    places is the health system talking, not the department. (Not "appears in
+    every visit": a live capture showed the check-in paragraph missing from a
+    visit that offers no online check-in, so that rule would have left it on
+    most visits.)
+
+Paragraphs are compared after whitespace and case normalisation. Departments
+and practitioners are counted by their normalised names first, and by the
+portal's own ids (`departmentId`, `practitionerId`) only when a visit has no
+name. Names on purpose, although ids are the better identity in principle:
+the stored visits span many sessions, and the ids' stability across sessions
+has not been observed (the visit's own token's has). An id that changed per
+session would count one department twice and strip its real directions -- the
+one failure here that loses what the owner asked for -- while two departments
+sharing a name only strips less.
+
+Visit instructions are not filtered: they are written per visit type, and no
+capture has shown shared noise in them.
+
+Pure: the calendar sync and the MCP both call it, so they cannot disagree.
+*/
 
 import { normalizeLabel } from "./portal-dedupe.ts";
 
@@ -50,12 +50,12 @@ const MIN_DISTINCT = 2;
 export type Boilerplate = ReadonlySet<string>;
 
 /**
- * The paragraphs of a directions text: every line on its own, empty ones dropped.
- *
- * Lines rather than blank-line blocks, because the portal separates its
- * boilerplate from the department's text with a single break as often as with a
- * blank line, and a block that held both could never match another visit's.
- */
+The paragraphs of a directions text: every line on its own, empty ones dropped.
+
+Lines rather than blank-line blocks, because the portal separates its
+boilerplate from the department's text with a single break as often as with a
+blank line, and a block that held both could never match another visit's.
+*/
 function paragraphs(text: string): string[] {
   return text
     .split("\n")
@@ -69,9 +69,9 @@ function paragraphKey(paragraph: string): string {
 }
 
 /** A name's normalised form, or the id with a prefix no name can produce. */
-function identity(name: string | undefined, id: string | undefined): string {
+function identity(name: string | undefined, id = ""): string {
   const label = normalizeLabel(name);
-  return label === "" ? `id:${id ?? ""}` : label;
+  return label === "" ? `id:${id}` : label;
 }
 
 function departmentKey(visit: PortalVisit): string {

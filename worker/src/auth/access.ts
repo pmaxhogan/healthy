@@ -32,13 +32,13 @@ const ACCESS_HEADER = "cf-access-jwt-assertion";
 const ACCESS_COOKIE = "CF_Authorization";
 
 /**
- * One remote JWKS per team domain, cached for the life of the isolate.
- *
- * `createRemoteJWKSet` does its own caching and cooldown, so re-creating it per
- * request would defeat that and issue a certificate fetch on every hit. Keyed by
- * team domain so a secret rotation that changes the team is picked up without a
- * redeploy.
- */
+One remote JWKS per team domain, cached for the life of the isolate.
+
+`createRemoteJWKSet` does its own caching and cooldown, so re-creating it per
+request would defeat that and issue a certificate fetch on every hit. Keyed by
+team domain so a secret rotation that changes the team is picked up without a
+redeploy.
+*/
 const jwksByTeam = new Map<string, JWTVerifyGetKey>();
 
 function jwksFor(team: string): JWTVerifyGetKey {
@@ -52,21 +52,21 @@ function jwksFor(team: string): JWTVerifyGetKey {
 /** Overrides for the tests. Production never passes this. */
 export interface VerifyAccessOptions {
   /**
-   * Replaces the remote JWKS with a locally supplied key resolver, so the email
-   * and audience checks can be tested against a real RS256 signature without
-   * reaching the network. `jose`'s `createLocalJWKSet` produces one.
-   */
+  Replaces the remote JWKS with a locally supplied key resolver, so the email
+  and audience checks can be tested against a real RS256 signature without
+  reaching the network. `jose`'s `createLocalJWKSet` produces one.
+  */
   getKey?: JWTVerifyGetKey;
 }
 
 /**
- * True when the request carries a valid Access assertion for the one allowed
- * identity.
- *
- * `DEV_MODE === "true"` short-circuits this gate and *only* this gate: there is
- * no Access in front of `wrangler dev` or the integration tests, but the
- * password gate still applies in both.
- */
+True when the request carries a valid Access assertion for the one allowed
+identity.
+
+`DEV_MODE === "true"` short-circuits this gate and *only* this gate: there is
+no Access in front of `wrangler dev` or the integration tests, but the
+password gate still applies in both.
+*/
 export async function verifyAccess(
   request: Request,
   env: AccessEnv,

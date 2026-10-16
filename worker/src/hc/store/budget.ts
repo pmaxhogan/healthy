@@ -1,42 +1,42 @@
 /**
- * What one slice of the ingest runner may spend.
- *
- * Two limits, and both are hard platform ones seen from a safe distance. D1
- * allows about a thousand queries per Worker invocation, and every statement
- * of a `db.batch` counts as one; an invocation that reaches the limit dies
- * mid-way with nothing to catch. So the work counts its own statements and
- * stops well short. Wall clock is the other: a slice that yields early costs
- * one more alarm, a slice that is cut off costs a retry.
- *
- * A slice always does at least one unit of work, whatever the budget says
- * (`mayStart`). Otherwise a unit that costs more than the whole budget would
- * be put off for ever.
- */
+What one slice of the ingest runner may spend.
+
+Two limits, and both are hard platform ones seen from a safe distance. D1
+allows about a thousand queries per Worker invocation, and every statement
+of a `db.batch` counts as one; an invocation that reaches the limit dies
+mid-way with nothing to catch. So the work counts its own statements and
+stops well short. Wall clock is the other: a slice that yields early costs
+one more alarm, a slice that is cut off costs a retry.
+
+A slice always does at least one unit of work, whatever the budget says
+(`mayStart`). Otherwise a unit that costs more than the whole budget would
+be put off for ever.
+*/
 
 export interface SliceBudget {
   /** Statements, counted by the code that issues them. */
   maxQueries: number;
   maxMs: number;
   /**
-   * Commit every chunk in a transaction of its own, and read heart-rate spill
-   * from the table for each: applying as it was before chunks shared a commit.
-   * The reference the shared path is held to in the tests, and the way to turn
-   * sharing off. Slower by a round trip or two a chunk, and the same store.
-   */
+  Commit every chunk in a transaction of its own, and read heart-rate spill
+  from the table for each: applying as it was before chunks shared a commit.
+  The reference the shared path is held to in the tests, and the way to turn
+  sharing off. Slower by a round trip or two a chunk, and the same store.
+  */
   perChunk?: boolean;
 }
 
 /**
- * The runner's budget. 650 of D1's ~1000 queries leaves room for the one unit
- * that was already under way when the count was last checked; 20 seconds is
- * what the full-refresh runner asks of an alarm, for the same reason.
- */
+The runner's budget. 650 of D1's ~1000 queries leaves room for the one unit
+that was already under way when the count was last checked; 20 seconds is
+what the full-refresh runner asks of an alarm, for the same reason.
+*/
 export const DEFAULT_SLICE_BUDGET: SliceBudget = { maxQueries: 650, maxMs: 20_000 };
 
 /**
- * What a slice really asked of D1, as D1 and the clock report it: see
- * worker/src/hc/store/counted.ts. Counts and durations only.
- */
+What a slice really asked of D1, as D1 and the clock report it: see
+worker/src/hc/store/counted.ts. Counts and durations only.
+*/
 export interface Measured {
   /** Calls that left for D1: each `db.batch`, and each statement run alone. */
   roundTrips: number;
@@ -130,9 +130,9 @@ export class Meter {
   }
 
   /**
-   * A meter for a bounded share of what this one may spend, for work that must
-   * not be allowed to crowd out the rest of the slice. `absorb` it afterwards.
-   */
+  A meter for a bounded share of what this one may spend, for work that must
+  not be allowed to crowd out the rest of the slice. `absorb` it afterwards.
+  */
   share(fraction: number): Meter {
     return new Meter(
       {
@@ -144,10 +144,10 @@ export class Meter {
   }
 
   /**
-   * A meter with a budget of its own, on this one's clock, for work that is
-   * allowed so much and no more whatever this meter has left. `absorb` it
-   * afterwards.
-   */
+  A meter with a budget of its own, on this one's clock, for work that is
+  allowed so much and no more whatever this meter has left. `absorb` it
+  afterwards.
+  */
   part(budget: SliceBudget): Meter {
     return new Meter(budget, this.clock);
   }
@@ -168,9 +168,9 @@ export class Meter {
   }
 
   /**
-   * Whether a unit expected to cost about `queries` statements may begin. The
-   * first unit of a slice always may.
-   */
+  Whether a unit expected to cost about `queries` statements may begin. The
+  first unit of a slice always may.
+  */
   mayStart(queries: number): boolean {
     if (this.units === 0) return true;
     const affordable = this.queries + queries <= this.budget.maxQueries;

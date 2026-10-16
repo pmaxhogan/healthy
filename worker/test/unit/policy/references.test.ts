@@ -39,13 +39,13 @@ const NPI = "npi-synthetic-0001";
 const LAB_NAME = "Synthetic hemoglobin panel";
 const NARRATIVE = "narrative-synthetic-marker";
 
-function hide(paths: string[], resourceType?: string): PolicyRuleInput {
+function hide(paths: string[], resourceType: string | null = null): PolicyRuleInput {
   return {
     rule_type: "field",
     target: JSON.stringify(paths),
     effect: "hide",
     scope_tool: null,
-    scope_resource: resourceType ?? null,
+    scope_resource: resourceType,
     scope_health_system: null,
     paths_json: JSON.stringify(paths),
   };

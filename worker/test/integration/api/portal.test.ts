@@ -70,12 +70,12 @@ const LOGIN_PAGE = `<!doctype html><html><body>
 const MOVED_ORIGIN = "https://moved.example.test";
 
 /**
- * The portal's own host over plain http.
- *
- * Derived rather than written out: a literal `http://` URL in this repository is
- * rewritten to `https://` by an eslint fixer, which would quietly turn the
- * downgrade test below into a test of nothing.
- */
+The portal's own host over plain http.
+
+Derived rather than written out: a literal `http://` URL in this repository is
+rewritten to `https://` by an eslint fixer, which would quietly turn the
+downgrade test below into a test of nothing.
+*/
 const INSECURE_ORIGIN = PORTAL_ORIGIN.replace("https://", "http://");
 
 /** A page that is a page, but not a login form. */
@@ -92,11 +92,11 @@ function htmlStub(body: string): ReturnType<typeof stubFetch> {
 }
 
 /**
- * A portal whose login page answers only under an org-specific first path
- * segment -- none of the generic candidates (`/MyChart/`, `/`, `/prd/`) have
- * anything there. What the owner pastes is the login page itself, path and all,
- * so the mount hint has to come from that path or discovery never finds it.
- */
+A portal whose login page answers only under an org-specific first path
+segment -- none of the generic candidates (`/MyChart/`, `/`, `/prd/`) have
+anything there. What the owner pastes is the login page itself, path and all,
+so the mount hint has to come from that path or discovery never finds it.
+*/
 function orgMountStub(mount: string): ReturnType<typeof stubFetch> {
   return stubFetch([
     {
@@ -112,12 +112,12 @@ function orgMountStub(mount: string): ReturnType<typeof stubFetch> {
 }
 
 /**
- * A `portal` port that runs the real sign-in when the test says to.
- *
- * `startSignIn` does what the Durable Object's first storage write does -- record
- * that a sign-in has begun -- and hands back a `run` the test calls to play the job
- * out. That split is the point: it is what lets one test observe both phases.
- */
+A `portal` port that runs the real sign-in when the test says to.
+
+`startSignIn` does what the Durable Object's first storage write does -- record
+that a sign-in has begun -- and hands back a `run` the test calls to play the job
+out. That split is the point: it is what lets one test observe both phases.
+*/
 function fakeRunner(portal: FakePortal): {
   ports: Parameters<typeof usePorts>[0];
   run: (ctx: Ctx, healthSystemId: string) => Promise<void>;

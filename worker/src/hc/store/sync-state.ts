@@ -1,22 +1,22 @@
 /**
- * `hc_sync_state`: per (device, record type), what has arrived and what the
- * phone says about its own access to that type. It is what lets an MCP answer
- * tell "not permitted", "permitted, no data" and "stale" from an empty list.
- *
- * Two writers, both at the end of a batch:
- *
- *   - `recountStatement` -- what the store holds. Recomputed from `hc_chunks`
- *     rather than incremented, so it is exact whatever was replayed on the way:
- *     the count, the earliest record start and the latest record end.
- *   - `reportStatement`  -- what the phone reported in the batch's `syncState`:
- *     permission, changes-token age, backlog, backfill progress. Latest wins,
- *     by the batch's arrival time.
- *
- * `last_upload_at` is the arrival (unix seconds) of the last batch that covered
- * the type: one that carried records of it or changed some, or whose
- * `syncState` listed it. A granted type the phone keeps reporting on is
- * therefore not stale merely because nothing new was recorded.
- */
+`hc_sync_state`: per (device, record type), what has arrived and what the
+phone says about its own access to that type. It is what lets an MCP answer
+tell "not permitted", "permitted, no data" and "stale" from an empty list.
+
+Two writers, both at the end of a batch:
+
+  - `recountStatement` -- what the store holds. Recomputed from `hc_chunks`
+    rather than incremented, so it is exact whatever was replayed on the way:
+    the count, the earliest record start and the latest record end.
+  - `reportStatement`  -- what the phone reported in the batch's `syncState`:
+    permission, changes-token age, backlog, backfill progress. Latest wins,
+    by the batch's arrival time.
+
+`last_upload_at` is the arrival (unix seconds) of the last batch that covered
+the type: one that carried records of it or changed some, or whose
+`syncState` listed it. A granted type the phone keeps reporting on is
+therefore not stale merely because nothing new was recorded.
+*/
 
 import { HC_RECORD_TYPES } from "../record-types.ts";
 
@@ -24,10 +24,10 @@ import type { Ctx } from "../../db/client.ts";
 import type { HcSyncState } from "../wire.ts";
 
 /**
- * The statement `recountStatement` runs. Bound: device, the types as a JSON
- * array, the upload time. Everything it reads of `hc_chunks` is in the index
- * `hc_chunks_counts`, so no chunk row -- and no payload -- is touched.
- */
+The statement `recountStatement` runs. Bound: device, the types as a JSON
+array, the upload time. Everything it reads of `hc_chunks` is in the index
+`hc_chunks_counts`, so no chunk row -- and no payload -- is touched.
+*/
 export const RECOUNT_SQL = `INSERT INTO hc_sync_state (device_id, record_type, record_count, first_ms, last_ms, last_upload_at)
        SELECT ?1, t.value, coalesce(a.n, 0), a.first_ms, a.last_ms, ?3
          FROM json_each(?2) AS t

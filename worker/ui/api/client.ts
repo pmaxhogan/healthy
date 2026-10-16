@@ -32,12 +32,12 @@ export class ApiRequestError extends Error {
 }
 
 /**
- * Thrown after a re-auth navigation has been started.
- *
- * Callers must let it pass without showing a toast: the page is already on its
- * way to the server-rendered login wall, and a red banner flashing over the
- * navigation is noise. `isAuthRequired` is the check.
- */
+Thrown after a re-auth navigation has been started.
+
+Callers must let it pass without showing a toast: the page is already on its
+way to the server-rendered login wall, and a red banner flashing over the
+navigation is noise. `isAuthRequired` is the check.
+*/
 export class AuthRequiredError extends Error {
   constructor() {
     super("authentication required");
@@ -95,12 +95,12 @@ async function readError(response: Response): Promise<ApiError> {
 }
 
 /**
- * Issues one request against the Worker.
- *
- * `path` is absolute and same-origin (`/api/overview`, `/auth/logout`) -- the
- * Worker's CSRF guard checks the Origin header, so a cross-origin call would be
- * rejected anyway and there is no reason to allow one to be written.
- */
+Issues one request against the Worker.
+
+`path` is absolute and same-origin (`/api/overview`, `/auth/logout`) -- the
+Worker's CSRF guard checks the Origin header, so a cross-origin call would be
+rejected anyway and there is no reason to allow one to be written.
+*/
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const method = (options.method ?? "GET").toUpperCase();
   const headers = new Headers({ accept: "application/json" });
@@ -150,21 +150,21 @@ export const api = {
 };
 
 /**
- * Short, human copy for the `ErrorCode`s a 5xx response answers with -- see
- * `worker/src/api/http.ts`: a 5xx `AppError`'s own message is never sent (it can
- * quote an upstream body), so the client only ever has the bare code to show,
- * and "upstream auth" read as a toast tells the owner nothing they can act on.
- *
- * Deliberately not Trello-specific for `upstream_auth`/`upstream_unavailable`/
- * `upstream_error`: those three codes are shared by Trello, Google and every
- * Epic connection (see `worker/src/lib/errors.ts`), so a message naming one of them
- * would be wrong the other times it fires.
- *
- * This is a plain object rather than an import from `worker/src/lib/errors.ts`:
- * `worker/ui/**` may not import `worker/src/**` (see CLAUDE.md), so the code list is
- * mirrored here. `worker/src/lib/errors.ts` is the source of truth for what the
- * codes are; keep this in sync with it by hand.
- */
+Short, human copy for the `ErrorCode`s a 5xx response answers with -- see
+`worker/src/api/http.ts`: a 5xx `AppError`'s own message is never sent (it can
+quote an upstream body), so the client only ever has the bare code to show,
+and "upstream auth" read as a toast tells the owner nothing they can act on.
+
+Deliberately not Trello-specific for `upstream_auth`/`upstream_unavailable`/
+`upstream_error`: those three codes are shared by Trello, Google and every
+Epic connection (see `worker/src/lib/errors.ts`), so a message naming one of them
+would be wrong the other times it fires.
+
+This is a plain object rather than an import from `worker/src/lib/errors.ts`:
+`worker/ui/**` may not import `worker/src/**` (see CLAUDE.md), so the code list is
+mirrored here. `worker/src/lib/errors.ts` is the source of truth for what the
+codes are; keep this in sync with it by hand.
+*/
 const CODE_MESSAGES: Record<string, string> = {
   bad_request: "That request was not valid. Check the values and try again.",
   unauthorized: "You are not signed in. Reload the page and sign in again.",
@@ -220,22 +220,22 @@ const CODE_MESSAGES: Record<string, string> = {
 };
 
 /**
- * Human copy for a bare stable code that did not arrive wrapped in an
- * `ApiRequestError` -- `PortalSignInState.code`, say, which the portal account
- * card shows next to a failed sign-in. Same table and same fallback
- * `errorMessage` itself uses for a 5xx with no server-supplied message.
- */
+Human copy for a bare stable code that did not arrive wrapped in an
+`ApiRequestError` -- `PortalSignInState.code`, say, which the portal account
+card shows next to a failed sign-in. Same table and same fallback
+`errorMessage` itself uses for a 5xx with no server-supplied message.
+*/
 export function codeMessage(code: string): string {
   return CODE_MESSAGES[code] ?? code.replaceAll("_", " ");
 }
 
 /**
- * Turns anything thrown by the client into one line for a toast.
- *
- * Never includes a response body verbatim: an API error may name a field, and
- * "the UI printed whatever the server said" is how clinical detail ends up in a
- * screenshot.
- */
+Turns anything thrown by the client into one line for a toast.
+
+Never includes a response body verbatim: an API error may name a field, and
+"the UI printed whatever the server said" is how clinical detail ends up in a
+screenshot.
+*/
 export function errorMessage(error: unknown): string {
   if (error instanceof ApiRequestError) {
     // A distinct message from the server is shown as-is (a 4xx `AppError`, or a
@@ -257,15 +257,15 @@ export function errorMessage(error: unknown): string {
 const MAX_SHOWN_ISSUES = 3;
 
 /**
- * The `details.issues` a 400 carries (`worker/src/api/http.ts`'s `issuesOf`), made
- * readable. Each is `path: rule`, built by the Worker from the schema -- a field
- * path and either a zod code or a message written in this repository, never the
- * value that was sent -- so showing them does not break the "no response body
- * verbatim" rule above. A zod array index is 0-based; the owner counts from one,
- * so `allowlist.1` reads as "allowlist entry 2".
- *
- * Anything that is not an array of strings is ignored rather than trusted.
- */
+The `details.issues` a 400 carries (`worker/src/api/http.ts`'s `issuesOf`), made
+readable. Each is `path: rule`, built by the Worker from the schema -- a field
+path and either a zod code or a message written in this repository, never the
+value that was sent -- so showing them does not break the "no response body
+verbatim" rule above. A zod array index is 0-based; the owner counts from one,
+so `allowlist.1` reads as "allowlist entry 2".
+
+Anything that is not an array of strings is ignored rather than trusted.
+*/
 function validationIssues(details: Record<string, unknown> | undefined): string[] {
   const issues = details?.issues;
   if (!Array.isArray(issues)) return [];

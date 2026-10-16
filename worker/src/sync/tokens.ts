@@ -1,39 +1,39 @@
 /**
- * Health system access tokens: caching, expiry, and the single-flight refresh.
- *
- * `withAccessToken` returns a *getter*, not a token, because `FhirClient` calls
- * it once per request and a sync run makes many: handing out a string would mean
- * a run that starts four minutes before expiry dies half way through paging.
- *
- * The four rules that make this safe, in the order they matter:
- *
- * 1. **Refresh ahead of expiry, not at zero.** Epic's access-token lifetime is
- *    set per organisation and has been seen as short as a few minutes. A token
- *    inside the adapter's margin (`EhrAdapter.refreshSkewMs`, five minutes unless
- *    the vendor's tokens are shorter-lived than that) is treated as already dead.
- *
- * 2. **One refresh at a time, enforced twice.** A refresh token is invalidated
- *    the moment it is redeemed, so two concurrent refreshes lose the connection
- *    outright and the owner has to re-authorise. The D1 lease (`acquireLease`, a
- *    single conditional UPDATE) is the cross-isolate guard; a promise latch is the
- *    within-isolate one, because a lease round trip per page would be silly.
- *
- * 3. **Persist the rotated refresh token before using the new access token.** The
- *    write happens first, in one statement, and only then does the new access
- *    token leave this module. If the order were reversed, a write that failed
- *    after a successful refresh would leave a dead refresh token in D1 and a live
- *    one in memory -- unrecoverable without a re-auth.
- *
- * 4. **`invalid_grant` is the only error that asks the owner for anything.** It
- *    means the grant is gone (expired, revoked in the portal, invalidated by a
- *    password reset), so the connection is marked `needs_reauth` and an alert is
- *    opened. Everything else marks `error` and *keeps the tokens*: a 500 from the
- *    token endpoint is not a reason to throw away a working refresh token.
- *
- * Units: `Ctx.now()` is unix **seconds** and `connections.access_expires_at` is
- * too, while `TokenSet.expiresAt` and every retry option are **milliseconds**.
- * Both conversions are spelled out at the boundary rather than inlined.
- */
+Health system access tokens: caching, expiry, and the single-flight refresh.
+
+`withAccessToken` returns a *getter*, not a token, because `FhirClient` calls
+it once per request and a sync run makes many: handing out a string would mean
+a run that starts four minutes before expiry dies half way through paging.
+
+The four rules that make this safe, in the order they matter:
+
+1. **Refresh ahead of expiry, not at zero.** Epic's access-token lifetime is
+   set per organisation and has been seen as short as a few minutes. A token
+   inside the adapter's margin (`EhrAdapter.refreshSkewMs`, five minutes unless
+   the vendor's tokens are shorter-lived than that) is treated as already dead.
+
+2. **One refresh at a time, enforced twice.** A refresh token is invalidated
+   the moment it is redeemed, so two concurrent refreshes lose the connection
+   outright and the owner has to re-authorise. The D1 lease (`acquireLease`, a
+   single conditional UPDATE) is the cross-isolate guard; a promise latch is the
+   within-isolate one, because a lease round trip per page would be silly.
+
+3. **Persist the rotated refresh token before using the new access token.** The
+   write happens first, in one statement, and only then does the new access
+   token leave this module. If the order were reversed, a write that failed
+   after a successful refresh would leave a dead refresh token in D1 and a live
+   one in memory -- unrecoverable without a re-auth.
+
+4. **`invalid_grant` is the only error that asks the owner for anything.** It
+   means the grant is gone (expired, revoked in the portal, invalidated by a
+   password reset), so the connection is marked `needs_reauth` and an alert is
+   opened. Everything else marks `error` and *keeps the tokens*: a 500 from the
+   token endpoint is not a reason to throw away a working refresh token.
+
+Units: `Ctx.now()` is unix **seconds** and `connections.access_expires_at` is
+too, while `TokenSet.expiresAt` and every retry option are **milliseconds**.
+Both conversions are spelled out at the boundary rather than inlined.
+*/
 
 import { makeRepos } from "../db/index.ts";
 import { DEFAULT_REFRESH_SKEW_MS } from "../ehr/adapter.ts";
@@ -56,9 +56,9 @@ import type { FhirClient } from "../ehr/epic/fhir-client.ts";
 import type { SmartConfig } from "../fhir/types.ts";
 
 /**
- * Refresh once this little of an access token's life is left. Five minutes: the
- * Google token manager's margin, and a health system adapter's default.
- */
+Refresh once this little of an access token's life is left. Five minutes: the
+Google token manager's margin, and a health system adapter's default.
+*/
 export const REFRESH_SKEW_MS = DEFAULT_REFRESH_SKEW_MS;
 /** How long a refresh may hold the connection lease. */
 export const LEASE_TTL_MS = 60_000;
@@ -75,9 +75,9 @@ export interface AccessTokenHandle {
   smart: SmartConfig;
   adapter: EhrAdapter;
   /**
-   * A usable access token. Cached; refreshes inside the skew, or when `forceRefresh`
-   * says a 401 proved the cached one dead.
-   */
+  A usable access token. Cached; refreshes inside the skew, or when `forceRefresh`
+  says a 401 proved the cached one dead.
+  */
   getAccessToken: (options?: { forceRefresh?: boolean }) => Promise<string>;
 }
 
@@ -128,11 +128,11 @@ function codeOf(error: unknown): string {
 }
 
 /**
- * Open a token session for one health system.
- *
- * Does the D1 and discovery work once, up front, and hands back a getter that a
- * whole sync (or one MCP tool call) can lean on.
- */
+Open a token session for one health system.
+
+Does the D1 and discovery work once, up front, and hands back a getter that a
+whole sync (or one MCP tool call) can lean on.
+*/
 export async function withAccessToken(
   ctx: Ctx,
   healthSystemId: string,
@@ -302,12 +302,12 @@ export interface FhirSession extends AccessTokenHandle {
 }
 
 /**
- * A ready FHIR client for one health system.
- *
- * The 401 hook is `getAccessToken({ forceRefresh: true })`, which is the single
- * -flight refresh: several pages racing a mid-run expiry all wait on one refresh
- * rather than each redeeming the refresh token.
- */
+A ready FHIR client for one health system.
+
+The 401 hook is `getAccessToken({ forceRefresh: true })`, which is the single
+-flight refresh: several pages racing a mid-run expiry all wait on one refresh
+rather than each redeeming the refresh token.
+*/
 export async function getFhirClientFor(
   ctx: Ctx,
   healthSystemId: string,

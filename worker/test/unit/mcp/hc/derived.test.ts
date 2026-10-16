@@ -284,19 +284,17 @@ const nap = (): HcRecord => interval("nap", "SleepSession", at(16), at(17), { ti
 const resting = (id: string, ms: number, bpm: number): HcRecord =>
   instantRecord(id, "RestingHeartRate", ms, { bpm });
 
-/** The wearable's one record of the day, written again under its id at another time. */
-function restamp(ms: number, bpm: number): void {
+/** The wearable's one record of the day, written again under its id at another time, at 62 bpm. */
+function restamp(ms: number): void {
   world.state.hc.records.set(
     DEVICE_ID,
-    records().map((record) => (record.id === "rhr-1" ? resting("rhr-1", ms, bpm) : record)),
+    records().map((record) => (record.id === "rhr-1" ? resting("rhr-1", ms, 62) : record)),
   );
 }
 
 /** `restingHr` of every sleep row, by the row's title. */
-async function restingByTitle(
-  args: Record<string, unknown> = RANGE,
-): Promise<Record<string, unknown>> {
-  const answer = await call("sleep_sessions", args);
+async function restingByTitle(): Promise<Record<string, unknown>> {
+  const answer = await call("sleep_sessions", RANGE);
   expect(answer.isError, answer.text).toBe(false);
   return Object.fromEntries(answer.items.map((item) => [String(item.title), item.restingHr]));
 }
@@ -313,7 +311,7 @@ describe("sleep_sessions' resting heart rate", () => {
   it("stays on the night when a nap moves the day's one record to its own end", async () => {
     // The wearable writes one record a day, at the end of the day's last sleep.
     records().push(nap());
-    restamp(at(17, 2), 62);
+    restamp(at(17, 2));
 
     // Was: null on the night and 62 on the nap.
     expect(await restingByTitle()).toStrictEqual({ Night: 62, Nap: null });
@@ -333,7 +331,7 @@ describe("sleep_sessions' resting heart rate", () => {
       interval("sleep-0", "SleepSession", at(-25), at(-17), { title: "Night before" }),
       nap(),
     );
-    restamp(at(17, 2), 62);
+    restamp(at(17, 2));
 
     expect(await restingByTitle()).toStrictEqual({ "Night before": null, Night: 62, Nap: null });
   });
@@ -341,7 +339,7 @@ describe("sleep_sessions' resting heart rate", () => {
   describe("whatever range the row is asked for in", () => {
     beforeEach(() => {
       records().push(nap());
-      restamp(at(17, 2), 62);
+      restamp(at(17, 2));
       world.state.hc.calls.length = 0;
     });
 
@@ -875,7 +873,7 @@ describe("more than one phone in an answer", () => {
 
 const dayRollupTypes = (): string[] =>
   world.state.hc.calls.flatMap((entry) =>
-    entry.reader === "dayRollups" && entry.type !== undefined ? [entry.type] : [],
+    entry.reader === "dayRollups" && entry.type !== undefined ? entry.type : [],
   );
 const pending = { queuedBatches: 0, parkedBatches: 0, dirty: 2, rezonePending: false };
 

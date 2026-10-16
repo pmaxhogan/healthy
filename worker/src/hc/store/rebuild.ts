@@ -1,58 +1,58 @@
 /**
- * The rebuild phase: what the ingest runner does once a device's queue is
- * empty. It drains `hc_dirty` (worker/src/hc/store/dirty.ts), turning each
- * mark into the row it asks for:
- *
- *   hr        the per-minute heart-rate row of an hour a series spilled into
- *   day       one type's day rollups for a UTC day, from its hour rollups
- *   sleep     one night's summary, from the session and what was measured
- *   exercise  one session's summary, likewise
- *
- * Each row is written, and its mark deleted, in one `db.batch`. A slice that
- * is cut off leaves the mark, and the row is built again: every build reads
- * the store as it is, so building twice is harmless.
- *
- * `day` marks are settled a run at a time -- up to `DAY_RUN` consecutive UTC
- * days of one type, their hour rollups read once, every local day they fall on
- * written and all their marks cleared in the one transaction. A UTC day falls
- * on two local days in any zone off UTC and its neighbour shares one of them,
- * so a run builds each local day once where single marks would build it twice.
- *
- * ### Days and the configured zone
- *
- * A day rollup is a calendar day in the zone the owner configured (the sealed
- * `timezone` setting; there is no zone in source). Its hours are whole UTC
- * hours wherever the day's edges fall on one, and are read from the hour
- * rollups without opening a chunk. Where an edge falls inside a UTC hour (a
- * zone a half or three quarters of an hour off UTC) that one hour's chunk is
- * opened and only the records that start on the right side of the edge are
- * counted, so a day is exact in every zone.
- *
- * Each row carries `tz_digest`, a keyed digest of the zone it was built for.
- * When the setting changes, rows of the old zone are found by that digest:
- * every day the type has data on is marked for the new zone and the old rows
- * are deleted, one record type at a time so the work is resumable. Readers
- * only return rows of the current zone in the meantime.
- *
- * ### Rollups of an earlier making
- *
- * The digest also covers the revision of the rollups themselves
- * (`ROLLUP_REVISION` in worker/src/hc/store/read.ts), so a deploy that changes
- * what a rollup holds re-rolls every stored day by this same path, with no
- * step to run by hand. A day is built from its hour rollups, and those may be
- * of the earlier making too. One that only lacks what its own row says (the
- * hour it is of) is completed as it is read. One that lacks what only the
- * records can say -- a running count's list of the records that run past
- * their hour -- is written afresh from its chunk, in the transaction that
- * writes the day and clears its mark, a UTC day at a time so that a slice
- * stays inside its budget. Replayable for the reason everything here is: each
- * build reads the store as it is and writes what the rows are to be.
- *
- * The sleep nights and exercise sessions are derived rows too, and are marked
- * for rebuilding with the last type's days (`summaryMarkStatements`): nights
- * and sessions are rebuilt before days, so they are the first thing a re-roll
- * finishes.
- */
+The rebuild phase: what the ingest runner does once a device's queue is
+empty. It drains `hc_dirty` (worker/src/hc/store/dirty.ts), turning each
+mark into the row it asks for:
+
+  hr        the per-minute heart-rate row of an hour a series spilled into
+  day       one type's day rollups for a UTC day, from its hour rollups
+  sleep     one night's summary, from the session and what was measured
+  exercise  one session's summary, likewise
+
+Each row is written, and its mark deleted, in one `db.batch`. A slice that
+is cut off leaves the mark, and the row is built again: every build reads
+the store as it is, so building twice is harmless.
+
+`day` marks are settled a run at a time -- up to `DAY_RUN` consecutive UTC
+days of one type, their hour rollups read once, every local day they fall on
+written and all their marks cleared in the one transaction. A UTC day falls
+on two local days in any zone off UTC and its neighbour shares one of them,
+so a run builds each local day once where single marks would build it twice.
+
+### Days and the configured zone
+
+A day rollup is a calendar day in the zone the owner configured (the sealed
+`timezone` setting; there is no zone in source). Its hours are whole UTC
+hours wherever the day's edges fall on one, and are read from the hour
+rollups without opening a chunk. Where an edge falls inside a UTC hour (a
+zone a half or three quarters of an hour off UTC) that one hour's chunk is
+opened and only the records that start on the right side of the edge are
+counted, so a day is exact in every zone.
+
+Each row carries `tz_digest`, a keyed digest of the zone it was built for.
+When the setting changes, rows of the old zone are found by that digest:
+every day the type has data on is marked for the new zone and the old rows
+are deleted, one record type at a time so the work is resumable. Readers
+only return rows of the current zone in the meantime.
+
+### Rollups of an earlier making
+
+The digest also covers the revision of the rollups themselves
+(`ROLLUP_REVISION` in worker/src/hc/store/read.ts), so a deploy that changes
+what a rollup holds re-rolls every stored day by this same path, with no
+step to run by hand. A day is built from its hour rollups, and those may be
+of the earlier making too. One that only lacks what its own row says (the
+hour it is of) is completed as it is read. One that lacks what only the
+records can say -- a running count's list of the records that run past
+their hour -- is written afresh from its chunk, in the transaction that
+writes the day and clears its mark, a UTC day at a time so that a slice
+stays inside its budget. Replayable for the reason everything here is: each
+build reads the store as it is and writes what the rows are to be.
+
+The sleep nights and exercise sessions are derived rows too, and are marked
+for rebuilding with the last type's days (`summaryMarkStatements`): nights
+and sessions are rebuilt before days, so they are the first thing a re-roll
+finishes.
+*/
 
 import { blindHcRecordId, blinderFor } from "../../db/blind.ts";
 import { all, batch, one } from "../../db/client.ts";
@@ -113,10 +113,10 @@ import type { BucketRollup } from "../rollup/types.ts";
 import type { HcRecord } from "../wire.ts";
 
 /**
- * How far either side of a sleep session its context is read, and so how far
- * from a changed record a stored night is marked for rebuilding: the wider of
- * the two margins the summary itself uses (worker/src/hc/rollup/sleep.ts).
- */
+How far either side of a sleep session its context is read, and so how far
+from a changed record a stored night is marked for rebuilding: the wider of
+the two margins the summary itself uses (worker/src/hc/rollup/sleep.ts).
+*/
 export const SLEEP_CONTEXT_MARGIN_MS = Math.max(SLEEP_MATCH_TOLERANCE_MS, HR_WAKE_SEARCH_AFTER_MS);
 
 const TYPE_HRV = "HeartRateVariabilityRmssd";
@@ -128,10 +128,10 @@ const TYPE_DISTANCE = "Distance";
 const TYPE_ACTIVE_CALORIES = "ActiveCaloriesBurned";
 
 /**
- * The types a sleep night's summary reads. A change to one re-marks the night.
- * Another sleep session is among them: a reading stamped between two sessions
- * is given to one only, so each night depends on its neighbours.
- */
+The types a sleep night's summary reads. A change to one re-marks the night.
+Another sleep session is among them: a reading stamped between two sessions
+is given to one only, so each night depends on its neighbours.
+*/
 export const SLEEP_CONTEXT_TYPES: ReadonlySet<string> = new Set([
   TYPE_SLEEP_SESSION,
   TYPE_HEART_RATE,
@@ -153,32 +153,32 @@ export const EXERCISE_CONTEXT_TYPES: ReadonlySet<string> = new Set([
 /** Marks fetched per query. */
 const DIRTY_PAGE = 100;
 /**
- * Statements one mark may cost, as an upper estimate: a session's summary is
- * the dearest, at two reads per context type plus the write.
- */
+Statements one mark may cost, as an upper estimate: a session's summary is
+the dearest, at two reads per context type plus the write.
+*/
 const MARK_COST = 16;
 
 const DAY_MS = DAY_HOURS * HOUR_MS;
 /**
- * UTC days of one type settled as one unit. A week: its eight or nine local
- * days are one read of hour rollups (a few hundred small rows) and one
- * transaction of a few dozen statements, and only the two days at its ends can
- * be built again by a neighbouring run.
- */
+UTC days of one type settled as one unit. A week: its eight or nine local
+days are one read of hour rollups (a few hundred small rows) and one
+transaction of a few dozen statements, and only the two days at its ends can
+be built again by a neighbouring run.
+*/
 const DAY_RUN = 7;
 /**
- * Statements one run may cost, as an estimate: the read and the statement that
- * clears the marks, then for each local day -- one more than the run has UTC
- * days, in any zone off UTC -- a row per origin (taken as two) and the delete
- * of the origins that left.
- */
+Statements one run may cost, as an estimate: the read and the statement that
+clears the marks, then for each local day -- one more than the run has UTC
+days, in any zone off UTC -- a row per origin (taken as two) and the delete
+of the origins that left.
+*/
 const runCost = (run: DayRun): number => 2 + (run.days + 1) * 3;
 /**
- * Statements one UTC day may cost when its hour rollups are written afresh on
- * the way (see "Rollups of an earlier making"): two local days, and for each
- * a row per origin and hour (taken as three origins recording round the
- * clock) beside what `runCost` counts.
- */
+Statements one UTC day may cost when its hour rollups are written afresh on
+the way (see "Rollups of an earlier making"): two local days, and for each
+a row per origin and hour (taken as three origins recording round the
+clock) beside what `runCost` counts.
+*/
 const REROLL_DAY_COST = 160;
 
 /** A run of `day` marks, and whether its hour rollups are known to need writing afresh. */
@@ -187,10 +187,10 @@ interface QueuedRun extends DayRun {
 }
 
 /**
- * Thrown when a day's hour rollup is of an earlier making and has to be built
- * again from its chunk. Not a failure: the signal that takes the build of the
- * day down the path a corrupt rollup takes.
- */
+Thrown when a day's hour rollup is of an earlier making and has to be built
+again from its chunk. Not a failure: the signal that takes the build of the
+day down the path a corrupt rollup takes.
+*/
 class RollupOutdated extends Error {
   constructor() {
     super("hour rollup of an earlier revision");
@@ -216,20 +216,20 @@ async function commit(job: Rebuild, statements: D1PreparedStatement[]): Promise<
 // ---------------------------------------------------------------------------
 
 /**
- * The statements that mark every stored sleep night and exercise session for
- * rebuilding, as part of the transaction that re-marks `type` -- and only when
- * `type` is the LAST type with rows of another digest.
- *
- * A summary is a derived row like a day rollup, and a revision of the rollups
- * may change what it holds (`ROLLUP_REVISION` in `./read.ts`). It has no
- * digest of its own to go stale by, so it is re-marked on the back of the day
- * rollups: once, in the very transaction that removes the last row of the old
- * digest. After that transaction there is nothing left to make this run
- * again, and before it the marks are not written, so a slice that dies at any
- * point leaves either "still to do" or "done", never both and never neither.
- * A change of the `timezone` setting takes the same path and so rebuilds the
- * summaries too, which it does not need; that is a few hundred rows, once.
- */
+The statements that mark every stored sleep night and exercise session for
+rebuilding, as part of the transaction that re-marks `type` -- and only when
+`type` is the LAST type with rows of another digest.
+
+A summary is a derived row like a day rollup, and a revision of the rollups
+may change what it holds (`ROLLUP_REVISION` in `./read.ts`). It has no
+digest of its own to go stale by, so it is re-marked on the back of the day
+rollups: once, in the very transaction that removes the last row of the old
+digest. After that transaction there is nothing left to make this run
+again, and before it the marks are not written, so a slice that dies at any
+point leaves either "still to do" or "done", never both and never neither.
+A change of the `timezone` setting takes the same path and so rebuilds the
+summaries too, which it does not need; that is a few hundred rows, once.
+*/
 function summaryMarkStatements(job: Rebuild, type: string): D1PreparedStatement[] {
   const { ctx, deviceId, digest } = job;
   return (["sleep", "exercise"] as const).map((kind) => {
@@ -248,10 +248,10 @@ function summaryMarkStatements(job: Rebuild, type: string): D1PreparedStatement[
 }
 
 /**
- * Re-mark every day of every type that still has rows built for another zone
- * (or revision), and with the last of them every session summary. True when
- * none are left.
- */
+Re-mark every day of every type that still has rows built for another zone
+(or revision), and with the last of them every session summary. True when
+none are left.
+*/
 async function rezone(job: Rebuild): Promise<boolean> {
   const { ctx, deviceId, digest, meter } = job;
   for (;;) {
@@ -356,11 +356,11 @@ async function hourRollups(
 }
 
 /**
- * A day's parts the cheap way: hours wholly inside the day from their rollup,
- * and an hour the day's edge cuts through recounted from its chunk (see the
- * module comment). `rows` are the type's hour rollups, already read, for a span
- * that covers the day; the ones outside it are passed over.
- */
+A day's parts the cheap way: hours wholly inside the day from their rollup,
+and an hour the day's edge cuts through recounted from its chunk (see the
+module comment). `rows` are the type's hour rollups, already read, for a span
+that covers the day; the ones outside it are passed over.
+*/
 async function dayFromRollups(
   job: Rebuild,
   type: string,
@@ -388,11 +388,11 @@ async function dayFromRollups(
 }
 
 /**
- * An hour rollup as this code would have written it. One of an earlier making
- * does not say which hour its records start in, which its own row does: it is
- * completed here. A running count's also lacks the list of the records that
- * run past the hour, and only the records can supply that: `RollupOutdated`.
- */
+An hour rollup as this code would have written it. One of an earlier making
+does not say which hour its records start in, which its own row does: it is
+completed here. A running count's also lacks the list of the records that
+run past the hour, and only the records can supply that: `RollupOutdated`.
+*/
 function currentRollup(type: string, hourUtc: number, rollup: BucketRollup): BucketRollup {
   if (rollup.hours !== undefined) return rollup;
   if (isSpreadType(type)) throw new RollupOutdated();
@@ -400,12 +400,12 @@ function currentRollup(type: string, hourUtc: number, rollup: BucketRollup): Buc
 }
 
 /**
- * One origin's day, from its parts. Of the records that run past their hour,
- * a day keeps only the ones an answer needs from it: those that run past the
- * end of the DAY (the rest are divided inside it, which changes nothing a day
- * says), and those longer than an hour (what a day's total owes to them is
- * said beside it).
- */
+One origin's day, from its parts. Of the records that run past their hour,
+a day keeps only the ones an answer needs from it: those that run past the
+end of the DAY (the rest are divided inside it, which changes nothing a day
+says), and those longer than an hour (what a day's total owes to them is
+said beside it).
+*/
 function dayRollup(parts: readonly BucketRollup[], endMs: number): BucketRollup {
   const { crossing, ...merged } = mergeRollups(parts);
   const kept = (crossing ?? []).filter(
@@ -415,10 +415,10 @@ function dayRollup(parts: readonly BucketRollup[], endMs: number): BucketRollup 
 }
 
 /**
- * A day's parts the long way: every chunk of the day opened and counted. What
- * is done when an hour rollup will not open. A rollup is derived, so it is not
- * a loss: `repairs` are the statements that write each hour's rollup afresh.
- */
+A day's parts the long way: every chunk of the day opened and counted. What
+is done when an hour rollup will not open. A rollup is derived, so it is not
+a loss: `repairs` are the statements that write each hour's rollup afresh.
+*/
 async function dayFromChunks(
   job: Rebuild,
   type: string,
@@ -444,25 +444,25 @@ async function dayFromChunks(
 }
 
 /**
- * The statement that removes a day's rows for the origins that no longer have
- * anything on it. Bound: device, type, day, and the origins that do, as a JSON
- * array.
- *
- * `INDEXED BY`: the day is not next in the primary key (the origin is), so left
- * to itself the planner walks every day the type has ever had and tests each.
- * Once per day rebuilt, that is every stored day read again for each of them.
- * The range index goes straight to the one day.
- */
+The statement that removes a day's rows for the origins that no longer have
+anything on it. Bound: device, type, day, and the origins that do, as a JSON
+array.
+
+`INDEXED BY`: the day is not next in the primary key (the origin is), so left
+to itself the planner walks every day the type has ever had and tests each.
+Once per day rebuilt, that is every stored day read again for each of them.
+The range index goes straight to the one day.
+*/
 export const PRUNE_DAY_SQL = `DELETE FROM hc_rollup_day INDEXED BY hc_rollup_day_range
   WHERE device_id = ? AND record_type = ? AND day = ?
     AND origin_hash NOT IN (SELECT value FROM json_each(?))`;
 
 /**
- * The statements that make one type's rows for one local day agree with the
- * store. `rows`: see `dayFromRollups`. `reroll` says whether hour rollups of
- * an earlier making may be written afresh here; when they may not, finding
- * one throws `RollupOutdated` and the caller comes back a day at a time.
- */
+The statements that make one type's rows for one local day agree with the
+store. `rows`: see `dayFromRollups`. `reroll` says whether hour rollups of
+an earlier making may be written afresh here; when they may not, finding
+one throws `RollupOutdated` and the caller comes back a day at a time.
+*/
 async function dayStatements(
   job: Rebuild,
   type: string,
@@ -515,13 +515,13 @@ async function dayStatements(
 }
 
 /**
- * The statements that settle a run of `day` marks: every local day the run's
- * UTC days fall on -- in the zone configured now -- rebuilt for the type, and
- * the mark of each of those UTC days cleared. Each hour of the run lies inside
- * one of the days rebuilt, so the marks are answered whole; a neighbouring run
- * that shares the local day at either end will build that one day again, which
- * is only work.
- */
+The statements that settle a run of `day` marks: every local day the run's
+UTC days fall on -- in the zone configured now -- rebuilt for the type, and
+the mark of each of those UTC days cleared. Each hour of the run lies inside
+one of the days rebuilt, so the marks are answered whole; a neighbouring run
+that shares the local day at either end will build that one day again, which
+is only work.
+*/
 async function rebuildDayRun(job: Rebuild, run: DayRun): Promise<D1PreparedStatement[]> {
   const { type } = run;
   const startMs = run.firstDay * DAY_MS;
@@ -548,10 +548,10 @@ async function rebuildDayRun(job: Rebuild, run: DayRun): Promise<D1PreparedState
 }
 
 /**
- * The transactions that settle a run: one that rebuilds it, or -- when a chunk
- * one of its days has to be built from will not open -- one per UTC day, with
- * the day that cannot be built parked (see `settleMark`) and the others built.
- */
+The transactions that settle a run: one that rebuilds it, or -- when a chunk
+one of its days has to be built from will not open -- one per UTC day, with
+the day that cannot be built parked (see `settleMark`) and the others built.
+*/
 async function settleDayRun(job: Rebuild, run: DayRun): Promise<D1PreparedStatement[][]> {
   const { ctx, deviceId } = job;
   try {
@@ -582,13 +582,13 @@ function dayByDay(run: DayRun): QueuedRun[] {
 }
 
 /**
- * Settle a page of `day` marks, a run at a time. False when the budget ran out.
- *
- * A run whose hour rollups turn out to be of an earlier making is taken apart
- * and settled a UTC day at a time, newest first, each day a unit of its own
- * with its own, larger, estimate: writing a week of hour rollups afresh in one
- * unit could take a slice past its budget.
- */
+Settle a page of `day` marks, a run at a time. False when the budget ran out.
+
+A run whose hour rollups turn out to be of an earlier making is taken apart
+and settled a UTC day at a time, newest first, each day a unit of its own
+with its own, larger, estimate: writing a week of hour rollups afresh in one
+unit could take a slice past its budget.
+*/
 async function settleDays(job: Rebuild, marks: readonly DirtyRow[]): Promise<boolean> {
   const { runs, unreadable } = dayRuns(
     marks.map((mark) => mark.key),
@@ -618,11 +618,11 @@ async function settleDays(job: Rebuild, marks: readonly DirtyRow[]): Promise<boo
 }
 
 /**
- * The stretch of a session its context is read for. A session that claims to
- * run for longer than any real one is summarised from its first
- * `MAX_SESSION_SPAN_MS` only -- reading months of heart rate for one record
- * would be a way to stall the rebuild -- and the summary says so.
- */
+The stretch of a session its context is read for. A session that claims to
+run for longer than any real one is summarised from its first
+`MAX_SESSION_SPAN_MS` only -- reading months of heart rate for one record
+would be a way to stall the rebuild -- and the summary says so.
+*/
 function contextSpan(session: HcRecord): { startMs: number; endMs: number; clamped: boolean } {
   const startMs = recordStartMs(session);
   const endMs = recordEndMs(session);
@@ -637,9 +637,9 @@ interface HrMinuteRow {
 }
 
 /**
- * Rewrite, from the chunks, every per-minute heart-rate row of the window that
- * will not open. The rows are derived; one that is corrupt is rebuilt.
- */
+Rewrite, from the chunks, every per-minute heart-rate row of the window that
+will not open. The rows are derived; one that is corrupt is rebuilt.
+*/
 async function repairHrMinutes(job: Rebuild, startMs: number, endMs: number): Promise<void> {
   const { ctx, deviceId, meter } = job;
   meter.spend();
@@ -767,10 +767,10 @@ async function rebuildSleep(job: Rebuild, idBlind: string): Promise<D1PreparedSt
 }
 
 /**
- * One origin's records, for a quantity that is summed: the session's own app's
- * when it wrote any in the window, otherwise those of the app that wrote the
- * most. Two apps counting the same steps must not be added together.
- */
+One origin's records, for a quantity that is summed: the session's own app's
+when it wrote any in the window, otherwise those of the app that wrote the
+most. Two apps counting the same steps must not be added together.
+*/
 function oneOrigin(records: readonly HcRecord[], ownOrigin: string): HcRecord[] {
   const byOrigin = new Map<string, HcRecord[]>();
   for (const record of records) {
@@ -872,15 +872,15 @@ async function rebuildMark(job: Rebuild, mark: DirtyRow): Promise<D1PreparedStat
 }
 
 /**
- * The statements that settle one mark: its row written and the mark cleared --
- * or, when what the row has to be built from will not open, the mark parked.
- *
- * A derived row that is corrupt has been repaired by the time an error gets
- * here (`dayStatements`, `hrPoints`); what is left is a source chunk that
- * cannot be read. Retrying that would hold this mark at the head of the list
- * for ever with every other mark behind it, so it is set aside, loudly, and
- * the rebuild goes on. Anything that might pass is thrown, as everywhere else.
- */
+The statements that settle one mark: its row written and the mark cleared --
+or, when what the row has to be built from will not open, the mark parked.
+
+A derived row that is corrupt has been repaired by the time an error gets
+here (`dayStatements`, `hrPoints`); what is left is a source chunk that
+cannot be read. Retrying that would hold this mark at the head of the list
+for ever with every other mark behind it, so it is set aside, loudly, and
+the rebuild goes on. Anything that might pass is thrown, as everywhere else.
+*/
 async function settleMark(job: Rebuild, mark: DirtyRow): Promise<D1PreparedStatement[]> {
   const { ctx, deviceId } = job;
   try {
@@ -894,11 +894,11 @@ async function settleMark(job: Rebuild, mark: DirtyRow): Promise<D1PreparedState
 }
 
 /**
- * Park the mark the rebuild would take next. For the caller that counts
- * attempts (worker/src/hc/apply.ts): when slices keep dying with nothing
- * queued, the mark at the head of the list is what they die on. False when
- * there is no mark to park.
- */
+Park the mark the rebuild would take next. For the caller that counts
+attempts (worker/src/hc/apply.ts): when slices keep dying with nothing
+queued, the mark at the head of the list is what they die on. False when
+there is no mark to park.
+*/
 export async function parkFirstMark(
   ctx: Ctx,
   deviceId: string,
@@ -913,11 +913,11 @@ export async function parkFirstMark(
 }
 
 /**
- * Settle the marks of one page, in order. False when the budget ran out.
- *
- * A page is all of one kind (`nextDirty`), and a page of `day` marks is
- * settled in runs rather than mark by mark.
- */
+Settle the marks of one page, in order. False when the budget ran out.
+
+A page is all of one kind (`nextDirty`), and a page of `day` marks is
+settled in runs rather than mark by mark.
+*/
 async function settlePage(job: Rebuild, marks: readonly DirtyRow[]): Promise<boolean> {
   if (marks[0]?.kind === "day") return settleDays(job, marks);
   for (const mark of marks) {
@@ -935,13 +935,13 @@ export interface RebuildResult {
 }
 
 /**
- * What one slice of the runner has already read and need not read again. A
- * slice runs the rebuild after every batch it applies, and the configured zone
- * is the same each time: it is the owner's setting, and a slice is seconds.
- *
- * It lives no longer than the slice. The zone can be changed at any time, and
- * the next slice -- the next alarm -- reads it afresh.
- */
+What one slice of the runner has already read and need not read again. A
+slice runs the rebuild after every batch it applies, and the configured zone
+is the same each time: it is the owner's setting, and a slice is seconds.
+
+It lives no longer than the slice. The zone can be changed at any time, and
+the next slice -- the next alarm -- reads it afresh.
+*/
 export interface SliceMemo {
   zone?: string;
 }
@@ -956,10 +956,10 @@ async function zoneFor(ctx: Ctx, meter: Meter, memo: SliceMemo | undefined): Pro
 }
 
 /**
- * One budgeted pass over a device's rebuild work. `knownDigest` is what the
- * caller remembers from the last pass; when it is the current zone's digest
- * the check for rows of another zone is skipped.
- */
+One budgeted pass over a device's rebuild work. `knownDigest` is what the
+caller remembers from the last pass; when it is the current zone's digest
+the check for rows of another zone is skipped.
+*/
 export async function rebuildSlice(
   ctx: Ctx,
   deviceId: string,
@@ -980,10 +980,10 @@ export async function rebuildSlice(
 }
 
 /**
- * Settle the pages `nextDirty` returned, in order. Says what is left of the
- * list afterwards: `"some"` when the budget ran out, `"none"` when the list is
- * known to be empty, and `"unknown"` when it has to be read again.
- */
+Settle the pages `nextDirty` returned, in order. Says what is left of the
+list afterwards: `"some"` when the budget ran out, `"none"` when the list is
+known to be empty, and `"unknown"` when it has to be read again.
+*/
 async function settlePages(
   job: Rebuild,
   pages: readonly DirtyRow[][],

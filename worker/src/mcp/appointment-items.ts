@@ -1,51 +1,51 @@
 /**
- * Appointments from both places they are known: the FHIR cache and the portal.
- *
- * Epic's patient-facing FHIR view never returns an Encounter before the visit
- * happens, so every *upcoming* appointment the owner has is known only to the
- * patient portal -- and the portal pass stores what it read in `portal_visits`.
- * This module merges the two into the one flat shape `get_appointments` has
- * always answered with (`NormalizedAppointmentView`, the same projection the
- * calendar maps from), so a caller cannot tell which source an item came from
- * except by its `source` field.
- *
- * ### One visit, one item
- *
- * A visit can be in both places -- the FHIR Encounter usually turns up once it
- * has happened, while the portal row is kept for a year. The match is the
- * calendar sync's own rule (`sameVisitWithinHealthSystem` in
- * `worker/src/sync/portal-dedupe.ts`), for the same health system: the CSN when both
- * sides carry one, otherwise a start within `DEDUPE_WINDOW_SECONDS` AND the same
- * practitioner. A start alone is not enough -- a cancelled Encounter would absorb a
- * different, live visit at the same time and answer for it as cancelled. A match
- * yields the FHIR item, with any field it lacks filled from the portal's copy; the
- * portal item is dropped.
- *
- * ### Policy
- *
- * Portal items are tagged `resourceType: "Encounter"` exactly as the FHIR ones
- * are, so a `resource` rule on Encounter removes them and every `Encounter.<field>`
- * rule reaches them through `applyPolicy` in `respond`. There is no raw FHIR
- * behind a portal item, and its stored payload is not offered as `raw` either:
- * the payload's own keys (`locationName`, `address`, `phone`, `isVideo`) are in
- * neither of the vocabularies a `field` rule is written in, so a rule the owner
- * wrote to hide an address would not reach them. Each portal item's `raw` entry is
- * therefore a bare `{ resourceType: "Encounter" }` placeholder -- one per item, so
- * `items` and `raw` stay index-aligned through the filter -- and the answer
- * carries the {@link PORTAL_RAW_WARNING} warning.
- *
- * A `health_system` deny rule removes the denied organisation before anything is
- * read -- but another organisation's portal can list the denied one's visit
- * (shared records), stored and tagged as the *listing* organisation's. So the
- * denied organisations' own sightings (their cached Encounters and stored portal
- * visits) are read as well, used only for matching, and any answer that is the
- * same visit as one of them is dropped, whichever copy would have outranked the
- * other (security review M1). Two limits, both in SECURITY.md: the match is the
- * cross-organisation one, so an allowed visit at the same time and place as a
- * denied one is hidden too -- the safe direction -- and a copy of a denied
- * organisation's visit that it has no stored record of itself cannot be
- * recognised, because the copy does not say whose it is.
- */
+Appointments from both places they are known: the FHIR cache and the portal.
+
+Epic's patient-facing FHIR view never returns an Encounter before the visit
+happens, so every *upcoming* appointment the owner has is known only to the
+patient portal -- and the portal pass stores what it read in `portal_visits`.
+This module merges the two into the one flat shape `get_appointments` has
+always answered with (`NormalizedAppointmentView`, the same projection the
+calendar maps from), so a caller cannot tell which source an item came from
+except by its `source` field.
+
+### One visit, one item
+
+A visit can be in both places -- the FHIR Encounter usually turns up once it
+has happened, while the portal row is kept for a year. The match is the
+calendar sync's own rule (`sameVisitWithinHealthSystem` in
+`worker/src/sync/portal-dedupe.ts`), for the same health system: the CSN when both
+sides carry one, otherwise a start within `DEDUPE_WINDOW_SECONDS` AND the same
+practitioner. A start alone is not enough -- a cancelled Encounter would absorb a
+different, live visit at the same time and answer for it as cancelled. A match
+yields the FHIR item, with any field it lacks filled from the portal's copy; the
+portal item is dropped.
+
+### Policy
+
+Portal items are tagged `resourceType: "Encounter"` exactly as the FHIR ones
+are, so a `resource` rule on Encounter removes them and every `Encounter.<field>`
+rule reaches them through `applyPolicy` in `respond`. There is no raw FHIR
+behind a portal item, and its stored payload is not offered as `raw` either:
+the payload's own keys (`locationName`, `address`, `phone`, `isVideo`) are in
+neither of the vocabularies a `field` rule is written in, so a rule the owner
+wrote to hide an address would not reach them. Each portal item's `raw` entry is
+therefore a bare `{ resourceType: "Encounter" }` placeholder -- one per item, so
+`items` and `raw` stay index-aligned through the filter -- and the answer
+carries the {@link PORTAL_RAW_WARNING} warning.
+
+A `health_system` deny rule removes the denied organisation before anything is
+read -- but another organisation's portal can list the denied one's visit
+(shared records), stored and tagged as the *listing* organisation's. So the
+denied organisations' own sightings (their cached Encounters and stored portal
+visits) are read as well, used only for matching, and any answer that is the
+same visit as one of them is dropped, whichever copy would have outranked the
+other (security review M1). Two limits, both in SECURITY.md: the match is the
+cross-organisation one, so an allowed visit at the same time and place as a
+denied one is hidden too -- the safe direction -- and a copy of a denied
+organisation's visit that it has no stored record of itself cannot be
+recognised, because the copy does not say whose it is.
+*/
 
 import { appointmentViewFromEncounter, mapResolver } from "../fhir/normalize/index.ts";
 import {
@@ -70,17 +70,17 @@ import type { Boilerplate } from "../sync/portal-directions.ts";
 export const PORTAL_RAW_WARNING = "portal_items_have_no_raw";
 
 /**
- * `appointmentViewFromEncounter` takes a NormalizeCtx but reads only
- * `ctx.health_system` -- every reference it needs was already resolved into the
- * normalized Encounter. An empty resolver is therefore correct, not a shortcut.
- */
+`appointmentViewFromEncounter` takes a NormalizeCtx but reads only
+`ctx.health_system` -- every reference it needs was already resolved into the
+normalized Encounter. An empty resolver is therefore correct, not a shortcut.
+*/
 const NO_REFS = mapResolver([]);
 
 /**
- * Fields a FHIR item takes from the portal's copy of the same visit when it has
- * none of its own. Never `status` or `start`: where both sources speak, FHIR is
- * the record.
- */
+Fields a FHIR item takes from the portal's copy of the same visit when it has
+none of its own. Never `status` or `start`: where both sources speak, FHIR is
+the record.
+*/
 const ENRICHED_FIELDS = [
   "practitioner",
   "department",
@@ -98,10 +98,10 @@ const ENRICHED_FIELDS = [
 
 export interface AppointmentOptions {
   /**
-   * The health systems a `health_system` rule denies to this caller. Read only to
-   * recognise their visits in an allowed organisation's portal; never answered
-   * from. See the module comment.
-   */
+  The health systems a `health_system` rule denies to this caller. Read only to
+  recognise their visits in an allowed organisation's portal; never answered
+  from. See the module comment.
+  */
   denied: readonly HealthSystemInfo[];
   from?: string | undefined;
   to?: string | undefined;
@@ -115,9 +115,9 @@ export interface Appointments {
   /** Empty unless `raw` was asked for. Index-aligned with `items`. */
   rawItems: RawEntry[];
   /**
-   * The FHIR Encounter behind each item, for the exposure policy to judge by;
-   * undefined for a portal visit, which has none. Never returned. Index-aligned.
-   */
+  The FHIR Encounter behind each item, for the exposure policy to judge by;
+  undefined for a portal visit, which has none. Never returned. Index-aligned.
+  */
   sources: (RawEntry | undefined)[];
   healthSystemIds: string[];
   /** The tool's own notes, e.g. {@link PORTAL_RAW_WARNING}. */
@@ -244,10 +244,10 @@ function portalEntry(
 }
 
 /**
- * True when a FHIR entry and a portal entry are two sightings of one visit: the
- * calendar's own rule, `sameVisitWithinHealthSystem`. The sightings carry the
- * start in seconds already.
- */
+True when a FHIR entry and a portal entry are two sightings of one visit: the
+calendar's own rule, `sameVisitWithinHealthSystem`. The sightings carry the
+start in seconds already.
+*/
 function sameVisit(fhir: Entry, portal: Entry): boolean {
   return (
     fhir.healthSystemId === portal.healthSystemId &&
@@ -267,9 +267,9 @@ function enrich(fhir: Entry, portal: Entry): void {
 }
 
 /**
- * Add the portal's visits to the FHIR entries, merging the ones that are the
- * same appointment. Mutates `entries` (only this module's own array).
- */
+Add the portal's visits to the FHIR entries, merging the ones that are the
+same appointment. Mutates `entries` (only this module's own array).
+*/
 async function mergePortal(
   deps: ToolDeps,
   healthSystems: readonly HealthSystemInfo[],
@@ -297,10 +297,10 @@ async function mergePortal(
 }
 
 /**
- * One item per visit across health systems: a visit several organisations' records
- * list is answered once, by the sighting that outranks the rest (see
- * `worker/src/sync/portal-dedupe.ts`). A visit only one of them lists is always kept.
- */
+One item per visit across health systems: a visit several organisations' records
+list is answered once, by the sighting that outranks the rest (see
+`worker/src/sync/portal-dedupe.ts`). A visit only one of them lists is always kept.
+*/
 function collapseAcrossHealthSystems(entries: readonly Entry[]): Entry[] {
   const byPrecedence = [...entries];
   byPrecedence.sort((a, b) => {
@@ -318,9 +318,9 @@ function collapseAcrossHealthSystems(entries: readonly Entry[]): Entry[] {
 }
 
 /**
- * Every sighting a denied health system has of its own visits: its cached
- * Encounters and its stored portal visits. For matching only.
- */
+Every sighting a denied health system has of its own visits: its cached
+Encounters and its stored portal visits. For matching only.
+*/
 async function deniedSightings(
   deps: ToolDeps,
   denied: readonly HealthSystemInfo[],
@@ -350,13 +350,13 @@ function compare(order: "asc" | "desc"): (a: Entry, b: Entry) => number {
 }
 
 /**
- * Every appointment the selected health systems have, from both sources, windowed on
- * `start` and ordered as asked.
- *
- * The dedupe runs before the window, deliberately: a FHIR Encounter just outside
- * the window must still claim its portal twin, or the twin would be shown as a
- * separate visit just inside it.
- */
+Every appointment the selected health systems have, from both sources, windowed on
+`start` and ordered as asked.
+
+The dedupe runs before the window, deliberately: a FHIR Encounter just outside
+the window must still claim its portal twin, or the twin would be shown as a
+separate visit just inside it.
+*/
 export async function collectAppointments(
   deps: ToolDeps,
   healthSystems: readonly HealthSystemInfo[],

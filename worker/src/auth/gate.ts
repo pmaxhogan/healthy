@@ -28,15 +28,15 @@ export interface AppHonoEnv {
 }
 
 /**
- * `POST /auth/login` and `POST /auth/logout` clear Access but skip the *session*
- * step: login is how a session is obtained, and logout must work from an expired
- * one (otherwise "sign out" answers 401 and leaves the stale cookie in place).
- *
- * The METHOD is part of the exemption, not just the path. Only `app.post`
- * registers these two, so exempting every method would let `GET /auth/login` fall
- * through the gate to the SPA asset fallback and serve the admin UI with no
- * session -- which is the one thing app.ts's route order exists to prevent.
- */
+`POST /auth/login` and `POST /auth/logout` clear Access but skip the *session*
+step: login is how a session is obtained, and logout must work from an expired
+one (otherwise "sign out" answers 401 and leaves the stale cookie in place).
+
+The METHOD is part of the exemption, not just the path. Only `app.post`
+registers these two, so exempting every method would let `GET /auth/login` fall
+through the gate to the SPA asset fallback and serve the admin UI with no
+session -- which is the one thing app.ts's route order exists to prevent.
+*/
 const SESSION_EXEMPT_PATHS = new Set(["/auth/login", "/auth/logout"]);
 
 function isSessionExempt(request: Request, pathname: string): boolean {
@@ -65,12 +65,12 @@ function currentPath(request: Request): string | undefined {
 }
 
 /**
- * Gate 1 + gate 2.
- *
- * Access failure is 403 (the identity is wrong; no amount of retrying the
- * password helps). Session failure is 401 with `x-healthy-auth: required` for the
- * JSON surfaces and the login page everywhere else.
- */
+Gate 1 + gate 2.
+
+Access failure is 403 (the identity is wrong; no amount of retrying the
+password helps). Session failure is 401 with `x-healthy-auth: required` for the
+JSON surfaces and the login page everywhere else.
+*/
 export const ownerGate = createMiddleware<AppHonoEnv>(async (c, next) => {
   const request = c.req.raw;
   const pathname = new URL(request.url).pathname;

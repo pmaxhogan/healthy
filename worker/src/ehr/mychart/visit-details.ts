@@ -1,30 +1,30 @@
 /**
- * The parts of one visit's details page (`Visits/VisitDetails?csn=<token>`) the
- * visits list does not carry: the earlier-appointment wait list, the
- * department's directions, and the visit's own instructions.
- *
- * The page is server-rendered HTML, and a live capture found no JSON endpoint
- * behind any of the three: the wait-list widget's own script only ever *posts*
- * a change (`Scheduling/AutoWaitList/AddAppointmentToWaitList`), and its
- * `Index` endpoint answered an empty body. So the page is read, and only as
- * text: the markers below are the page's own class names and ids, sliced out
- * of the string, and flattened by `messageText` exactly like a message body --
- * nothing of the markup is kept.
- *
- *   - **Wait list.** A `waitlist` block exists only when the visit offers one.
- *     Its link (`id="updatewaitlist"`) carries `data-add="1"` when following it
- *     would *add* the patient -- not enrolled -- and `data-add="0"` when it would
- *     remove them. Any other value is the null "offered, state unknown".
- *   - **Directions.** The `departmentdirections` block's content. Every
- *     paragraph is kept here, the health system's boilerplate included; which
- *     paragraphs are boilerplate is only knowable across many visits, and
- *     `worker/src/sync/portal-directions.ts` decides that.
- *   - **Visit instructions.** The other `visitinstructionscontent` block, the one
- *     that is not inside the directions.
- *
- * Read-only: the page is only ever fetched with GET, and nothing on it is
- * followed or submitted.
- */
+The parts of one visit's details page (`Visits/VisitDetails?csn=<token>`) the
+visits list does not carry: the earlier-appointment wait list, the
+department's directions, and the visit's own instructions.
+
+The page is server-rendered HTML, and a live capture found no JSON endpoint
+behind any of the three: the wait-list widget's own script only ever *posts*
+a change (`Scheduling/AutoWaitList/AddAppointmentToWaitList`), and its
+`Index` endpoint answered an empty body. So the page is read, and only as
+text: the markers below are the page's own class names and ids, sliced out
+of the string, and flattened by `messageText` exactly like a message body --
+nothing of the markup is kept.
+
+  - **Wait list.** A `waitlist` block exists only when the visit offers one.
+    Its link (`id="updatewaitlist"`) carries `data-add="1"` when following it
+    would *add* the patient -- not enrolled -- and `data-add="0"` when it would
+    remove them. Any other value is the null "offered, state unknown".
+  - **Directions.** The `departmentdirections` block's content. Every
+    paragraph is kept here, the health system's boilerplate included; which
+    paragraphs are boilerplate is only knowable across many visits, and
+    `worker/src/sync/portal-directions.ts` decides that.
+  - **Visit instructions.** The other `visitinstructionscontent` block, the one
+    that is not inside the directions.
+
+Read-only: the page is only ever fetched with GET, and nothing on it is
+followed or submitted.
+*/
 
 import { messageText } from "./message-text.ts";
 
@@ -40,9 +40,9 @@ export interface VisitDetails {
 /** Where the directions block starts. */
 const DIRECTIONS_OPEN = /<div\s+class="departmentdirections"\s*>/iu;
 /**
- * Where the visit instructions block starts: a `visitinformation` wrapper whose
- * first child is the content block (the directions' one is wrapped differently).
- */
+Where the visit instructions block starts: a `visitinformation` wrapper whose
+first child is the content block (the directions' one is wrapped differently).
+*/
 const INSTRUCTIONS_OPEN =
   /<div\s+class="visitinformation"\s*>\s*<div\s+class="visitinformation visitinstructionscontent"\s*>/iu;
 /** The text container inside either block. */

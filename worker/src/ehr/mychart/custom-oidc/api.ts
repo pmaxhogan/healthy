@@ -1,28 +1,28 @@
 /**
- * The `custom_oidc` shell's JSON API: password, emailed code, trust token.
- *
- * This is the half of the strategy that is a normal API client -- a handful of
- * POSTs against documented routes, with a cookie jar. The other half, the part
- * that turns a shell session into a classic chart session, is `bridge.ts`.
- *
- * Three things shape every function here.
- *
- * **The route names are confirmed; the payloads mostly are not.** They were read
- * out of the deployment's own public bundle, so the paths and the request field
- * names are facts. The *responses* were never observed, so every reader below
- * goes through a candidate-key list from `wire-custom.ts` and degrades to a null
- * rather than throwing. `[assumption]` in that file is the index of what live QA
- * has to confirm.
- *
- * **Nothing here is logged except a status and a stable label.** The user id is
- * the owner's login name and the contact is an email address; both are arguments
- * to these functions and neither may reach a log line or an `AppError.details`.
- *
- * **A refusal is told from a failure by the body, not the status.** The shell
- * answers a wrong password with a 4xx often enough, but its own bundle carries
- * the lockout wording, so a body marker is what distinguishes `portal_locked`
- * from `portal_login_failed` -- exactly as it does on the classic pages.
- */
+The `custom_oidc` shell's JSON API: password, emailed code, trust token.
+
+This is the half of the strategy that is a normal API client -- a handful of
+POSTs against documented routes, with a cookie jar. The other half, the part
+that turns a shell session into a classic chart session, is `bridge.ts`.
+
+Three things shape every function here.
+
+**The route names are confirmed; the payloads mostly are not.** They were read
+out of the deployment's own public bundle, so the paths and the request field
+names are facts. The *responses* were never observed, so every reader below
+goes through a candidate-key list from `wire-custom.ts` and degrades to a null
+rather than throwing. `[assumption]` in that file is the index of what live QA
+has to confirm.
+
+**Nothing here is logged except a status and a stable label.** The user id is
+the owner's login name and the contact is an email address; both are arguments
+to these functions and neither may reach a log line or an `AppError.details`.
+
+**A refusal is told from a failure by the body, not the status.** The shell
+answers a wrong password with a 4xx often enough, but its own bundle carries
+the lockout wording, so a body marker is what distinguishes `portal_locked`
+from `portal_login_failed` -- exactly as it does on the classic pages.
+*/
 
 import { AppError } from "../../../lib/errors.ts";
 import { bodyMentions } from "../html.ts";
@@ -58,15 +58,15 @@ export interface LoginOutcome {
   /** True when the shell wants a verification code before it will sign in. */
   mfaRequired: boolean;
   /**
-   * True when the response said outright that the password signed us in: an
-   * explicit "signed in" flag, or -- the captured shape -- both MFA flags
-   * present and saying no code is needed.
-   *
-   * False covers both "said no" (which never gets this far -- it is a refusal)
-   * and "said nothing either way", which is the case that matters: a response
-   * that names none of these is not evidence that no code is needed. See the
-   * custom client's `login`.
-   */
+  True when the response said outright that the password signed us in: an
+  explicit "signed in" flag, or -- the captured shape -- both MFA flags
+  present and saying no code is needed.
+
+  False covers both "said no" (which never gets this far -- it is a refusal)
+  and "said nothing either way", which is the case that matters: a response
+  that names none of these is not evidence that no code is needed. See the
+  custom client's `login`.
+  */
   signedInStated: boolean;
   /** The id every later MFA call is keyed on, lower-cased. Null when unreadable. */
   userId: string | null;
@@ -88,13 +88,13 @@ function portalHostOf(api: ShellApi): string {
 }
 
 /**
- * A JSON object body as a field map.
- *
- * Empty rather than null when the body was not a JSON object, which makes every
- * reader below one expression: an unreadable response and a response that simply
- * did not mention a field are the same thing to all of them, and both degrade to
- * "said nothing" rather than to a throw.
- */
+A JSON object body as a field map.
+
+Empty rather than null when the body was not a JSON object, which makes every
+reader below one expression: an unreadable response and a response that simply
+did not mention a field are the same thing to all of them, and both degrade to
+"said nothing" rather than to a throw.
+*/
 function jsonFields(response: PortalResponse): ReadonlyMap<string, unknown> {
   const trimmed = response.body.trim();
   if (!trimmed.startsWith("{")) return EMPTY;
@@ -130,21 +130,21 @@ function yes(fields: ReadonlyMap<string, unknown>, keys: readonly string[]): boo
 }
 
 /**
- * True when a candidate key is present and says no.
- *
- * Distinct from `!yes(...)`: an absent key says nothing at all, and the whole
- * design of these readers is that silence degrades rather than fails.
- */
+True when a candidate key is present and says no.
+
+Distinct from `!yes(...)`: an absent key says nothing at all, and the whole
+design of these readers is that silence degrades rather than fails.
+*/
 function no(fields: ReadonlyMap<string, unknown>, keys: readonly string[]): boolean {
   return keys.some((key) => FALSE_VALUES.has(fields.get(key)));
 }
 
 /**
- * Turn a refused API call into the right stable code.
- *
- * `locked` first, because it is the one that has to stop the retry loop for the
- * day; everything else is the caller's `fallback`.
- */
+Turn a refused API call into the right stable code.
+
+`locked` first, because it is the one that has to stop the retry loop for the
+day; everything else is the caller's `fallback`.
+*/
 function refusal(response: PortalResponse, endpoint: string, fallback: "login" | "code"): AppError {
   const details = { endpoint, status: response.status };
   if (bodyMentions(response.body, CUSTOM_MARKERS.locked)) {
@@ -164,12 +164,12 @@ function refused(response: PortalResponse): boolean {
 }
 
 /**
- * POST the credentials.
- *
- * Form-urlencoded, and lower-case field names: the one route on this API that is
- * not JSON. A remembered device does not skip the code here: that is a separate
- * call the caller makes afterwards, `postValidateTrustToken`.
- */
+POST the credentials.
+
+Form-urlencoded, and lower-case field names: the one route on this API that is
+not JSON. A remembered device does not skip the code here: that is a separate
+call the caller makes afterwards, `postValidateTrustToken`.
+*/
 export async function postLogin(
   api: ShellApi,
   credentials: { username: string; password: string },
@@ -218,12 +218,12 @@ export async function postLogin(
 }
 
 /**
- * Ask the shell to send a code.
- *
- * The channel is the body *key*, not a value: `{ email: <contact> }`. `clientId`
- * is a per-attempt correlation number the caller mints and has to send again on
- * the validate call, which is why it is an argument rather than generated here.
- */
+Ask the shell to send a code.
+
+The channel is the body *key*, not a value: `{ email: <contact> }`. `clientId`
+is a per-attempt correlation number the caller mints and has to send again on
+the validate call, which is why it is an argument rather than generated here.
+*/
 export async function postGenerateCode(
   api: ShellApi,
   input: { channel: "email"; contact: string; userId: string; clientId: number },
@@ -267,16 +267,16 @@ export async function postValidateCode(
 }
 
 /**
- * Tell the shell to trust this device, with a token the *caller* mints.
- *
- * [confirmed] request shape, read out of the shell's own client code: the
- * token is generated in the browser and posted as `rememberMeToken` alongside
- * the user id. The shell answers with nothing this function reads -- the token
- * that ends up in the jar as a cookie is the one the caller already minted, not
- * anything parsed from the response. False rather than a throw on a refusal:
- * failing to be remembered costs an extra emailed code next time and nothing
- * else, so it must not fail a sign-in that has otherwise just succeeded.
- */
+Tell the shell to trust this device, with a token the *caller* mints.
+
+[confirmed] request shape, read out of the shell's own client code: the
+token is generated in the browser and posted as `rememberMeToken` alongside
+the user id. The shell answers with nothing this function reads -- the token
+that ends up in the jar as a cookie is the one the caller already minted, not
+anything parsed from the response. False rather than a throw on a refusal:
+failing to be remembered costs an extra emailed code next time and nothing
+else, so it must not fail a sign-in that has otherwise just succeeded.
+*/
 export async function saveTrustToken(
   api: ShellApi,
   input: { userId: string; rememberMeToken: string },
@@ -295,23 +295,23 @@ export async function saveTrustToken(
 }
 
 /**
- * What the trusted-device check said.
- *
- * `trusted`: the shell accepted the token and needs no code. `forgotten`: a
- * 410, which the shell's own login screen answers by deleting the cookie and
- * asking for a code. `refused`: anything else -- also "ask for a code", but
- * the token is kept, because nothing said it stopped being good.
- */
+What the trusted-device check said.
+
+`trusted`: the shell accepted the token and needs no code. `forgotten`: a
+410, which the shell's own login screen answers by deleting the cookie and
+asking for a code. `refused`: anything else -- also "ask for a code", but
+the token is kept, because nothing said it stopped being good.
+*/
 export type TrustCheck = "trusted" | "forgotten" | "refused";
 
 /**
- * [confirmed from capture] Ask the shell to honour a device it trusted before.
- *
- * The shell's own login screen makes exactly this call when the login response
- * wants a code and the trust cookie exists: `{ userId, rememberMeToken }`, the
- * token read back out of that cookie. Never a throw: every outcome here has a
- * fallback, which is the emailed code.
- */
+[confirmed from capture] Ask the shell to honour a device it trusted before.
+
+The shell's own login screen makes exactly this call when the login response
+wants a code and the trust cookie exists: `{ userId, rememberMeToken }`, the
+token read back out of that cookie. Never a throw: every outcome here has a
+fallback, which is the emailed code.
+*/
 export async function postValidateTrustToken(
   api: ShellApi,
   input: { userId: string; rememberMeToken: string },
@@ -342,13 +342,13 @@ export class HandoffStepError extends Error {
 }
 
 /**
- * [confirmed from capture] The first step of the hand-off: mint the SSO token.
- *
- * The body is the literal string `{}` as `text/plain`, because that is what the
- * shell's HTTP library sends for it. Returns the `yum` value, which the caller
- * writes into the jar as a cookie -- the shell's own script does the same, and
- * no `Set-Cookie` does it for us.
- */
+[confirmed from capture] The first step of the hand-off: mint the SSO token.
+
+The body is the literal string `{}` as `text/plain`, because that is what the
+shell's HTTP library sends for it. Returns the `yum` value, which the caller
+writes into the jar as a cookie -- the shell's own script does the same, and
+no `Set-Cookie` does it for us.
+*/
 export async function postSsoToken(api: ShellApi): Promise<string> {
   const response = await portalFetch(api.http, {
     url: apiUrl(api, API_PATHS.ssoToken),
@@ -364,10 +364,10 @@ export async function postSsoToken(api: ShellApi): Promise<string> {
 }
 
 /**
- * [confirmed from capture] What the shell's authorize page does with the
- * authorization request: trade it for a code. Every field comes off the
- * authorization URL the stub carried; see `AUTH_CODE_FIELDS`.
- */
+[confirmed from capture] What the shell's authorize page does with the
+authorization request: trade it for a code. Every field comes off the
+authorization URL the stub carried; see `AUTH_CODE_FIELDS`.
+*/
 export async function postGetAuthCode(
   api: ShellApi,
   input: { clientId: string; scope: string; responseType: string; guid: string; nonce: string },
@@ -393,12 +393,12 @@ export async function postGetAuthCode(
 }
 
 /**
- * Ask the shell where a code can be sent, or null.
- *
- * The last of three sources, after the login response and the owner's own
- * configuration. Null rather than a throw for the same reason: the caller has a
- * better error to raise than this function does.
- */
+Ask the shell where a code can be sent, or null.
+
+The last of three sources, after the login response and the owner's own
+configuration. Null rather than a throw for the same reason: the caller has a
+better error to raise than this function does.
+*/
 export async function fetchContact(api: ShellApi, userId: string): Promise<string | null> {
   const response = await portalFetch(api.http, {
     url: `${apiUrl(api, API_PATHS.mfaContact)}?${new URLSearchParams({ [GENERATE_FIELDS.userId]: userId }).toString()}`,

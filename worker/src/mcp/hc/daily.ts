@@ -1,47 +1,47 @@
 /**
- * `daily_summary`: one row per local day, joining what the other Health
- * Connect tools answer one type at a time.
- *
- * Every number comes from the same code the single-type tools use, so a day
- * here can never disagree with `hc_aggregate` or `blood_pressure` about the
- * same day:
- *
- *  - steps, distance, active and total energy: `aggregate()` by day under
- *    `hc_priority`. Total energy is what was recorded -- never padded with
- *    basal metabolic rate. When part of a day's total is the share of a
- *    record longer than an hour (a day's energy written as one record, which
- *    only counts in the hours nobody measured), the day is flagged
- *    `long_record_used`.
- *  - HRV and respiratory rate: the day's MEAN, every origin. The HRV field
- *    says so in its name (`hrvRmssdMean`): `sleep_sessions` gives a night's
- *    MEDIAN, over the night and not the day, and the two are not one figure.
- *  - sleep: the night that ENDED on the day -- the day you woke up, which is
- *    also where `hc_aggregate` files a night (the longest, when there are
- *    several; the others are counted as `naps`, their time asleep as
- *    `napMin`, and `totalAsleepMin` is the two together: the day's figure
- *    `hc_aggregate` gives as `durationMs`).
- *  - blood pressure: the day's readings after the duplicate rule.
- *  - weight: the day's last weighing after the profile-setup rule. Every
- *    weighing is still listed (`weighings`), each with the flag it earned.
- *  - resting heart rate: RestingHeartRate records, but not a cuff's. A
- *    blood-pressure app that also writes its pulse as a "resting heart rate"
- *    is not measuring one, so a RestingHeartRate record from an origin that
- *    wrote a BloodPressure reading within {@link CUFF_PULSE_WINDOW_MS} of the
- *    same instant is left out and counted.
- *
- * A section whose record type the exposure policy denies is not read and is
- * absent from the row, not null: the caller is told by a warning, and the row
- * does not say the type exists. The caller passes every row through
- * `stripJoined` (`./policy.ts`) as well, which is what removes a field that
- * sits inside another type's section (`sleep.skinTempDelta`). A rule that
- * needs a second type for context -- the cuff rule needs the readings, the
- * profile rule a height -- only gets it when that type is itself allowed, and
- * a flag is only raised from types the call may see. A denied type is never
- * read to apply a rule: the rule is then NOT applied, the figure is what was
- * recorded, and the answer says so with a stable warning
- * (`resting_hr_cuff_rule_not_applied`, `weight_artefact_rule_not_applied`),
- * which names the rule and nothing about the type that was withheld.
- */
+`daily_summary`: one row per local day, joining what the other Health
+Connect tools answer one type at a time.
+
+Every number comes from the same code the single-type tools use, so a day
+here can never disagree with `hc_aggregate` or `blood_pressure` about the
+same day:
+
+ - steps, distance, active and total energy: `aggregate()` by day under
+   `hc_priority`. Total energy is what was recorded -- never padded with
+   basal metabolic rate. When part of a day's total is the share of a
+   record longer than an hour (a day's energy written as one record, which
+   only counts in the hours nobody measured), the day is flagged
+   `long_record_used`.
+ - HRV and respiratory rate: the day's MEAN, every origin. The HRV field
+   says so in its name (`hrvRmssdMean`): `sleep_sessions` gives a night's
+   MEDIAN, over the night and not the day, and the two are not one figure.
+ - sleep: the night that ENDED on the day -- the day you woke up, which is
+   also where `hc_aggregate` files a night (the longest, when there are
+   several; the others are counted as `naps`, their time asleep as
+   `napMin`, and `totalAsleepMin` is the two together: the day's figure
+   `hc_aggregate` gives as `durationMs`).
+ - blood pressure: the day's readings after the duplicate rule.
+ - weight: the day's last weighing after the profile-setup rule. Every
+   weighing is still listed (`weighings`), each with the flag it earned.
+ - resting heart rate: RestingHeartRate records, but not a cuff's. A
+   blood-pressure app that also writes its pulse as a "resting heart rate"
+   is not measuring one, so a RestingHeartRate record from an origin that
+   wrote a BloodPressure reading within {@link CUFF_PULSE_WINDOW_MS} of the
+   same instant is left out and counted.
+
+A section whose record type the exposure policy denies is not read and is
+absent from the row, not null: the caller is told by a warning, and the row
+does not say the type exists. The caller passes every row through
+`stripJoined` (`./policy.ts`) as well, which is what removes a field that
+sits inside another type's section (`sleep.skinTempDelta`). A rule that
+needs a second type for context -- the cuff rule needs the readings, the
+profile rule a height -- only gets it when that type is itself allowed, and
+a flag is only raised from types the call may see. A denied type is never
+read to apply a rule: the rule is then NOT applied, the figure is what was
+recorded, and the answer says so with a stable warning
+(`resting_hr_cuff_rule_not_applied`, `weight_artefact_rule_not_applied`),
+which names the rule and nothing about the type that was withheld.
+*/
 
 import { dayBoundsMs, daysTouched } from "../../hc/rollup/day.ts";
 import { dedupeBloodPressure, flagWeightArtefacts, isOverThreeHours } from "../../hc/rules.ts";
@@ -60,11 +60,11 @@ import type { ExerciseSummary, SleepNight } from "../../hc/rollup/types.ts";
 import type { HcRecord } from "../../hc/wire.ts";
 
 /**
- * How close a RestingHeartRate record must be to a BloodPressure reading from
- * the same app to be taken for the cuff's pulse, ms. One minute: a cuff
- * writes both from one measurement, seconds apart at most, while a wearable's
- * daily resting figure is stamped on its own schedule.
- */
+How close a RestingHeartRate record must be to a BloodPressure reading from
+the same app to be taken for the cuff's pulse, ms. One minute: a cuff
+writes both from one measurement, seconds apart at most, while a wearable's
+daily resting figure is stamped on its own schedule.
+*/
 const CUFF_PULSE_WINDOW_MS = MINUTE_MS;
 
 /** The record types `daily_summary` reads, by the section each fills. */
@@ -95,10 +95,10 @@ export interface DailyRequest {
   /** The sections the exposure policy lets this call fill. */
   sections: ReadonlySet<DailySection>;
   /**
-   * Whether the policy lets this call read a record type at all. The rules
-   * that need a second type for context (a cuff's readings, a profile's
-   * height) only get it when that type is itself allowed.
-   */
+  Whether the policy lets this call read a record type at all. The rules
+  that need a second type for context (a cuff's readings, a profile's
+  height) only get it when that type is itself allowed.
+  */
   allowed: (type: string) => boolean;
 }
 
@@ -111,9 +111,9 @@ export interface DailyResult {
   /** Records of other apps left out of the day totals. */
   duplicatesDropped: number;
   /**
-   * Stable codes of the rules that could not be applied because the type they
-   * need for context is withheld: the figures they guard are as recorded.
-   */
+  Stable codes of the rules that could not be applied because the type they
+  need for context is withheld: the figures they guard are as recorded.
+  */
   rulesNotApplied: string[];
 }
 
@@ -130,9 +130,9 @@ function byDay(records: readonly HcRecord[], clock: ZoneClock): Map<string, HcRe
 }
 
 /**
- * RestingHeartRate records that are not a cuff's pulse: see the module
- * comment. `readings` are the BloodPressure records around the same time.
- */
+RestingHeartRate records that are not a cuff's pulse: see the module
+comment. `readings` are the BloodPressure records around the same time.
+*/
 function excludeCuffPulses(
   resting: readonly HcRecord[],
   readings: readonly HcRecord[],
@@ -383,7 +383,7 @@ function dayFlags(
     [data.cuffPulses.has(day), "resting_hr_cuff_pulse_excluded"],
     [data.weightFlagDays.has(day), "weight_profile_artefact_excluded"],
   ];
-  return checks.flatMap(([raised, flag]) => (raised ? [flag] : []));
+  return checks.flatMap(([raised, flag]) => (raised ? flag : []));
 }
 
 function sleepSection(

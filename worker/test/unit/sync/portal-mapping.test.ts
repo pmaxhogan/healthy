@@ -60,12 +60,12 @@ function input(
 }
 
 /**
- * A visit override may be an explicit `undefined`, which means "drop this field".
- *
- * `Partial<PortalVisit>` will not do: under `exactOptionalPropertyTypes` an
- * optional property does not accept `undefined`, and several tests here are about
- * what the mapping does when the payload carried no practitioner or no location.
- */
+A visit override may be an explicit `undefined`, which means "drop this field".
+
+`Partial<PortalVisit>` will not do: under `exactOptionalPropertyTypes` an
+optional property does not accept `undefined`, and several tests here are about
+what the mapping does when the payload carried no practitioner or no location.
+*/
 type VisitOverrides = { [K in keyof PortalVisit]?: PortalVisit[K] | undefined };
 
 function visit(overrides: VisitOverrides = {}): PortalVisit {

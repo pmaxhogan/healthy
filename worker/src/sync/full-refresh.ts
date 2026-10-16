@@ -1,57 +1,57 @@
 /**
- * The four-hourly full-scope refresh that fills the MCP's read cache.
- *
- * Everything the owner's record contains, per health system, every four hours,
- * into `fhir_cache` with an eight-day TTL -- a day longer than a week so a single
- * missed night never empties the cache the MCP serves from.
- *
- * Isolation is per (health system, resource type), one level finer than the calendar
- * sync. That is deliberate: an organisation that exposes Immunization but not
- * Coverage should produce a cache full of immunizations and one recorded failure,
- * not an empty cache. `fhir_sync_state` is where those failures live, and it
- * survives every later success, because the useful question is not "how did last
- * night go" but "which resource types has this organisation never returned
- * anything for" -- that is what tells the owner a scope is missing.
- *
- * Epic-specific behaviour encoded here:
- *
- *   - **The registry is intersected with the CapabilityStatement.**
- *     `filterSupported` drops resource types the organisation does not expose and
- *     prunes search parameters it does not advertise, rather than sending searches
- *     that come back 4122 or empty.
- *   - **`DocumentReference` is metadata only, and `Binary` is never searched.**
- *     Epic caps document queries per day (error 4135), and the attached document
- *     bodies are fetched lazily when the MCP is actually asked for one.
- *   - **4135 stops document work for that health system for the rest of the run.** The
- *     cap is daily, so continuing would spend the remaining quota on failures.
- *   - **Only `Patient` is read by id.** The other `mode: "read"` entries
- *     (Practitioner, Location, Organization, Medication, Binary) exist to be
- *     resolved on demand, and reading them speculatively would be unbounded.
- *
- * ### Why this is chunked, and what a chunk is
- *
- * A refresh of a large record is minutes of wall clock, nearly all of it waiting on
- * the organisation. That is fine under cron, which gets minutes. It is *not* fine
- * behind a request: work handed to `ctx.waitUntil` is cancelled about thirty
- * seconds after the response is written, mid-`await`, with the invocation still
- * reported as `ok`. That is exactly how a refresh came to leave half a record
- * cached, `connections.last_full_refresh_at` NULL and a `run_log` row open forever.
- *
- * So `runFullRefreshChunk` takes a wall-clock `budgetMs` and a `RefreshJob`. When
- * the budget is spent it stops between two resource types, hands back a job
- * describing what is left, and leaves the run row open; `runner.ts` stores that job
- * in a Durable Object and re-arms an alarm, so the next chunk is a fresh invocation
- * with a fresh budget. `runFullRefresh` is the same thing with no budget, which is
- * what cron still uses and what the tests drive.
- *
- * Resuming needs no new table. `fhir_sync_state.last_full_at` is already stamped
- * per (health system, resource type) on success *and* on failure, so a type whose stamp
- * is at or after the cycle's start instant is done for this cycle and is skipped --
- * which also means a type that failed is not retried within one cycle.
- *
- * Log lines carry health system ids, resource type names, counts and Epic codes. Never
- * a search URL -- the parameters carry the patient id -- and never a resource.
- */
+The four-hourly full-scope refresh that fills the MCP's read cache.
+
+Everything the owner's record contains, per health system, every four hours,
+into `fhir_cache` with an eight-day TTL -- a day longer than a week so a single
+missed night never empties the cache the MCP serves from.
+
+Isolation is per (health system, resource type), one level finer than the calendar
+sync. That is deliberate: an organisation that exposes Immunization but not
+Coverage should produce a cache full of immunizations and one recorded failure,
+not an empty cache. `fhir_sync_state` is where those failures live, and it
+survives every later success, because the useful question is not "how did last
+night go" but "which resource types has this organisation never returned
+anything for" -- that is what tells the owner a scope is missing.
+
+Epic-specific behaviour encoded here:
+
+  - **The registry is intersected with the CapabilityStatement.**
+    `filterSupported` drops resource types the organisation does not expose and
+    prunes search parameters it does not advertise, rather than sending searches
+    that come back 4122 or empty.
+  - **`DocumentReference` is metadata only, and `Binary` is never searched.**
+    Epic caps document queries per day (error 4135), and the attached document
+    bodies are fetched lazily when the MCP is actually asked for one.
+  - **4135 stops document work for that health system for the rest of the run.** The
+    cap is daily, so continuing would spend the remaining quota on failures.
+  - **Only `Patient` is read by id.** The other `mode: "read"` entries
+    (Practitioner, Location, Organization, Medication, Binary) exist to be
+    resolved on demand, and reading them speculatively would be unbounded.
+
+### Why this is chunked, and what a chunk is
+
+A refresh of a large record is minutes of wall clock, nearly all of it waiting on
+the organisation. That is fine under cron, which gets minutes. It is *not* fine
+behind a request: work handed to `ctx.waitUntil` is cancelled about thirty
+seconds after the response is written, mid-`await`, with the invocation still
+reported as `ok`. That is exactly how a refresh came to leave half a record
+cached, `connections.last_full_refresh_at` NULL and a `run_log` row open forever.
+
+So `runFullRefreshChunk` takes a wall-clock `budgetMs` and a `RefreshJob`. When
+the budget is spent it stops between two resource types, hands back a job
+describing what is left, and leaves the run row open; `runner.ts` stores that job
+in a Durable Object and re-arms an alarm, so the next chunk is a fresh invocation
+with a fresh budget. `runFullRefresh` is the same thing with no budget, which is
+what cron still uses and what the tests drive.
+
+Resuming needs no new table. `fhir_sync_state.last_full_at` is already stamped
+per (health system, resource type) on success *and* on failure, so a type whose stamp
+is at or after the cycle's start instant is done for this cycle and is skipped --
+which also means a type that failed is not retried within one cycle.
+
+Log lines carry health system ids, resource type names, counts and Epic codes. Never
+a search URL -- the parameters carry the patient id -- and never a resource.
+*/
 
 import { makeRepos } from "../db/index.ts";
 import { getAllSettings, setSyncBackoff } from "../db/settings.ts";
@@ -94,13 +94,13 @@ function categoryOf(params: Record<string, string>): string {
 }
 
 /**
- * How much wall clock one chunk of a chunked refresh may spend.
- *
- * Twenty seconds against a thirty second cancellation deadline. The check happens
- * *between* resource types, so a chunk overruns by however long its last type takes
- * -- a few seconds for everything observed -- and ten seconds of headroom is what
- * pays for that. Raising this trades margin for fewer alarms and is not worth it.
- */
+How much wall clock one chunk of a chunked refresh may spend.
+
+Twenty seconds against a thirty second cancellation deadline. The check happens
+*between* resource types, so a chunk overruns by however long its last type takes
+-- a few seconds for everything observed -- and ten seconds of headroom is what
+pays for that. Raising this trades margin for fewer alarms and is not worth it.
+*/
 export const CHUNK_BUDGET_MS = 20_000;
 
 export interface FullRefreshOptions {
@@ -110,13 +110,13 @@ export interface FullRefreshOptions {
 }
 
 /**
- * What one chunk hands the next.
- *
- * `pending` is the health systems still to walk, `cycleStartedAt` the instant the whole
- * refresh began (the resume marker against `fhir_sync_state.last_full_at`), and
- * `runId` plus `state` the one open run row and its counts so far. `runId` is null
- * only before the first chunk has opened the row.
- */
+What one chunk hands the next.
+
+`pending` is the health systems still to walk, `cycleStartedAt` the instant the whole
+refresh began (the resume marker against `fhir_sync_state.last_full_at`), and
+`runId` plus `state` the one open run row and its counts so far. `runId` is null
+only before the first chunk has opened the row.
+*/
 export interface RefreshJob {
   pending: string[];
   cycleStartedAt: number;
@@ -138,12 +138,12 @@ export interface ChunkOptions extends FullRefreshOptions {
 }
 
 /**
- * Refresh every health system's cached record, start to finish, in this invocation.
- *
- * Writes one `run_log` row of kind "full" and resolves with its summary. Never
- * throws. Safe only where the caller has minutes of wall clock -- cron does, a
- * request's `waitUntil` does not; that path goes through `runner.ts`.
- */
+Refresh every health system's cached record, start to finish, in this invocation.
+
+Writes one `run_log` row of kind "full" and resolves with its summary. Never
+throws. Safe only where the caller has minutes of wall clock -- cron does, a
+request's `waitUntil` does not; that path goes through `runner.ts`.
+*/
 export async function runFullRefresh(
   ctx: Ctx,
   options: FullRefreshOptions = {},
@@ -153,11 +153,11 @@ export async function runFullRefresh(
 }
 
 /**
- * One chunk of a refresh: as many (health system, resource type) passes as the budget
- * allows, then a job describing the rest.
- *
- * With no `budgetMs` this is `runFullRefresh` and `job` always comes back null.
- */
+One chunk of a refresh: as many (health system, resource type) passes as the budget
+allows, then a job describing the rest.
+
+With no `budgetMs` this is `runFullRefresh` and `job` always comes back null.
+*/
 export async function runFullRefreshChunk(
   ctx: Ctx,
   options: ChunkOptions = {},
@@ -280,21 +280,21 @@ export async function runFullRefreshChunk(
 }
 
 /**
- * Whether one health system's finished pass counts as a refresh that worked.
- *
- * `refreshResourceType` never rethrows, so a pass in which every search failed
- * still comes back as finished: this is the only place that can say it was not
- * a success. Judged from what the pass itself recorded in `fhir_sync_state`
- * (rows stamped in this cycle), which is also what makes it right for a chunked
- * refresh whose types were spread over several invocations.
- *
- * The line: a pass fails when more of the types it attempted failed than
- * succeeded. One or two types a vendor rejects every time, with the rest fine,
- * is a nuisance that `coverage` already reports per type and is not worth a
- * card; most of the record being unreadable is. A type the organisation does
- * not offer and a document type past the daily cap were not attempted at all,
- * so they are on neither side.
- */
+Whether one health system's finished pass counts as a refresh that worked.
+
+`refreshResourceType` never rethrows, so a pass in which every search failed
+still comes back as finished: this is the only place that can say it was not
+a success. Judged from what the pass itself recorded in `fhir_sync_state`
+(rows stamped in this cycle), which is also what makes it right for a chunked
+refresh whose types were spread over several invocations.
+
+The line: a pass fails when more of the types it attempted failed than
+succeeded. One or two types a vendor rejects every time, with the rest fine,
+is a nuisance that `coverage` already reports per type and is not worth a
+card; most of the record being unreadable is. A type the organisation does
+not offer and a document type past the daily cap were not attempted at all,
+so they are on neither side.
+*/
 async function noteRefreshOutcome(
   ctx: Ctx,
   repos: Repos,
@@ -340,12 +340,12 @@ function commonestCode(failed: readonly { lastErrorCode: string | null }[]): str
 }
 
 /**
- * How much wall clock this chunk may still spend.
- *
- * `processed` is what guarantees forward progress: at least one resource type is
- * always attempted, so a single slow type can never make a chunk defer everything
- * and re-arm forever.
- */
+How much wall clock this chunk may still spend.
+
+`processed` is what guarantees forward progress: at least one resource type is
+always attempted, so a single slow type can never make a chunk defer everything
+and re-arm forever.
+*/
 interface Budget {
   startedMs: number;
   limitMs: number | null;
@@ -370,12 +370,12 @@ interface RefreshPass {
 }
 
 /**
- * The resource types this health system has already had refreshed in this cycle.
- *
- * One query rather than one per entry, and only for a chunked run: an unchunked
- * refresh has nothing to skip, and asking would make "run it twice in a row"
- * -- which the tests do, on a fixed clock -- mean "do nothing the second time".
- */
+The resource types this health system has already had refreshed in this cycle.
+
+One query rather than one per entry, and only for a chunked run: an unchunked
+refresh has nothing to skip, and asking would make "run it twice in a row"
+-- which the tests do, on a fixed clock -- mean "do nothing the second time".
+*/
 async function completedTypes(
   repos: Repos,
   healthSystemId: string,
@@ -390,10 +390,10 @@ async function completedTypes(
 }
 
 /**
- * One registry entry's outcome for one health system: an unsupported search
- * type is just recorded, a document type past the daily cap is recorded and
- * skipped, and everything else is actually fetched.
- */
+One registry entry's outcome for one health system: an unsupported search
+type is just recorded, a document type past the daily cap is recorded and
+skipped, and everything else is actually fetched.
+*/
 async function processRegistryEntry(
   ctx: Ctx,
   repos: Repos,
@@ -578,23 +578,23 @@ function mergeUnique(resources: Resource[], seen: Set<string>, found: readonly R
 }
 
 /**
- * Run every parameter set an entry asks for, or read the Patient by id.
- *
- * An entry with several parameter sets (`byCategory`) runs each independently:
- * Epic rejecting one category outright (a 400 whose body is a single
- * OperationOutcome issue, thrown by `assertIssuesUsable` as `upstream_error` --
- * 59109 among the codes observed) must not discard every other category's
- * results. Before this, one rejected category failed the whole type and cached
- * nothing, even when the others paged fine -- exactly what happened to CarePlan.
- * Only that one failure mode is tolerated per set -- an auth failure, a rate
- * limit or an unavailable upstream is not category-specific, applies to every
- * set alike, and is left to fail (and, for a rate limit, escape) the whole
- * entry exactly as it always has.
- *
- * When every set fails this throws the last failure, so a single-set entry
- * (everything but the `byCategory` ones) behaves exactly as before: one
- * failure is the type's failure.
- */
+Run every parameter set an entry asks for, or read the Patient by id.
+
+An entry with several parameter sets (`byCategory`) runs each independently:
+Epic rejecting one category outright (a 400 whose body is a single
+OperationOutcome issue, thrown by `assertIssuesUsable` as `upstream_error` --
+59109 among the codes observed) must not discard every other category's
+results. Before this, one rejected category failed the whole type and cached
+nothing, even when the others paged fine -- exactly what happened to CarePlan.
+Only that one failure mode is tolerated per set -- an auth failure, a rate
+limit or an unavailable upstream is not category-specific, applies to every
+set alike, and is left to fail (and, for a rate limit, escape) the whole
+entry exactly as it always has.
+
+When every set fails this throws the last failure, so a single-set entry
+(everything but the `byCategory` ones) behaves exactly as before: one
+failure is the type's failure.
+*/
 async function fetchEntry(
   ctx: Ctx,
   session: { client: FhirClient; patientId: string },
@@ -677,12 +677,12 @@ async function setBackoff(ctx: Ctx, retryAfterMs: number | undefined): Promise<v
 }
 
 /**
- * A stable code for `fhir_sync_state.last_error_code`.
- *
- * Epic's numeric code is appended when there is one, because "upstream_error"
- * alone does not distinguish "you are not registered for this" from "the daily
- * document cap is reached".
- */
+A stable code for `fhir_sync_state.last_error_code`.
+
+Epic's numeric code is appended when there is one, because "upstream_error"
+alone does not distinguish "you are not registered for this" from "the daily
+document cap is reached".
+*/
 function codeOf(error: unknown): string {
   if (!isAppError(error)) return "internal";
   const epic = epicCodesOf(error)[0];

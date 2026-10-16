@@ -74,20 +74,18 @@ describe("verifySession", () => {
 
   it("rejects a tampered expiry, because exp is inside the signed message", async () => {
     const token = await mintSessionToken(ENV, NOW);
-    const [exp, signature] = token.split(".", 2);
-    const extended = `${String(Number(exp) + 86_400)}.${signature ?? ""}`;
+    const [exp, signature = ""] = token.split(".", 2);
+    const extended = `${String(Number(exp) + 86_400)}.${signature}`;
 
     await expect(verifySession(requestWithCookie(extended), ENV, NOW)).resolves.toBe(false);
   });
 
   it("rejects a tampered signature", async () => {
     const token = await mintSessionToken(ENV, NOW);
-    const [exp, signature] = token.split(".", 2);
-    const flipped = (signature ?? "").startsWith("A")
-      ? `B${(signature ?? "").slice(1)}`
-      : `A${(signature ?? "").slice(1)}`;
+    const [exp = "", signature = ""] = token.split(".", 2);
+    const flipped = signature.startsWith("A") ? `B${signature.slice(1)}` : `A${signature.slice(1)}`;
 
-    const tampered = [exp ?? "", flipped].join(".");
+    const tampered = [exp, flipped].join(".");
 
     await expect(verifySession(requestWithCookie(tampered), ENV, NOW)).resolves.toBe(false);
   });

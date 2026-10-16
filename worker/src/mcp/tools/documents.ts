@@ -1,17 +1,17 @@
 /**
- * `get_documents` and `get_document_text`.
- *
- * Split in two because the second one costs something. Document metadata is
- * refreshed on the daily schedule like everything else, but the body of a
- * clinical note lives in a `Binary` that Epic meters: an organisation returns
- * error 4135 once the day's document quota is spent. So the note is fetched on
- * demand, once, and the decoded text is cached for thirty days -- and the cap is
- * reported as `document_cap_reached` rather than as a generic upstream failure, so
- * a caller knows to try tomorrow rather than to retry now.
- *
- * `get_document_text` is the only tool on this server that can reach a health
- * system during a request. Everything else reads the cache.
- */
+`get_documents` and `get_document_text`.
+
+Split in two because the second one costs something. Document metadata is
+refreshed on the daily schedule like everything else, but the body of a
+clinical note lives in a `Binary` that Epic meters: an organisation returns
+error 4135 once the day's document quota is spent. So the note is fetched on
+demand, once, and the decoded text is cached for thirty days -- and the cap is
+reported as `document_cap_reached` rather than as a generic upstream failure, so
+a caller knows to try tomorrow rather than to retry now.
+
+`get_document_text` is the only tool on this server that can reach a health
+system during a request. Everything else reads the cache.
+*/
 
 import { z } from "zod";
 

@@ -1,10 +1,10 @@
 /**
- * Every tool this server registers, in the order a caller would meet them.
- *
- * Re-exported by `tools/index.ts`, which is where a reader looks for it; kept
- * in a module of its own, with no imports, so `worker/src/policy/tree.ts` can key
- * its per-tool field shapes by it without an import cycle through the tools.
- */
+Every tool this server registers, in the order a caller would meet them.
+
+Re-exported by `tools/index.ts`, which is where a reader looks for it; kept
+in a module of its own, with no imports, so `worker/src/policy/tree.ts` can key
+its per-tool field shapes by it without an import cycle through the tools.
+*/
 export const TOOL_NAMES = [
   "get_health_summary",
   "list_health_systems",

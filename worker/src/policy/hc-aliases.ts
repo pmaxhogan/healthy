@@ -1,35 +1,35 @@
 /**
- * A `field` rule's vocabularies, for a paired phone's Health Connect data.
- *
- * `./aliases.ts` translates a FHIR rule between two shapes of one resource.
- * Phone data has the same problem in a different form: ONE measurement is
- * spelled several ways, by several tools, on rows of several types. A systolic
- * pressure is `systolic` on a sitting, `readings[].systolic` inside it,
- * `data.systolic` in `hc_records`, `values.systolic.mean` in `hc_aggregate`
- * and `bloodPressure.systolic` on a `daily_summary` row -- whose `resourceType`
- * is not even `hc:BloodPressure`. A rule that removed only the spelling it was
- * written in would be a rule the owner believes in and a model reads around.
- *
- * So a rule naming a field of a record type -- in ANY of its spellings -- is
- * expanded into every place that field ends up, on every tool:
- *
- *  - on rows of that type: `<f>`, `data.<f>` (and `data.<list>[].<f>` for a
- *    sampled series), `values.<f>`, `readings[].<f>`, the type's own other
- *    names for it ({@link OWN_PLACES}), a quality finding's `value`;
- *  - on rows of another type: the joined fields `JOINED_FIELDS` says carry
- *    that type's data (`./hc-fields.ts`), narrowed by {@link DERIVED_PLACES}
- *    where a type has several fields and each lands somewhere different.
- *
- * A rule may also name a joined field directly under its SOURCE type
- * (`hc:HeartRate` / `hr`): that reaches the rows that carry it, whatever their
- * own type.
- *
- * It only ever adds paths, and every path it adds names the same measurement,
- * so it strips more and never less. `./filter.ts` applies the result;
- * `./validate.ts` uses it to refuse a rule that could reach nothing.
- *
- * Pure: tables and string work.
- */
+A `field` rule's vocabularies, for a paired phone's Health Connect data.
+
+`./aliases.ts` translates a FHIR rule between two shapes of one resource.
+Phone data has the same problem in a different form: ONE measurement is
+spelled several ways, by several tools, on rows of several types. A systolic
+pressure is `systolic` on a sitting, `readings[].systolic` inside it,
+`data.systolic` in `hc_records`, `values.systolic.mean` in `hc_aggregate`
+and `bloodPressure.systolic` on a `daily_summary` row -- whose `resourceType`
+is not even `hc:BloodPressure`. A rule that removed only the spelling it was
+written in would be a rule the owner believes in and a model reads around.
+
+So a rule naming a field of a record type -- in ANY of its spellings -- is
+expanded into every place that field ends up, on every tool:
+
+ - on rows of that type: `<f>`, `data.<f>` (and `data.<list>[].<f>` for a
+   sampled series), `values.<f>`, `readings[].<f>`, the type's own other
+   names for it ({@link OWN_PLACES}), a quality finding's `value`;
+ - on rows of another type: the joined fields `JOINED_FIELDS` says carry
+   that type's data (`./hc-fields.ts`), narrowed by {@link DERIVED_PLACES}
+   where a type has several fields and each lands somewhere different.
+
+A rule may also name a joined field directly under its SOURCE type
+(`hc:HeartRate` / `hr`): that reaches the rows that carry it, whatever their
+own type.
+
+It only ever adds paths, and every path it adds names the same measurement,
+so it strips more and never less. `./filter.ts` applies the result;
+`./validate.ts` uses it to refuse a rule that could reach nothing.
+
+Pure: tables and string work.
+*/
 
 import { ARRAY_SEGMENT } from "@shared/policy-path.ts";
 
@@ -57,10 +57,10 @@ export function hcTypeOf(resourceType: string): string {
 const CONTAINERS: ReadonlySet<string> = new Set(["data", "values", "readings", "weighings"]);
 
 /**
- * A type's other names for one of its fields, on rows of its OWN type. Heart
- * rate is `bpm` in a record and a minute's `mean`/`min`/`max` in `hr_series`,
- * and an event's three figures in `hr_events`.
- */
+A type's other names for one of its fields, on rows of its OWN type. Heart
+rate is `bpm` in a record and a minute's `mean`/`min`/`max` in `hr_series`,
+and an event's three figures in `hr_events`.
+*/
 const OWN_PLACES: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
   HeartRate: { bpm: ["mean", "min", "max", "baselineBpm", "peakBpm", "deltaBpm"] },
 };
@@ -69,10 +69,10 @@ const OWN_PLACES: Readonly<Record<string, Readonly<Record<string, readonly strin
 const FINDING_VALUE_PATHS: readonly string[] = ["value", "maxValue", "minValue"];
 
 /**
- * Where one field of a type lands on rows of ANOTHER type, per tool, when
- * that is narrower than "every joined field of the type" -- or, for a tool
- * `JOINED_FIELDS` does not cover, where it lands at all.
- */
+Where one field of a type lands on rows of ANOTHER type, per tool, when
+that is narrower than "every joined field of the type" -- or, for a tool
+`JOINED_FIELDS` does not cover, where it lands at all.
+*/
 const DERIVED_PLACES: Readonly<
   Record<string, Readonly<Record<string, Readonly<Record<string, readonly string[]>>>>>
 > = {
@@ -126,14 +126,14 @@ function otherNamesOf(type: string, field: string): string[] {
 }
 
 /**
- * The type's field a path names by one of its OTHER names: where the field
- * lands on another row (`bloodPressure.systolic`, `weighings[].weight`), the
- * type's own alternative name for it (`mean` of a heart-rate point), or a
- * joined field that carries nothing but this type's one number (`hr`,
- * `restingHr`, `steps`). A joined field read off two types (a workout's
- * left-running flag) names neither's field: hiding the flag is not hiding
- * every heart rate.
- */
+The type's field a path names by one of its OTHER names: where the field
+lands on another row (`bloodPressure.systolic`, `weighings[].weight`), the
+type's own alternative name for it (`mean` of a heart-rate point), or a
+joined field that carries nothing but this type's one number (`hr`,
+`restingHr`, `steps`). A joined field read off two types (a workout's
+left-running flag) names neither's field: hiding the flag is not hiding
+every heart rate.
+*/
 function fieldByOtherName(type: string, dotted: string): string | null {
   const numeric = numericFields(type);
   const fields = new Set([...numeric, ...(recordFieldsOf(type) ?? [])]);
@@ -151,11 +151,11 @@ function fieldByOtherName(type: string, dotted: string): string | null {
 }
 
 /**
- * The field a path names, whichever way it was written: `systolic`,
- * `data.systolic`, `values.systolic.mean`, `readings[].systolic`,
- * `data.samples[].bpm` (the sampled field, not its list) and
- * `bloodPressure.systolic` all name one.
- */
+The field a path names, whichever way it was written: `systolic`,
+`data.systolic`, `values.systolic.mean`, `readings[].systolic`,
+`data.samples[].bpm` (the sampled field, not its list) and
+`bloodPressure.systolic` all name one.
+*/
 function namedField(type: string, path: readonly string[]): NamedField | null {
   const plain = path.filter((segment) => segment !== ARRAY_SEGMENT);
   const byOtherName = fieldByOtherName(type, plain.join("."));
@@ -205,10 +205,10 @@ function derivedPlaces(tool: string, type: string, field: string): string[][] {
 }
 
 /**
- * The joined fields of `tool` carrying `type`'s data that `path` names: the
- * one it spells (or sits below), and any other of the same name one level
- * down -- a sitting's `pulse` and each of its readings' `pulse` are one thing.
- */
+The joined fields of `tool` carrying `type`'s data that `path` names: the
+one it spells (or sits below), and any other of the same name one level
+down -- a sitting's `pulse` and each of its readings' `pulse` are one thing.
+*/
 function namedJoinedFields(tool: string, type: string, path: readonly string[]): string[][] {
   const plain = path.filter((segment) => segment !== ARRAY_SEGMENT);
   const dotted = plain.join(".");
@@ -245,10 +245,10 @@ function candidatesFor(
 }
 
 /**
- * Every path worth pruning from one row for one rule path. Always includes
- * the path as written when the rule is on the row's own type (or on every
- * type); nothing at all when the rule's type has no data on this row.
- */
+Every path worth pruning from one row for one rule path. Always includes
+the path as written when the rule is on the row's own type (or on every
+type); nothing at all when the rule's type has no data on this row.
+*/
 export function hcCandidates(input: HcCandidateInput): readonly (readonly string[])[] {
   const { tool, path } = input;
   const key = [tool, input.rowType, input.ruleType ?? "*", ...path].join("\u{0}");
@@ -291,10 +291,10 @@ function typesWithJoins(tool: string): string[] {
 }
 
 /**
- * True when rows tagged `rowType` in `tool` can carry anything a rule on
- * `ruleType` could name: they are that type's own rows, or the tool joins
- * that type's data onto them.
- */
+True when rows tagged `rowType` in `tool` can carry anything a rule on
+`ruleType` could name: they are that type's own rows, or the tool joins
+that type's data onto them.
+*/
 export function hcRuleCanReach(tool: string, rowType: string, ruleType: string): boolean {
   if (rowType === ruleType) return true;
   const type = hcTypeOf(ruleType);
@@ -305,10 +305,10 @@ export function hcRuleCanReach(tool: string, rowType: string, ruleType: string):
 }
 
 /**
- * True when a `field` rule names `field` of record type `type`, in any
- * spelling: it is scoped to that type (or to every type) and one of its
- * paths resolves to the field.
- */
+True when a `field` rule names `field` of record type `type`, in any
+spelling: it is scoped to that type (or to every type) and one of its
+paths resolves to the field.
+*/
 export function hcFieldRuleNames(rule: FieldRule, type: string, field: string): boolean {
   const scoped = rule.resourceType === null || rule.resourceType === `${HC_TYPE_PREFIX}${type}`;
   return scoped && namedField(type, rule.path)?.field === field;

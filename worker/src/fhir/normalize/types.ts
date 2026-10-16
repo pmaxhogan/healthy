@@ -7,43 +7,43 @@
 import type { RefResolver } from "./refs.ts";
 
 /** Context every `normalizeX` function receives: which health system connection
- * the resource came from, and a synchronous resolver for its references. */
+the resource came from, and a synchronous resolver for its references. */
 export interface NormalizeCtx {
   healthSystem: string;
   refs: RefResolver;
 }
 
 /**
- * One rename between the normalized shape and the raw FHIR shape it was
- * derived from, for the MCP exposure policy's `field` rule engine
- * (`worker/src/policy/aliases.ts`). Declared next to the `normalizeX` function
- * that performs the rename, so a future rename and its alias entry cannot
- * drift apart in separate files.
- *
- * Matching is root-anchored: an alias is tried only against the start of a
- * rule's path (right after the resource type), never re-scanned inside
- * whatever is left over. A rename nested below another rename -- Observation's
- * `component[].valueQuantity` becoming `components[].value` -- therefore needs
- * its own entry naming the full prefix down to that point, not two entries
- * composed automatically.
- */
+One rename between the normalized shape and the raw FHIR shape it was
+derived from, for the MCP exposure policy's `field` rule engine
+(`worker/src/policy/aliases.ts`). Declared next to the `normalizeX` function
+that performs the rename, so a future rename and its alias entry cannot
+drift apart in separate files.
+
+Matching is root-anchored: an alias is tried only against the start of a
+rule's path (right after the resource type), never re-scanned inside
+whatever is left over. A rename nested below another rename -- Observation's
+`component[].valueQuantity` becoming `components[].value` -- therefore needs
+its own entry naming the full prefix down to that point, not two entries
+composed automatically.
+*/
 export interface FieldAlias {
   /** Path segments in the normalized shape, from the item root. */
   normalized: readonly string[];
   /**
-   * Equivalent path segments in the raw FHIR shape. More than one alternative
-   * means a FHIR `value[x]` choice type (or similar) collapsed to one
-   * normalized name -- resolving must try each alternative in turn.
-   */
+  Equivalent path segments in the raw FHIR shape. More than one alternative
+  means a FHIR `value[x]` choice type (or similar) collapsed to one
+  normalized name -- resolving must try each alternative in turn.
+  */
   raw: readonly (readonly string[])[];
   /**
-   * The normalized side is one value RENDERED from the raw side -- a code's
-   * display text, a reference's name, a date picked out of a period -- rather
-   * than the same structure renamed. A raw path below a match then maps to the
-   * whole normalized field instead of to the same tail below it (which would
-   * name nothing): hiding `code.coding[].display` must hide the text made from
-   * it.
-   */
+  The normalized side is one value RENDERED from the raw side -- a code's
+  display text, a reference's name, a date picked out of a period -- rather
+  than the same structure renamed. A raw path below a match then maps to the
+  whole normalized field instead of to the same tail below it (which would
+  name nothing): hiding `code.coding[].display` must hide the text made from
+  it.
+  */
   rendered?: true;
 }
 
@@ -91,7 +91,7 @@ export interface NormalizedEncounter extends NormalizedBase {
 }
 
 /** The calendar-facing projection of an `Encounter`: exactly the fields the
- * Google Calendar sync needs to build an event, nothing more. */
+Google Calendar sync needs to build an event, nothing more. */
 export interface NormalizedAppointmentView {
   healthSystem: string;
   encounterId: string;
@@ -107,22 +107,22 @@ export interface NormalizedAppointmentView {
   telehealth: boolean;
   csn?: string;
   /**
-   * The patient portal's own token for this visit, when the visit is one the
-   * portal shows as first-party. Links the description to the visit's details
-   * page (`worker/src/sync/mapping.ts`'s `linkTargetFor`). Never FHIR's CSN.
-   */
+  The patient portal's own token for this visit, when the visit is one the
+  portal shows as first-party. Links the description to the visit's details
+  page (`worker/src/sync/mapping.ts`'s `linkTargetFor`). Never FHIR's CSN.
+  */
   detailCsn?: string;
   /** How to find the room, from the portal's visit details, boilerplate removed. */
   directions?: string;
   /** The visit's own instructions, from the portal's visit details. */
   visitInstructions?: string;
   /**
-   * Whether the owner has confirmed the appointment. Null: nothing to confirm.
-   *
-   * This and the three portal-only states after it are absent when unknown (a
-   * FHIR-only visit, or a portal copy stored before they were read) and null
-   * when the portal says the thing does not apply to this visit.
-   */
+  Whether the owner has confirmed the appointment. Null: nothing to confirm.
+
+  This and the three portal-only states after it are absent when unknown (a
+  FHIR-only visit, or a portal copy stored before they were read) and null
+  when the portal says the thing does not apply to this visit.
+  */
   confirmed?: boolean | null;
   /** The pre-visit "get ready" (eCheck-in) tasks. Null: not offered for this visit. */
   getReady?: AppointmentGetReady | null;
@@ -169,12 +169,12 @@ export interface NormalizedCoding {
 }
 
 /**
- * A condition's code: the first coding, as every concept is normalized, plus
- * every coding it carries. A health system often sends SNOMED first on one row
- * and ICD-10 first on another copy of the same diagnosis, so telling that two
- * rows are one condition needs all of them (`worker/src/mcp/conditions.ts`). Nested
- * under `code` so a rule hiding `code` hides the codings too.
- */
+A condition's code: the first coding, as every concept is normalized, plus
+every coding it carries. A health system often sends SNOMED first on one row
+and ICD-10 first on another copy of the same diagnosis, so telling that two
+rows are one condition needs all of them (`worker/src/mcp/conditions.ts`). Nested
+under `code` so a rule hiding `code` hides the codings too.
+*/
 export interface NormalizedConditionCode extends NormalizedCodeableConcept {
   codings?: NormalizedCoding[];
 }

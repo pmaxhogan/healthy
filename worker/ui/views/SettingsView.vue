@@ -49,10 +49,10 @@ watch(
 );
 
 /**
- * Mirrors `worker/src/api/schemas.ts`'s `portalLoginAttemptLimit` bound, so a bad
- * value is refused here before it is ever sent -- see `errorMessage` for the
- * zod issue text shown when a save is 400ed anyway.
- */
+Mirrors `worker/src/api/schemas.ts`'s `portalLoginAttemptLimit` bound, so a bad
+value is refused here before it is ever sent -- see `errorMessage` for the
+zod issue text shown when a save is 400ed anyway.
+*/
 const portalLimitValid = computed(
   () =>
     Number.isSafeInteger(portalLimitDraft.value) &&

@@ -68,9 +68,9 @@ function healthSystem(id: string, displayName: string): HealthSystemInfo {
 }
 
 /**
- * The sync engine as `sync_health_systems` sees it, faked: what is in flight,
- * what has been asked for before, and a record of everything a call started.
- */
+The sync engine as `sync_health_systems` sees it, faked: what is in flight,
+what has been asked for before, and a record of everything a call started.
+*/
 interface FakeSync {
   backoffUntil: number | null;
   runInFlight: boolean;
@@ -523,11 +523,11 @@ function textOf(result: CallToolResult): string {
 }
 
 /**
- * The envelope, when there is one.
- *
- * A schema rejection comes back as a protocol error rendered into the text block
- * rather than as this server's JSON envelope, so parsing has to be optional.
- */
+The envelope, when there is one.
+
+A schema rejection comes back as a protocol error rendered into the text block
+rather than as this server's JSON envelope, so parsing has to be optional.
+*/
 function parseEnvelope(text: string): Record<string, unknown> {
   try {
     return JSON.parse(text) as Record<string, unknown>;

@@ -1,41 +1,41 @@
 /**
- * The chunk store: `hc_chunks`, and the two pre-aggregates that are rewritten
- * with a chunk -- `hc_rollup_hour` and `hc_hr_minute`
- * (worker/migrations/0016_health_connect.sql).
- *
- * One chunk is every record of one type from one origin app that starts in one
- * UTC hour, as sealed gzip JSON: `{ "origin": "<package>", "records": [...] }`.
- * A change is a read-modify-write of that one chunk. This module reads chunks
- * and builds the statements of a write; the caller (worker/src/hc/apply.ts)
- * runs them in one `db.batch` beside the record-index rows, so a chunk and the
- * index that points into it never disagree.
- *
- * `content_hash` is a keyed digest of the plaintext, bound to the chunk's key.
- * A write whose digest equals the stored one produces no statements at all,
- * which is what makes replaying a batch cost one read per chunk and no writes.
- *
- * An emptied chunk is deleted, with its rollup, never stored as an empty list.
- *
- * ### A chunk larger than one row
- *
- * D1 refuses a value over two million bytes, and nothing is ever stored cut
- * short, so a chunk whose compressed payload is larger than one row may hold
- * is split into parts -- by bytes, after compression, so even a single
- * enormous record splits. The `part` column is the last of the primary key:
- * part 0 is the ordinary row, and parts above it are continuation rows.
- *
- * Every part carries the chunk's own `min_start_ms`, `max_end_ms` and
- * `content_hash`, so whatever range predicate finds part 0 finds the rest, and
- * `assembleChunks` puts them back together in `part` order. A continuation's
- * `record_count` is zero, so sums over the column stay right. Each part is
- * sealed under an AAD naming its own row, part included, so parts cannot be
- * reordered or moved between chunks.
- *
- * Anything that lists chunk rows therefore either assembles what it gets
- * (`readChunks`, `hrSpillIn`, the range reads in `read.ts`) or asks only for
- * `part = 0`. Nothing else in the schema knows: the index, the rollups and
- * the summaries have no parts.
- */
+The chunk store: `hc_chunks`, and the two pre-aggregates that are rewritten
+with a chunk -- `hc_rollup_hour` and `hc_hr_minute`
+(worker/migrations/0016_health_connect.sql).
+
+One chunk is every record of one type from one origin app that starts in one
+UTC hour, as sealed gzip JSON: `{ "origin": "<package>", "records": [...] }`.
+A change is a read-modify-write of that one chunk. This module reads chunks
+and builds the statements of a write; the caller (worker/src/hc/apply.ts)
+runs them in one `db.batch` beside the record-index rows, so a chunk and the
+index that points into it never disagree.
+
+`content_hash` is a keyed digest of the plaintext, bound to the chunk's key.
+A write whose digest equals the stored one produces no statements at all,
+which is what makes replaying a batch cost one read per chunk and no writes.
+
+An emptied chunk is deleted, with its rollup, never stored as an empty list.
+
+### A chunk larger than one row
+
+D1 refuses a value over two million bytes, and nothing is ever stored cut
+short, so a chunk whose compressed payload is larger than one row may hold
+is split into parts -- by bytes, after compression, so even a single
+enormous record splits. The `part` column is the last of the primary key:
+part 0 is the ordinary row, and parts above it are continuation rows.
+
+Every part carries the chunk's own `min_start_ms`, `max_end_ms` and
+`content_hash`, so whatever range predicate finds part 0 finds the rest, and
+`assembleChunks` puts them back together in `part` order. A continuation's
+`record_count` is zero, so sums over the column stay right. Each part is
+sealed under an AAD naming its own row, part included, so parts cannot be
+reordered or moved between chunks.
+
+Anything that lists chunk rows therefore either assembles what it gets
+(`readChunks`, `hrSpillIn`, the range reads in `read.ts`) or asks only for
+`part = 0`. Nothing else in the schema knows: the index, the rollups and
+the summaries have no parts.
+*/
 
 import { blinderFor } from "../../db/blind.ts";
 import { all, batch, chunk as pages } from "../../db/client.ts";
@@ -89,27 +89,27 @@ const READ_PAGE = 20;
 export interface SizedWrite {
   statements: D1PreparedStatement[];
   /**
-   * Characters of sealed payload bound to the statements: what makes one
-   * request to D1 large. The caller that puts several writes in one `db.batch`
-   * keeps their sum under a limit.
-   */
+  Characters of sealed payload bound to the statements: what makes one
+  request to D1 large. The caller that puts several writes in one `db.batch`
+  keeps their sum under a limit.
+  */
   bytes: number;
 }
 
 const NO_WRITE: SizedWrite = { statements: [], bytes: 0 };
 
 /**
- * Compressed bytes per row. D1 caps a value at two million bytes and the
- * envelope is base64 (four characters per three bytes), so this leaves
- * comfortable room -- the same figure the ingest queue splits a body at.
- */
+Compressed bytes per row. D1 caps a value at two million bytes and the
+envelope is base64 (four characters per three bytes), so this leaves
+comfortable room -- the same figure the ingest queue splits a body at.
+*/
 const PART_BYTES = 1_200_000;
 
 /**
- * The AAD of one part of one chunk: `<device>:<type>:<originHash>:<hour>:<part>`.
- * Read from the right it is unambiguous whatever the type contains: two plain
- * integers, then a blind of fixed length with no `:` in it.
- */
+The AAD of one part of one chunk: `<device>:<type>:<originHash>:<hour>:<part>`.
+Read from the right it is unambiguous whatever the type contains: two plain
+integers, then a blind of fixed length with no `:` in it.
+*/
 const partAad = (deviceId: string, key: ChunkKey, part: number): string =>
   payloadAad("hc_chunks", deviceId, keyId(key), part);
 const hourRollupAad = (deviceId: string, key: ChunkKey): string =>
@@ -162,10 +162,10 @@ async function openChunk(
 }
 
 /**
- * Chunk rows, in any order and with continuations among them, as whole chunks
- * in (hour, origin) order. Every row of each chunk must be present: see the
- * module comment for why any predicate that finds one part finds them all.
- */
+Chunk rows, in any order and with continuations among them, as whole chunks
+in (hour, origin) order. Every row of each chunk must be present: see the
+module comment for why any predicate that finds one part finds them all.
+*/
 export async function assembleChunks(
   ctx: Ctx,
   deviceId: string,
@@ -190,14 +190,14 @@ export async function assembleChunks(
 }
 
 /**
- * The statement `readChunks` runs. Bound: the keys as a JSON array of
- * `[type, originHash, hour]`, then the device.
- *
- * CROSS JOIN, not JOIN: SQLite treats it as an instruction to keep the join
- * order as written. Left to itself the planner walks every chunk row of the
- * device and probes the key list for each -- quadratic over a backfill -- when
- * what is wanted is one primary-key lookup per key.
- */
+The statement `readChunks` runs. Bound: the keys as a JSON array of
+`[type, originHash, hour]`, then the device.
+
+CROSS JOIN, not JOIN: SQLite treats it as an instruction to keep the join
+order as written. Left to itself the planner walks every chunk row of the
+device and probes the key list for each -- quadratic over a backfill -- when
+what is wanted is one primary-key lookup per key.
+*/
 export const READ_CHUNKS_SQL = `SELECT c.record_type, c.origin_hash, c.hour_utc, c.part, c.payload_enc, c.content_hash
    FROM json_each(?) AS k
   CROSS JOIN hc_chunks AS c
@@ -207,40 +207,40 @@ export const READ_CHUNKS_SQL = `SELECT c.record_type, c.origin_hash, c.hour_utc,
     AND c.hour_utc = json_extract(k.value, '$[2]')`;
 
 /**
- * The statement `hrSpillIn` runs: every earlier chunk of one origin that can
- * hold a heart-rate sample timed in the hour H. Bound: device, type, origin
- * blind, and H.
- *
- * ### The rule at the hour boundary
- *
- * A record is the half-open interval `[start, end)`: one that ends exactly
- * where H starts has no time in H. But its SAMPLES are instants, and one
- * stamped exactly on the boundary (`t == end == start of H`) is in H, and
- * belongs to H's minute row although its record started the hour before
- * (`samplesInInterval` keeps `t <= end`). So the chunks that matter are the
- * earlier ones with `max_end_ms >= start of H`, and they are found in two
- * disjoint ways:
- *
- *   - `max_end_ms == start of H`. Only the chunk of the hour before can end
- *     there (an earlier one that reached H would have run past its own hour by
- *     an hour or more), so it is read by primary key: one row. A wearable's
- *     contiguous series ends on the boundary every hour, so this is the usual
- *     case, and its chunk is not in any index for it.
- *   - `max_end_ms > start of H`, from any earlier hour. Such a chunk runs past
- *     the end of its own hour, which is exactly what the partial index
- *     `hc_chunks_spill` holds. The comparison with `(hour_utc + 1)` repeats the
- *     index's own predicate so that `INDEXED BY` can name it.
- *
- * ### Keys first
- *
- * The index is entered at `max_end_ms`, so the range holds every LATER chunk
- * of the origin that overruns as well, and those are told apart by
- * `hour_utc < H`. The inner select is answered from the index alone -- the
- * table being WITHOUT ROWID, an entry carries the whole primary key -- and
- * only the keys that pass are looked up for their payload. In one flat SELECT
- * SQLite fetches the table row of every entry in range BEFORE it tests the
- * hour: a payload read per later chunk, for every chunk written.
- */
+The statement `hrSpillIn` runs: every earlier chunk of one origin that can
+hold a heart-rate sample timed in the hour H. Bound: device, type, origin
+blind, and H.
+
+### The rule at the hour boundary
+
+A record is the half-open interval `[start, end)`: one that ends exactly
+where H starts has no time in H. But its SAMPLES are instants, and one
+stamped exactly on the boundary (`t == end == start of H`) is in H, and
+belongs to H's minute row although its record started the hour before
+(`samplesInInterval` keeps `t <= end`). So the chunks that matter are the
+earlier ones with `max_end_ms >= start of H`, and they are found in two
+disjoint ways:
+
+  - `max_end_ms == start of H`. Only the chunk of the hour before can end
+    there (an earlier one that reached H would have run past its own hour by
+    an hour or more), so it is read by primary key: one row. A wearable's
+    contiguous series ends on the boundary every hour, so this is the usual
+    case, and its chunk is not in any index for it.
+  - `max_end_ms > start of H`, from any earlier hour. Such a chunk runs past
+    the end of its own hour, which is exactly what the partial index
+    `hc_chunks_spill` holds. The comparison with `(hour_utc + 1)` repeats the
+    index's own predicate so that `INDEXED BY` can name it.
+
+### Keys first
+
+The index is entered at `max_end_ms`, so the range holds every LATER chunk
+of the origin that overruns as well, and those are told apart by
+`hour_utc < H`. The inner select is answered from the index alone -- the
+table being WITHOUT ROWID, an entry carries the whole primary key -- and
+only the keys that pass are looked up for their payload. In one flat SELECT
+SQLite fetches the table row of every entry in range BEFORE it tests the
+hour: a payload read per later chunk, for every chunk written.
+*/
 export const HR_SPILL_SQL = `SELECT record_type, origin_hash, hour_utc, part, payload_enc, content_hash
    FROM hc_chunks
   WHERE device_id = ?1 AND record_type = ?2 AND origin_hash = ?3
@@ -288,11 +288,11 @@ const UPSERT_PART = `INSERT INTO hc_chunks
      updated_at = excluded.updated_at`;
 
 /**
- * The statements that make the chunk at `key` hold exactly `records`, and its
- * hour rollup agree: none when nothing would change, deletes when the chunk is
- * now empty, otherwise one upsert per part, the rollup, and a delete of any
- * continuation rows the chunk no longer needs.
- */
+The statements that make the chunk at `key` hold exactly `records`, and its
+hour rollup agree: none when nothing would change, deletes when the chunk is
+now empty, otherwise one upsert per part, the rollup, and a delete of any
+continuation rows the chunk no longer needs.
+*/
 export async function chunkStatements(
   ctx: Ctx,
   deviceId: string,
@@ -361,10 +361,10 @@ export async function chunkStatements(
 }
 
 /**
- * The statement that writes the hour rollup of the chunk at `key` from its
- * records. Part of every chunk write; on its own, what repairs a rollup row
- * that will not open (a rollup is derived, so it is rebuilt, not mourned).
- */
+The statement that writes the hour rollup of the chunk at `key` from its
+records. Part of every chunk write; on its own, what repairs a rollup row
+that will not open (a rollup is derived, so it is rebuilt, not mourned).
+*/
 export async function hourRollupStatement(
   ctx: Ctx,
   deviceId: string,
@@ -423,15 +423,15 @@ export async function readChunksInHours(
 }
 
 /**
- * HeartRate records of earlier chunks of the same origin that reach the hour
- * `hourUtc` -- run into it, or end exactly where it starts -- however long ago
- * they started.
- *
- * A heart-rate series is filed under its start hour however long it runs, but
- * each sample belongs to the minute row of its own hour, so the row for an
- * hour is built from that hour's chunk plus these (worker/src/hc/rollup/hr-minute.ts,
- * rule 1). See `HR_SPILL_SQL` for how they are found without walking history.
- */
+HeartRate records of earlier chunks of the same origin that reach the hour
+`hourUtc` -- run into it, or end exactly where it starts -- however long ago
+they started.
+
+A heart-rate series is filed under its start hour however long it runs, but
+each sample belongs to the minute row of its own hour, so the row for an
+hour is built from that hour's chunk plus these (worker/src/hc/rollup/hr-minute.ts,
+rule 1). See `HR_SPILL_SQL` for how they are found without walking history.
+*/
 export async function hrSpillIn(
   ctx: Ctx,
   deviceId: string,
@@ -448,14 +448,14 @@ export async function hrSpillIn(
 }
 
 /**
- * The spill into each of several hours, in ONE round trip: `HR_SPILL_SQL` once
- * per hour, all in a `db.batch`. Per hour asked for, in the order asked, the
- * earlier chunks of the same origin that reach into it, whole.
- *
- * The same statement as `hrSpillIn`, so the same rows and the same plan; only
- * the trips are saved. What applying a page of heart-rate chunks reads ahead
- * (worker/src/hc/store/hr-spill.ts).
- */
+The spill into each of several hours, in ONE round trip: `HR_SPILL_SQL` once
+per hour, all in a `db.batch`. Per hour asked for, in the order asked, the
+earlier chunks of the same origin that reach into it, whole.
+
+The same statement as `hrSpillIn`, so the same rows and the same plan; only
+the trips are saved. What applying a page of heart-rate chunks reads ahead
+(worker/src/hc/store/hr-spill.ts).
+*/
 export async function hrSpillChunks(
   ctx: Ctx,
   deviceId: string,
@@ -478,10 +478,10 @@ export async function hrSpillChunks(
 }
 
 /**
- * The statement that makes the per-minute heart-rate row of one (origin, UTC
- * hour) agree with the HeartRate records given: an upsert, or a delete when no
- * sample falls in the hour.
- */
+The statement that makes the per-minute heart-rate row of one (origin, UTC
+hour) agree with the HeartRate records given: an upsert, or a delete when no
+sample falls in the hour.
+*/
 export async function hrMinuteStatement(
   ctx: Ctx,
   deviceId: string,

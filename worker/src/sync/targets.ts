@@ -1,17 +1,17 @@
 /**
- * Which health systems a run should touch.
- *
- * Deliberately *not* `connections.listActive()`, which returns only
- * `status = 'connected'`. A health system that failed transiently is marked `error` by
- * the token manager, and if the cron only ever looked at `connected` rows a single
- * 500 from a token endpoint would take that organisation off the schedule until
- * somebody noticed by hand. `error` is therefore retried every run, and a
- * successful refresh clears it back to `connected`.
- *
- * `needs_reauth` is the one status that is skipped, because retrying it cannot
- * work: the grant is gone and only the owner can bring it back. The alert opened
- * when it was marked is what asks them to.
- */
+Which health systems a run should touch.
+
+Deliberately *not* `connections.listActive()`, which returns only
+`status = 'connected'`. A health system that failed transiently is marked `error` by
+the token manager, and if the cron only ever looked at `connected` rows a single
+500 from a token endpoint would take that organisation off the schedule until
+somebody noticed by hand. `error` is therefore retried every run, and a
+successful refresh clears it back to `connected`.
+
+`needs_reauth` is the one status that is skipped, because retrying it cannot
+work: the grant is gone and only the owner can bring it back. The alert opened
+when it was marked is what asks them to.
+*/
 
 import { parseJsonColumn, healthSystemConfigSchema } from "../db/schemas.ts";
 
@@ -31,23 +31,23 @@ export interface SyncTarget {
   /** `health_systems.config_json`, parsed. */
   config: HealthSystemConfig;
   /**
-   * The connected portal account's endpoint, when one has ever signed in.
-   * `mapping.ts` falls back to its visits list when the health system has no
-   * portal url of its own configured. Read fresh here rather than carried over
-   * from the portal pass, because the FHIR pass this target is built for runs
-   * whether or not a portal account exists at all.
-   */
+  The connected portal account's endpoint, when one has ever signed in.
+  `mapping.ts` falls back to its visits list when the health system has no
+  portal url of its own configured. Read fresh here rather than carried over
+  from the portal pass, because the FHIR pass this target is built for runs
+  whether or not a portal account exists at all.
+  */
   portalAccount: ConnectedPortal | null;
 }
 
 /**
- * The health systems to sync, in display-name order.
- *
- * `healthSystemIds`, when given, narrows the list -- that is the admin UI's "sync this
- * one now" button -- but never widens it: a health system that is soft-deleted, not
- * connected, or switched off in its own config is skipped however it was asked
- * for.
- */
+The health systems to sync, in display-name order.
+
+`healthSystemIds`, when given, narrows the list -- that is the admin UI's "sync this
+one now" button -- but never widens it: a health system that is soft-deleted, not
+connected, or switched off in its own config is skipped however it was asked
+for.
+*/
 export async function syncTargets(
   repos: Repos,
   healthSystemIds?: readonly string[],

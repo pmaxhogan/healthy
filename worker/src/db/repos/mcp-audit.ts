@@ -1,15 +1,15 @@
 /**
- * The MCP audit trail: who called which tool, when, and how much came back.
- *
- * Metadata only, by design -- the table has no column a result could be written
- * into, so no future change can quietly start logging content. A `jq` program is
- * recorded as a SHA-256 and a length for the same reason: its text can name what
- * the caller was looking for. Retention is one
- * year and `prune` is called from the daily cron.
- *
- * Ids are sortable, so `ORDER BY id DESC` and `ORDER BY ts DESC` agree and the
- * recent-first listing needs no tiebreaker.
- */
+The MCP audit trail: who called which tool, when, and how much came back.
+
+Metadata only, by design -- the table has no column a result could be written
+into, so no future change can quietly start logging content. A `jq` program is
+recorded as a SHA-256 and a length for the same reason: its text can name what
+the caller was looking for. Retention is one
+year and `prune` is called from the daily cron.
+
+Ids are sortable, so `ORDER BY id DESC` and `ORDER BY ts DESC` agree and the
+recent-first listing needs no tiebreaker.
+*/
 
 import { newId } from "../../lib/ids.ts";
 import { DAY_SECONDS } from "../../lib/time.ts";

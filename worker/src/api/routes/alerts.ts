@@ -1,19 +1,19 @@
 /**
- * `/api/alerts` -- the reconnect alerts, and the "does Trello still work?" button.
- *
- * ### Why the test card is not auto-archived
- *
- * The obvious design is "create the card, then archive it in ten minutes". There is
- * no way to do that honestly in a Worker: `waitUntil` is bounded by the
- * invocation's lifetime, a `setTimeout` inside it is not a durable timer, and a
- * ten-minute sleep would burn the request's wall clock for nothing. An alarm on the
- * MCP Durable Object would work, but making the alert test depend on the MCP
- * session object is a strange coupling to introduce for a diagnostic.
- *
- * So the card id is returned instead, and `DELETE /api/alerts/test/:cardId`
- * archives it on demand -- which is also the honest UX: the owner presses "send
- * test card", goes and looks at Trello, comes back and presses "archive it".
- */
+`/api/alerts` -- the reconnect alerts, and the "does Trello still work?" button.
+
+### Why the test card is not auto-archived
+
+The obvious design is "create the card, then archive it in ten minutes". There is
+no way to do that honestly in a Worker: `waitUntil` is bounded by the
+invocation's lifetime, a `setTimeout` inside it is not a durable timer, and a
+ten-minute sleep would burn the request's wall clock for nothing. An alarm on the
+MCP Durable Object would work, but making the alert test depend on the MCP
+session object is a strange coupling to introduce for a diagnostic.
+
+So the card id is returned instead, and `DELETE /api/alerts/test/:cardId`
+archives it on demand -- which is also the honest UX: the owner presses "send
+test card", goes and looks at Trello, comes back and presses "archive it".
+*/
 
 import { Hono } from "hono";
 
@@ -29,12 +29,12 @@ const DEFAULT_ALERT_LIMIT = 50;
 export const alertsRouter = new Hono<AppHonoEnv>();
 
 /**
- * Recent alerts, open ones first.
- *
- * The whole history rather than just the open ones: "this connection has broken
- * four times this month" is the useful signal, and it is invisible if resolved rows
- * are hidden.
- */
+Recent alerts, open ones first.
+
+The whole history rather than just the open ones: "this connection has broken
+four times this month" is the useful signal, and it is invisible if resolved rows
+are hidden.
+*/
 alertsRouter.get("/", async (c) => {
   const api = apiContext(c);
   const { limit } = readQuery(c, limitQuerySchema);
@@ -47,11 +47,11 @@ alertsRouter.get("/", async (c) => {
 });
 
 /**
- * Create a disposable Trello card, to prove the credentials and list ids work.
- *
- * No `alerts` row is written: this is not an alert, and inserting one would make
- * the open-alert count on the dashboard lie.
- */
+Create a disposable Trello card, to prove the credentials and list ids work.
+
+No `alerts` row is written: this is not an alert, and inserting one would make
+the open-alert count on the dashboard lie.
+*/
 alertsRouter.post("/test", async (c) => {
   const api = apiContext(c);
   const trello = api.ports.trello(c.env, api.ports.fetch);

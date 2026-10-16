@@ -1,25 +1,25 @@
 /**
- * Every Health Connect record type the companion app maps, by its wire name
- * (the SDK class without `Record`), and the keys of each one's `data`.
- *
- * The store itself keeps no such list: it takes whatever type the phone
- * sends, so a type a newer SDK adds is never dropped. This list exists for the
- * exposure policy, which has to be able to OFFER a type before any record of
- * it has arrived -- the owner must be able to deny `SexualActivity` on the day
- * the phone is paired, not on the day the first record shows it exists -- and
- * to tell a field a type really has from a typo.
- *
- * Deliberately not derived from the rollup field table
- * (`./rollup/hour.ts`): that one lists the types with something numeric to
- * summarise, and the types it leaves out are the ones most worth hiding.
- *
- * A unit test holds this list to the checked-in contract fixture
- * (`worker/test/fixtures/hc/phone-batches.json`), whose `changes` batch
- * carries one record of every mapped type: a type or a field the phone gains
- * fails that test until it is added here.
- *
- * Pure: plain data, no imports.
- */
+Every Health Connect record type the companion app maps, by its wire name
+(the SDK class without `Record`), and the keys of each one's `data`.
+
+The store itself keeps no such list: it takes whatever type the phone
+sends, so a type a newer SDK adds is never dropped. This list exists for the
+exposure policy, which has to be able to OFFER a type before any record of
+it has arrived -- the owner must be able to deny `SexualActivity` on the day
+the phone is paired, not on the day the first record shows it exists -- and
+to tell a field a type really has from a typo.
+
+Deliberately not derived from the rollup field table
+(`./rollup/hour.ts`): that one lists the types with something numeric to
+summarise, and the types it leaves out are the ones most worth hiding.
+
+A unit test holds this list to the checked-in contract fixture
+(`worker/test/fixtures/hc/phone-batches.json`), whose `changes` batch
+carries one record of every mapped type: a type or a field the phone gains
+fails that test until it is added here.
+
+Pure: plain data, no imports.
+*/
 
 /** `data` keys by record type. An empty list is a type that carries nothing but its times. */
 export const HC_RECORD_FIELDS = {

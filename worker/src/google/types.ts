@@ -19,9 +19,9 @@ export interface GoogleTokens {
 }
 
 /**
- * A refresh yields no new refresh token (Google keeps the original valid), so
- * this is `GoogleTokens` minus that field rather than a partial of it.
- */
+A refresh yields no new refresh token (Google keeps the original valid), so
+this is `GoogleTokens` minus that field rather than a partial of it.
+*/
 export type GoogleRefreshedTokens = Omit<GoogleTokens, "refreshToken">;
 
 /** An owned calendar, as the admin UI's calendar picker needs it. */
@@ -51,15 +51,15 @@ export interface EventDateTime {
 }
 
 /**
- * The private extended properties every event this app owns carries.
- *
- * `healthy: "1"` is the invariant: the sync engine only ever lists, patches or
- * considers events that carry it, so an event the owner created by hand can
- * never be touched. The other three exist so a sync run can diff without
- * re-reading anything else: `key` identifies the appointment, `fp` is the
- * fingerprint of the mapped fields, `health_system` says which connection produced
- * it.
- */
+The private extended properties every event this app owns carries.
+
+`healthy: "1"` is the invariant: the sync engine only ever lists, patches or
+considers events that carry it, so an event the owner created by hand can
+never be touched. The other three exist so a sync run can diff without
+re-reading anything else: `key` identifies the appointment, `fp` is the
+fingerprint of the mapped fields, `health_system` says which connection produced
+it.
+*/
 interface HealthyEventProperties {
   healthy: "1";
   key: string;
@@ -94,11 +94,11 @@ export interface EventRecord {
   status: string;
   summary: string | null;
   /**
-   * The description as Google holds it now, owner's edits and all. Read only so
-   * a write can keep the owner's text above the rule (`worker/src/sync/description.ts`);
-   * `events.list` returns it with everything else, so this costs no extra call.
-   * Personal content: never logged, never stored.
-   */
+  The description as Google holds it now, owner's edits and all. Read only so
+  a write can keep the owner's text above the rule (`worker/src/sync/description.ts`);
+  `events.list` returns it with everything else, so this costs no extra call.
+  Personal content: never logged, never stored.
+  */
   description: string | null;
   start: EventDateTime | null;
   end: EventDateTime | null;
@@ -111,22 +111,22 @@ export interface EventRecord {
 }
 
 /**
- * What the sync engine produces from a FHIR Encounter, and the only input to
- * `buildEventBody`. Kept minimal on purpose: the mapping layer owns titles,
- * descriptions and arrival offsets, and this type is the seam between it and
- * the Google wire format.
- */
+What the sync engine produces from a FHIR Encounter, and the only input to
+`buildEventBody`. Kept minimal on purpose: the mapping layer owns titles,
+descriptions and arrival offsets, and this type is the seam between it and
+the Google wire format.
+*/
 export interface CalendarEventModel {
   /**
-   * The blinded event key (`blindEventKey`). Stable for the life of the
-   * appointment; the row's primary key and the Google marker alike.
-   */
+  The blinded event key (`blindEventKey`). Stable for the life of the
+  appointment; the row's primary key and the Google marker alike.
+  */
   key: string;
   /**
-   * The logical upstream id the key was blinded from: an Encounter id, or
-   * `csn:<csn>` for a portal visit. Never sent to Google -- `buildEventBody` picks
-   * its fields explicitly -- and only read by the row writer, which blinds it.
-   */
+  The logical upstream id the key was blinded from: an Encounter id, or
+  `csn:<csn>` for a portal visit. Never sent to Google -- `buildEventBody` picks
+  its fields explicitly -- and only read by the row writer, which blinds it.
+  */
   encounterId: string;
   /** Health system id, for per-health system diffing and cleanup. */
   healthSystem: string;

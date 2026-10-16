@@ -1,18 +1,18 @@
 /**
- * Builds the title and Markdown body for the Trello card that says a phone's
- * uploads could not be applied.
- *
- * Pure formatting, like `reconnect.ts`: no fetch, no D1, no Env. `deviceName`
- * is user data -- the name the owner gave the phone -- and this module only
- * ever puts it into the returned strings; it never logs anything itself.
- *
- * What the card may say is deliberately little: that uploads are being kept
- * rather than lost, how many, the stable error code of the failure, and where
- * to look. Never anything from inside an upload -- no record type, no value,
- * no origin app -- and no id: the link is the Phone page's path and nothing
- * more. The occurrence time is UTC and labelled as such, for the reason given
- * in `reconnect.ts`.
- */
+Builds the title and Markdown body for the Trello card that says a phone's
+uploads could not be applied.
+
+Pure formatting, like `reconnect.ts`: no fetch, no D1, no Env. `deviceName`
+is user data -- the name the owner gave the phone -- and this module only
+ever puts it into the returned strings; it never logs anything itself.
+
+What the card may say is deliberately little: that uploads are being kept
+rather than lost, how many, the stable error code of the failure, and where
+to look. Never anything from inside an upload -- no record type, no value,
+no origin app -- and no id: the link is the Phone page's path and nothing
+more. The occurrence time is UTC and labelled as such, for the reason given
+in `reconnect.ts`.
+*/
 
 export interface BuildParkedCardInput {
   deviceName: string;

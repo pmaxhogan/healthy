@@ -1,19 +1,19 @@
 /**
- * Matching a caller's filter against Epic-flavoured FHIR.
- *
- * Every function here checks the raw resource FIRST and the normalized item
- * second, because normalization is lossy in exactly the direction that matters:
- * `codeText` prefers `text`, then `coding[].display`, and only then
- * `coding[].code`. So an organisation that labels its lab panel "Vital Signs"
- * leaves the machine-readable `vital-signs` nowhere but the resource -- and a
- * caller asking for vitals by category would get nothing back from the item
- * alone.
- *
- * Comparison is on a slug (lower-cased, non-alphanumerics dropped) so
- * `vital-signs`, `Vital Signs` and `vitalsigns` are one value. That is deliberate
- * over-matching: the alternative is a filter that silently returns an empty list
- * at one organisation and the full one at another.
- */
+Matching a caller's filter against Epic-flavoured FHIR.
+
+Every function here checks the raw resource FIRST and the normalized item
+second, because normalization is lossy in exactly the direction that matters:
+`codeText` prefers `text`, then `coding[].display`, and only then
+`coding[].code`. So an organisation that labels its lab panel "Vital Signs"
+leaves the machine-readable `vital-signs` nowhere but the resource -- and a
+caller asking for vitals by category would get nothing back from the item
+alone.
+
+Comparison is on a slug (lower-cased, non-alphanumerics dropped) so
+`vital-signs`, `Vital Signs` and `vitalsigns` are one value. That is deliberate
+over-matching: the alternative is a filter that silently returns an empty list
+at one organisation and the full one at another.
+*/
 
 import type * as fhir4 from "fhir/r4";
 
@@ -43,11 +43,11 @@ function categoriesOf(resource: fhir4.FhirResource): fhir4.CodeableConcept[] | u
 }
 
 /**
- * True when a resource belongs to any of `wanted`.
- *
- * `wanted` is a list of acceptable spellings for one category -- the FHIR code and
- * the display strings organisations use for it.
- */
+True when a resource belongs to any of `wanted`.
+
+`wanted` is a list of acceptable spellings for one category -- the FHIR code and
+the display strings organisations use for it.
+*/
 export function hasCategory(
   resource: fhir4.FhirResource,
   normalizedCategories: readonly string[],

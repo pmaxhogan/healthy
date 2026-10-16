@@ -19,8 +19,8 @@ const PAGE = "https://portal.example-portal.test/MyChart/Authentication/Login";
 /** The scheme a Secure cookie must never be sent over. See the test that uses it. */
 const INSECURE_SCHEME = "http:";
 
-function jar(now = T0): CookieJar {
-  return new CookieJar({ now: () => now });
+function jar(): CookieJar {
+  return new CookieJar({ now: () => T0 });
 }
 
 /** A Response carrying the given Set-Cookie headers, as several headers. */

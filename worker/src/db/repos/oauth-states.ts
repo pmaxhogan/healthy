@@ -1,16 +1,16 @@
 /**
- * In-flight authorization requests: the CSRF `state` and the PKCE verifier.
- *
- * `consume` is the security-relevant operation. It is a single
- * `DELETE ... RETURNING`, so a state can be redeemed exactly once however many
- * times the callback URL is replayed -- the second call finds nothing. Checking
- * expiry after the delete rather than in the predicate is deliberate: an expired
- * state should be removed as well as refused.
- *
- * The verifier is sealed, because it is the second half of the PKCE proof and a
- * D1 dump containing both it and a leaked authorization code would be enough to
- * complete someone else's flow.
- */
+In-flight authorization requests: the CSRF `state` and the PKCE verifier.
+
+`consume` is the security-relevant operation. It is a single
+`DELETE ... RETURNING`, so a state can be redeemed exactly once however many
+times the callback URL is replayed -- the second call finds nothing. Checking
+expiry after the delete rather than in the predicate is deliberate: an expired
+state should be removed as well as refused.
+
+The verifier is sealed, because it is the second half of the PKCE proof and a
+D1 dump containing both it and a leaked authorization code would be enough to
+complete someone else's flow.
+*/
 
 import { newToken } from "../../lib/ids.ts";
 import { one, run, ttlSeconds } from "../client.ts";
@@ -67,9 +67,9 @@ export function makeOAuthStatesRepo(ctx: Ctx) {
     },
 
     /**
-     * Redeem a state exactly once. Returns null for an unknown, already-redeemed
-     * or expired state -- the caller cannot tell which, which is the point.
-     */
+    Redeem a state exactly once. Returns null for an unknown, already-redeemed
+    or expired state -- the caller cannot tell which, which is the point.
+    */
     async consume(state: string): Promise<ConsumedState | null> {
       const row = await one<OAuthStateRow>(
         ctx.db.prepare("DELETE FROM oauth_states WHERE state = ? RETURNING *").bind(state),
