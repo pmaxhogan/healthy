@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-12T19:04:35.926Z",
+  "generatedAt": "2026-10-19T16:28:49.719Z",
   "source": "https://open.epic.com/Endpoints/Brands",
   "count": 772,
   "brands": [
@@ -2022,6 +2022,7 @@
         "Neighborhood Health Clinic",
         "North Sunflower Medical Center",
         "Our Lady of the Lake LSU",
+        "Point Coupee General Hospital",
         "Southwest Mississippi Regional Medical Center",
         "The Baton Rouge Clinic",
         "The Woman's Clinic",
@@ -3138,7 +3139,7 @@
     {
       "id": "445877d0-8e9e-4d81-b3a3-87c89fc46f8f",
       "name": "Health Ventures",
-      "fhirBaseUrl": "https://emrproxy.mcfarlandclinic.com/FHIRProxy/api/FHIR/R4",
+      "fhirBaseUrl": "https://emrproxy.mcfarlandclinic.com/FHIRProxy/MYCHART/api/FHIR/R4",
       "locations": [
         "ROLAND, IA",
         "Ames, IA",
@@ -3681,6 +3682,10 @@
         "OLEAN, NY",
         "DUNKIRK, NY",
         "HAMBURG, NY"
+      ],
+      "aliases": [
+        "ECMC",
+        "UBMD"
       ]
     },
     {
@@ -4694,6 +4699,7 @@
         "Great Lakes Surgical Associates",
         "Karu Medical Associates",
         "Mackinac Straits Health System",
+        "McKenzie Health System",
         "Nimkee"
       ]
     },
@@ -5170,6 +5176,7 @@
         "Community Health Centers Burlington",
         "Jackson County Regional Health Center",
         "JAMHI",
+        "K'ima:w Medical Center",
         "LALGBT Center",
         "Muckleshoot Tribal Health & Wellness Center",
         "PacificSource PACE",
@@ -5181,6 +5188,7 @@
         "Squaxin Island Tribal Health Center",
         "The Healthcare Connection",
         "Waianae Coast Comprehensive Care",
+        "West Side Family Healthcare",
         "Yakima Neighborhood Health"
       ]
     },
@@ -7192,11 +7200,11 @@
       "name": "The Christ Hospital",
       "fhirBaseUrl": "https://soapproxyprod.thechristhospital.com/fhir/MOBILE/api/FHIR/R4",
       "locations": [
+        "LIBERTY TOWNSHIP, OH",
         "SOUTHGATE, KY",
         "Florence, KY",
         "CINCINNATI, OH",
-        "Liberty Township, OH",
-        "Cincinnati, OH"
+        "Liberty Township, OH"
       ]
     },
     {
@@ -8054,6 +8062,16 @@
       ]
     },
     {
+      "id": "868a8906-706a-496a-8c96-6db4f01f55fc",
+      "name": "UT Dell Medicine",
+      "fhirBaseUrl": "https://interconnect.utmedicine.org/OAuth2-prd/api/FHIR/R4",
+      "locations": [
+        "Austin, TX",
+        "AUSTIN, TX",
+        "DEL VALLE, TX"
+      ]
+    },
+    {
       "id": "53afcfef-04ce-4063-8009-35707f095a87",
       "name": "UT Health East Texas",
       "fhirBaseUrl": "https://epicproxy.ardenthealth.com/fhir/UTHET/api/FHIR/R4",
@@ -8063,16 +8081,6 @@
         "Carthage, TX",
         "QUITMAN, TX",
         "Mineola, TX"
-      ]
-    },
-    {
-      "id": "868a8906-706a-496a-8c96-6db4f01f55fc",
-      "name": "UT Medicine",
-      "fhirBaseUrl": "https://interconnect.utmedicine.org/OAuth2-prd/api/FHIR/R4",
-      "locations": [
-        "Austin, TX",
-        "AUSTIN, TX",
-        "DEL VALLE, TX"
       ]
     },
     {
