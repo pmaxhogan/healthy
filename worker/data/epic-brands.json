@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2026-10-19T16:28:49.719Z",
+  "generatedAt": "2026-10-26T16:08:53.271Z",
   "source": "https://open.epic.com/Endpoints/Brands",
-  "count": 772,
+  "count": 773,
   "brands": [
     {
       "id": "c5f287a7-e01d-4745-a773-ce0d41710e55",
@@ -566,7 +566,7 @@
       "name": "Bailey Medical Center",
       "fhirBaseUrl": "https://epicproxy.ardenthealth.com/fhir/BMC/api/FHIR/R4",
       "locations": [
-        "TULSA, OK",
+        "Tulsa, OK",
         "OWASSO, OK"
       ]
     },
@@ -1018,8 +1018,8 @@
       "name": "BSA",
       "fhirBaseUrl": "https://epicproxy.ardenthealth.com/fhir/BSA/api/FHIR/R4",
       "locations": [
-        "AMARILLO, TX",
-        "Amarillo, TX"
+        "Amarillo, TX",
+        "AMARILLO, TX"
       ]
     },
     {
@@ -1143,7 +1143,7 @@
     {
       "id": "86ae8031-138d-4059-a717-a29b8cfc1fb0",
       "name": "Carilion Clinic",
-      "fhirBaseUrl": "https://epicproxy.et0600.epichosted.com/APIProxyPRD/api/FHIR/R4",
+      "fhirBaseUrl": "https://epicproxy.et0600.epichosted.com/APIProxyPRD/PARENT/api/FHIR/R4",
       "locations": [
         "Bluefield, VA",
         "Tazewell, VA",
@@ -1587,7 +1587,7 @@
     {
       "id": "a075b803-0398-4a5e-9db9-367f17b0da92",
       "name": "Children's Wisconsin",
-      "fhirBaseUrl": "https://epicproxy.et0815.epichosted.com/FHIRProxy/api/FHIR/R4",
+      "fhirBaseUrl": "https://epicproxy.et0815.epichosted.com/FHIRProxy/HOME/api/FHIR/R4",
       "locations": [
         "Eau Claire, WI",
         "Glendale, WI",
@@ -3862,7 +3862,7 @@
     {
       "id": "a3792191-e404-47be-acb3-de7fc01c8e68",
       "name": "LCMC Health",
-      "fhirBaseUrl": "https://interconnect.lcmchealth.org/FHIR/LCMC/api/FHIR/R4",
+      "fhirBaseUrl": "https://epicproxy.et0779.epichosted.com/APIPROXYPRD/LCMC/api/FHIR/R4",
       "locations": [
         "GRETNA, LA",
         "RICHARDSON, TX",
@@ -3883,7 +3883,7 @@
     {
       "id": "211dc6b1-6c65-4f12-acff-80fda461a688",
       "name": "Lee Health Systems, Inc",
-      "fhirBaseUrl": "https://epicedi.leememorial.org/FHIR-prd/api/FHIR/R4",
+      "fhirBaseUrl": "https://epicproxy.et0523.epichosted.com/FHIRProxyPRD/api/FHIR/R4",
       "locations": [
         "BONITA SPRINGS, FL",
         "FORT MYERS, FL",
@@ -4286,6 +4286,7 @@
       "name": "Mercy Health",
       "fhirBaseUrl": "https://carepath.health-partners.org/Proxy-FHIR/MYCHART/api/FHIR/R4",
       "locations": [
+        "GREENVILLE, SC",
         "CINCINNATI, OH"
       ]
     },
@@ -4834,7 +4835,7 @@
     {
       "id": "1dcab979-7919-4e94-bc20-7ccce42242c1",
       "name": "New Orleans Nephrology Associates",
-      "fhirBaseUrl": "https://interconnect.lcmchealth.org/FHIR/LAK/api/FHIR/R4"
+      "fhirBaseUrl": "https://epicproxy.et0779.epichosted.com/APIPROXYPRD/LAK/api/FHIR/R4"
     },
     {
       "id": "fda40659-da96-48d1-b7bb-28f1b3afa9ea",
@@ -5109,7 +5110,8 @@
         "OKEMAH, OK",
         "STILLWATER, OK",
         "TULSA, OK",
-        "MUSKOGEE, OK"
+        "MUSKOGEE, OK",
+        "Tulsa, OK"
       ]
     },
     {
@@ -5165,9 +5167,9 @@
       "locations": [
         "UPLAND, CA",
         "SPRINGFIELD, OR",
+        "CHAPEL HILL, NC",
         "PUEBLO, CO",
-        "TACOMA, WA",
-        "CAVE JUNCTION, OR"
+        "TACOMA, WA"
       ],
       "aliases": [
         "Bigfork Valley",
@@ -5184,6 +5186,7 @@
         "Pueblo Community Health Center",
         "Puyallup Tribal Health Authority",
         "Rocky Boy Health Center",
+        "San Diego County",
         "Siskiyou Community Health Center",
         "Squaxin Island Tribal Health Center",
         "The Healthcare Connection",
@@ -5505,6 +5508,18 @@
         "WEST CHESTER, PA",
         "Morganville, NJ",
         "PRINCETON, NJ"
+      ]
+    },
+    {
+      "id": "87d9fb0e-59d1-4b48-b09a-fca59144854d",
+      "name": "PennState Health",
+      "fhirBaseUrl": "https://epicproxy.et1407.epichosted.com/FHIRPROXYPRD/PSH/api/FHIR/R4",
+      "locations": [
+        "FLEETWOOD, PA",
+        "MIDDLETOWN, PA",
+        "STATE COLLEGE, PA",
+        "HARRISBURG, PA",
+        "MECHANICSBURG, PA"
       ]
     },
     {
@@ -6214,7 +6229,7 @@
     {
       "id": "d486a98b-fde2-48b0-a256-aeacd70e188b",
       "name": "Saint Luke's Health System",
-      "fhirBaseUrl": "https://epicmobile.corp.saint-lukes.org/FHIRPROXY/api/FHIR/R4",
+      "fhirBaseUrl": "https://epicproxy.et0877.epichosted.com/APIProxyPRD/HOME/api/FHIR/R4",
       "locations": [
         "OVERLAND PARK, KS",
         "Kansas City, MO",
