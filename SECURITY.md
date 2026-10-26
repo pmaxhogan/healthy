@@ -13,8 +13,9 @@ read from; and, where a phone is paired, that person's own Health Connect data
 holds) together with the device token that lets the phone upload it. There is no
 other user's data in the system, which removes a whole class of authorisation
 bugs and concentrates the risk on three things: the admin surface, the MCP
-surface (which reads, and through one tool can ask for a sync: see
-["Read-only, with one tool that acts"](#mcp-sync-tool)), and the one
+surface (which reads, and through two tools can ask for a sync or a
+re-read of the portal's messages: see
+["Read-only, with two tools that act"](#mcp-sync-tool)), and the one
 machine-facing upload route.
 
 ## Assets and where they live
@@ -133,7 +134,10 @@ listed rather than left to be inferred:
   sync, when an MCP client last had one started, how many it had that UTC day,
   and that client's id (the value `mcp_audit` already holds). It is what the
   cooldown on `sync_health_systems` is kept in; see
-  ["Read-only, with one tool that acts"](#mcp-sync-tool).
+  ["Read-only, with two tools that act"](#mcp-sync-tool).
+- **`mcp_message_refreshes`**: for each health system, the token bucket
+  `refresh_messages` is held to: tokens left, when that was worked out, and
+  the id of the client that last took one. Same section.
 - **The other settings** (`default_title_template`, `default_color_id`,
   `ghost_color_id`, `window_past_days`, `default_arrival_offset_min`,
   `sync_backoff_until`, `mcp_enabled`, `portal_login_attempt_limit`): generic
@@ -471,10 +475,11 @@ can now make this Worker execute code of its choosing. What limits it:
   its length and the item counts in and out — not the program, which can name
   what the caller was looking for.
 
-<a id="mcp-sync-tool"></a>**Read-only, with one tool that acts.** Every MCP tool but one is annotated
+<a id="mcp-sync-tool"></a>**Read-only, with two tools that act.** Every MCP tool but two is annotated
 `readOnlyHint` and has no code path to a write, to a health system or to the
-calendar: it reads the cache. The exception is `sync_health_systems`, which lets
-an assistant ask this server to run a sync now. It is annotated as what it is
+calendar: it reads the cache. The exceptions are `sync_health_systems`, which lets
+an assistant ask this server to run a sync now, and `refresh_messages`, which
+re-reads one health system's portal messages (described after the first). It is annotated as what it is
 (`readOnlyHint: false`, `openWorldHint: true`), so a client asks the person
 before running it, and the annotation is stamped by the registrar a tool goes
 through (`worker/src/mcp/tools/register.ts`), not chosen per tool.
@@ -510,7 +515,8 @@ What it **cannot** do, by construction rather than by policy:
   a health system is rate limiting this app the tool refuses every kind.
 - _Refresh a token, disconnect, change a setting, a rule or a credential._ The
   tool's whole reach is `SyncControls` in `worker/src/mcp/deps.ts`: two
-  starters, five questions and one row.
+  starters, five questions and one row (the rest of that interface is
+  `refresh_messages`' bucket and its one read, below).
 - _Reach a health system the exposure policy denies._ A `health_system` rule
   removes it before the target is resolved, so neither its name nor `all: true`
   selects it.
@@ -542,12 +548,32 @@ So the worst a looping or hijacked client can do in a day, per health system, is
 that already existed, on top of what the schedule does anyway. `dryRun: true`
 reports every one of those verdicts and starts nothing.
 
+<a id="mcp-refresh-messages"></a>`refresh_messages` is narrower and more frequent. It re-reads one named
+health system's patient-portal Message Center (and fetches any new
+attachments) over a session that is already signed in, and waits for it: no
+visits, no calendar, no FHIR. What it can cause is that read and nothing
+else; it reads nothing back but counts. It cannot sign in (a dead session
+answers `portal_session_expired`, spends no attempt and opens no card), and
+it holds the per-health-system sign-in gate for the read, so it cannot run
+during a sign-in, or twice at once. It does not count towards the
+sync-failing alert, so a burst of them cannot open a card the schedule would
+not. It is held to a token bucket per health system in D1
+(`mcp_message_refreshes`, migration 0021): five tokens, one earned back every
+two minutes, taken by a single SQL statement. A refresh skipped for the
+account's state takes no token, and one that found the gate held gets its
+token back. So the worst a looping client can do is five reads in a burst
+and then one every two minutes, of a session that already existed, which is
+in the range of a person checking their own inbox. The admin UI's **Refresh
+messages** button runs the same read without the bucket (the owner's other
+portal buttons have no cooldown either), still under the gate.
+
 The owner's off switch is the one every tool has: a `tool` deny rule for
-`sync_health_systems` on the MCP page, which makes it answer `policy_denied`
+`sync_health_systems` (or `refresh_messages`) on the MCP page, which makes it answer `policy_denied`
 before it reads anything, and the MCP switch itself. The rule builder's preview
 and structure endpoints, which otherwise run real tools over real data, never
-run this one: it is previewed on a made-up row, and the dependencies every
-sample runs with can neither take a cooldown slot nor queue a run. Every call
+run either: each is previewed on a made-up row, and the dependencies every
+sample runs with can neither take a cooldown slot or a token, nor queue a run
+or a read. Every call
 is audited like any other (tool, client, health system ids, row count), and the
 log line per health system is an id, the kind and two stable codes.
 
@@ -807,9 +833,10 @@ history in CI.
 - D1 has no per-row access control; the encryption is what stands in for it.
 - The consent page authorises the whole `health:read` scope. There is no
   per-tool consent granularity beyond the deny-list the owner sets. That scope
-  now also covers asking for a sync (`sync_health_systems`): there is no
-  separate scope for the one tool that acts, so a client approved to read can
-  also ask, within the limits above, unless a `tool` rule denies it.
+  now also covers asking for a sync (`sync_health_systems`) and a message
+  refresh (`refresh_messages`): there is no separate scope for the tools that
+  act, so a client approved to read can also ask, within the limits above,
+  unless a `tool` rule denies it.
 - **A sync asked for over MCP is bounded, not prevented.** A client that has
   been steered by text in the record can still spend the day's allowance of
   syncs (12 ordinary, 3 full, 8 portal reads per health system). Each of those

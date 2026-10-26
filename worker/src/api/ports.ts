@@ -33,12 +33,14 @@ import {
   startFullRefresh,
   startPortalSignIn,
   startPortalSync,
+  refreshPortalMessages,
 } from "../sync/index.ts";
 
 import type { TrelloAlerts } from "../alerts/trello.ts";
 import type { Ctx } from "../db/client.ts";
 import type { Env } from "../env.ts";
 import type { CalendarClient } from "../google/calendar.ts";
+import type { MessageRefreshResult } from "../sync/message-refresh-result.ts";
 import type { McpGrantDto, PortalSignInState } from "@shared/types.ts";
 
 /** Which connection a reconnect alert is about. */
@@ -102,6 +104,8 @@ interface PortalPort {
   startSync(ctx: Ctx, options: { healthSystemId: string }): Promise<{ started: boolean }>;
   /** Progress for the card the admin UI polls. Never the emailed code. */
   signInState(ctx: Ctx, options: { healthSystemId: string }): Promise<PortalSignInState>;
+  /** Re-read the portal's messages now, awaited. Never signs in; never throws. */
+  refreshMessages(ctx: Ctx, options: { healthSystemId: string }): Promise<MessageRefreshResult>;
 }
 
 interface GrantsPort {
@@ -162,6 +166,7 @@ function defaults(): Ports {
       startSignIn: startPortalSignIn,
       startSync: startPortalSync,
       signInState: portalSignInState,
+      refreshMessages: refreshPortalMessages,
     },
     grants: { listGrants, revokeGrant },
     trello: liveTrello,

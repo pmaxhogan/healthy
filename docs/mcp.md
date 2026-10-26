@@ -4,9 +4,11 @@ Healthy exposes the aggregated record over the Model Context Protocol,
 Streamable HTTP, at `/mcp`. It is OAuth-protected, every tool but one is
 read-only (`readOnlyHint`), and every call passes through one server-side
 filter before anything is serialised — see [SECURITY.md](../SECURITY.md) for
-why that design exists. The one tool that acts, `sync_health_systems`, asks
-the server to sync sooner than its schedule; it is described under
-[Asking for a sync](#asking-for-a-sync-sync_health_systems). This page covers connecting a client, the consent flow,
+why that design exists. The two tools that act are `sync_health_systems`,
+which asks the server to sync sooner than its schedule (described under
+[Asking for a sync](#asking-for-a-sync-sync_health_systems)), and
+`refresh_messages`, which re-reads one health system's portal messages now
+([Refreshing messages](#refreshing-messages-refresh_messages)). This page covers connecting a client, the consent flow,
 the exposure policy's exact syntax, the audit log, and revoking access.
 
 ## Tools
@@ -17,7 +19,7 @@ The server registers (in `worker/src/mcp/tools/index.ts`): `get_health_summary`,
 `get_medication_fills`, `get_allergies`, `get_immunizations`,
 `get_lab_results`, `get_vitals`, `get_social_history`, `get_procedures`,
 `get_diagnostic_reports`, `get_documents`, `get_document_text`,
-`get_messages`, `get_message_thread`, `get_message_attachment`, `get_care_team`, `get_care_plans`, `get_goals`, `get_devices`,
+`get_messages`, `get_message_thread`, `get_message_attachment`, `refresh_messages`, `get_care_team`, `get_care_plans`, `get_goals`, `get_devices`,
 `get_coverage`, `get_service_requests`. Most accept an optional
 `health_systems[]` filter and an optional `raw` flag that additionally returns
 the underlying FHIR resource (filtered by the same policy as the normalised
@@ -263,6 +265,65 @@ server to slow down, and only the admin UI's buttons override that) and a run
 in flight. The cooldown is a row in D1, so it holds across clients and
 sessions. To switch the tool off altogether, add a `tool` rule for
 `sync_health_systems` on the MCP page.
+
+### Refreshing messages: `refresh_messages`
+
+The second tool that acts, for the conversation the scheduled sync is too
+slow for: "I just sent my doctor a message, look at it", "did they reply?".
+It re-reads one health system's patient-portal Message Center (every folder,
+and any new attachments) and **waits**: it answers once the messages are
+stored, a few seconds later, so the next `get_messages`, `get_message_thread`
+or `get_message_attachment` sees the inbox as it is now. It reads nothing
+else: no visits, no calendar, nothing from the API.
+
+| Argument       | Meaning                                                                                                 |
+| -------------- | ------------------------------------------------------------------------------------------------------- |
+| `healthSystem` | Required. One id, or a case-insensitive piece of a display name that matches exactly one health system. |
+| `jq`           | As on every tool, over the one result row.                                                              |
+
+A name that matches none or several is the tool error `invalid_health_system`,
+and nothing is read. Like `sync_health_systems` it **never signs in** to a
+portal.
+
+The answer is one row:
+
+```json
+{
+  "kind": "message_refresh",
+  "healthSystem": "Example Health",
+  "healthSystemId": "…",
+  "outcome": "refreshed",
+  "code": "refreshed",
+  "changed": 1,
+  "threads": 12,
+  "messages": 40,
+  "complete": true,
+  "refreshesLeft": 4,
+  "nextAllowedAt": null,
+  "capacity": 5,
+  "refillSeconds": 120
+}
+```
+
+| `outcome`   | `code`                                                                                          | Meaning                                                                                 |
+| ----------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `refreshed` | `refreshed`                                                                                     | Read and stored. `changed` is how many messages were new or changed.                    |
+| `refused`   | `rate_limited`                                                                                  | The bucket is empty. `nextAllowedAt` says when the next refresh may be asked for.       |
+| `skipped`   | `portal_not_configured`, `portal_no_credentials`, `portal_needs_reauth`, `portal_not_signed_in` | There is no signed-in portal to read. Only you can sign it in. No refresh was spent.    |
+| `busy`      | `portal_signin_busy`                                                                            | A sign-in or another refresh holds the portal. No refresh was spent; ask again shortly. |
+| `failed`    | `portal_session_expired`, or the portal's own code                                              | The session had expired or the read failed. What was stored before is left as it was.   |
+
+A `refreshed` answer adds the warning
+`messages_refreshed_read_get_messages_now`.
+
+**The limit is a token bucket, per health system**, built for a back and
+forth rather than for a sync: five refreshes may be asked for at once, and
+one is earned back every two minutes (continuously, so a minute banks half).
+`refreshesLeft` says how many are available now. The bucket is a row in D1
+(`mcp_message_refreshes`), so it holds across clients and sessions. The admin
+UI's **Refresh messages** button on a portal card does the same read without
+spending the bucket. To switch the tool off, add a `tool` rule for
+`refresh_messages` on the MCP page.
 
 ### Freshness: `coverage` and `get_sync_status`
 

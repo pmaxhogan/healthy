@@ -17,8 +17,9 @@ Two invariants it maintains that the layers above depend on:
 Nothing here talks to a health system. Every reading tool but
 `get_document_text` reads only what a sync already cached, which is why they
 are all fast and none of them can be made to spend an organisation's API
-quota. (`sync_health_systems` is the tool that can, and it does not come
-through here: see `tools/sync.ts`.)
+quota. (`sync_health_systems` and `refresh_messages` are the tools that can,
+and they do not come through here: see `tools/sync.ts` and
+`tools/refresh-messages.ts`.)
 */
 
 import { mapResolver, normalizeResource } from "../fhir/normalize/index.ts";

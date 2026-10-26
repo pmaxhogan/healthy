@@ -67,6 +67,7 @@ import type {
   PortalAccountDto,
   PortalAccountStatusDto,
   PortalDiscoveryDto,
+  PortalMessageRefreshDto,
 } from "@shared/types.ts";
 
 export const portalRouter = new Hono<AppHonoEnv>();
@@ -398,6 +399,31 @@ portalRouter.post("/:id/portal/sync", async (c) => {
   await requireCredentials(api, row.id);
   const { started } = await api.ports.portal.startSync(api.ctx, { healthSystemId: row.id });
   return c.json({ accepted: true, started }, 202, NO_STORE);
+});
+
+/**
+Re-read this portal's secure messages now. 200 once they are stored.
+
+Awaited, unlike the sync above: a Message Center read is seconds, never signs
+in, and the owner pressed the button to see the answer. Not held to the token
+bucket `refresh_messages` is (that limit is for a model calling a tool in a
+loop; the owner's other portal buttons have no cooldown either), only to the
+sign-in gate the refresh takes, so it cannot overlap a sign-in or itself.
+*/
+portalRouter.post("/:id/portal/messages", async (c) => {
+  const api = apiContext(c);
+  const row = await requireHealthSystem(api, c.req.param("id"));
+  await requireCredentials(api, row.id);
+  const result = await api.ports.portal.refreshMessages(api.ctx, { healthSystemId: row.id });
+  const refreshed = result.outcome === "refreshed" ? result : null;
+  const body: PortalMessageRefreshDto = {
+    outcome: result.outcome,
+    code: "code" in result ? result.code : null,
+    changed: refreshed?.written ?? null,
+    threads: refreshed?.threads ?? null,
+    messages: refreshed?.messages ?? null,
+  };
+  return c.json(body, 200, NO_STORE);
 });
 
 /**

@@ -23,6 +23,7 @@ import { registerHcSessionTools } from "./hc-sessions.ts";
 import { registerHcStatusTools } from "./hc-status.ts";
 import { registerHealthSystemTools } from "./health-systems.ts";
 import { registerMessageTools } from "./messages.ts";
+import { registerRefreshMessagesTool } from "./refresh-messages.ts";
 import { registerSummaryTool } from "./summary.ts";
 import { registerSyncTool } from "./sync.ts";
 
@@ -39,6 +40,7 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
   registerClinicalTools(server, deps);
   registerDocumentTools(server, deps);
   registerMessageTools(server, deps);
+  registerRefreshMessagesTool(server, deps);
   registerHcStatusTools(server, deps);
   registerHcRecordTools(server, deps);
   registerHcHeartTools(server, deps);

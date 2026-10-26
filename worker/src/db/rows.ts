@@ -320,6 +320,30 @@ export interface McpSyncRequestEntry {
   dayCount: number;
 }
 
+/** One health system's message-refresh token bucket (migration 0021). Nothing personal. */
+export interface McpMessageRefreshRow {
+  health_system_id: string;
+  /** Tokens left as of `updated_at`; fractional, the refill is continuous. */
+  tokens: number;
+  updated_at: number;
+  client_id: string | null;
+}
+
+/** What a message-refresh bucket is held to. Beside the row for the reason above. */
+export interface McpMessageRefreshLimits {
+  /** Most tokens the bucket holds: how many refreshes may be asked for at once. */
+  capacity: number;
+  /** Seconds to earn one token back. */
+  refillSeconds: number;
+}
+
+/** A bucket as it was last stored. */
+export interface McpMessageRefreshEntry {
+  tokens: number;
+  /** Unix seconds `tokens` was worked out at. */
+  updatedAt: number;
+}
+
 export interface LoginAttemptRow {
   ip_hash: string;
   count: number;

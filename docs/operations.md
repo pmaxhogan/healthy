@@ -73,6 +73,19 @@ organisation that starts rate-limiting a patient-facing endpoint is
 throttling the whole app, not one request, and retrying in the 60 seconds
 a header asked for just burns the next quota window too.
 
+## Message refreshes
+
+The **Refresh messages** button on a health system's portal card, and the MCP
+tool `refresh_messages` ([mcp.md](mcp.md#refreshing-messages-refresh_messages)),
+re-read that portal's Message Center now and wait for it. They do not appear
+on the **Runs** page: there is no run, only the read, and the button's toast
+says what it found. In the logs it is `portal.messages_refresh` (outcome, code,
+counts, `ms`). It never signs in, holds the portal's sign-in gate while it
+reads (so it answers `portal_signin_busy` during a sign-in), and a failed read
+is recorded on the Message Center's sync row without counting towards the
+sync-failing alert. The MCP tool's token bucket is a row per health system in
+`mcp_message_refreshes`; deleting it refills that bucket.
+
 ## Syncs an MCP client asks for
 
 An assistant connected over MCP can ask for a sync with the

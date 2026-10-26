@@ -169,6 +169,7 @@ describe("reposFor", () => {
         "loginAttempts",
         "mailInbox",
         "mcpAudit",
+        "mcpMessageRefreshes",
         "mcpPolicy",
         "mcpSyncRequests",
         "oauthStates",

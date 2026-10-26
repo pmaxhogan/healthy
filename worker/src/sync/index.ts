@@ -54,6 +54,13 @@ waits for an emailed code, so it cannot happen inside the request that asked for
 it. `portalSignInState` is what the admin UI polls while it does.
 */
 export { portalSignInState, startPortalSignIn, startPortalSync } from "./portal-runner.ts";
+/**
+Re-read one health system's portal messages now, awaited: what the admin
+"Refresh messages" button and the MCP tool `refresh_messages` call. A
+Message Center read is seconds and never signs in, so unlike the runs above
+it is safe to await from a request. See `portal-messages-refresh.ts`.
+*/
+export { refreshPortalMessages } from "./portal-messages-refresh.ts";
 /** How long an open run row counts as a run in flight; older ones are swept. */
 export { STALE_RUN_SECONDS } from "./run.ts";
 export { refreshConnectionToken } from "./keepalive.ts";

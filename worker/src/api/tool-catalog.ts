@@ -135,6 +135,12 @@ export const TOOL_CATALOG: readonly McpToolInfoDto[] = [
     resourceTypes: ["Communication"],
   },
   {
+    name: "refresh_messages",
+    description:
+      "Re-reads one health system's portal messages now. Acts; a burst of five, then one per two minutes.",
+    resourceTypes: [],
+  },
+  {
     name: "get_care_team",
     description: "Care team members and their roles.",
     resourceTypes: ["CareTeam", "Practitioner", "PractitionerRole"],

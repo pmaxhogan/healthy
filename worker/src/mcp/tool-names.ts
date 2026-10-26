@@ -29,6 +29,8 @@ export const TOOL_NAMES = [
   "get_messages",
   "get_message_thread",
   "get_message_attachment",
+  // The second tool that acts: it re-reads one health system's portal messages.
+  "refresh_messages",
   "get_care_team",
   "get_care_plans",
   "get_goals",

@@ -87,6 +87,7 @@ export type ToolErrorCode =
   | "cursor_expired"
   | "invalid_range"
   | "invalid_target"
+  | "invalid_health_system"
   | JqFailureCode;
 
 /**
@@ -120,6 +121,12 @@ const ERROR_MESSAGES = new Map<ToolErrorCode, string>([
     "invalid_target",
     "say which health systems to sync: name them in `healthSystems`, or pass `all: true` " +
       "to mean every one. Exactly one of the two; nothing was started",
+  ],
+  [
+    "invalid_health_system",
+    "`healthSystem` must name exactly one health system: its id, or a part of its name " +
+      "that no other health system's name shares (list_health_systems gives both); nothing " +
+      "was refreshed",
   ],
   ["jq_error", "the jq program failed; `detail` has jq's message"],
   ["jq_budget_exceeded", "the jq program exceeded its step budget"],

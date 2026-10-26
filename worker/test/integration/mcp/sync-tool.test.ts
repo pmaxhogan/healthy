@@ -85,6 +85,7 @@ function recordingEngine(recorded: Recorded): SyncEngine {
       recorded.full.push(options.healthSystemId);
       return Promise.resolve({ started: true });
     },
+    refreshPortalMessages: () => Promise.reject(new Error("not under test here")),
   };
 }
 

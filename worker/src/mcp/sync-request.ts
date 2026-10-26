@@ -157,7 +157,7 @@ sync (no stored login, nothing to do). The last two go further than it does:
 an account that needs re-authorising, was locked out or has never signed in
 can only be brought back by a sign-in, and that is the owner's to start.
 */
-function portalSkipCode(healthSystem: HealthSystemInfo): SyncCode | null {
+export function portalSkipCode(healthSystem: HealthSystemInfo): SyncCode | null {
   const { portal } = healthSystem;
   if (portal === null) return "portal_not_configured";
   if (!portal.hasCredentials) return "portal_no_credentials";

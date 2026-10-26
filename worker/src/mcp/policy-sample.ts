@@ -17,11 +17,12 @@ read from `mcp_policy`, and three things a preview must not do:
  - It never samples `get_document_text`, which is the one tool that can spend
    a health system's metered document quota. Its preview runs the draft over a
    made-up item of the tool's shape instead, and says so (`synthetic`).
- - It never runs `sync_health_systems`, the one tool that acts: a preview is
-   recomputed on every keystroke of a draft, and must not be able to start a
-   sync or spend a cooldown. That tool is previewed on a made-up item too,
-   and locked out twice over: `runTool` refuses it, and the dependencies every
-   sample runs with (`sampleDeps`) can neither claim a slot nor start a run.
+ - It never runs `sync_health_systems` or `refresh_messages`, the two tools
+   that act: a preview is recomputed on every keystroke of a draft, and must
+   not be able to start a sync, read a portal or spend a cooldown or a token.
+   Each is previewed on a made-up item too, and locked out twice over:
+   `runTool` refuses them, and the dependencies every sample runs with
+   (`sampleDeps`) can neither claim a slot, take a token nor start a run.
 
 The baseline a draft is compared against is the owner's stored `resource` and
 `health_system` rules -- what decides which items exist at all -- and none of
@@ -56,11 +57,12 @@ import type {
 /** The one reading tool never sampled for real. See the module comment. */
 const METERED_TOOL = "get_document_text";
 
-/** The one tool that acts. Never run from here; see the module comment. */
+/** The tools that act. Never run from here; see the module comment. */
 const ACTION_TOOL = "sync_health_systems";
+const REFRESH_TOOL = "refresh_messages";
 
 /** The tools a sample never runs: their previews use a made-up item. */
-const NEVER_RUN: ReadonlySet<string> = new Set([METERED_TOOL, ACTION_TOOL]);
+const NEVER_RUN: ReadonlySet<string> = new Set([METERED_TOOL, ACTION_TOOL, REFRESH_TOOL]);
 
 /** A tool answer, parsed: the items and, with `raw: true`, the raw entries. */
 interface Answer {
@@ -100,6 +102,9 @@ function sampleDeps(deps: ToolDeps, rules: PolicyRules): ToolDeps {
       claim: () => Promise.resolve(false),
       startCalendarSync: refuseToStart,
       startFullRefresh: refuseToStart,
+      takeMessageRefresh: () => Promise.resolve(false),
+      refundMessageRefresh: () => Promise.resolve(),
+      refreshMessages: () => Promise.reject(new Error("a policy sample refreshes nothing")),
     },
   };
 }
@@ -323,6 +328,37 @@ function syntheticSyncRequest(): Answer {
   };
 }
 
+/** A made-up `refresh_messages` item: the tool's shape, and nothing was read. */
+function syntheticMessageRefresh(): Answer {
+  return {
+    items: [
+      {
+        kind: "message_refresh",
+        healthSystem: "Example Health",
+        healthSystemId: "example",
+        outcome: "refreshed",
+        code: "refreshed",
+        changed: 1,
+        threads: 3,
+        messages: 7,
+        complete: true,
+        refreshesLeft: 4,
+        nextAllowedAt: null,
+        capacity: 5,
+        refillSeconds: 120,
+      },
+    ],
+    raw: [],
+    warnings: [],
+  };
+}
+
+/** The made-up item a never-run tool is previewed on. */
+function syntheticAnswer(tool: string): Answer {
+  if (tool === ACTION_TOOL) return syntheticSyncRequest();
+  return tool === REFRESH_TOOL ? syntheticMessageRefresh() : syntheticDocumentText();
+}
+
 /**
 True when an item is one a rule on `resourceType` is about: an item of that
 type, or -- for a phone's data -- a row of another type that carries that
@@ -483,7 +519,7 @@ async function beforeAndAfter(
   const before = baselineRules(stored);
   const after = withDraft(stored, field);
   if (NEVER_RUN.has(tool)) {
-    const sample = tool === ACTION_TOOL ? syntheticSyncRequest() : syntheticDocumentText();
+    const sample = syntheticAnswer(tool);
     const run = (rules: PolicyRules): Answer => {
       const filtered = applyPolicy({ tool, items: sample.items, rules });
       return { items: filtered.items, raw: [], warnings: filtered.warnings };

@@ -747,6 +747,24 @@ arrive in the inbox, which takes seconds to a couple of minutes.
 export type PortalSignInPhase =
   "idle" | "logging_in" | "awaiting_code" | "validating" | "signed_in" | "failed";
 
+/**
+What `POST /api/health-systems/:id/portal/messages` answers: one Message
+Center read, done by the time this arrives. Counts and stable codes only.
+
+`outcome` as `worker/src/sync/portal-messages-refresh.ts` reports it:
+`refreshed`, `skipped` (nothing to read; `code` says why), `busy` (a sign-in
+or another refresh holds the portal) or `failed` (`code` says why). The
+counts are null unless it was `refreshed`.
+*/
+export interface PortalMessageRefreshDto {
+  outcome: "refreshed" | "skipped" | "busy" | "failed";
+  code: string | null;
+  /** Messages the read found new or changed. */
+  changed: number | null;
+  threads: number | null;
+  messages: number | null;
+}
+
 export interface PortalSignInState {
   phase: PortalSignInPhase;
   /**

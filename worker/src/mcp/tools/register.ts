@@ -10,7 +10,8 @@ Three functions, and every tool uses one of them:
    description and a `CollectSpec`, and writing each of them out longhand would
    be nineteen chances to forget the policy call.
  - `actionTool` registers a tool that makes this server do something. There
-   is exactly one, `sync_health_systems`, and a second should be argued for.
+   are two: `sync_health_systems`, and `refresh_messages`, which is argued
+   for in its own header. A third should be argued for too.
 
 The annotations are not decoration. `readOnlyHint` is what lets a client run a
 tool without a confirmation prompt, so it is stamped by the registrar and is

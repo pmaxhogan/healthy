@@ -199,6 +199,10 @@ const CODE_MESSAGES: Record<string, string> = {
     "The portal asked for a one-time code, which it normally does not. Sign in once yourself on the portal's own site to see why, then try again here.",
   portal_bot_blocked: "The portal blocked this as automated traffic. Try again later.",
   portal_session_expired: "The portal signed this session out. Sign in again.",
+  portal_signin_busy:
+    "The portal is busy with a sign-in or another refresh. Try again in a moment.",
+  portal_not_signed_in: "The portal is not signed in yet. Press Sign in now first.",
+  portal_needs_reauth: "The portal needs signing in again. Press Sign in now.",
   portal_parse_failed:
     "The portal's response was not in a shape this could read -- it may have changed its pages.",
   portal_unreachable:

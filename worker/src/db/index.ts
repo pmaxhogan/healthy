@@ -25,6 +25,7 @@ import { makeHealthSystemsRepo } from "./repos/health-systems.ts";
 import { makeLoginAttemptsRepo } from "./repos/login-attempts.ts";
 import { makeMailInboxRepo } from "./repos/mail-inbox.ts";
 import { makeMcpAuditRepo } from "./repos/mcp-audit.ts";
+import { makeMcpMessageRefreshesRepo } from "./repos/mcp-message-refreshes.ts";
 import { makeMcpPolicyRepo } from "./repos/mcp-policy.ts";
 import { makeMcpSyncRequestsRepo } from "./repos/mcp-sync-requests.ts";
 import { makeOAuthStatesRepo } from "./repos/oauth-states.ts";
@@ -51,6 +52,7 @@ export function makeRepos(ctx: Ctx) {
     alerts: makeAlertsRepo(ctx),
     syncFailures: makeSyncFailuresRepo(ctx),
     mcpAudit: makeMcpAuditRepo(ctx),
+    mcpMessageRefreshes: makeMcpMessageRefreshesRepo(ctx),
     mcpPolicy: makeMcpPolicyRepo(ctx),
     mcpSyncRequests: makeMcpSyncRequestsRepo(ctx),
     runLog: makeRunLogRepo(ctx),

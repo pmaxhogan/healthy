@@ -39,6 +39,7 @@ import {
   calendarSyncBusy,
   fullRefreshBusy,
   portalSignInState,
+  refreshPortalMessages,
   startCalendarSync,
   startFullRefresh,
 } from "../sync/index.ts";
@@ -71,6 +72,7 @@ import type { Env } from "../env.ts";
 import type { HcSyncState } from "../hc/wire.ts";
 import type { Logger } from "../lib/log.ts";
 import type { PolicyRules } from "../policy/rules.ts";
+import type { MessageRefreshResult } from "../sync/message-refresh-result.ts";
 import type { PortalSignInState } from "@shared/types.ts";
 
 /**
@@ -91,6 +93,10 @@ export interface SyncEngine {
   calendarSyncBusy(ctx: Ctx): Promise<boolean>;
   fullRefreshBusy(ctx: Ctx, options: { healthSystemId: string }): Promise<boolean>;
   portalSignInState(ctx: Ctx, options: { healthSystemId: string }): Promise<PortalSignInState>;
+  refreshPortalMessages(
+    ctx: Ctx,
+    options: { healthSystemId: string },
+  ): Promise<MessageRefreshResult>;
 }
 
 const LIVE_SYNC_ENGINE: SyncEngine = {
@@ -99,6 +105,7 @@ const LIVE_SYNC_ENGINE: SyncEngine = {
   calendarSyncBusy,
   fullRefreshBusy,
   portalSignInState,
+  refreshPortalMessages,
 };
 
 export interface ToolDepsOptions {
@@ -427,9 +434,11 @@ const SIGN_IN_ACTIVE_PHASES: ReadonlySet<string> = new Set([
 The real {@link SyncControls}.
 
 Reads: the backoff setting, open `run_log` rows, the two runners' "is a job
-stored" answers, the sign-in phase and `mcp_sync_requests`. Writes: one
-`mcp_sync_requests` row per claim, and a job on a runner. Nothing here
-decides anything; `worker/src/mcp/sync-request.ts` does.
+stored" answers, the sign-in phase, `mcp_sync_requests` and
+`mcp_message_refreshes`. Writes: one `mcp_sync_requests` row per claim, one
+`mcp_message_refreshes` row per token, a job on a runner, and the message
+refresh itself. Nothing here decides anything; `worker/src/mcp/sync-request.ts`
+and `worker/src/mcp/message-refresh.ts` do.
 */
 function makeSyncControls(repos: Repos, engine: SyncEngine, caller: CallerIdentity): SyncControls {
   const { ctx } = repos;
@@ -466,6 +475,16 @@ function makeSyncControls(repos: Repos, engine: SyncEngine, caller: CallerIdenti
       engine.startCalendarSync(ctx, { healthSystemIds, portalOnly: startOptions.portalOnly }),
 
     startFullRefresh: (healthSystemId) => engine.startFullRefresh(ctx, { healthSystemId }),
+
+    messageRefreshBucket: (healthSystemId) => repos.mcpMessageRefreshes.get(healthSystemId),
+
+    takeMessageRefresh: (healthSystemId, limits) =>
+      repos.mcpMessageRefreshes.take(healthSystemId, limits, caller.clientId),
+
+    refundMessageRefresh: (healthSystemId, limits) =>
+      repos.mcpMessageRefreshes.refund(healthSystemId, limits),
+
+    refreshMessages: (healthSystemId) => engine.refreshPortalMessages(ctx, { healthSystemId }),
   };
 }
 

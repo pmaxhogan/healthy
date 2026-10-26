@@ -52,6 +52,13 @@ are largely in place; hardening and the first real deployment are ongoing.
   in to a portal, and has a dry run that reports what would happen. A `tool`
   rule in the deny-list switches it off. The numbers and the reasoning are in
   [SECURITY.md](SECURITY.md#mcp-sync-tool) and [docs/mcp.md](docs/mcp.md#asking-for-a-sync-sync_health_systems).
+- **Messages, refreshed on request.** A second tool that acts,
+  `refresh_messages`, re-reads one health system's patient-portal Message
+  Center now and answers once the messages are stored, for "look at the
+  message I just sent" or "did they reply?". It is held to a token bucket per
+  health system (five at once, one back every two minutes), never signs in,
+  and the admin UI's portal card has the same action as a **Refresh messages**
+  button. See [docs/mcp.md](docs/mcp.md#refreshing-messages-refresh_messages).
 - **Secure messages.** Where a patient portal is connected, the hourly portal
   pass also reads its Message Center -- every folder, every conversation, every
   message -- with the session it already holds, and the MCP serves them

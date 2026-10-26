@@ -54,9 +54,10 @@ describe("the registered surface", () => {
 
   it("annotates every reading tool read-only, non-destructive and closed-world", async () => {
     const { tools } = await world.client.listTools();
-    const reading = tools.filter((tool) => tool.name !== "sync_health_systems");
+    const acting = new Set(["sync_health_systems", "refresh_messages"]);
+    const reading = tools.filter((tool) => !acting.has(tool.name));
 
-    expect(reading).toHaveLength(tools.length - 1);
+    expect(reading).toHaveLength(tools.length - acting.size);
     for (const tool of reading) {
       expect(tool.annotations, tool.name).toMatchObject({
         readOnlyHint: true,
@@ -67,17 +68,22 @@ describe("the registered surface", () => {
     }
   });
 
-  it("annotates the one tool that acts as not read-only, so a client asks first", async () => {
+  it("annotates the two tools that act as not read-only, so a client asks first", async () => {
     const { tools } = await world.client.listTools();
     const acting = tools.filter((tool) => tool.annotations?.readOnlyHint !== true);
 
-    expect(acting.map((tool) => tool.name)).toStrictEqual(["sync_health_systems"]);
-    expect(acting[0]?.annotations).toMatchObject({
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: false,
-      openWorldHint: true,
-    });
+    expect(acting.map((tool) => tool.name)).toStrictEqual([
+      "sync_health_systems",
+      "refresh_messages",
+    ]);
+    for (const tool of acting) {
+      expect(tool.annotations, tool.name).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      });
+    }
   });
 
   it("gives every tool a description, because the description is the prompt", async () => {

@@ -15,13 +15,15 @@ The tool layer is written against this interface and never against `Repos`,
 
 Everything here reads, with two exceptions that are named as such: the audit
 row, and {@link SyncControls}, the one way a tool can make this server act
-(ask the sync engine for a run). No tool but `sync_health_systems` touches
-the second.
+(ask the sync engine for a run, or re-read the portal's messages). No tool
+but `sync_health_systems` and `refresh_messages` touches the second.
 */
 
 import type {
   ConnectionStatus,
   HealthSystemEnvironment,
+  McpMessageRefreshEntry,
+  McpMessageRefreshLimits,
   McpSyncKind,
   McpSyncRequestEntry,
   McpSyncRequestLimits,
@@ -31,6 +33,7 @@ import type { HcReads } from "./hc/reads.ts";
 import type { PortalMessage, PortalThread, PortalVisit } from "../ehr/mychart/index.ts";
 import type { Logger } from "../lib/log.ts";
 import type { PolicyRules } from "../policy/rules.ts";
+import type { MessageRefreshResult } from "../sync/message-refresh-result.ts";
 
 /** Resource type the decoded text of a clinical document is cached under. */
 export const BINARY_TEXT_TYPE = "_binary_text";
@@ -259,7 +262,8 @@ The door from a tool to the sync engine: what `sync_health_systems` needs to
 decide whether a sync may be asked for, and to ask for it.
 
 Deliberately narrow. It can start the three kinds of run the admin UI's own
-buttons start and nothing else: it cannot sign in to a patient portal, clear
+buttons start, and the message refresh its "Refresh messages" button runs,
+and nothing else: it cannot sign in to a patient portal, clear
 a rate-limit backoff, refresh a token or change a setting, and it is handed
 no credential, URL or portal identifier. Health system ids in, booleans and
 instants out.
@@ -293,6 +297,17 @@ export interface SyncControls {
   ): Promise<{ started: boolean }>;
   /** Queue a full refresh of one health system. `started: false`: already queued. */
   startFullRefresh(healthSystemId: string): Promise<{ started: boolean }>;
+  /** One health system's message-refresh bucket as last stored; null when never used. */
+  messageRefreshBucket(healthSystemId: string): Promise<McpMessageRefreshEntry | null>;
+  /** Spend one message-refresh token, atomically. False: the bucket is empty. */
+  takeMessageRefresh(healthSystemId: string, limits: McpMessageRefreshLimits): Promise<boolean>;
+  /** Give back a token whose refresh never reached the portal. */
+  refundMessageRefresh(healthSystemId: string, limits: McpMessageRefreshLimits): Promise<void>;
+  /**
+  Re-read one health system's patient-portal messages now, and wait for it.
+  Never signs in; never throws. See `worker/src/sync/portal-messages-refresh.ts`.
+  */
+  refreshMessages(healthSystemId: string): Promise<MessageRefreshResult>;
 }
 
 export interface ToolDeps {
@@ -361,7 +376,10 @@ export interface ToolDeps {
   needed. The only tool path that talks to an organisation at request time.
   */
   documentText(input: DocumentTextRequest): Promise<DocumentTextResult>;
-  /** Asking the sync engine for a run. Only `sync_health_systems` uses it. */
+  /**
+  Asking the sync engine for a run. Only the two acting tools use it:
+  `sync_health_systems` and `refresh_messages`.
+  */
   readonly sync: SyncControls;
   /** Write the audit row. Never throws into the tool's own result. */
   recordAudit(entry: AuditRecord): Promise<void>;

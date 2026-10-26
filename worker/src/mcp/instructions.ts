@@ -9,7 +9,9 @@ context on every turn, and each tool's own description carries the detail.
 export const MCP_INSTRUCTIONS =
   "A copy of one person's health record, cached from their health systems. " +
   "Every tool reads that cache and changes nothing, except sync_health_systems, " +
-  "which asks the server to refresh it. The cache is already refreshed on a " +
+  "which asks the server to refresh it, and refresh_messages, which re-reads " +
+  "one health system's portal messages now (use it when the person just sent " +
+  "or is expecting a message). The cache is already refreshed on a " +
   "schedule, so do not call sync_health_systems before a read as a matter of " +
   "course or in a loop: call it only when the person asks for a refresh or " +
   "`coverage` shows that what they need is stale or failed, and read its " +

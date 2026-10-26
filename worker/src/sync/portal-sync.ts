@@ -329,7 +329,8 @@ async function loadPortalVisits(
 
   if ((await repos.healthSystems.get(healthSystemId)) === null) return null;
   await recordVisits(input, healthSystemId, visits);
-  await syncMessages(input, healthSystemId, session);
+  const read = await syncMessages(input, healthSystemId, session, { countFailure: true });
+  if (read.ok) input.state.summary.portalMessages += read.messages;
   return visits;
 }
 
@@ -420,9 +421,32 @@ interface AttachmentPass {
   abandoned: number;
 }
 
+/**
+What the Message Center read needs: the database and the sync's own deps,
+nothing of the calendar. The portal pass hands it its own; the on-demand
+refresh (`portal-messages-refresh.ts`) builds one.
+*/
+export interface MessageSyncInput {
+  ctx: Ctx;
+  repos: Repos;
+  deps: SyncDeps;
+}
+
+/** What one Message Center read did. Counts and a stable code only. */
+export type MessageReadResult =
+  | {
+      ok: true;
+      threads: number;
+      messages: number;
+      /** Messages stored new or changed by this read. */
+      written: number;
+      complete: boolean;
+    }
+  | { ok: false; errorCode: string };
+
 /** Fetch and store one attachment, or record why not. Never throws for the portal's reasons. */
 async function fetchAttachment(
-  input: PortalPassInput,
+  input: MessageSyncInput,
   healthSystemId: string,
   session: PortalSession,
   attachment: FetchableAttachment,
@@ -468,7 +492,7 @@ Never throws into the message sync: a failure here costs attachment content,
 not messages.
 */
 async function syncAttachments(
-  input: PortalPassInput,
+  input: MessageSyncInput,
   healthSystemId: string,
   session: PortalSession,
   listed: readonly FetchableAttachment[],
@@ -514,18 +538,24 @@ async function syncAttachments(
 Read the whole Message Center with the session the visits just used, and store
 every message (`worker/src/db/repos/portal-messages.ts`).
 
-Never a sign-in of its own: it runs only after `ensureSession` handed back a
-live session, and a session that dies mid-read is recorded on the sync row
+Never a sign-in of its own: it runs only after the caller holds a live
+session, and a session that dies mid-read is recorded on the sync row
 (`portal_session_expired`) for the MCP's coverage to report, not retried.
 Isolated from the visits: a failure here costs the MCP one run's freshness and
 nothing else, so it is logged and recorded but never thrown. The jar is saved
 either way, because every one of these calls can refresh the session cookie.
+
+`countFailure` is false for the on-demand refresh: a burst of them against a
+portal having a bad minute would otherwise open the sync-failing card in a
+minute where the hourly run takes hours. The sync row still says what
+happened, so `coverage` stays truthful, and the schedule keeps the streak.
 */
-async function syncMessages(
-  input: PortalPassInput,
+export async function syncMessages(
+  input: MessageSyncInput,
   healthSystemId: string,
   session: PortalSession,
-): Promise<void> {
+  options: { countFailure: boolean },
+): Promise<MessageReadResult> {
   const { ctx, repos } = input;
   try {
     const result = await session.client.loadMessages();
@@ -539,26 +569,36 @@ async function syncMessages(
       threads: result.threads.length,
       messages,
     });
-    input.state.summary.portalMessages += messages;
     ctx.log.info("portal.messages_stored", {
       healthSystemId,
       threads: result.threads.length,
       messages,
+      written: recorded.written,
       complete: result.complete,
     });
     await syncAttachments(input, healthSystemId, session, recorded.attachments);
     await noteSyncOk(ctx, { healthSystemId, portal: true }, "messages", input.deps);
+    return {
+      ok: true,
+      threads: result.threads.length,
+      messages,
+      written: recorded.written,
+      complete: result.complete,
+    };
   } catch (error) {
     const code = isAppError(error) ? error.code : "internal";
     ctx.log.warn("portal.messages_failed", { healthSystemId, ...errorFields(error) });
     // Its own streak, apart from the visits': the message centre is a whole
     // source for the MCP, and it can stop reading while the visit list is fine.
-    await noteSyncFailure(ctx, { healthSystemId, portal: true }, "messages", code, input.deps);
+    if (options.countFailure) {
+      await noteSyncFailure(ctx, { healthSystemId, portal: true }, "messages", code, input.deps);
+    }
     try {
       await repos.portalMessages.markSync(healthSystemId, { ok: false, errorCode: code });
     } catch (markError) {
       ctx.log.warn("portal.messages_mark_failed", { healthSystemId, ...errorFields(markError) });
     }
+    return { ok: false, errorCode: code };
   } finally {
     try {
       await repos.portalAccounts.saveCookieJar(healthSystemId, session.client.jar.serialise());

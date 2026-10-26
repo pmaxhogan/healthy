@@ -1627,6 +1627,21 @@ const SYNC_REQUEST_ROW = {
   cooldownSeconds: "integer",
 } as const;
 
+const MESSAGE_REFRESH_ROW = {
+  kind: ["string", "message_refresh"],
+  ...TAGS,
+  outcome: ["string", "refreshed, refused, skipped, busy or failed"],
+  code: ["string", "Why, as a stable code"],
+  changed: ["integer", "Messages the refresh found new or changed"],
+  threads: "integer",
+  messages: "integer",
+  complete: ["boolean", "Whether the read could prove it saw every message"],
+  refreshesLeft: ["integer", "How many more refreshes may be asked for now"],
+  nextAllowedAt: ["string", "When the next refresh may be asked for, when none is left"],
+  capacity: "integer",
+  refillSeconds: "integer",
+} as const;
+
 const RESOURCE_SYNC_ROW = {
   kind: ["string", "resource_sync"],
   ...TAGS,
@@ -2176,6 +2191,13 @@ const SHAPES: readonly ShapeDef[] = [
     vocabulary: "normalized",
     fields: SYNC_REQUEST_ROW,
   },
+  {
+    id: "system:message_refresh",
+    label: "Message refresh row",
+    resourceType: null,
+    vocabulary: "normalized",
+    fields: MESSAGE_REFRESH_ROW,
+  },
   ...HC_SHAPES.map(({ rows: _rows, ...shape }): ShapeDef => ({
     ...shape,
     resourceType: null,
@@ -2212,6 +2234,7 @@ const TOOL_SHAPES = {
   list_health_systems: ["system:health_system"],
   get_sync_status: ["system:health_system", "system:resource_sync"],
   sync_health_systems: ["system:sync_request"],
+  refresh_messages: ["system:message_refresh"],
   get_patient_profile: collectionShapes("Patient"),
   get_appointments: [APPOINTMENT_SHAPE, "raw:Encounter"],
   get_encounters: collectionShapes("Encounter"),

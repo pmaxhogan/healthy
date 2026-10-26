@@ -151,6 +151,7 @@ const TABLES = [
   "portal_visits",
   "portal_accounts",
   "mcp_sync_requests",
+  "mcp_message_refreshes",
   "mcp_policy",
   "mcp_audit",
   "run_log",

@@ -35,6 +35,7 @@ import type {
   McpToolSchemaDto,
   OverviewDto,
   PairedDeviceDto,
+  PortalMessageRefreshDto,
   RetryFailedResponse,
   PolicyPreviewDto,
   PolicyPreviewRequest,
@@ -174,6 +175,9 @@ export const endpoints = {
     api.delete(`/api/health-systems/${encodeURIComponent(healthSystemId)}/portal`),
   syncPortalNow: (healthSystemId: string): Promise<Accepted> =>
     api.post(`/api/health-systems/${encodeURIComponent(healthSystemId)}/portal/sync`),
+  /** 200 once the messages are read and stored: awaited, unlike the sync above. */
+  refreshPortalMessages: (healthSystemId: string): Promise<PortalMessageRefreshDto> =>
+    api.post(`/api/health-systems/${encodeURIComponent(healthSystemId)}/portal/messages`),
 
   google: (signal?: AbortSignal): Promise<GoogleAccountDto> => api.get("/api/google", signal),
   googleCalendars: (signal?: AbortSignal): Promise<CalendarOptionDto[]> =>

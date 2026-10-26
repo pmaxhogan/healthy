@@ -36,6 +36,7 @@ export const JQ_EXAMPLES = {
     ".[] | {healthSystem, sync, outcome, code, nextAllowedAt}",
     '.[] | select(.outcome != "started") | {healthSystem, outcome, code, nextAllowedAt}',
   ],
+  refresh_messages: [".[] | {healthSystem, outcome, code, changed, refreshesLeft, nextAllowedAt}"],
   get_patient_profile: [".[] | {healthSystem, name, gender, address}"],
   get_appointments: [
     ".[] | {start, visitType, practitioner, department, telehealth, source}",

@@ -15,7 +15,7 @@ import { computed, reactive, ref, watch } from "vue";
 import { ApiRequestError, codeMessage } from "../api/client.ts";
 import { endpoints, isPortalSignInInProgress } from "../api/endpoints.ts";
 import { relativeTime } from "../lib/format.ts";
-import { toastSuccess } from "../lib/toasts.ts";
+import { toastError, toastSuccess } from "../lib/toasts.ts";
 import { useAction } from "../lib/use-load.ts";
 import { effectiveSignIn, usePortalAccount } from "../lib/use-portal-account.ts";
 
@@ -69,6 +69,7 @@ const save = useAction();
 const confirmSave = useAction();
 const signIn = useAction();
 const syncNow = useAction();
+const refreshMessages = useAction();
 const forgetting = useAction();
 const removing = useAction();
 const confirmingForget = ref(false);
@@ -266,6 +267,23 @@ async function onSync(): Promise<void> {
   });
 }
 
+async function onRefreshMessages(): Promise<void> {
+  const ok = await refreshMessages.run(async () => {
+    const result = await endpoints.refreshPortalMessages(props.healthSystemId);
+    if (result.outcome !== "refreshed") {
+      toastError(codeMessage(result.code ?? result.outcome));
+      return;
+    }
+    const changed = result.changed ?? 0;
+    toastSuccess(
+      changed === 0
+        ? "Messages refreshed. Nothing new."
+        : `Messages refreshed. ${String(changed)} new or changed.`,
+    );
+  });
+  if (ok) await portal.account.reload();
+}
+
 async function onForgetSession(): Promise<void> {
   const ok = await forgetting.run(async () => {
     await endpoints.forgetPortalSession(props.healthSystemId);
@@ -381,6 +399,13 @@ async function onRemove(): Promise<void> {
         </button>
         <button class="small" :disabled="!hasCredentials || syncNow.busy.value" @click="onSync">
           {{ syncNow.busy.value ? "Syncing…" : "Sync upcoming now" }}
+        </button>
+        <button
+          class="small"
+          :disabled="!hasSession || refreshMessages.busy.value"
+          @click="onRefreshMessages"
+        >
+          {{ refreshMessages.busy.value ? "Refreshing…" : "Refresh messages" }}
         </button>
         <button class="small danger" :disabled="!hasSession" @click="confirmingForget = true">
           Forget session

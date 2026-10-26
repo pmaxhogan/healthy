@@ -142,6 +142,7 @@ function fakeRunner(portal: FakePortal): {
           return Promise.resolve({ started: true });
         },
         signInState: () => Promise.resolve(state.phase),
+        refreshMessages: () => Promise.reject(new Error("not under test here")),
       },
     },
     run: async (ctx: Ctx, healthSystemId: string): Promise<void> => {
@@ -170,6 +171,14 @@ function idlePorts(): Parameters<typeof usePorts>[0] {
       startSync: () => Promise.resolve({ started: true }),
       signInState: () =>
         Promise.resolve({ phase: "idle", code: null, startedAt: null, updatedAt: null }),
+      refreshMessages: () =>
+        Promise.resolve({
+          outcome: "refreshed",
+          threads: 2,
+          messages: 5,
+          written: 1,
+          complete: true,
+        } as const),
     },
   };
 }
@@ -256,6 +265,7 @@ describe("GET /api/health-systems/:id/portal", () => {
         startSignIn: () => Promise.resolve({ started: true }),
         startSync: () => Promise.resolve({ started: true }),
         signInState: () => Promise.resolve(STALE_PHASE),
+        refreshMessages: () => Promise.reject(new Error("not under test here")),
       },
     });
     const healthSystemId = await seedHealthSystem();
@@ -757,6 +767,67 @@ describe("POST /api/health-systems/:id/portal/sync", () => {
     // `needs_reauth` over a button press that should not have been possible.
     expect(response.status).toBe(409);
     expect(runner.syncs).toBe(0);
+  });
+});
+
+describe("POST /api/health-systems/:id/portal/messages", () => {
+  it("answers 200 with what the awaited refresh read", async () => {
+    usePorts(idlePorts());
+    const healthSystemId = await seedHealthSystem();
+    await seedPortalAccount(testCtx(), healthSystemId);
+
+    const response = await owner().send(
+      "POST",
+      `/api/health-systems/${healthSystemId}/portal/messages`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await json(response)).toStrictEqual({
+      outcome: "refreshed",
+      code: null,
+      changed: 1,
+      threads: 2,
+      messages: 5,
+    });
+  });
+
+  it("passes a refresh that could not run through as its code, still 200", async () => {
+    const ports = idlePorts();
+    usePorts({
+      portal: {
+        ...ports.portal!,
+        refreshMessages: () =>
+          Promise.resolve({ outcome: "busy", code: "portal_signin_busy" } as const),
+      },
+    });
+    const healthSystemId = await seedHealthSystem();
+    await seedPortalAccount(testCtx(), healthSystemId);
+
+    const response = await owner().send(
+      "POST",
+      `/api/health-systems/${healthSystemId}/portal/messages`,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await json(response)).toStrictEqual({
+      outcome: "busy",
+      code: "portal_signin_busy",
+      changed: null,
+      threads: null,
+      messages: null,
+    });
+  });
+
+  it("refuses a health system with no portal login stored", async () => {
+    usePorts(idlePorts());
+    const healthSystemId = await seedHealthSystem();
+
+    const response = await owner().send(
+      "POST",
+      `/api/health-systems/${healthSystemId}/portal/messages`,
+    );
+
+    expect(response.status).toBe(409);
   });
 });
 

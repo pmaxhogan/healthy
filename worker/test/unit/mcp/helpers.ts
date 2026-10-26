@@ -13,13 +13,14 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
+import { bucketLevel } from "../../../src/mcp/message-refresh.ts";
 import { registerTools } from "../../../src/mcp/tools/index.ts";
 import { EMPTY_RULES } from "../../../src/policy/rules.ts";
 
 import { emptyHc, fakeHcReads } from "./hc-fake.ts";
 
 import type { FakeHc } from "./hc-fake.ts";
-import type { McpSyncRequestEntry } from "../../../src/db/rows.ts";
+import type { McpMessageRefreshEntry, McpSyncRequestEntry } from "../../../src/db/rows.ts";
 import type { Logger } from "../../../src/lib/log.ts";
 import type {
   AuditRecord,
@@ -35,6 +36,7 @@ import type {
   ToolDeps,
 } from "../../../src/mcp/deps.ts";
 import type { PolicyRules } from "../../../src/policy/rules.ts";
+import type { MessageRefreshResult } from "../../../src/sync/message-refresh-result.ts";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 /** 2026-06-01T00:00:00Z, in unix seconds. An arbitrary fixed "now". */
@@ -86,6 +88,12 @@ interface FakeSync {
   calendarStarts: { healthSystemIds: string[]; portalOnly: boolean }[];
   /** Every full refresh queued, by health system id, in order. */
   fullStarts: string[];
+  /** `mcp_message_refreshes`, by health system id. `take` follows the repo's rule. */
+  buckets: Map<string, McpMessageRefreshEntry>;
+  /** What a message refresh answers. */
+  refreshAnswer: MessageRefreshResult;
+  /** Every message refresh run, by health system id, in order. */
+  refreshes: string[];
 }
 
 function emptySync(): FakeSync {
@@ -99,6 +107,9 @@ function emptySync(): FakeSync {
     startThrows: false,
     calendarStarts: [],
     fullStarts: [],
+    buckets: new Map(),
+    refreshAnswer: { outcome: "refreshed", threads: 3, messages: 7, written: 1, complete: true },
+    refreshes: [],
   };
 }
 
@@ -147,6 +158,26 @@ function fakeSyncControls(sync: FakeSync, now: () => number): SyncControls {
     startFullRefresh: (healthSystemId) => {
       sync.fullStarts.push(healthSystemId);
       return start();
+    },
+    messageRefreshBucket: (healthSystemId) => {
+      const entry = sync.buckets.get(healthSystemId);
+      return Promise.resolve(entry === undefined ? null : { ...entry });
+    },
+    takeMessageRefresh: (healthSystemId, limits) => {
+      const at = now();
+      const level = bucketLevel(sync.buckets.get(healthSystemId) ?? null, at, limits);
+      if (level < 1) return Promise.resolve(false);
+      sync.buckets.set(healthSystemId, { tokens: level - 1, updatedAt: at });
+      return Promise.resolve(true);
+    },
+    refundMessageRefresh: (healthSystemId, limits) => {
+      const entry = sync.buckets.get(healthSystemId);
+      if (entry !== undefined) entry.tokens = Math.min(limits.capacity, entry.tokens + 1);
+      return Promise.resolve();
+    },
+    refreshMessages: (healthSystemId) => {
+      sync.refreshes.push(healthSystemId);
+      return Promise.resolve(sync.refreshAnswer);
     },
   };
 }
