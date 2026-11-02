@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2026-10-26T16:08:53.271Z",
+  "generatedAt": "2026-11-02T19:30:19.280Z",
   "source": "https://open.epic.com/Endpoints/Brands",
-  "count": 773,
+  "count": 776,
   "brands": [
     {
       "id": "c5f287a7-e01d-4745-a773-ce0d41710e55",
@@ -256,8 +256,8 @@
         "Langdon, ND",
         "NORTHWOOD, ND",
         "Dunseith, ND",
-        "Maddock, ND",
-        "Warroad, MN"
+        "Cloquet, MN",
+        "Maddock, ND"
       ]
     },
     {
@@ -465,7 +465,6 @@
         "Winston Salem, NC"
       ],
       "aliases": [
-        "Alleghany Health",
         "Camino Health Center",
         "Morehouse Medicine",
         "Scotland Health Care System"
@@ -1143,7 +1142,7 @@
     {
       "id": "86ae8031-138d-4059-a717-a29b8cfc1fb0",
       "name": "Carilion Clinic",
-      "fhirBaseUrl": "https://epicproxy.et0600.epichosted.com/APIProxyPRD/PARENT/api/FHIR/R4",
+      "fhirBaseUrl": "https://epicproxy.et0600.epichosted.com/APIProxyPRD/api/FHIR/R4",
       "locations": [
         "Bluefield, VA",
         "Tazewell, VA",
@@ -2541,6 +2540,18 @@
         "CHICO, CA",
         "Chico, CA",
         "OROVILLE, CA"
+      ]
+    },
+    {
+      "id": "6d399254-c5b2-47e2-b845-da692a754497",
+      "name": "ENT and Allergy Associates",
+      "fhirBaseUrl": "https://proxy.entandallergy.com/Interconnect-OAuth2-PRD/api/FHIR/R4",
+      "locations": [
+        "STATEN ISLAND, NY",
+        "BROOKLYN, NY",
+        "HORSHAM, PA",
+        "HOUSTON, TX",
+        "NEW YORK, NY"
       ]
     },
     {
@@ -4286,7 +4297,6 @@
       "name": "Mercy Health",
       "fhirBaseUrl": "https://carepath.health-partners.org/Proxy-FHIR/MYCHART/api/FHIR/R4",
       "locations": [
-        "GREENVILLE, SC",
         "CINCINNATI, OH"
       ]
     },
@@ -5401,6 +5411,18 @@
         "Leitchfield, KY",
         "HENDERSON, KY",
         "OWENSBORO, KY"
+      ]
+    },
+    {
+      "id": "69af2f88-6bd1-4125-9084-c04efcec7632",
+      "name": "PA Health Center Technology Alliance",
+      "fhirBaseUrl": "https://epicproxy.et1528.epichosted.com/APIProxyPRD/api/FHIR/R4",
+      "locations": [
+        "Lancaster, PA",
+        "Lebanon, PA",
+        "Philadelphia, PA",
+        "Wormleysburg, PA",
+        "Barto, PA"
       ]
     },
     {
@@ -6552,6 +6574,14 @@
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MYCHARTSOS/api/FHIR/R4",
       "locations": [
         "Newport Beach, CA"
+      ]
+    },
+    {
+      "id": "49f7c612-af4d-4d1f-ab8a-f5ceccd04ecb",
+      "name": "Sharp Health Plan",
+      "fhirBaseUrl": "https://epicproxy.et1297.epichosted.com/FHIRProxy/api/FHIR/R4",
+      "locations": [
+        "CA"
       ]
     },
     {
