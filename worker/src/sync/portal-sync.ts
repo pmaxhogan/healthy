@@ -289,8 +289,9 @@ until the owner signs in, and the reconnect alert is what says so. And
 code, which is not an attempt at all.
 
 What is left is an account still `active` that did not sync: the scheduled
-run holding back from signing in on its own (`portal_signin_deferred`), or a
-sign-in already in flight. Each ends by itself, but a portal that has not
+run holding back from signing in on its own (`portal_signin_deferred`), a
+sign-in already in flight, or a sign-in the portal did not answer
+(`portal_unreachable`, which `failSignIn` deliberately does not park on). Each ends by itself, but a portal that has not
 synced for three runs is a portal the owner can bring back with "Sign in
 now", and nothing else tells them that out of band.
 */

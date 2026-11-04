@@ -1068,6 +1068,46 @@ describe("portal sessions", () => {
     expect(upstreams.trelloCards).toStrictEqual([]);
   });
 
+  it("leaves the account active when the portal does not answer the sign-in, and signs in again next run", async () => {
+    const ctx = syncCtx({ trello: true });
+    const healthSystem = await seedConnectedHealthSystem(ctx, { host: HOST });
+    await seedGoogle(ctx);
+    await seedSettings(ctx);
+    await seedPortalAccount(ctx, healthSystem.healthSystemId);
+    await syncRepos(ctx).portalAccounts.markActive(healthSystem.healthSystemId);
+    const portal = fakePortal({
+      alive: false,
+      loginStatus: "signed_in",
+      loginError: new AppError("portal_unreachable", "synthetic maintenance window"),
+    });
+    const upstreams = stubUpstreams({ [HOST]: fhirServer({ patientId: healthSystem.patientId }) });
+    const run = () =>
+      runCalendarSync(ctx, {
+        trigger: "manual",
+        portalOnly: true,
+        deps: { ...upstreams.deps, portalAdapter: portal.adapter },
+      });
+
+    const first = await run();
+
+    expect(first.portalErrors).toStrictEqual(["portal_unreachable"]);
+    const repos = syncRepos(ctx);
+    const afterOutage = await repos.portalAccounts.get(healthSystem.healthSystemId);
+    expect(afterOutage?.session_state).toBe("active");
+    expect(upstreams.trelloCards).toStrictEqual([]);
+    expect(await repos.alerts.getOpen(`portal:${healthSystem.healthSystemId}`)).toBeNull();
+
+    // The outage ends by itself; nobody presses anything.
+    portal.loginError = null;
+    const second = await run();
+
+    expect(portal.calls.logins).toBe(2);
+    expect(second.portalErrors).toStrictEqual([]);
+    const account = await repos.portalAccounts.get(healthSystem.healthSystemId);
+    expect(account?.session_state).toBe("active");
+    expect(upstreams.trelloCards).toStrictEqual([]);
+  });
+
   it("refuses to sign in at all once the daily attempt budget is spent, and alerts", async () => {
     const ctx = syncCtx({ trello: true });
     const healthSystem = await seedConnectedHealthSystem(ctx, {

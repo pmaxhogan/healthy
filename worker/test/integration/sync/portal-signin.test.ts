@@ -96,20 +96,20 @@ describe("a verification code that never arrives", () => {
     const fix = await fixture();
 
     await miss(fix);
-    await miss(fix, "portal_unreachable");
+    await miss(fix, "portal_parse_failed");
     await miss(fix);
 
     expect(fix.upstreams.trelloCards).toHaveLength(1);
-    expect(fix.upstreams.trelloCards[0]?.desc).toContain("portal_unreachable");
+    expect(fix.upstreams.trelloCards[0]?.desc).toContain("portal_parse_failed");
   });
 });
 
 // A failed sign-in parks the account, and the scheduled sync never signs in to a
 // parked one: whatever the code, nothing more happens until the owner acts, so
-// every one of these has to reach them.
+// every one of these has to reach them. A transient failure is the exception,
+// below.
 describe("every way a sign-in fails", () => {
   const RETRY = [
-    "portal_unreachable",
     "portal_parse_failed",
     "portal_2fa_rejected",
     "portal_handoff_failed",
@@ -161,9 +161,9 @@ describe("every way a sign-in fails", () => {
     const fix = await fixture();
     fix.upstreams.failTrello(401);
 
-    const outcome = await failSignIn(fix.ctx, fix.healthSystemId, "portal_unreachable", fix.deps);
+    const outcome = await failSignIn(fix.ctx, fix.healthSystemId, "portal_parse_failed", fix.deps);
 
-    expect(outcome).toStrictEqual({ phase: "failed", code: "portal_unreachable" });
+    expect(outcome).toStrictEqual({ phase: "failed", code: "portal_parse_failed" });
     const repos = syncRepos(fix.ctx);
     const account = await repos.portalAccounts.get(fix.healthSystemId);
     expect(account?.session_state).toBe("needs_reauth");
@@ -171,9 +171,53 @@ describe("every way a sign-in fails", () => {
     expect(open).toMatchObject({ kind: "reconnect", trello_card_id: null });
 
     fix.upstreams.failTrello(null);
-    await miss(fix, "portal_unreachable");
+    await miss(fix, "portal_parse_failed");
     expect(fix.upstreams.trelloCards).toHaveLength(1);
     const carded = await repos.alerts.getOpen(`portal:${fix.healthSystemId}`);
     expect(carded).toMatchObject({ id: open?.id, trello_card_id: "card-1" });
+  });
+});
+
+// A portal that did not answer says nothing about the account, and parking it
+// would leave the owner to end an outage that ends by itself. The next
+// scheduled run signs in again instead; see `TRANSIENT_SIGN_IN_CODES`.
+describe("a sign-in the portal did not answer", () => {
+  it("leaves an active account active and opens no card, however often it happens", async () => {
+    const fix = await fixture();
+    await syncRepos(fix.ctx).portalAccounts.markActive(fix.healthSystemId);
+
+    const outcome = await failSignIn(fix.ctx, fix.healthSystemId, "portal_unreachable", fix.deps);
+    await miss(fix, "portal_unreachable");
+    await miss(fix, "portal_unreachable");
+
+    expect(outcome).toStrictEqual({ phase: "failed", code: "portal_unreachable" });
+    const repos = syncRepos(fix.ctx);
+    const account = await repos.portalAccounts.get(fix.healthSystemId);
+    expect(account?.session_state).toBe("active");
+    expect(account?.needs_reauth_since).toBeNull();
+    expect(fix.upstreams.trelloCards).toStrictEqual([]);
+    expect(await repos.alerts.getOpen(`portal:${fix.healthSystemId}`)).toBeNull();
+  });
+
+  it("leaves a parked account parked behind the card it already has", async () => {
+    const fix = await fixture();
+    await miss(fix, "portal_login_failed");
+
+    await miss(fix, "portal_unreachable");
+
+    const repos = syncRepos(fix.ctx);
+    const account = await repos.portalAccounts.get(fix.healthSystemId);
+    expect(account?.session_state).toBe("needs_reauth");
+    expect(account?.last_error_code).toBe("portal_login_failed");
+    expect(fix.upstreams.trelloCards).toHaveLength(1);
+  });
+
+  it("does not count as the first of two missing codes", async () => {
+    const fix = await fixture();
+
+    await miss(fix);
+    await miss(fix, "portal_unreachable");
+
+    expect(fix.upstreams.trelloCards).toStrictEqual([]);
   });
 });
