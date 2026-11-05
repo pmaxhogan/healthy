@@ -124,17 +124,37 @@ const OK: SignInOutcome = { phase: "signed_in", code: null };
 const CODE_MISS = "portal_2fa_required";
 
 /**
+Sign-in failures that say nothing about the account: the portal did not
+answer, or answered with a server error. The request may never have reached
+the credential check at all.
+
+These do not park the account. The incident this exists for: a portal that
+5xx'd for one sign-in in its nightly maintenance window parked an account with
+eleven of its twelve daily attempts unused, and the owner had to press
+"Sign in now" by hand to end an outage that had already ended by itself.
+Left `active`, the next hourly run simply signs in again, still bounded by
+the daily budget (`attemptsLeft`, `OWNER_RESERVED_ATTEMPTS`), and a portal
+that stays down is still surfaced: `noteNoSession` counts each failed run
+against an `active` account, and three in a row open the `sync_failing`
+card.
+
+A bot block (`portal_bot_blocked`) is deliberately not here. Retrying a WAF or
+a lockout hourly is how a temporary one becomes permanent.
+*/
+const TRANSIENT_SIGN_IN_CODES: ReadonlySet<string> = new Set(["portal_unreachable"]);
+
+/**
 Whether a failed sign-in opens the reconnect card straight away.
 
-Every failure does, bar one. A failed sign-in parks the account
-(`needs_reauth`), and the scheduled sync only ever signs in to `active`
-accounts -- retrying a bot block or a lockout hourly is how a temporary one
-becomes permanent, and the same caution holds for a portal that is down or
-whose pages stopped parsing, because every look costs one of the day's
-attempts. So whatever the code, nothing more happens until the owner presses
-"Sign in now", and a failure that waited to be noticed on the Health systems
-page was a portal that silently stopped syncing. The card is how they find
-out.
+Every parking failure does, bar one. A failed sign-in parks the account
+(`needs_reauth`) -- unless it is transient, see `TRANSIENT_SIGN_IN_CODES` --
+and the scheduled sync only ever signs in to `active` accounts: retrying a
+bot block or a lockout hourly is how a temporary one becomes permanent, and
+the same caution holds for a portal whose pages stopped parsing, because
+every look costs one of the day's attempts. So nothing more happens until the
+owner presses "Sign in now", and a failure that waited to be noticed on the
+Health systems page was a portal that silently stopped syncing. The card is
+how they find out.
 
 The exception is a *first* missing code. A slow mail hop explains one, and
 the owner who pressed the button is watching it happen. Two in a row -- with
@@ -300,6 +320,10 @@ export async function recentSessionAge(ctx: Ctx, healthSystemId: string): Promis
 /**
 Record the failure: the account's state, and the Trello card when it warrants one.
 
+A transient failure (`TRANSIENT_SIGN_IN_CODES`) records neither: the account
+keeps whatever state it had, so an `active` one is signed in again by the next
+scheduled run and a parked one stays parked behind the card it already has.
+
 Never throws. A failure to write the failure must not turn into a second,
 different failure for the caller to interpret.
 */
@@ -309,6 +333,10 @@ export async function failSignIn(
   code: string,
   deps: PortalDeps,
 ): Promise<SignInOutcome> {
+  if (TRANSIENT_SIGN_IN_CODES.has(code)) {
+    ctx.log.warn("portal.signin.transient", { healthSystemId, code });
+    return { phase: "failed", code };
+  }
   try {
     const repos = makeRepos(ctx);
     const previous = await repos.portalAccounts.markNeedsReauth(healthSystemId, code);
