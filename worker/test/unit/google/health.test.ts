@@ -18,8 +18,10 @@ import {
   grantedTypes,
   hasHealthScope,
   num,
+  parseGoogleError,
 } from "../../../src/google/health.ts";
 import { AppError } from "../../../src/lib/errors.ts";
+import { noopLogger } from "../../../src/lib/log.ts";
 
 import { appErrorFrom, jsonResponse, recordingFetch } from "./helpers.ts";
 
@@ -386,7 +388,37 @@ describe("failures", () => {
   });
 
   it("names a missing scope, a disabled API and any other refusal", async () => {
-    const scope = client(() => jsonResponse(403, { error: { status: "PERMISSION_DENIED" } }));
+    const scope = client(() =>
+      jsonResponse(403, {
+        error: {
+          status: "PERMISSION_DENIED",
+          details: [
+            {
+              "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+              reason: "ACCESS_TOKEN_SCOPE_INSUFFICIENT",
+            },
+          ],
+        },
+      }),
+    );
+    const scopeByMessage = client(() =>
+      jsonResponse(403, {
+        error: {
+          status: "PERMISSION_DENIED",
+          message: "Request had insufficient authentication scopes.",
+        },
+      }),
+    );
+    const forbidden = client(() =>
+      jsonResponse(403, {
+        error: {
+          status: "PERMISSION_DENIED",
+          details: [{ reason: "CONSUMER_INVALID", metadata: { service: "health.googleapis.com" } }],
+        },
+      }),
+    );
+    const bare403 = client(() => jsonResponse(403, { error: { status: "PERMISSION_DENIED" } }));
+    const empty403 = client(() => new Response("forbidden", { status: 403 }));
     const disabled = client(() =>
       jsonResponse(403, { error: { details: [{ reason: "SERVICE_DISABLED" }] } }),
     );
@@ -399,9 +431,85 @@ describe("failures", () => {
     };
 
     expect(await codeOf(scope)).toBe("google_health_scope_missing");
+    expect(await codeOf(scopeByMessage)).toBe("google_health_scope_missing");
+    // Any other 403 carries Google's own word, so the real reason is visible.
+    expect(await codeOf(forbidden)).toBe("google_health_forbidden:CONSUMER_INVALID");
+    expect(await codeOf(bare403)).toBe("google_health_forbidden:PERMISSION_DENIED");
+    expect(await codeOf(empty403)).toBe("google_health_forbidden");
     expect(await codeOf(disabled)).toBe("google_health_api_disabled");
     expect(await codeOf(other)).toBe("upstream_error");
     expect(await codeOf(notJson)).toBe("upstream_error");
+  });
+
+  it("logs Google's status, reason and metadata, never the body or an echoed value", async () => {
+    const lines: { event: string; fields: Record<string, unknown> }[] = [];
+    const record = (event: string, fields?: Record<string, unknown>): void => {
+      lines.push({ event, fields: fields ?? {} });
+    };
+    const logger = { ...noopLogger, warn: record };
+    const recorded = recordingFetch(() =>
+      jsonResponse(403, {
+        error: {
+          code: 403,
+          status: "PERMISSION_DENIED",
+          message: 'Permission denied on filter "daily_vo2_max.date < 2026-03-02".',
+          details: [
+            {
+              "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+              reason: "SOME_NEW_REASON",
+              metadata: {
+                service: "health.googleapis.com",
+                consumer: "projects/123456",
+                method: "google.example.health.v4.DataPointService.ListDataPoints",
+                email: "person@example.test",
+              },
+            },
+            {
+              "@type": "type.googleapis.com/google.rpc.Help",
+              reason: "lower case is not a reason",
+            },
+          ],
+        },
+      }),
+    );
+    const made = createGoogleHealthClient({
+      getAccessToken: () => Promise.resolve("t"),
+      fetchImpl: recorded.fetchImpl,
+      logger,
+      sleep: () => Promise.resolve(),
+    });
+
+    const error = await appErrorFrom(made.listDaily(daily("DailyVo2Max"), range));
+
+    expect(googleHealthErrorCode(error)).toBe("google_health_forbidden:SOME_NEW_REASON");
+    expect(error.details).toMatchObject({
+      status: 403,
+      googleStatus: "PERMISSION_DENIED",
+      googleReason: "SOME_NEW_REASON",
+    });
+    const failed = lines.find((line) => line.event === "google.health.request_failed");
+    expect(failed?.fields).toStrictEqual({
+      operation: "list daily-vo2-max",
+      status: 403,
+      errorCode: "google_health_forbidden:SOME_NEW_REASON",
+      googleStatus: "PERMISSION_DENIED",
+      googleReason: "SOME_NEW_REASON",
+      googleMetadata:
+        "service=health.googleapis.com method=DataPointService.ListDataPoints consumer=projects/123456",
+      googleMessage: 'Permission denied on filter "...".',
+    });
+    expect(JSON.stringify(lines)).not.toContain("person@example.test");
+    expect(JSON.stringify(lines)).not.toContain("2026-03-02");
+  });
+
+  it("reads what it can of an error body and never throws", () => {
+    expect(parseGoogleError("not json")).toStrictEqual({ googleReasons: [], googleMetadata: [] });
+    expect(parseGoogleError('{"error": "flat"}')).toStrictEqual({
+      googleReasons: [],
+      googleMetadata: [],
+    });
+    const long = parseGoogleError(JSON.stringify({ error: { message: "x".repeat(500) } }));
+    expect(long.googleMessage).toHaveLength(200);
   });
 
   it("codes anything that is not an AppError as internal", () => {

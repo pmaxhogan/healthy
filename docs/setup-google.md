@@ -117,5 +117,10 @@ phone path cannot supply them. They are served by the MCP tool
 The first read of each metric starts straight after the consent and reads its
 whole history; after that the hourly cron reads the last 14 days. The card
 shows, per metric, how many days are stored and how the last read went.
+A metric whose read fails shows its code on the card. A
+`google_health_forbidden:<REASON>` code is Google's own reason for a 403 that
+is not a missing scope; the `google.health.request_failed` log line
+(`wrangler tail`) carries Google's error status, reasons, the API metadata
+(service, method, project) and its message with any echoed value masked.
 Unchecking a scope on the consent screen leaves those metrics unread
 (`google_health_scope_not_granted:<Type>` on the MCP) and the rest working.

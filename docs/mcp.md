@@ -407,6 +407,7 @@ from payers, other providers or other FHIR servers.
 | `google_health_not_linked`                                                                     | error    | The Google account has not been moved to Google Health; the owner signs in to the Fitbit (Google Health) app once.                           | Google Health API (`ACCOUNT_NOT_LINKED`)         |
 | `google_health_scope_missing`                                                                  | error    | The Google grant does not cover the metric's scope; the owner grants Google Health access again.                                             | Google Health API (403)                          |
 | `google_health_api_disabled`                                                                   | error    | The Google Health API is not enabled on the deployment's Google Cloud project.                                                               | Google Health API (`SERVICE_DISABLED`)           |
+| `google_health_forbidden[:<REASON>]`                                                           | error    | Google Health refused the call (403) for a reason other than a missing scope; `<REASON>` is Google's own (ErrorInfo reason or status).       | Google Health API (403)                          |
 | `google_health_unauthorized`                                                                   | error    | Google rejected the access token even after a refresh; the next read tries again.                                                            | Google Health API (401)                          |
 
 ### Appointments: FHIR and the patient portal
@@ -1234,7 +1235,8 @@ The envelope adds `range: { start, end }`, the days the answer covers.
 has not been read for three hours; `failed` with an `errorCode` and its
 `errorMeaning` (`not_connected` and `needs_reauth` are the Google account's own
 state; `google_health_not_linked`, `google_health_scope_missing`,
-`google_health_api_disabled` and `google_health_unauthorized` are below); or
+`google_health_api_disabled`, `google_health_forbidden[:<REASON>]` and
+`google_health_unauthorized` are below); or
 `never`. `recordCount` is the days stored. A metric the Google grant does not
 cover is `never` and is also warned as
 `google_health_scope_not_granted:<Type>`.

@@ -213,6 +213,13 @@ const MEANINGS: Readonly<Record<string, SyncCodeMeaning>> = {
     meaning: "The Google Health API is not enabled on this deployment's Google Cloud project.",
     severity: "error",
   },
+  google_health_forbidden: {
+    meaning:
+      "Google Health refused the call for a reason other than a missing scope; the part " +
+      "after the colon, when there is one, is Google's own reason (an ErrorInfo reason or " +
+      "the error status), and the request_failed log line has the rest.",
+    severity: "error",
+  },
   google_health_unauthorized: {
     meaning: "Google rejected the access token even after a refresh; the next read tries again.",
     severity: "error",

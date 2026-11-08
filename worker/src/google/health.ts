@@ -381,36 +381,157 @@ type GoogleHealthReason =
   | "google_health_not_linked"
   | "google_health_scope_missing"
   | "google_health_api_disabled"
-  | "google_health_unauthorized";
+  | "google_health_unauthorized"
+  | "google_health_forbidden";
+
+/** Google's own reason words: upper-case enum names, nothing else. */
+const REASON_WORD = /^[A-Z][A-Z0-9_]{0,63}$/u;
+
+/**
+The `ErrorInfo.metadata` keys that name Google's side of a refusal (which API,
+which method, which Cloud project, which permission) and never anything
+about the owner. Every other key is dropped unread.
+*/
+const METADATA_KEYS = ["service", "method", "consumer", "permission", "containerInfo"] as const;
+
+/** A metadata value worth keeping: short, and only the characters these keys use. */
+const METADATA_VALUE = /^[\w./:-]{1,160}$/u;
+
+/** The longest piece of Google's error message a log line carries. */
+const MESSAGE_MAX = 200;
+
+/** What Google said about a refused call, cut down to what is safe to log. */
+interface GoogleErrorInfo {
+  /** `error.status`, e.g. `PERMISSION_DENIED`. */
+  googleStatus?: string;
+  /** Every `ErrorInfo.reason`, e.g. `ACCESS_TOKEN_SCOPE_INSUFFICIENT`. */
+  googleReasons: string[];
+  /** The allowlisted `ErrorInfo.metadata` entries, as `key=value`. */
+  googleMetadata: string[];
+  /**
+  `error.message` with every quoted span replaced by `"..."` (a quoted span is
+  where Google echoes a request value, such as a filter's dates), cut to
+  `MESSAGE_MAX` characters.
+  */
+  googleMessage?: string;
+}
+
+function asWord(value: unknown): string | undefined {
+  return typeof value === "string" && REASON_WORD.test(value) ? value : undefined;
+}
+
+/** The allowlisted metadata of one `ErrorInfo`, as `key=value`. */
+function metadataOf(detail: Record<string, unknown>): string[] {
+  const metadata = field(detail, "metadata");
+  if (!isRecord(metadata)) return [];
+  const out: string[] = [];
+  for (const key of METADATA_KEYS) {
+    const value = field(metadata, key);
+    if (typeof value === "string" && METADATA_VALUE.test(value)) {
+      out.push(`${key}=${key === "method" ? shortMethod(value) : value}`);
+    }
+  }
+  return out;
+}
+
+/**
+A gRPC method's last two parts (`DataPointService.ListDataPoints`): the full
+dotted name is long enough that the logger masks it as an opaque token.
+*/
+function shortMethod(method: string): string {
+  return method.split(".").slice(-2).join(".");
+}
+
+/** Google's message, with any echoed value replaced and the length capped. */
+function safeMessage(value: unknown): string | undefined {
+  if (typeof value !== "string" || value === "") return undefined;
+  const masked = value.replaceAll(/"[^"]*"|'[^']*'/gu, '"..."');
+  return masked.length > MESSAGE_MAX ? masked.slice(0, MESSAGE_MAX) : masked;
+}
+
+/**
+Read Google's error body (`{ error: { status, message, details: [...] } }`).
+Anything it cannot read is left out; it never throws.
+*/
+export function parseGoogleError(body: string): GoogleErrorInfo {
+  const info: GoogleErrorInfo = { googleReasons: [], googleMetadata: [] };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return info;
+  }
+  const error = isRecord(parsed) ? field(parsed, "error") : undefined;
+  if (!isRecord(error)) return info;
+  const status = asWord(field(error, "status"));
+  if (status !== undefined) info.googleStatus = status;
+  const message = safeMessage(field(error, "message"));
+  if (message !== undefined) info.googleMessage = message;
+  const raw = field(error, "details");
+  const details: unknown[] = Array.isArray(raw) ? raw : [];
+  for (const detail of details) {
+    if (!isRecord(detail)) continue;
+    const reason = asWord(field(detail, "reason"));
+    if (reason !== undefined) info.googleReasons.push(reason);
+    info.googleMetadata.push(...metadataOf(detail));
+  }
+  return info;
+}
+
+/** The log fields for a refused call: Google's words, never the body. */
+function googleErrorFields(info: GoogleErrorInfo): Record<string, string> {
+  return {
+    ...(info.googleStatus !== undefined && { googleStatus: info.googleStatus }),
+    ...(info.googleReasons.length > 0 && { googleReason: info.googleReasons.join(",") }),
+    ...(info.googleMetadata.length > 0 && { googleMetadata: info.googleMetadata.join(" ") }),
+    ...(info.googleMessage !== undefined && { googleMessage: info.googleMessage }),
+  };
+}
+
+const INSUFFICIENT_SCOPES = /insufficient authentication scopes/iu;
+
+/** Which of this app's codes a refusal is. */
+function reasonFor(status: number, info: GoogleErrorInfo): GoogleHealthReason | null {
+  const has = (reason: string): boolean => info.googleReasons.includes(reason);
+  if (has("ACCOUNT_NOT_LINKED")) return "google_health_not_linked";
+  if (has("SERVICE_DISABLED")) return "google_health_api_disabled";
+  if (
+    has("ACCESS_TOKEN_SCOPE_INSUFFICIENT") ||
+    INSUFFICIENT_SCOPES.test(info.googleMessage ?? "")
+  ) {
+    return "google_health_scope_missing";
+  }
+  if (status === 403) return "google_health_forbidden";
+  return status === 401 ? "google_health_unauthorized" : null;
+}
 
 function failureFor(status: number, body: string, operation: string): AppError {
+  const info = parseGoogleError(body);
+  // A body that is not Google's JSON but still names a reason (a proxy's page).
+  if (info.googleReasons.length === 0) {
+    for (const word of ["ACCOUNT_NOT_LINKED", "SERVICE_DISABLED"]) {
+      if (body.includes(word)) info.googleReasons.push(word);
+    }
+  }
+  const reason = reasonFor(status, info);
   const message = `google health ${operation}: HTTP ${String(status)}`;
-  if (body.includes("ACCOUNT_NOT_LINKED")) {
-    return new AppError("upstream_error", `${message} (account not linked)`, {
+  const google = googleErrorFields(info);
+  if (reason === null) {
+    const transient = status === 429 || status >= 500;
+    return new AppError(transient ? "upstream_unavailable" : "upstream_error", message, {
       status,
-      reason: "google_health_not_linked" satisfies GoogleHealthReason,
+      ...google,
     });
   }
-  if (body.includes("SERVICE_DISABLED")) {
-    return new AppError("upstream_error", `${message} (API not enabled)`, {
-      status,
-      reason: "google_health_api_disabled" satisfies GoogleHealthReason,
-    });
-  }
-  if (status === 403) {
-    return new AppError("upstream_auth", `${message} (scope not granted)`, {
-      status,
-      reason: "google_health_scope_missing" satisfies GoogleHealthReason,
-    });
-  }
-  if (status === 401) {
-    return new AppError("upstream_auth", `${message} after a forced refresh`, {
-      status,
-      reason: "google_health_unauthorized" satisfies GoogleHealthReason,
-    });
-  }
-  const transient = status === 429 || status >= 500;
-  return new AppError(transient ? "upstream_unavailable" : "upstream_error", message, { status });
+  // A refusal this app has no word for carries Google's in its code, so the
+  // admin UI and the MCP's coverage show it: `google_health_forbidden:<REASON>`.
+  const googleWord = info.googleReasons[0] ?? info.googleStatus;
+  const recorded =
+    reason === "google_health_forbidden" && googleWord !== undefined
+      ? `${reason}:${googleWord}`
+      : reason;
+  const code = status === 401 || status === 403 ? "upstream_auth" : "upstream_error";
+  return new AppError(code, `${message} (${recorded})`, { status, reason: recorded, ...google });
 }
 
 /**
@@ -633,11 +754,18 @@ async function call(
       );
       continue;
     }
-    sender.log.warn("google.health.request_failed", { operation, status });
     if (status === 0) {
+      sender.log.warn("google.health.request_failed", { operation, status });
       throw new AppError("upstream_unavailable", `google health ${operation}: request failed`);
     }
-    throw failureFor(status, text, operation);
+    const failure = failureFor(status, text, operation);
+    sender.log.warn("google.health.request_failed", {
+      operation,
+      status,
+      errorCode: googleHealthErrorCode(failure),
+      ...googleErrorFields(parseGoogleError(text)),
+    });
+    throw failure;
   }
 }
 
