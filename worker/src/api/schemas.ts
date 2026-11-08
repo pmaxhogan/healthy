@@ -263,6 +263,11 @@ export const syncRequestSchema = z.strictObject({
   healthSystemIds: z.array(z.string().min(1).max(64)).max(50).optional(),
 });
 
+/** `POST /api/google-health/sync`. `full` reads every metric's whole history again. */
+export const googleHealthSyncSchema = z.strictObject({
+  full: z.boolean().optional(),
+});
+
 /** `GET /api/brands?q=`. */
 export const brandQuerySchema = z.object({
   q: z.string().max(200).optional(),

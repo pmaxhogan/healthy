@@ -19,6 +19,7 @@ import { makeDevicesRepo } from "./repos/devices.ts";
 import { makeFhirCacheRepo } from "./repos/fhir-cache.ts";
 import { makeFhirSyncStateRepo } from "./repos/fhir-sync-state.ts";
 import { makeGoogleAccountRepo } from "./repos/google-account.ts";
+import { makeGoogleHealthRepo } from "./repos/google-health.ts";
 import { makeHcIngestQueueRepo } from "./repos/hc-ingest-queue.ts";
 import { makeHcStatusRepo } from "./repos/hc-status.ts";
 import { makeHealthSystemsRepo } from "./repos/health-systems.ts";
@@ -45,6 +46,7 @@ export function makeRepos(ctx: Ctx) {
     healthSystems: makeHealthSystemsRepo(ctx),
     connections: makeConnectionsRepo(ctx),
     google: makeGoogleAccountRepo(ctx),
+    googleHealth: makeGoogleHealthRepo(ctx),
     oauthStates: makeOAuthStatesRepo(ctx),
     fhirCache: makeFhirCacheRepo(ctx),
     fhirSyncState: makeFhirSyncStateRepo(ctx),

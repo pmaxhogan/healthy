@@ -43,6 +43,11 @@ export const MCP_INSTRUCTIONS =
   "arrived yet, and say so. In a `start`/`end` range an `end` written as a " +
   "calendar date includes that whole local day, while an `end` written as an " +
   "instant is exclusive. " +
+  "Wearable metrics Health Connect never receives -- blood-oxygen saturation " +
+  "(SpO2), the nightly HRV breakdown, VO2 max, the skin-temperature baseline, " +
+  "heart-rate zones and active zone minutes -- come from google_health_daily, " +
+  "read hourly from Google Health (rows tagged `google_health` and `gh:<Type>`): " +
+  "for SpO2 ask it, not hc_coverage. " +
   "Every tool that reads a resource " +
   "type returns { items, total, matched, coverage, warnings, truncated, " +
   "generatedAt } and accepts an optional `jq` argument: a real jq program run " +

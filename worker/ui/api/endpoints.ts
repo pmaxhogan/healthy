@@ -26,6 +26,7 @@ import type {
   DeviceIngestSummaryDto,
   CreateHealthSystemRequest,
   GoogleAccountDto,
+  GoogleHealthDto,
   MailInboxEntryDto,
   MailSettingsDto,
   McpAuditDto,
@@ -185,6 +186,11 @@ export const endpoints = {
   googleColors: (signal?: AbortSignal): Promise<ColorOptionDto[]> =>
     api.get("/api/google/colors", signal),
   disconnectGoogle: (): Promise<void> => api.delete("/api/google"),
+  googleHealth: (signal?: AbortSignal): Promise<GoogleHealthDto> =>
+    api.get("/api/google-health", signal),
+  /** Starts a read of the granted Google Health metrics; `full` reads every one's history. */
+  syncGoogleHealth: (full: boolean): Promise<Accepted> =>
+    api.post("/api/google-health/sync", { full }),
 
   settings: (signal?: AbortSignal): Promise<SettingsDto> => api.get("/api/settings", signal),
   saveSettings: (patch: SettingsPatch): Promise<SettingsDto> => api.put("/api/settings", patch),

@@ -164,6 +164,7 @@ describe("reposFor", () => {
         "fhirCache",
         "fhirSyncState",
         "google",
+        "googleHealth",
         "hcIngestQueue",
         "hcStatus",
         "loginAttempts",

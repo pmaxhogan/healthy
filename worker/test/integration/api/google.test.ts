@@ -79,6 +79,7 @@ function withCalendar(calendar: CalendarClient): void {
       runCalendarSync: () => Promise.resolve({}),
       startFullRefresh: () => Promise.resolve({ started: true }),
       refreshConnectionToken: () => Promise.resolve({}),
+      runGoogleHealthSync: () => Promise.resolve({}),
       getGoogleCalendarFor: () => Promise.resolve(calendar),
       resolveReconnectAlert: () => Promise.resolve(),
     },

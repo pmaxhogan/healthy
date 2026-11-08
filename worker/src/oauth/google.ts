@@ -15,12 +15,22 @@ need to show which Google account is connected, or a re-consent into the wrong
 account is invisible. So the primary calendar's id is read from the calendar
 scopes the grant already includes, sealed into `google_account.email_enc`, and
 masked (`p…n@gmail.com`) on the way to the UI. It is never logged.
+
+**Google Health rides on the same grant.** `/oauth/google/start?health=1` asks
+for the calendar scopes plus the Google Health read scopes, and Google's
+`include_granted_scopes` makes the result a superset of what was granted
+before; the callback stores whatever `scope` comes back, and the sync reads
+only the metrics that string covers. Once the grant has them, a plain
+`/oauth/google/start` (the reconnect card's link) asks for them again too, so
+reconnecting the calendar never quietly drops them.
 */
 
 import { Hono } from "hono";
 
 import { getPorts } from "../api/ports.ts";
 import { reposFor } from "../db/index.ts";
+import { GOOGLE_HEALTH_SCOPES, hasHealthScope } from "../google/health.ts";
+import { GOOGLE_CALENDAR_SCOPES } from "../google/oauth.ts";
 import { newToken } from "../lib/ids.ts";
 import { makeLogger } from "../lib/log.ts";
 
@@ -47,7 +57,10 @@ googleOAuthRouter.get("/google/start", async (c) => {
     codeVerifier: newToken(),
     ttlMs: STATE_TTL_MS,
   });
-  return c.redirect(client.buildAuthUrl({ state }), 302);
+  const account = await repos.google.get();
+  const health = c.req.query("health") === "1" || hasHealthScope(account.scope);
+  const scopes = health ? [...GOOGLE_CALENDAR_SCOPES, ...GOOGLE_HEALTH_SCOPES] : undefined;
+  return c.redirect(client.buildAuthUrl({ state, ...(scopes !== undefined && { scopes }) }), 302);
 });
 
 googleOAuthRouter.get("/google/callback", async (c) => {
@@ -90,6 +103,17 @@ googleOAuthRouter.get("/google/callback", async (c) => {
     await ports.sync.resolveReconnectAlert(repos.ctx, GOOGLE_SUBJECT);
   } catch {
     log.warn("oauth.google.alert_not_resolved");
+  }
+
+  // A grant that now covers Google Health starts its first read (the whole
+  // history) straight away rather than at the next hourly run. Best effort: the
+  // cron finishes whatever this does not.
+  if (hasHealthScope(tokens.scope)) {
+    try {
+      c.executionCtx.waitUntil(ports.sync.runGoogleHealthSync(repos.ctx, { full: false }));
+    } catch {
+      log.info("oauth.google.health_sync_deferred");
+    }
   }
 
   return c.redirect("/?google=connected", 302);

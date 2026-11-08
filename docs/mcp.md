@@ -27,8 +27,11 @@ one). Eleven more read a paired phone's Health Connect data — `hc_coverage`,
 `hc_sync_status`, `hc_records`, `hc_aggregate`, `hr_series`, `hr_events`,
 `sleep_sessions`, `exercise_sessions`, `blood_pressure`, `daily_summary`,
 `data_quality` — and are described under
-[Health Connect](#health-connect-the-paired-phone) below. The admin UI's MCP
-page (`/connectors`) lists the live catalogue.
+[Health Connect](#health-connect-the-paired-phone) below. One more,
+`google_health_daily`, reads the wearable metrics Health Connect never
+receives (SpO2, VO2 max and the rest) from Google Health; see
+[Google Health](#google-health-the-wearables-own-metrics-google_health_daily).
+The admin UI's MCP page (`/connectors`) lists the live catalogue.
 
 Every answer is the same envelope:
 `{ items, total, matched, coverage, warnings, truncated, generatedAt }` (plus `raw` when
@@ -400,6 +403,11 @@ from payers, other providers or other FHIR servers.
 | `category_rejected:<cat>`                                                                      | warning  | That category of a category-split search was refused while the others succeeded (coverage `partial`).                                        | This server                                      |
 | `unsupported`                                                                                  | info     | The health system does not offer the type (above).                                                                                           | This server                                      |
 | `upstream_error[:<epic>]`, `upstream_auth`, `upstream_unavailable`, `needs_reauth`, `internal` | error    | The attempt failed; with an Epic suffix, the suffix's meaning applies.                                                                       | This server (`worker/src/lib/errors.ts`)         |
+| `not_connected`                                                                                | error    | There is no connection to read from; the owner connects it in the admin UI.                                                                  | This server                                      |
+| `google_health_not_linked`                                                                     | error    | The Google account has not been moved to Google Health; the owner signs in to the Fitbit (Google Health) app once.                           | Google Health API (`ACCOUNT_NOT_LINKED`)         |
+| `google_health_scope_missing`                                                                  | error    | The Google grant does not cover the metric's scope; the owner grants Google Health access again.                                             | Google Health API (403)                          |
+| `google_health_api_disabled`                                                                   | error    | The Google Health API is not enabled on the deployment's Google Cloud project.                                                               | Google Health API (`SERVICE_DISABLED`)           |
+| `google_health_unauthorized`                                                                   | error    | Google rejected the access token even after a refresh; the next read tries again.                                                            | Google Health API (401)                          |
 
 ### Appointments: FHIR and the patient portal
 
@@ -1184,6 +1192,60 @@ Two things follow a type across rows of another type:
 - The platform totals are stored as `Agg.<Metric>` types (`Agg.Steps`).
   They are not policy objects of their own: `Agg.Steps` is step data, is
   denied whenever `hc:Steps` is, and its rows are tagged `hc:Steps`.
+
+### Google Health: the wearable's own metrics (`google_health_daily`)
+
+A third kind of source, beside the health systems and the paired phone. A
+Fitbit or Pixel Watch measures some things it never writes to Health Connect
+-- blood-oxygen saturation above all -- so the phone path cannot supply them.
+This server reads them from the Google Health API (the successor to the Fitbit
+Web API, switched off in 2026) with the same Google grant the calendar uses,
+once the owner has widened that grant to the Google Health read scopes (see
+[setup-google.md](setup-google.md#5-google-health-optional)). The hourly cron
+reads the last 14 days of every granted metric after the calendar sync; the
+first read of each metric, and a **Re-read all history** from the admin UI's
+Calendar page, reads its whole history.
+
+`google_health_daily` answers one row per metric per day:
+
+| `resourceType`                        | Fields                                                                                                 |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `gh:DailyOxygenSaturation`            | `averagePct`, `lowerBoundPct`, `upperBoundPct`, `stdDevPct` (SpO2 while asleep, percent)               |
+| `gh:DailyHeartRateVariability`        | `averageRmssdMs`, `deepSleepRmssdMs`, `nonRemHeartRateBpm`, `entropy`                                  |
+| `gh:DailyVo2Max`                      | `vo2Max` (ml/kg/min), `vo2MaxCovariance`, `cardioFitnessLevel`, `estimated`                            |
+| `gh:DailySleepTemperatureDerivations` | `nightlyTempC`, `baselineTempC`, `nightlyDeltaC` (nightly minus baseline), `relativeNightlyStddev30dC` |
+| `gh:DailyHeartRateZones`              | `zones[]`: `zone` (light, moderate, vigorous, peak), `minBpm`, `maxBpm`                                |
+| `gh:ActiveZoneMinutes`                | `fatBurnMin`, `cardioMin`, `peakMin`, `totalMin`                                                       |
+| `gh:TimeInHeartRateZone`              | `lightMin`, `moderateMin`, `vigorousMin`, `peakMin`                                                    |
+
+Every row also carries `healthSystemId: "google_health"`, `healthSystem:
+"Google Health"` and `date`, the calendar date Google gives the value. A
+metric with no value on a day has no row for it. Only the trackers' own data
+is read (Google's `google-wearables` data source family): not values typed
+into the app, and not what other apps wrote through Health Connect.
+
+Arguments: `date` (one day), or `start` and optionally `end` (both inclusive;
+`end` defaults to the newest stored day); with neither, the 30 days ending on
+the newest stored day. `types` narrows to some metrics. `jq` and `limit` work
+as everywhere else. There is no byte budget: a long range is a long answer.
+The envelope adds `range: { start, end }`, the days the answer covers.
+
+`coverage` has one entry per metric asked for: `ok`; `stale` once a metric
+has not been read for three hours; `failed` with an `errorCode` and its
+`errorMeaning` (`not_connected` and `needs_reauth` are the Google account's own
+state; `google_health_not_linked`, `google_health_scope_missing`,
+`google_health_api_disabled` and `google_health_unauthorized` are below); or
+`never`. `recordCount` is the days stored. A metric the Google grant does not
+cover is `never` and is also warned as
+`google_health_scope_not_granted:<Type>`.
+
+The exposure policy treats it like any other source: a `tool` rule on
+`google_health_daily` switches it off; a `resource` rule on a metric's
+`gh:<Type>` withholds that metric (it is not read and gets no coverage); a
+`health_system` rule on `google_health` withholds the whole source; and a
+`field` rule may name any field above, scoped to the tool, a `gh:<Type>`, or
+`google_health`. Every field is declared in `worker/src/policy/tree.ts`, and a
+unit test fails if the tool emits one that is not.
 
 A single settings toggle, **MCP enabled**, is a kill switch: when it is off,
 every tool call answers `mcp_disabled` immediately, without reading

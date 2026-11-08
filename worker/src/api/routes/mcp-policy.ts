@@ -26,6 +26,7 @@ import { Hono } from "hono";
 
 import { formatPath } from "@shared/policy-path.ts";
 
+import { GOOGLE_HEALTH_SOURCE_ID } from "../../google/health.ts";
 import { coverageResourceType, deviceSourceId } from "../../hc/coverage.ts";
 import { AppError } from "../../lib/errors.ts";
 import { adminCaller } from "../../mcp/admin-call.ts";
@@ -105,13 +106,15 @@ async function checkedColumns(api: ApiContext, spec: FieldRuleSpec): Promise<Fie
   await requireKnownPhoneType(api, spec.resourceType?.trim() ?? null);
   const healthSystems = await api.repos.healthSystems.list();
   // A paired phone is a source too: a rule may be scoped to `device:<id>`, the
-  // id its Health Connect rows are tagged with.
+  // id its Health Connect rows are tagged with. So is Google Health.
   const devices = await api.repos.devices.list();
   const check = checkFieldSpec(
     spec,
     new Set([
       ...healthSystems.map((row) => row.id),
       ...devices.map((device) => deviceSourceId(device.id)),
+      // Google Health's rows are tagged with one fixed source id.
+      GOOGLE_HEALTH_SOURCE_ID,
     ]),
   );
   if (!check.ok) {

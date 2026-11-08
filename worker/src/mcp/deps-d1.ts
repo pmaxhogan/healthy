@@ -512,6 +512,18 @@ export function makeToolDeps(options: ToolDepsOptions): ToolDeps {
     hc,
     sync,
 
+    googleHealth: {
+      days: (types, from, to) => repos.googleHealth.days(types, from, to),
+      async state() {
+        const [account, sync, extents] = await Promise.all([
+          repos.google.get(),
+          repos.googleHealth.syncRows(),
+          repos.googleHealth.extents(),
+        ]);
+        return { googleStatus: account.status, scope: account.scope, sync, extents };
+      },
+    },
+
     timezone(): Promise<string> {
       cache.timezone ??= getTimezone(repos.ctx);
       return cache.timezone;

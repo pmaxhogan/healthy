@@ -13,6 +13,7 @@
 
 import { beforeAll, describe, expect, it } from "vitest";
 
+import { GOOGLE_HEALTH_SCOPES } from "../../../src/google/health.ts";
 import { JQ_EXAMPLES } from "../../../src/mcp/jq-examples.ts";
 import { TOOL_NAMES } from "../../../src/mcp/tools/index.ts";
 
@@ -332,6 +333,30 @@ beforeAll(async () => {
     },
     // A paired phone holding one invented day of every Health Connect type.
     hc: hcWorld(NOW),
+    // Google Health, connected, with one invented night of SpO2.
+    googleHealth: {
+      days: [
+        {
+          dataType: "DailyOxygenSaturation",
+          date: "2026-03-01",
+          fetchedAt: NOW,
+          values: { averagePct: 94, lowerBoundPct: 88, upperBoundPct: 99, stdDevPct: 1.5 },
+        },
+      ],
+      state: {
+        googleStatus: "connected",
+        scope: GOOGLE_HEALTH_SCOPES.join(" "),
+        sync: [],
+        extents: [
+          {
+            dataType: "DailyOxygenSaturation",
+            days: 1,
+            firstDate: "2026-03-01",
+            lastDate: "2026-03-01",
+          },
+        ],
+      },
+    },
   });
   // A health system that needs attention, and sync rows in every state the
   // get_sync_status examples filter for.

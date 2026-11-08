@@ -16,6 +16,7 @@ import the policy filter).
 import { registerAppointmentTools } from "./appointments.ts";
 import { registerClinicalTools } from "./clinical.ts";
 import { registerDocumentTools } from "./documents.ts";
+import { registerGoogleHealthTools } from "./google-health.ts";
 import { registerHcDailyTools } from "./hc-daily.ts";
 import { registerHcHeartTools } from "./hc-heart.ts";
 import { registerHcRecordTools } from "./hc-records.ts";
@@ -46,4 +47,5 @@ export function registerTools(server: McpServer, deps: ToolDeps): void {
   registerHcHeartTools(server, deps);
   registerHcSessionTools(server, deps);
   registerHcDailyTools(server, deps);
+  registerGoogleHealthTools(server, deps);
 }

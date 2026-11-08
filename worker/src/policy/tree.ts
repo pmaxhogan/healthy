@@ -556,6 +556,11 @@ const DATATYPES: Readonly<Record<string, FieldSpecs>> = {
     name: ["string", "The sender's name"],
   },
   "N.PractitionerName": { name: ["string", "The clinician's name"] },
+  "N.GhHeartRateZone": {
+    zone: ["string", "light, moderate, vigorous or peak"],
+    minBpm: ["number", "The zone's lower bound, beats per minute"],
+    maxBpm: ["number", "The zone's upper bound, beats per minute"],
+  },
   "N.MessageAttachment": {
     name: ["string", "The file's name"],
     extension: ["string", "Its file type"],
@@ -2026,6 +2031,97 @@ const HC_SHAPES: readonly {
 /** What a `daily_summary` row is tagged as: a view over several record types. */
 const HC_DAILY_SUMMARY_TYPE = "DailySummary";
 
+// --- Google Health (the wearable metrics read from the Google Health API) -----
+//
+// One row per metric per day, tagged `resourceType: gh:<Type>` and
+// `healthSystemId: google_health` (`worker/src/mcp/tools/google-health.ts`).
+// Each metric is a resource type of its own, so these shapes carry it, as the
+// message views carry `Communication`.
+
+const GH_TAGS = {
+  resourceType: ["string", "gh:<Type>, the Google Health metric"],
+  healthSystemId: ["string", "Always google_health"],
+  healthSystem: ["string", "Always Google Health"],
+  date: ["date", "The calendar date Google gives the value"],
+} as const;
+
+const GH_METRICS: readonly { type: string; label: string; fields: FieldSpecs }[] = [
+  {
+    type: "DailyOxygenSaturation",
+    label: "Blood-oxygen saturation (SpO2), one day",
+    fields: {
+      ...GH_TAGS,
+      averagePct: ["number", "Mean SpO2 while asleep, percent"],
+      lowerBoundPct: ["number", "Lower bound of the night's SpO2, percent"],
+      upperBoundPct: ["number", "Upper bound of the night's SpO2, percent"],
+      stdDevPct: ["number", "Standard deviation of the night's SpO2, percent"],
+    },
+  },
+  {
+    type: "DailyHeartRateVariability",
+    label: "Heart-rate variability, one day",
+    fields: {
+      ...GH_TAGS,
+      averageRmssdMs: ["number", "The day's HRV (RMSSD), milliseconds"],
+      deepSleepRmssdMs: ["number", "HRV (RMSSD) in deep sleep, milliseconds"],
+      nonRemHeartRateBpm: ["number", "Heart rate in non-REM sleep, beats per minute"],
+      entropy: ["number", "Entropy of the beat-to-beat intervals"],
+    },
+  },
+  {
+    type: "DailyVo2Max",
+    label: "VO2 max, one day",
+    fields: {
+      ...GH_TAGS,
+      vo2Max: ["number", "VO2 max, ml/kg/min"],
+      vo2MaxCovariance: ["number", "Covariance of the estimate"],
+      cardioFitnessLevel: ["string", "poor, fair, average, good, very_good or excellent"],
+      estimated: ["boolean", "True when confidence has dropped and the value is an estimate"],
+    },
+  },
+  {
+    type: "DailySleepTemperatureDerivations",
+    label: "Sleep skin temperature, one night",
+    fields: {
+      ...GH_TAGS,
+      nightlyTempC: ["number", "The night's skin temperature, Celsius"],
+      baselineTempC: ["number", "The personal baseline, Celsius"],
+      nightlyDeltaC: ["number", "Nightly minus baseline, Celsius"],
+      relativeNightlyStddev30dC: ["number", "30-day standard deviation of the nightly delta"],
+    },
+  },
+  {
+    type: "DailyHeartRateZones",
+    label: "Heart-rate zone bounds, one day",
+    fields: { ...GH_TAGS, zones: ["N.GhHeartRateZone[]", "Each zone and its bounds"] },
+  },
+  {
+    type: "ActiveZoneMinutes",
+    label: "Active zone minutes, one day",
+    fields: {
+      ...GH_TAGS,
+      fatBurnMin: ["number", "Active zone minutes in the fat-burn zone"],
+      cardioMin: ["number", "Active zone minutes in the cardio zone"],
+      peakMin: ["number", "Active zone minutes in the peak zone"],
+      totalMin: ["number", "The three together"],
+    },
+  },
+  {
+    type: "TimeInHeartRateZone",
+    label: "Time in heart-rate zones, one day",
+    fields: {
+      ...GH_TAGS,
+      lightMin: ["number", "Minutes in the light zone"],
+      moderateMin: ["number", "Minutes in the moderate zone"],
+      vigorousMin: ["number", "Minutes in the vigorous zone"],
+      peakMin: ["number", "Minutes in the peak zone"],
+    },
+  },
+];
+
+/** The `gh:<Type>` resource types, one per metric. */
+const GH_RESOURCE_TYPES: readonly string[] = GH_METRICS.map((metric) => `gh:${metric.type}`);
+
 /**
 The `hc:<Type>` resource types the rule builder offers: every record type
 the companion app maps (`worker/src/hc/record-types.ts`) -- the ones with
@@ -2198,6 +2294,13 @@ const SHAPES: readonly ShapeDef[] = [
     vocabulary: "normalized",
     fields: MESSAGE_REFRESH_ROW,
   },
+  ...GH_METRICS.map((metric): ShapeDef => ({
+    id: `gh:${metric.type}`,
+    label: metric.label,
+    resourceType: `gh:${metric.type}`,
+    vocabulary: "normalized",
+    fields: metric.fields,
+  })),
   ...HC_SHAPES.map(({ rows: _rows, ...shape }): ShapeDef => ({
     ...shape,
     resourceType: null,
@@ -2270,6 +2373,7 @@ const TOOL_SHAPES = {
   blood_pressure: ["hc:bp_session", "hc:bp_reading"],
   daily_summary: ["hc:day"],
   data_quality: ["hc:finding"],
+  google_health_daily: GH_RESOURCE_TYPES,
 } as const satisfies Record<ToolName, readonly string[]>;
 
 const TOOL_SHAPES_MAP: ReadonlyMap<string, readonly string[]> = new Map(
@@ -2284,9 +2388,9 @@ export function toolShapes(tool: string): readonly string[] | undefined {
 /**
 Resource types a tool answers with that have a view of their own but no FHIR
 normalizer or raw model behind them: a secure message is read from the patient
-portal, not a FHIR server.
+portal, not a FHIR server, and a Google Health metric from Google's API.
 */
-const VIEW_ONLY_RESOURCE_TYPES: readonly string[] = ["Communication"];
+const VIEW_ONLY_RESOURCE_TYPES: readonly string[] = ["Communication", ...GH_RESOURCE_TYPES];
 
 /** Every resource type the tree models, in a stable order. */
 export const MODELED_RESOURCE_TYPES: readonly string[] = [

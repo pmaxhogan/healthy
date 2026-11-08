@@ -78,6 +78,35 @@ export interface GoogleAccountDto {
   calendarId: string;
 }
 
+/** One Google Health metric as the admin UI shows it: bookkeeping, never a value. */
+interface GoogleHealthTypeDto {
+  /** This app's name for the metric (`DailyOxygenSaturation`, ...). */
+  type: string;
+  /** Whether the Google grant covers the scope this metric needs. */
+  scopeGranted: boolean;
+  /** Days stored. */
+  days: number;
+  firstDate: string | null;
+  lastDate: string | null;
+  lastOkAt: string | null;
+  lastAttemptAt: string | null;
+  /** Stable code of the last failed read, or null. */
+  lastErrorCode: string | null;
+  /** Whether its whole history has been read at least once. */
+  historyRead: boolean;
+}
+
+/** The Google Health side of the Google grant. */
+export interface GoogleHealthDto {
+  /** The Google account's own status: Google Health rides on its grant. */
+  googleStatus: GoogleAccountDto["status"];
+  /** Whether the grant covers any Google Health scope. */
+  granted: boolean;
+  /** Where the owner goes to grant (or re-grant) the Google Health scopes. */
+  connectPath: string;
+  types: GoogleHealthTypeDto[];
+}
+
 export interface CalendarOptionDto {
   id: string;
   summary: string;

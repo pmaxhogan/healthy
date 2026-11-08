@@ -192,6 +192,31 @@ const MEANINGS: Readonly<Record<string, SyncCodeMeaning>> = {
     meaning: "This server failed while reading the type; the next refresh tries again.",
     severity: "error",
   },
+  not_connected: {
+    meaning: "There is no connection to read this from; the owner connects it in the admin UI.",
+    severity: "error",
+  },
+  // Google Health (worker/src/google/health.ts).
+  google_health_not_linked: {
+    meaning:
+      "The Google account has not been moved to Google Health yet: the owner signs in to " +
+      "the Fitbit (Google Health) app once with this Google account, then the next read works.",
+    severity: "error",
+  },
+  google_health_scope_missing: {
+    meaning:
+      "The Google grant does not cover this metric's scope; the owner grants Google Health " +
+      "access again from the admin UI's Calendar page.",
+    severity: "error",
+  },
+  google_health_api_disabled: {
+    meaning: "The Google Health API is not enabled on this deployment's Google Cloud project.",
+    severity: "error",
+  },
+  google_health_unauthorized: {
+    meaning: "Google rejected the access token even after a refresh; the next read tries again.",
+    severity: "error",
+  },
 };
 
 /** The meaning of a code with none on record: said so, never guessed. */

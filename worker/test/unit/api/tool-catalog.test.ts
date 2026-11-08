@@ -50,6 +50,7 @@ const EXPECTED_NAMES = [
   "blood_pressure",
   "daily_summary",
   "data_quality",
+  "google_health_daily",
 ];
 
 describe("TOOL_CATALOG", () => {
@@ -77,8 +78,9 @@ describe("TOOL_CATALOG", () => {
       for (const type of tool.resourceTypes) {
         // Upper camel: a lower-case entry would never match a rule the owner wrote
         // against a FHIR resource type. A phone's Health Connect types are the
-        // same names behind `hc:`, which is how its rows are tagged.
-        expect(type, tool.name).toMatch(/^(?:[A-Z][A-Za-z]+|hc:[A-Z][A-Za-z0-9]+)$/);
+        // same names behind `hc:`, which is how its rows are tagged, and Google
+        // Health's metrics are tagged `gh:` the same way.
+        expect(type, tool.name).toMatch(/^(?:[A-Z][A-Za-z]+|(?:hc|gh):[A-Z][A-Za-z0-9]+)$/);
       }
     }
   });
@@ -89,9 +91,9 @@ describe("TOOL_CATALOG", () => {
       "sync_health_systems",
       "refresh_messages",
     ]);
-    const phoneTools = TOOL_CATALOG.filter((tool) => !tool.name.startsWith("get_")).filter(
-      (tool) => !aboutHealthSystems.has(tool.name),
-    );
+    const phoneTools = TOOL_CATALOG.filter((tool) => !tool.name.startsWith("get_"))
+      .filter((tool) => !aboutHealthSystems.has(tool.name))
+      .filter((tool) => !tool.name.startsWith("google_health_"));
 
     expect(phoneTools).toHaveLength(11);
     for (const tool of phoneTools) {
@@ -100,6 +102,13 @@ describe("TOOL_CATALOG", () => {
         tool.name,
       ).toBe(true);
     }
+  });
+
+  it("gives the Google Health tool gh: types, one per metric", () => {
+    const tool = TOOL_CATALOG.find((entry) => entry.name === "google_health_daily");
+
+    expect(tool?.resourceTypes).toContain("gh:DailyOxygenSaturation");
+    expect(tool?.resourceTypes.every((type) => type.startsWith("gh:"))).toBe(true);
   });
 
   it("gives the five cross-cutting tools no resource types", () => {

@@ -150,4 +150,8 @@ export const JQ_EXAMPLES = {
     ".[] | {resourceType, kind, reason, date, at, hour}",
     "group_by(.kind)[] | {kind: .[0].kind, findings: length}",
   ],
+  google_health_daily: [
+    '.[] | select(.resourceType == "gh:DailyOxygenSaturation") | {date, averagePct, lowerBoundPct}',
+    ".[] | select(.lowerBoundPct != null and .lowerBoundPct < 90) | {date, lowerBoundPct}",
+  ],
 } as const satisfies Record<ToolName, readonly string[]>;

@@ -6,6 +6,7 @@ import { computed, reactive, ref, watch } from "vue";
 
 import { endpoints } from "../api/endpoints.ts";
 import ColorSwatches from "../components/ColorSwatches.vue";
+import GoogleHealthCard from "../components/GoogleHealthCard.vue";
 import StateBlock from "../components/StateBlock.vue";
 import StatusPill from "../components/StatusPill.vue";
 import TimezoneSelect from "../components/TimezoneSelect.vue";
@@ -183,6 +184,8 @@ async function onDisconnect(): Promise<void> {
         </template>
       </StateBlock>
     </section>
+
+    <GoogleHealthCard />
 
     <section v-if="backoffUntil" class="card backoff">
       <h2>Syncing is backed off</h2>

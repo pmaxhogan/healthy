@@ -21,6 +21,9 @@ but `sync_health_systems` and `refresh_messages` touches the second.
 
 import type {
   ConnectionStatus,
+  GoogleHealthDay,
+  GoogleHealthExtent,
+  GoogleHealthSyncRow,
   HealthSystemEnvironment,
   McpMessageRefreshEntry,
   McpMessageRefreshLimits,
@@ -371,6 +374,8 @@ export interface ToolDeps {
   records and the rollups beside them. Read-only; see `./hc/reads.ts`.
   */
   readonly hc: HcReads;
+  /** The Google Health store. Read-only; see `./tools/google-health.ts`. */
+  readonly googleHealth: GoogleHealthReads;
   /**
   Decode one clinical document to text, fetching and caching the Binary if
   needed. The only tool path that talks to an organisation at request time.
@@ -385,4 +390,20 @@ export interface ToolDeps {
   recordAudit(entry: AuditRecord): Promise<void>;
   /** Drop audit rows past the one-year retention window. Sampled, not per call. */
   pruneAudit(): Promise<void>;
+}
+
+/** Where Google Health's state stands, for the tool's coverage. No value. */
+export interface GoogleHealthState {
+  /** The Google account's status: Google Health rides on its grant. */
+  googleStatus: ConnectionStatus;
+  /** The scopes the grant covers, as Google listed them. */
+  scope: string | null;
+  sync: GoogleHealthSyncRow[];
+  extents: GoogleHealthExtent[];
+}
+
+interface GoogleHealthReads {
+  /** The stored days of these metrics from `from` to `to`, both inclusive. */
+  days(types: readonly string[], from: string, to: string): Promise<GoogleHealthDay[]>;
+  state(): Promise<GoogleHealthState>;
 }

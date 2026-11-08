@@ -53,14 +53,19 @@ function stubGoogle(overrides: { tokenBody?: unknown } = {}): FetchStub {
   ]);
 }
 
-/** A sync port that records the reconnect-alert resolution and nothing else. */
-function recordingSync(): { resolved: unknown[] } {
+/** A sync port that records the reconnect-alert resolution and the Google Health reads. */
+function recordingSync(): { resolved: unknown[]; healthSyncs: unknown[] } {
   const resolved: unknown[] = [];
+  const healthSyncs: unknown[] = [];
   usePorts({
     sync: {
       runCalendarSync: () => Promise.resolve({}),
       startFullRefresh: () => Promise.resolve({ started: true }),
       refreshConnectionToken: () => Promise.resolve({}),
+      runGoogleHealthSync: (_ctx, options) => {
+        healthSyncs.push(options);
+        return Promise.resolve({});
+      },
       getGoogleCalendarFor: () => Promise.reject(new Error("not used")),
       resolveReconnectAlert: (_ctx, subject) => {
         resolved.push(subject);
@@ -68,7 +73,7 @@ function recordingSync(): { resolved: unknown[] } {
       },
     },
   });
-  return { resolved };
+  return { resolved, healthSyncs };
 }
 
 describe("GET /oauth/google/start", () => {
@@ -114,6 +119,29 @@ describe("GET /oauth/google/start", () => {
     expect((row?.expires_at ?? 0) - (row?.created_at ?? 0)).toBe(600);
   });
 
+  it("asks for the Google Health read scopes too when told to", async () => {
+    const response = await call("/oauth/google/start?health=1", {
+      headers: { cookie: owner().cookie },
+    });
+    const scope = new URL(response.headers.get("location") ?? "").searchParams.get("scope") ?? "";
+
+    expect(scope).toContain("calendar.events.owned");
+    expect(scope).toContain("googlehealth.health_metrics_and_measurements.readonly");
+    expect(scope).toContain("googlehealth.activity_and_fitness.readonly");
+  });
+
+  it("keeps asking for them once the grant has them, so a reconnect does not drop them", async () => {
+    await testRepos().google.upsertTokens({
+      scope:
+        "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly",
+    });
+
+    const response = await call("/oauth/google/start", { headers: { cookie: owner().cookie } });
+    const scope = new URL(response.headers.get("location") ?? "").searchParams.get("scope") ?? "";
+
+    expect(scope).toContain("googlehealth.activity_and_fitness.readonly");
+  });
+
   it("needs a session", async () => {
     const response = await call("/oauth/google/start");
 
@@ -156,6 +184,32 @@ describe("GET /oauth/google/callback", () => {
     expect(secrets.email).toBe(EMAIL);
 
     expect(recorded.resolved).toStrictEqual(["google"]);
+    // A calendar-only grant starts no Google Health read.
+    expect(recorded.healthSyncs).toStrictEqual([]);
+  });
+
+  it("starts the first Google Health read when the grant covers it", async () => {
+    usePorts({
+      fetch: stubGoogle({
+        tokenBody: {
+          access_token: ACCESS,
+          refresh_token: REFRESH,
+          expires_in: 3599,
+          scope:
+            "https://www.googleapis.com/auth/calendar.events.owned " +
+            "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly",
+          token_type: "Bearer",
+        },
+      }).fetchImpl,
+    });
+    const recorded = recordingSync();
+    const state = await startFlow();
+
+    await call(`/oauth/google/callback?code=auth-code&state=${state}`, {
+      headers: { cookie: owner().cookie },
+    });
+
+    expect(recorded.healthSyncs).toStrictEqual([{ full: false }]);
   });
 
   it("masks the label the moment the API is asked about it", async () => {

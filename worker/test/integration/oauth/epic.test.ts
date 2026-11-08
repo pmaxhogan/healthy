@@ -61,6 +61,7 @@ function recordingSync(): { synced: unknown[]; resolved: unknown[] } {
       },
       startFullRefresh: () => Promise.resolve({ started: true }),
       refreshConnectionToken: () => Promise.resolve({}),
+      runGoogleHealthSync: () => Promise.resolve({}),
       getGoogleCalendarFor: () => Promise.reject(new Error("not used")),
       resolveReconnectAlert: (_ctx, subject) => {
         resolved.push(subject);

@@ -872,6 +872,8 @@ export function syncBlinder(): Blinder {
 
 /** Every table, child before parent so the deletes never trip a foreign key. */
 const TABLES = [
+  "google_health_daily",
+  "google_health_sync",
   "data_migrations",
   "login_attempts",
   "mail_inbox",

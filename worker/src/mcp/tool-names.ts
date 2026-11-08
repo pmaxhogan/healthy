@@ -50,6 +50,9 @@ export const TOOL_NAMES = [
   "blood_pressure",
   "daily_summary",
   "data_quality",
+  // The wearable metrics read from the Google Health API: a third source, for
+  // what Health Connect never receives (SpO2, VO2 max, ...).
+  "google_health_daily",
 ] as const;
 
 /** One tool's name. */

@@ -30,6 +30,7 @@ import {
   refreshConnectionToken,
   resolveReconnectAlert,
   runCalendarSync,
+  runGoogleHealthSync,
   startFullRefresh,
   startPortalSignIn,
   startPortalSync,
@@ -76,6 +77,8 @@ interface SyncPort {
   getGoogleCalendarFor(ctx: Ctx): Promise<CalendarClient>;
   /** Closes the open reconnect alert for a subject, Trello card and all. */
   resolveReconnectAlert(ctx: Ctx, subject: ReconnectSubject): Promise<void>;
+  /** Reads the granted Google Health metrics; `full` reads each one's whole history. Never throws. */
+  runGoogleHealthSync(ctx: Ctx, options: { full: boolean }): Promise<unknown>;
 }
 
 /**
@@ -161,6 +164,9 @@ function defaults(): Ports {
       refreshConnectionToken,
       getGoogleCalendarFor,
       resolveReconnectAlert,
+      // Through the fetch port, so a test that stands in for Google stands in here too.
+      runGoogleHealthSync: (ctx, options) =>
+        runGoogleHealthSync(ctx, { fetchImpl: getPorts().fetch }, options),
     },
     portal: {
       startSignIn: startPortalSignIn,

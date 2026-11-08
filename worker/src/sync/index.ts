@@ -70,6 +70,7 @@ export { handleScheduled } from "./scheduled.ts";
 // a FHIR client with the connection's token management already wired in.
 export { getFhirClientFor } from "./tokens.ts";
 export { getGoogleCalendarFor } from "./google-tokens.ts";
+export { runGoogleHealthSync } from "./google-health-sync.ts";
 
 export { resolveReconnectAlert } from "./alerts.ts";
 /**

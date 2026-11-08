@@ -81,6 +81,13 @@ are largely in place; hardening and the first real deployment are ongoing.
   its error code and a **Retry** button, and the batches behind it carry on.
   Install the app with Obtainium:
   `obtainium://add/https://github.com/pmaxhogan/healthy`.
+- **Google Health.** With the Google grant widened to the Google Health read
+  scopes, the hourly sync also reads the wearable metrics a Fitbit or Pixel
+  Watch never writes to Health Connect -- blood-oxygen saturation, the nightly
+  HRV breakdown, VO2 max, the skin-temperature baseline, heart-rate zones and
+  active zone minutes -- into the same sealed store, served by the MCP tool
+  `google_health_daily` under the same exposure policy. See
+  [docs/setup-google.md](docs/setup-google.md#5-google-health-optional).
 - **Alerts.** When a connection's refresh token stops working, opens a Trello
   card with a one-click reconnect link, and closes it automatically once the
   connection is restored. A sync that keeps failing for any other reason (three
@@ -372,7 +379,7 @@ does FHIR encounters.
 - **[docs/setup-epic.md](docs/setup-epic.md)** — registering the app on
   fhir.epic.com, and connecting a health system.
 - **[docs/setup-google.md](docs/setup-google.md)** — the GCP project, OAuth
-  consent screen, and calendar scopes.
+  consent screen, calendar scopes, and the optional Google Health scopes.
 - **[docs/setup-cloudflare.md](docs/setup-cloudflare.md)** — D1/KV/DO,
   custom domain, Access apps, Workers Builds.
 - **[docs/setup-trello.md](docs/setup-trello.md)** — the board, key/token,

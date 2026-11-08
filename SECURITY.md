@@ -68,6 +68,8 @@ Three treatments, and every column is in exactly one of them:
 | Health Connect record id; origin app package name                                             | D1 (index and keys)                                                       | Keyed blinds, scoped to the device; the name itself is only inside a sealed payload |
 | Uploads waiting to be applied, or parked (set aside, kept until retried or wiped)             | D1 `hc_ingest_queue`                                                      | The whole gzip body sealed (`v3:`)                                                  |
 | Alert card about parked uploads: the phone's name, a count, a stable error code, a UTC time   | Trello                                                                    | Plaintext at Trello; no id, record type or value (see "Alert cards")                |
+| Google Health metrics: one value set per metric per day (SpO2, HRV, VO2 max, ...)             | D1 `google_health_daily`                                                  | Payload sealed, padded; metric name and date clear                                  |
+| Google Health sync bookkeeping: per metric, when it was read, a stable code                   | D1 `google_health_sync`                                                   | Plaintext: a metric name, instants, a code                                          |
 | Upload log, per-type sync state                                                               | D1 `hc_ingest_log`, `hc_sync_state`                                       | Plaintext: counts, instants, permission states, stable codes                        |
 | Hours whose platform total is stale, and the one-off scan for them                            | D1 `hc_platform_stale`, `hc_platform_scan`                                | Plaintext: record type names, UTC hours, queue sequence numbers, instants           |
 | Device token on the phone                                                                     | Android app storage                                                       | Encrypted under a non-exportable Android Keystore key                               |
@@ -144,6 +146,13 @@ listed rather than left to be inferred:
   configuration. A title template is only placeholders unless the owner types
   a name into it; one that does should go into a health system's config, which
   is sealed.
+- **`google_health_daily.data_type`, `day`, `fetched_at`** and the whole of
+  **`google_health_sync`**: which of a fixed list of wearable metrics has a
+  value on which calendar date, when this app read it, and each metric's last
+  read (instants, a stable code, whether its history was read). The same
+  disclosure a Health Connect rollup's keys make: that the owner wore a
+  tracker on a day, never what it measured. Every value is in the sealed,
+  padded `payload_enc`, bound to `<data_type>:<day>`.
 - **`data_migrations`**: which one-shot backfill ran, when, and counts (the 0007
   backfill has run and its code is gone; the row is its record).
 - The two Durable Objects (`FULL_REFRESH`, `PORTAL_SIGNIN`) hold a health system
@@ -628,6 +637,18 @@ human created. It deletes in exactly one case: a duplicate of a visit another,
 higher-precedence copy already has an event for, which is removed only after the
 event is seen carrying that marker and the duplicate row's own key. A cancelled
 or vanished visit is never deleted; it becomes a grey "Cancelled:" ghost.
+
+**Google Health is read-only and opt-in.** The Google Health scopes are added
+to the calendar's grant only when the owner presses "Grant Google Health
+access" (`/oauth/google/start?health=1`), and only the two `.readonly`
+scopes are ever requested: this app cannot write to Google Health. The sync
+reads only the metrics the granted scope string covers and only the
+trackers' own data source family. What it stores is sealed like a Health
+Connect rollup, the admin API shows only counts, dates and codes, and the MCP
+serves it through `respond()` under the same exposure policy as every other
+source (`gh:<Type>` resource rules, the `google_health` source, field rules
+declared in `worker/src/policy/tree.ts`). Disconnecting Google stops it with
+the calendar; the stored days stay until the database is wiped.
 
 **The phone app keeps the same discipline.** The companion app holds a read-only
 Health Connect grant (it never writes to it), keeps the device token encrypted

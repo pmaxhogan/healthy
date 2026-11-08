@@ -20,9 +20,14 @@ import { EMPTY_RULES } from "../../../src/policy/rules.ts";
 import { emptyHc, fakeHcReads } from "./hc-fake.ts";
 
 import type { FakeHc } from "./hc-fake.ts";
-import type { McpMessageRefreshEntry, McpSyncRequestEntry } from "../../../src/db/rows.ts";
+import type {
+  GoogleHealthDay,
+  McpMessageRefreshEntry,
+  McpSyncRequestEntry,
+} from "../../../src/db/rows.ts";
 import type { Logger } from "../../../src/lib/log.ts";
 import type {
+  GoogleHealthState,
   AuditRecord,
   CacheCount,
   CachedRow,
@@ -370,6 +375,8 @@ export interface FakeState {
   document: DocumentTextResult;
   /** The Health Connect store. No phone is paired unless a test adds one. */
   hc: FakeHc;
+  /** The Google Health store. Disconnected and empty unless a test fills it. */
+  googleHealth: FakeGoogleHealth;
   /** The sync engine, as `sync_health_systems` sees it. Idle unless a test says. */
   sync: FakeSync;
   /** The clock every tool reads. A test moves it to let a cooldown pass. */
@@ -390,6 +397,13 @@ export interface FakeOverrides {
   messageSync?: PortalMessageSyncEntry[];
   document?: DocumentTextResult;
   hc?: FakeHc;
+  googleHealth?: FakeGoogleHealth;
+}
+
+/** The Google Health store as the tool reads it. */
+interface FakeGoogleHealth {
+  days: GoogleHealthDay[];
+  state: GoogleHealthState;
 }
 
 /** The two-health system world every tool test starts from. */
@@ -415,6 +429,10 @@ export function fakeState(overrides: FakeOverrides = {}): FakeState {
     ],
     pools,
     portalVisits: overrides.portalVisits ?? new Map(),
+    googleHealth: overrides.googleHealth ?? {
+      days: [],
+      state: { googleStatus: "disconnected", scope: null, sync: [], extents: [] },
+    },
     portalMessages: overrides.portalMessages ?? new Map(),
     attachmentContent: new Map(),
     messageSync: overrides.messageSync ?? [],
@@ -509,6 +527,15 @@ export function fakeDeps(state: FakeState): ToolDeps {
     syncStatus: () => Promise.resolve(state.syncStatus),
     timezone: () => Promise.resolve(state.hc.timezone),
     hc: fakeHcReads(state.hc),
+    googleHealth: {
+      days: (types, from, to) =>
+        Promise.resolve(
+          state.googleHealth.days.filter(
+            (day) => types.includes(day.dataType) && day.date >= from && day.date <= to,
+          ),
+        ),
+      state: () => Promise.resolve(state.googleHealth.state),
+    },
     documentText: () => Promise.resolve(state.document),
     recordAudit: (entry) => {
       state.audits.push(entry);

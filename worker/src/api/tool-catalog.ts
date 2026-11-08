@@ -19,6 +19,7 @@ against -- so a name that exists here and not there is a deny-rule the owner can
 write and that will never fire, which is the failure mode worth avoiding.
 */
 
+import { GH_TYPE_NAMES, GOOGLE_HEALTH_TYPE_PREFIX } from "../google/health.ts";
 import { HC_RECORD_TYPES } from "../hc/record-types.ts";
 
 import type { McpToolInfoDto } from "@shared/types.ts";
@@ -251,5 +252,11 @@ export const TOOL_CATALOG: readonly McpToolInfoDto[] = [
     name: "data_quality",
     description: "Duplicates, artefacts, gaps and source changes in the phone's data.",
     resourceTypes: [...HC_TYPES],
+  },
+  {
+    name: "google_health_daily",
+    description:
+      "Wearable metrics from Google Health: SpO2, HRV breakdown, VO2 max, skin temperature, zones.",
+    resourceTypes: GH_TYPE_NAMES.map((type) => `${GOOGLE_HEALTH_TYPE_PREFIX}${type}`),
   },
 ];

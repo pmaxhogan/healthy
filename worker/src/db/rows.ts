@@ -489,3 +489,30 @@ export interface PortalMessageSyncRow {
   threads: number;
   messages: number;
 }
+
+/** `google_health_sync`: one metric's bookkeeping (migration 0022). */
+export interface GoogleHealthSyncRow {
+  data_type: string;
+  last_attempt_at: number | null;
+  last_ok_at: number | null;
+  last_error_code: string | null;
+  backfilled_at: number | null;
+  updated_at: number;
+}
+
+/** One stored `google_health_daily` day, opened. */
+export interface GoogleHealthDay {
+  dataType: string;
+  date: string;
+  /** Unix second of the run that last wrote it. */
+  fetchedAt: number;
+  values: Readonly<Record<string, unknown>>;
+}
+
+/** What is stored of one Google Health metric: no value, only how much and over which dates. */
+export interface GoogleHealthExtent {
+  dataType: string;
+  days: number;
+  firstDate: string;
+  lastDate: string;
+}

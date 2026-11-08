@@ -1,4 +1,4 @@
-# Setting up Google Calendar
+# Setting up Google Calendar (and Google Health)
 
 The sync writes appointments to one Google account's calendar, using an
 OAuth client you create in your own Google Cloud project. This is a step
@@ -38,7 +38,8 @@ as Google updates the console.)**
 
 ### Scopes
 
-Add exactly these two scopes and no others:
+Add exactly these two scopes and no others (plus, if you want Google Health,
+the two read scopes in [section 5](#5-google-health-optional)):
 
 - `https://www.googleapis.com/auth/calendar.events.owned`
 - `https://www.googleapis.com/auth/calendar.calendarlist.readonly`
@@ -79,3 +80,42 @@ If the Google connection ever needs re-authorising, the reconnect flow asks
 for consent again with `prompt=consent`, which is what makes Google issue a
 fresh refresh token on every reconnect rather than only on the very first
 one.
+
+## 5. Google Health (optional)
+
+The same grant can also read the owner's wearable metrics from the Google
+Health API (the successor to the Fitbit Web API): blood-oxygen saturation,
+the nightly HRV breakdown, VO2 max, the skin-temperature baseline, heart-rate
+zones and active zone minutes. Health Connect never receives these, so the
+phone path cannot supply them. They are served by the MCP tool
+`google_health_daily` ([mcp.md](mcp.md#google-health-the-wearables-own-metrics-google_health_daily)).
+
+1. Enable the **Google Health API** on the same project:
+   `gcloud services enable health.googleapis.com --project <project>`.
+2. On the consent screen's **Data Access** page, add the two read scopes:
+   - `https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly`
+     (SpO2, HRV, skin temperature, heart-rate zones)
+   - `https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly`
+     (VO2 max, active zone minutes, time in heart-rate zones)
+
+   They are sensitive scopes. An unverified app in **Production** may still
+   request them for its own owner (up to 100 users), behind the same
+   "unverified app" interstitial. Keep the publishing status Production: in
+   Testing the refresh token would expire after seven days and take the
+   calendar down with it.
+
+3. Sign in to the Fitbit (Google Health) app once with the same Google account
+   the calendar uses, if you have not already: an account that was never moved
+   to Google Health answers `google_health_not_linked`.
+4. In the admin UI, open **Calendar**, and under **Google Health (Fitbit)**
+   press **Grant Google Health access** (it opens
+   `/oauth/google/start?health=1`). Approve the calendar scopes and the two
+   Google Health scopes on the consent screen. The grant becomes a superset
+   (`include_granted_scopes`), so the calendar keeps working, and a later
+   plain reconnect asks for the Google Health scopes again.
+
+The first read of each metric starts straight after the consent and reads its
+whole history; after that the hourly cron reads the last 14 days. The card
+shows, per metric, how many days are stored and how the last read went.
+Unchecking a scope on the consent screen leaves those metrics unread
+(`google_health_scope_not_granted:<Type>` on the MCP) and the rest working.
