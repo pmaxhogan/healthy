@@ -71,7 +71,15 @@ export interface GoogleOAuth {
   /** The URL to redirect the owner to. `state` is the caller's CSRF nonce. */
   buildAuthUrl(opts: { state: string; scopes?: readonly string[] }): string;
   exchangeCode(code: string): Promise<GoogleTokens>;
-  refresh(refreshToken: string): Promise<GoogleRefreshedTokens>;
+  /**
+  Exchange the refresh token for an access token. `scopes`, when given, asks
+  for a token narrowed to that subset of the grant (Google's `scope` parameter
+  on a refresh): the grant itself, and the refresh token, are unchanged.
+  */
+  refresh(
+    refreshToken: string,
+    options?: { scopes?: readonly string[] },
+  ): Promise<GoogleRefreshedTokens>;
   /** Best effort: never throws, resolves true when Google accepted it. */
   revoke(token: string): Promise<boolean>;
   /** Requires the `openid email` scopes; see the module comment. */
@@ -282,16 +290,16 @@ export function createGoogleOAuth(options: GoogleOAuthOptions): GoogleOAuth {
       };
     },
 
-    async refresh(refreshToken) {
-      const response = await postForm(
-        TOKEN_URL,
-        new URLSearchParams({
-          client_id: clientId,
-          client_secret: clientSecret,
-          grant_type: "refresh_token",
-          refresh_token: refreshToken,
-        }),
-      );
+    async refresh(refreshToken, refreshOptions) {
+      const form = new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+      });
+      const narrowed = refreshOptions?.scopes;
+      if (narrowed !== undefined && narrowed.length > 0) form.set("scope", narrowed.join(" "));
+      const response = await postForm(TOKEN_URL, form);
       const data = await readTokenBody(response, "refresh", "needs_reauth");
       const accessToken = asString(data.access_token);
       if (accessToken === null) {

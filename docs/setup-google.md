@@ -114,6 +114,11 @@ phone path cannot supply them. They are served by the MCP tool
    (`include_granted_scopes`), so the calendar keeps working, and a later
    plain reconnect asks for the Google Health scopes again.
 
+Google Health refuses an access token that also carries other scopes
+(`DISALLOWED_OAUTH_SCOPES`), so the sync never uses the calendar's token: each
+run mints its own from the same refresh token, narrowed to the granted Google
+Health scopes. The calendar's stored token and the refresh token are untouched.
+
 The first read of each metric starts straight after the consent and reads its
 whole history; after that the hourly cron reads the last 14 days. The card
 shows, per metric, how many days are stored and how the last read went.

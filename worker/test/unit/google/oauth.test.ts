@@ -156,6 +156,21 @@ describe("refresh", () => {
     expect(form.get("refresh_token")).toBe("rt-1");
     expect(refreshed).toEqual({ accessToken: "at-2", expiresAt: NOW + 3_600_000, scope: "" });
     expect(refreshed).not.toHaveProperty("refreshToken");
+    // An ordinary refresh asks for the whole grant: no `scope` field.
+    expect(form.has("scope")).toBe(false);
+  });
+
+  it("asks for a narrowed token when given scopes, and an empty list narrows nothing", async () => {
+    const { fetchImpl, calls } = recordingFetch(() =>
+      jsonResponse(200, { access_token: "at-3", expires_in: 3600, scope: "a b" }),
+    );
+
+    const refreshed = await make(fetchImpl).refresh("rt-1", { scopes: ["a", "b"] });
+    await make(fetchImpl).refresh("rt-1", { scopes: [] });
+
+    expect(new URLSearchParams(calls[0]?.body ?? "").get("scope")).toBe("a b");
+    expect(new URLSearchParams(calls[1]?.body ?? "").has("scope")).toBe(false);
+    expect(refreshed).toEqual({ accessToken: "at-3", expiresAt: NOW + 3_600_000, scope: "a b" });
   });
 
   it("maps 400 invalid_grant to needs_reauth", async () => {

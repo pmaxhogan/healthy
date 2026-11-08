@@ -643,7 +643,10 @@ to the calendar's grant only when the owner presses "Grant Google Health
 access" (`/oauth/google/start?health=1`), and only the two `.readonly`
 scopes are ever requested: this app cannot write to Google Health. The sync
 reads only the metrics the granted scope string covers and only the
-trackers' own data source family. What it stores is sealed like a Health
+trackers' own data source family. It reads with an access token of its own,
+minted from the stored refresh token with `scope` narrowed to the granted
+Google Health scopes (the API refuses a token that also carries the
+calendar's), held in memory for one run and never written. What it stores is sealed like a Health
 Connect rollup, the admin API shows only counts, dates and codes, and the MCP
 serves it through `respond()` under the same exposure policy as every other
 source (`gh:<Type>` resource rules, the `google_health` source, field rules

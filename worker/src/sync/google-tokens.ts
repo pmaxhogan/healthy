@@ -163,6 +163,102 @@ export async function withGoogleAccessToken(
 }
 
 /**
+A Google Health access token, minted from the same refresh token but narrowed
+to `scopes` (the Google Health scopes the grant has).
+
+The Google Health API refuses an access token that also carries any other
+scope (403 `DISALLOWED_OAUTH_SCOPES`), and the calendar's token carries the
+calendar scopes, so Google Health cannot use it. This getter asks Google's
+token endpoint for a token with `scope` set to the subset: the grant is not
+changed, the response carries no new refresh token, and nothing is written.
+The token lives in this invocation's memory only. It never touches
+`google_account.access_token_enc` or `access_expires_at`, which stay the
+calendar's, and it never rewrites the refresh token. Each sync run mints one;
+a refresh `forceRefresh` asks for (after a 401) is a new narrowed token, and
+the calendar's token is never refreshed by it.
+
+A refresh token Google rejects is the same dead grant the calendar would
+find: the account is marked `needs_reauth` and the reconnect card opens, as
+the calendar's getter does.
+*/
+export async function withGoogleHealthAccessToken(
+  ctx: Ctx,
+  scopes: readonly string[],
+  deps: SyncDeps = {},
+): Promise<GoogleTokenGetter> {
+  if (scopes.length === 0) {
+    throw new AppError("bad_request", "a Google Health token needs at least one scope");
+  }
+  const resolved = resolveDeps(deps);
+  const repos = makeRepos(ctx);
+  const nowMs = (): number => ctx.now() * 1000;
+
+  const row = await repos.google.get();
+  if (row.status === "disconnected") {
+    throw new AppError("not_connected", "Google is not connected");
+  }
+  if (row.status === "needs_reauth") {
+    throw new AppError("needs_reauth", "Google needs the owner to reconnect");
+  }
+  const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET } = ctx.env;
+  if (GOOGLE_CLIENT_ID === undefined || GOOGLE_CLIENT_SECRET === undefined) {
+    throw new AppError("internal", "the Google OAuth client secrets are not set");
+  }
+  const secrets = await repos.google.getSecrets();
+  const refreshToken = secrets.refreshToken;
+  if (refreshToken === null) {
+    throw new AppError("needs_reauth", "Google has no refresh token");
+  }
+
+  const origin = resolved.origin ?? DEFAULT_PUBLIC_ORIGIN;
+  const oauth = createGoogleOAuth({
+    clientId: GOOGLE_CLIENT_ID,
+    clientSecret: GOOGLE_CLIENT_SECRET,
+    redirectUri: `${origin}/oauth/google/callback`,
+    fetchImpl: resolved.fetchImpl,
+    logger: ctx.log,
+    now: nowMs,
+  });
+
+  const state: { accessToken: string | null; expiresAtMs: number } = {
+    accessToken: null,
+    expiresAtMs: 0,
+  };
+  let inFlight: Promise<string> | null = null;
+
+  const mint = async (): Promise<string> => {
+    try {
+      const tokens = await oauth.refresh(refreshToken, { scopes });
+      state.accessToken = tokens.accessToken;
+      state.expiresAtMs = tokens.expiresAt;
+      ctx.log.info("sync.google_health_token.minted", { scopes: scopes.length });
+      return tokens.accessToken;
+    } catch (error) {
+      if (isAppError(error) && error.code === "needs_reauth") {
+        await repos.google.markNeedsReauth();
+        await openReconnectAlert(ctx, "google", error.code, deps);
+      }
+      throw toAppError(error, "upstream_error");
+    }
+  };
+
+  return async (options) => {
+    const token = state.accessToken;
+    const fresh =
+      options?.forceRefresh !== true &&
+      token !== null &&
+      state.expiresAtMs - nowMs() > REFRESH_SKEW_MS;
+    if (fresh) return token;
+    inFlight ??= mint();
+    try {
+      return await inFlight;
+    } finally {
+      inFlight = null;
+    }
+  };
+}
+
+/**
 The calendar client the sync writes through.
 
 `getAccessToken` is forwarded straight to the getter above, including its

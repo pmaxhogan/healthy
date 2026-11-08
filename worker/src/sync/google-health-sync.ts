@@ -2,11 +2,12 @@
 The Google Health sync: the owner's wearable metrics into the sealed store.
 
 Runs from the hourly cron, after the calendar sync, and from the admin UI's
-"Sync now". It rides on the calendar's Google grant: the same account row, the
-same token getter (refresh under the account lease, a reconnect card when the
-grant dies), and only the metrics whose scope the owner has granted
-(`grantedTypes`). A grant without any Google Health scope is not an error: the
-sync is skipped and says so.
+"Sync now". It rides on the calendar's Google grant: the same account row and
+the same refresh token (a reconnect card when the grant dies), but an access
+token of its own, narrowed to the Google Health scopes, because the Google
+Health API refuses one that also carries the calendar's. It reads only the
+metrics whose scope the owner has granted (`grantedTypes`). A grant without
+any Google Health scope is not an error: the sync is skipped and says so.
 
 Each metric is read on its own and fails on its own. The first read of a
 metric (or every read, when the owner asks for a full sync) takes its whole
@@ -28,12 +29,13 @@ import {
   addDays,
   createGoogleHealthClient,
   googleHealthErrorCode,
+  grantedHealthScopes,
   grantedTypes,
 } from "../google/health.ts";
 import { toIso } from "../lib/time.ts";
 
 import { resolveDeps } from "./deps.ts";
-import { withGoogleAccessToken } from "./google-tokens.ts";
+import { withGoogleHealthAccessToken } from "./google-tokens.ts";
 
 import type { SyncDeps } from "./deps.ts";
 import type { Ctx } from "../db/client.ts";
@@ -133,7 +135,13 @@ export async function runGoogleHealthSync(
       return summary;
     }
     const resolved = resolveDeps(deps);
-    const getAccessToken = await withGoogleAccessToken(ctx, deps);
+    // Its own token, narrowed to the Google Health scopes: the API refuses one
+    // that also carries the calendar's (`withGoogleHealthAccessToken`).
+    const getAccessToken = await withGoogleHealthAccessToken(
+      ctx,
+      grantedHealthScopes(account.scope),
+      deps,
+    );
     const today = toIso(ctx.now()).slice(0, 10);
     const plan: Plan = {
       client: createGoogleHealthClient({

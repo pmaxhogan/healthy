@@ -357,6 +357,15 @@ export function grantedTypes(scope: string | null): GhType[] {
   return GH_TYPES.filter((spec) => granted.has(spec.scope));
 }
 
+/**
+The Google Health scopes a granted scope string carries, in `GOOGLE_HEALTH_SCOPES`
+order: what a Google Health access token is narrowed to.
+*/
+export function grantedHealthScopes(scope: string | null): string[] {
+  const parts = scope === null ? [] : scope.split(/\s+/u);
+  return GOOGLE_HEALTH_SCOPES.filter((wanted) => parts.includes(wanted));
+}
+
 /** True when a scope string carries any Google Health read scope. */
 export function hasHealthScope(scope: string | null): boolean {
   return grantedTypes(scope).length > 0;

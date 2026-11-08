@@ -220,6 +220,14 @@ const MEANINGS: Readonly<Record<string, SyncCodeMeaning>> = {
       "the error status), and the request_failed log line has the rest.",
     severity: "error",
   },
+  // A Google reason that can follow `google_health_forbidden:`.
+  DISALLOWED_OAUTH_SCOPES: {
+    meaning:
+      "Google Health refused an access token that also carries scopes it does not allow " +
+      "beside its own; this server asks for a token narrowed to the Google Health scopes, " +
+      "so this means that narrowing did not happen.",
+    severity: "error",
+  },
   google_health_unauthorized: {
     meaning: "Google rejected the access token even after a refresh; the next read tries again.",
     severity: "error",

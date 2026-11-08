@@ -15,6 +15,7 @@ import {
   civilDate,
   createGoogleHealthClient,
   googleHealthErrorCode,
+  grantedHealthScopes,
   grantedTypes,
   hasHealthScope,
   num,
@@ -87,6 +88,18 @@ describe("values", () => {
 });
 
 describe("scopes", () => {
+  it("narrows a grant to the Google Health scopes it has", () => {
+    expect(grantedHealthScopes(null)).toStrictEqual([]);
+    expect(grantedHealthScopes(`calendar ${GOOGLE_HEALTH_ACTIVITY_SCOPE}`)).toStrictEqual([
+      GOOGLE_HEALTH_ACTIVITY_SCOPE,
+    ]);
+    expect(
+      grantedHealthScopes(
+        `${GOOGLE_HEALTH_ACTIVITY_SCOPE} calendar ${GOOGLE_HEALTH_METRICS_SCOPE}`,
+      ),
+    ).toStrictEqual(GOOGLE_HEALTH_SCOPES);
+  });
+
   it("names a metric readable only when its own scope is granted", () => {
     expect(grantedTypes(null)).toStrictEqual([]);
     expect(hasHealthScope("https://www.googleapis.com/auth/calendar.events.owned")).toBe(false);

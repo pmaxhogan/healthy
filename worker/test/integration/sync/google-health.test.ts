@@ -29,7 +29,11 @@ interface Seen {
   path: string;
   filter: string | null;
   body: Record<string, unknown> | null;
+  authorization: string | null;
 }
+
+/** The access token the stub's token endpoint mints for a narrowed refresh. */
+const HEALTH_TOKEN = "minted-health-access";
 
 const gdate = (value: string) => {
   const [year, month, day] = value.split("-").map(Number);
@@ -44,10 +48,25 @@ interface StubData {
   unlinked?: Set<string>;
 }
 
-function googleStub(data: StubData): { fetchImpl: typeof fetch; seen: Seen[] } {
+function googleStub(data: StubData): {
+  fetchImpl: typeof fetch;
+  seen: Seen[];
+  tokenForms: URLSearchParams[];
+} {
   const seen: Seen[] = [];
+  const tokenForms: URLSearchParams[] = [];
   const respondTo = (input: RequestInfo | URL, init?: RequestInit): Response => {
     const url = new URL(input instanceof Request ? input.url : String(input));
+    if (url.host === "oauth2.googleapis.com") {
+      const form = new URLSearchParams(typeof init?.body === "string" ? init.body : "");
+      tokenForms.push(form);
+      return Response.json({
+        access_token: `${HEALTH_TOKEN}-${String(tokenForms.length)}`,
+        expires_in: 3599,
+        scope: form.get("scope") ?? "",
+        token_type: "Bearer",
+      });
+    }
     const body =
       typeof init?.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : null;
     seen.push({
@@ -55,6 +74,7 @@ function googleStub(data: StubData): { fetchImpl: typeof fetch; seen: Seen[] } {
       path: url.pathname,
       filter: url.searchParams.get("filter"),
       body,
+      authorization: new Headers(init?.headers).get("authorization"),
     });
     const type = url.pathname.split("/", 6)[5] ?? "";
     if (data.unlinked?.has(type) === true) {
@@ -82,7 +102,7 @@ function googleStub(data: StubData): { fetchImpl: typeof fetch; seen: Seen[] } {
   };
   const fetchImpl = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
     Promise.resolve(respondTo(input, init));
-  return { fetchImpl: fetchImpl, seen };
+  return { fetchImpl: fetchImpl, seen, tokenForms };
 }
 
 async function grant(ctx: Ctx, scope: string): Promise<void> {
@@ -91,6 +111,80 @@ async function grant(ctx: Ctx, scope: string): Promise<void> {
 }
 
 const deps = (fetchImpl: typeof fetch) => ({ fetchImpl, sleep: () => Promise.resolve() });
+
+describe("the Google Health access token", () => {
+  it("is minted from the stored refresh token, narrowed to the Google Health scopes", async () => {
+    const ctx = syncCtx();
+    await grant(ctx, `${CALENDAR_SCOPE} ${GOOGLE_HEALTH_SCOPES.join(" ")}`);
+    const stub = googleStub({ spo2: [], azm: [] });
+
+    await runGoogleHealthSync(ctx, deps(stub.fetchImpl));
+
+    expect(stub.tokenForms).toHaveLength(1);
+    const form = stub.tokenForms[0];
+    expect(form?.get("grant_type")).toBe("refresh_token");
+    expect(form?.get("refresh_token")).toBe("seeded-google-refresh");
+    // The calendar scope is not asked for: Google Health refuses a token carrying it.
+    expect(form?.get("scope")).toBe(GOOGLE_HEALTH_SCOPES.join(" "));
+    const reads = stub.seen.filter((call) => call.path.startsWith("/v4/"));
+    // Five daily lists and one window of each of the two rollups.
+    expect(reads).toHaveLength(7);
+    expect(reads.every((call) => call.authorization === `Bearer ${HEALTH_TOKEN}-1`)).toBe(true);
+  });
+
+  it("asks only for the Google Health scopes the grant has", async () => {
+    const ctx = syncCtx();
+    const metrics = GOOGLE_HEALTH_SCOPES[0] ?? "";
+    await grant(ctx, `${CALENDAR_SCOPE} ${metrics}`);
+    const stub = googleStub({ spo2: [], azm: [] });
+
+    await runGoogleHealthSync(ctx, deps(stub.fetchImpl));
+
+    expect(stub.tokenForms[0]?.get("scope")).toBe(metrics);
+  });
+
+  it("leaves the calendar's access token, its expiry and the refresh token untouched", async () => {
+    const ctx = syncCtx();
+    await grant(ctx, `${CALENDAR_SCOPE} ${GOOGLE_HEALTH_SCOPES.join(" ")}`);
+    const columns = "access_token_enc, access_expires_at, refresh_token_enc, scope";
+    const before = await env.DB.prepare(
+      `SELECT ${columns} FROM google_account WHERE id = 1`,
+    ).first();
+
+    await runGoogleHealthSync(ctx, deps(googleStub({ spo2: [YESTERDAY], azm: [] }).fetchImpl));
+
+    const after = await env.DB.prepare(
+      `SELECT ${columns} FROM google_account WHERE id = 1`,
+    ).first();
+    expect(after).toStrictEqual(before);
+    const secrets = await syncRepos(ctx).google.getSecrets();
+    expect(secrets.accessToken).toBe("seeded-google-access");
+    expect(secrets.refreshToken).toBe("seeded-google-refresh");
+  });
+
+  it("mints a new one after a 401, and still never touches the calendar's", async () => {
+    const ctx = syncCtx();
+    await grant(ctx, GOOGLE_HEALTH_SCOPES.join(" "));
+    const stub = googleStub({ spo2: [], azm: [] });
+    let unauthorized = true;
+    const fetchImpl = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (unauthorized && url.includes("daily-oxygen-saturation")) {
+        unauthorized = false;
+        return Promise.resolve(new Response("{}", { status: 401 }));
+      }
+      return stub.fetchImpl(input, init);
+    }) as typeof fetch;
+
+    const summary = await runGoogleHealthSync(ctx, deps(fetchImpl));
+
+    expect(summary.errors).toStrictEqual([]);
+    expect(stub.tokenForms).toHaveLength(2);
+    expect(stub.tokenForms.every((form) => form.get("scope") !== null)).toBe(true);
+    const secrets = await syncRepos(ctx).google.getSecrets();
+    expect(secrets.accessToken).toBe("seeded-google-access");
+  });
+});
 
 describe("runGoogleHealthSync", () => {
   it("reads every metric's whole history first, and stores it sealed", async () => {
@@ -245,8 +339,7 @@ describe("runGoogleHealthSync", () => {
   it("never throws, even when the token cannot be had", async () => {
     const ctx = syncCtx();
     await grant(ctx, GOOGLE_HEALTH_SCOPES.join(" "));
-    // The stored token has expired and the token endpoint refuses the refresh.
-    await env.DB.prepare("UPDATE google_account SET access_expires_at = 0 WHERE id = 1").run();
+    // The token endpoint refuses the refresh token.
     const fetchImpl = (() =>
       Promise.resolve(
         Response.json({ error: "invalid_grant" }, { status: 400 }),
