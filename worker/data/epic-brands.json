@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2026-11-02T19:30:19.280Z",
+  "generatedAt": "2026-11-16T19:37:50.513Z",
   "source": "https://open.epic.com/Endpoints/Brands",
-  "count": 776,
+  "count": 779,
   "brands": [
     {
       "id": "c5f287a7-e01d-4745-a773-ce0d41710e55",
@@ -271,7 +271,7 @@
     {
       "id": "61259356-535b-4060-afd3-0eff674c696b",
       "name": "AnMed Health",
-      "fhirBaseUrl": "https://epicproxy.et0971.epichosted.com/FHIRProxy/api/FHIR/R4",
+      "fhirBaseUrl": "https://epicproxy.et0971.epichosted.com/FHIRProxy/ANMED/api/FHIR/R4",
       "locations": [
         "Anderson, SC",
         "ANDERSON, SC",
@@ -283,7 +283,7 @@
     {
       "id": "9a6888c7-7006-43b3-9391-87376b5d6a2a",
       "name": "Ann & Robert H. Lurie Children's Hospital of Chicago",
-      "fhirBaseUrl": "https://epicmobile.luriechildrens.org/Interconnect-FHIRPRD/HOME/api/FHIR/R4",
+      "fhirBaseUrl": "https://epicmobile.luriechildrens.org/Interconnect-FHIRPRD/api/FHIR/R4",
       "locations": [
         "Lake Bluff",
         "WESTCHESTER, IL",
@@ -676,7 +676,7 @@
     {
       "id": "220e94ef-772b-4f21-9a66-df01050b4a03",
       "name": "Baton Rouge General",
-      "fhirBaseUrl": "https://interconnect.brgeneral.org/oauth/BRG/api/FHIR/R4",
+      "fhirBaseUrl": "https://epicproxy.et1355.epichosted.com/APIPROXYPRD/BRG/api/FHIR/R4",
       "locations": [
         "Baton Rouge, LA",
         "Port Allen, LA",
@@ -1244,6 +1244,16 @@
         "BUFFALO, NY",
         "CHEEKTOWAGA, NY",
         "LOCKPORT, NY"
+      ],
+      "aliases": [
+        "Buffalo Neuromusculoskeletal Medicine",
+        "Eden Primary Care",
+        "Fare Well Medical Practice",
+        "Gaddi Family Medicine PLLC",
+        "Medical Care of Western New York",
+        "Nephrology Practice of Niagara",
+        "Southtowns Neurology of Western New York",
+        "Surgical Associates of Western New York"
       ]
     },
     {
@@ -1734,6 +1744,11 @@
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/CLINICAS/api/FHIR/R4"
     },
     {
+      "id": "a1b5c6a1-2876-468b-809a-957bfcab3a08",
+      "name": "CMH",
+      "fhirBaseUrl": "https://epicproxy.et0714.epichosted.com/APIProxyPRD/api/FHIR/R4"
+    },
+    {
       "id": "907b754c-e77f-41d1-a238-67c74c15fd19",
       "name": "Coast Community Health Center",
       "fhirBaseUrl": "https://webprd.ochin.org/prd-fhir/MYCHARTCCHC/api/FHIR/R4",
@@ -1815,11 +1830,11 @@
       "name": "CommonSpirit Health",
       "fhirBaseUrl": "https://epicproxy.et1482.epichosted.com/APIProxyPRD/api/FHIR/R4",
       "locations": [
+        "NORTH LITTLE ROCK, AR",
         "SEATTLE, WA",
+        "BARDSTOWN, KY",
         "FEDERAL WAY, WA",
-        "SILVERDALE, WA",
-        "LYNNWOOD, WA",
-        "PORT ORCHARD, WA"
+        "CALDWELL, TX"
       ]
     },
     {
@@ -1829,9 +1844,9 @@
       "locations": [
         "Durango, CO",
         "WESTMINSTER, CO",
+        "WEST JORDAN, UT",
         "Colorado Springs, CO",
-        "COLORADO SPRINGS, CO",
-        "MURRAY, UT"
+        "COLORADO SPRINGS, CO"
       ]
     },
     {
@@ -1899,6 +1914,7 @@
         "Chicago Family Health Center",
         "Christian Community Health Center",
         "Community Health Center of Lubbock",
+        "Community Health Northwest Florida",
         "CommWell Health",
         "District Health Care Services",
         "Empower U",
@@ -1911,12 +1927,15 @@
         "Hawaii Island Community Health Center",
         "Health Care District of Palm Beach County",
         "Homestead Community Health Center",
+        "Honor Community Health",
         "Jessie Trice Community Health System",
         "La Casa Family Health Centers",
         "Legacy Community Health",
         "Malama I Ke Ola Health Center",
         "Med Centro",
         "Miami Beach Community Health Center",
+        "Muskegon Family Care",
+        "MyCare Health Center",
         "NeoMed Center",
         "Orange Blossom Family Health",
         "Partnership Health Center",
@@ -1924,8 +1943,11 @@
         "Providence Community Health Centers",
         "Tampa Family Health Centers",
         "TCA Health",
+        "Thunder Bay Community Health Service Inc",
         "Treasure Coast Community Health",
-        "True Health"
+        "True Health",
+        "Western Wayne Family Health Centers",
+        "Whiteside County Community Health Clinic"
       ]
     },
     {
@@ -2215,7 +2237,7 @@
     {
       "id": "4c9940a6-f25a-4c08-aa02-c154f45e845a",
       "name": "Dartmouth",
-      "fhirBaseUrl": "https://edhwebportal.hitchcock.org/FHIRProxy/MYDH/api/FHIR/R4",
+      "fhirBaseUrl": "https://edhwebportal.hitchcock.org/FHIRProxy/api/FHIR/R4",
       "locations": [
         "Manchester, NH",
         "LEBANON, NH",
@@ -2314,9 +2336,9 @@
         "Monterey, CA"
       ],
       "aliases": [
+        "Central Coast Nephrology",
         "Johnny Blanchard, MD",
         "Salinas Valley Health",
-        "Salinas Valley Health Affiliates",
         "Santa Lucia Medical Group"
       ]
     },
@@ -2517,7 +2539,7 @@
         "Long Grove, IL",
         "Gurnee, IL",
         "Northfield, IL",
-        "CHICAGO, IL"
+        "DOWNERS GROVE, IL"
       ]
     },
     {
@@ -3206,7 +3228,7 @@
     {
       "id": "e533b051-92f2-4b49-946b-22b8b46464e3",
       "name": "Henry Ford Health",
-      "fhirBaseUrl": "https://fhir.hfhs.org/tesseractproxy/api/FHIR/R4",
+      "fhirBaseUrl": "https://fhir.hfhs.org/tesseractproxy/HFH/api/FHIR/R4",
       "locations": [
         "DETROIT, MI",
         "ST CLAIR SHORES, MI",
@@ -3250,7 +3272,7 @@
     {
       "id": "9510b004-8a1c-471d-8639-5eed9c665643",
       "name": "Hoag Memorial Hospital Presbyterian",
-      "fhirBaseUrl": "https://epicproxy.et1197.epichosted.com/FHIRProxy/api/FHIR/R4",
+      "fhirBaseUrl": "https://epicproxy.et1197.epichosted.com/FHIRProxy/HOAG/api/FHIR/R4",
       "locations": [
         "ORANGE, CA",
         "NEWPORT BEACH, CA",
@@ -3518,6 +3540,11 @@
       "locations": [
         "INDIANAPOLIS, IN"
       ]
+    },
+    {
+      "id": "572edfc4-c59a-403a-8b13-085d9da68467",
+      "name": "Janning ENT",
+      "fhirBaseUrl": "https://epicproxy.et0515.epichosted.com/APIProxyPRD/MOBILE/api/FHIR/R4"
     },
     {
       "id": "3aff7a3d-ef29-484d-9594-65115c9fcc58",
@@ -3908,11 +3935,11 @@
       "name": "Legacy Health System",
       "fhirBaseUrl": "https://LHSPDXFHIRPRD.LHS.ORG/FHIR/api/FHIR/R4",
       "locations": [
+        "SHERWOOD, OR",
         "SILVERTON, OR",
         "TUALATIN, OR",
         "Cornelius, OR",
-        "Vancouver, WA",
-        "Portland, OR"
+        "Vancouver, WA"
       ]
     },
     {
@@ -4408,10 +4435,10 @@
       "fhirBaseUrl": "https://epicproxy.et1124.epichosted.com/FHIRProxy/api/FHIR/R4",
       "locations": [
         "Middletown, CT",
+        "Westbrook, CT",
         "ESSEX, CT",
         "NEW HAVEN, CT",
-        "CHESHIRE, CT",
-        "MIDDLETOWN, CT"
+        "CHESHIRE, CT"
       ]
     },
     {
@@ -4621,6 +4648,11 @@
       ]
     },
     {
+      "id": "0c77f58f-83c4-4bb0-a5fc-f8c2f2adf60b",
+      "name": "MSU Health Care",
+      "fhirBaseUrl": "https://fhir.hfhs.org/tesseractproxy/MSU/api/FHIR/R4"
+    },
+    {
       "id": "3c8868fb-6e4b-4482-893e-776918ba5c47",
       "name": "MultiCare",
       "fhirBaseUrl": "https://soapprod.multicare.org/FHIRProxy/api/FHIR/R4",
@@ -4660,6 +4692,9 @@
         "COLUMBIA, SC",
         "Charleston, SC",
         "MT PLEASANT, SC"
+      ],
+      "aliases": [
+        "Neighbors Pediatrics Health"
       ]
     },
     {
@@ -4767,7 +4802,9 @@
       ],
       "aliases": [
         "EverWell Precision Health",
-        "Naples Concierge Cardiology and Internal Medicine"
+        "HSS at NCH",
+        "Naples Concierge Cardiology and Internal Medicine",
+        "Old Naples Concierge Medicine"
       ]
     },
     {
@@ -5186,11 +5223,13 @@
         "Center for Comprehensive Care & Diagnosis of Inherited Blood Disorders",
         "CITTHS",
         "Community Health Centers Burlington",
+        "Inland Behavioral and Health Services",
         "Jackson County Regional Health Center",
         "JAMHI",
         "K'ima:w Medical Center",
         "LALGBT Center",
         "Muckleshoot Tribal Health & Wellness Center",
+        "Nottawaseppi Huron Band of the Potawatomi",
         "PacificSource PACE",
         "Piedmont Health",
         "Pueblo Community Health Center",
@@ -5741,10 +5780,10 @@
       "fhirBaseUrl": "https://phsfhir.primehealthcare.com/PHS-PRD-FHIR/api/FHIR/R4",
       "locations": [
         "Kankakee, IL",
+        "Olympia Fields, IL",
         "Reno, NV",
         "Rumford, ME",
-        "EAST NORRITON, PA",
-        "PHILADELPHIA, PA"
+        "EAST NORRITON, PA"
       ]
     },
     {
@@ -6382,7 +6421,7 @@
     {
       "id": "3d280dbf-0f88-4605-b406-49565ac95ae9",
       "name": "Santa Clara",
-      "fhirBaseUrl": "https://scvhhsfhir.sccgov.org/interconnect-oauth2/api/FHIR/R4",
+      "fhirBaseUrl": "https://epicproxy.et0855.epichosted.com/APIProxyPRD/api/FHIR/R4",
       "locations": [
         "San Jose, CA",
         "Gilroy, CA",
@@ -7275,7 +7314,7 @@
     {
       "id": "8a6b49d9-7c36-456e-8941-74a514db6903",
       "name": "The Nebraska Medical Center",
-      "fhirBaseUrl": "https://ocsoapprd.nebraskamed.com/FHIR-PRD/HOME/api/FHIR/R4",
+      "fhirBaseUrl": "https://ocsoapprd.nebraskamed.com/FHIR-PRD/api/FHIR/R4",
       "locations": [
         "O' NEILL, NE",
         "KEARNEY, NE",
@@ -7456,8 +7495,8 @@
         "Boise, ID",
         "Boynton Beach, FL",
         "Lavonia, GA",
-        "Fort Lauderdale, FL",
-        "Waterbury, CT"
+        "Davenport, IA",
+        "Fort Lauderdale, FL"
       ]
     },
     {
@@ -8537,11 +8576,11 @@
       "name": "West Tennessee Healthcare",
       "fhirBaseUrl": "https://epicproxy.et1243.epichosted.com/OAuth2-PRD/api/FHIR/R4",
       "locations": [
+        "Bolivar, TN",
         "Halls, TN",
         "Jackson, TN",
         "Paris, TN",
-        "Dyersburg, TN",
-        "Selmer, TN"
+        "Dyersburg, TN"
       ]
     },
     {
