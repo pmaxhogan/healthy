@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-16T19:37:50.513Z",
+  "generatedAt": "2026-11-23T21:26:58.612Z",
   "source": "https://open.epic.com/Endpoints/Brands",
   "count": 779,
   "brands": [
@@ -2514,11 +2514,6 @@
       ]
     },
     {
-      "id": "831e765b-0786-4e72-9700-b32b04417f19",
-      "name": "Endeavor Health",
-      "fhirBaseUrl": "https://fhirprd.edward.org/fhirprd/api/FHIR/R4"
-    },
-    {
       "id": "4c0e843b-40d4-4e16-abe1-b092172d1176",
       "name": "Endeavor Health",
       "fhirBaseUrl": "https://epicprdproxy.nch.org/prd-fhir/api/FHIR/R4",
@@ -2905,11 +2900,11 @@
       "name": "GoHealth Urgent Care",
       "fhirBaseUrl": "https://epicproxy.et1462.epichosted.com/FHIRProxyPRD/api/FHIR/R4",
       "locations": [
+        "New Castle, DE",
+        "Wilmington, DE",
         "Allison Park, PA",
         "Bridgeville, PA",
-        "Charleston, WV",
-        "Wexford, PA",
-        "Wheeling, WV"
+        "Charleston, WV"
       ]
     },
     {
@@ -4221,6 +4216,18 @@
         "Timmonsville, SC",
         "Little River, SC",
         "Sumter, SC"
+      ]
+    },
+    {
+      "id": "a855e605-4456-4ef8-a55d-e12cb1795520",
+      "name": "Med Center Health",
+      "fhirBaseUrl": "https://epicproxy.et1514.epichosted.com/APIPROXYPRD/api/FHIR/R4",
+      "locations": [
+        "Bowling Green, KY",
+        "Elkton, KY",
+        "Scottsville, KY",
+        "Horse Cave, KY",
+        "Russellville, KY"
       ]
     },
     {
@@ -6993,8 +7000,8 @@
       "name": "St. Jude",
       "fhirBaseUrl": "https://rp.stjude.org/oauth2-prd/api/FHIR/R4",
       "locations": [
-        "MEMPHIS, TN",
-        "Memphis, TN"
+        "Memphis, TN",
+        "MEMPHIS, TN"
       ]
     },
     {
